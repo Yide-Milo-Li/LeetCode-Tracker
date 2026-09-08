@@ -22,7 +22,8 @@
     "test:private": "node --test tests/private-backup.test.ts",
     "restore": "node scripts/restore-backup.ts",
     "docs:check": "node scripts/check-docs.ts",
-    "test:web": "node --import tsx --test tests/web-components.test.tsx"
+    "test:web": "node --import tsx --test tests/web-components.test.tsx",
+    "git:repair": "node scripts/repair-git.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.2",
