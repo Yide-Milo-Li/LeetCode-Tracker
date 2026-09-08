@@ -197,7 +197,7 @@ export class BackupManager {
   public async restoreBackup(backupPath: string, targetDbPath: string): Promise<RestoreResult> {
     const sourcePath = path.resolve(backupPath);
     const targetPath = path.resolve(targetDbPath);
-    if (sourcePath === targetPath || (fs.existsSync(targetPath) && fs.realpathSync(sourcePath) === fs.realpathSync(targetPath))) {
+    if (sourcePath === targetPath || (fs.existsSync(targetPath) && fs.existsSync(sourcePath) && fs.realpathSync(sourcePath) === fs.realpathSync(targetPath))) {
       throw new Error('Source backup and restore target must be different files');
     }
     const verification = this.verifyBackup(sourcePath);

@@ -84,12 +84,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   }
 
-  /** Read the latest selected file; ignore reads superseded by an edit or clear. */
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file || committing.current) return;
+  /** Process a selected or dropped file with size validation before reading into memory. */
+  function processFile(file: File) {
+    if (committing.current) return;
     const generation = invalidateInput();
     setContent('');
+
+    if (file.size > 10 * 1024 * 1024) {
+      setSelectedFileName(file.name);
+      setSelectedFileSize(`${(file.size / 1024).toFixed(1)} KB`);
+      setAlertMsg({ type: 'danger', text: t.fileTooLarge });
+      return;
+    }
 
     setSelectedFileName(file.name);
     const sizeInKb = (file.size / 1024).toFixed(1);
@@ -108,6 +114,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setAlertMsg({ type: 'danger', text: t.fileReadFailed });
     };
     reader.readAsText(file);
+  }
+
+  /** Read the latest selected file; ignore reads superseded by an edit or clear. */
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) processFile(file);
   }
 
   /** Only expose a response if its source content is still current. */
@@ -283,6 +295,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <div
               className="upload-dropzone"
               onClick={() => { if (!committing.current) fileInputRef.current?.click(); }}
+              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const file = e.dataTransfer?.files?.[0];
+                if (file) processFile(file);
+              }}
             >
               <input
                 type="file"

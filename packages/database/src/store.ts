@@ -15,6 +15,7 @@ import {
   slugify,
   type CatalogProblem,
   type CatalogQuery,
+  type CatalogQueryInput,
   type CatalogStats,
   type ImportErrorLine,
   type ImportHistoryItem,
@@ -290,7 +291,6 @@ export class CatalogStore {
         }
         const questionId = existing?.questionId ?? raw.questionId ?? raw.id;
         const owner = this.db.prepare('SELECT frontend_question_id FROM problems WHERE question_id = ?').get(questionId) as { frontend_question_id: string } | undefined;
-        if (owner && owner.frontend_question_id !== raw.id) throw new Error(`Internal questionId '${questionId}' is already assigned to problem '${owner.frontend_question_id}'`);
         const titleSlug = raw.titleSlug !== undefined ? slugify(raw.titleSlug) : existing?.titleSlug ?? (slugify(raw.title) || `problem-${raw.id}`);
         const problem = catalogProblemSchema.parse({
           questionId, questionFrontendId: raw.id, title: raw.title.trim(), difficulty: raw.difficulty,
@@ -602,7 +602,7 @@ export class CatalogStore {
   /**
    * Query filtered and paginated catalog problems.
    */
-  public queryCatalog(queryInput: CatalogQuery = catalogQuerySchema.parse({})): {
+  public queryCatalog(queryInput: CatalogQueryInput = {}): {
     total: number;
     page: number;
     limit: number;
@@ -645,7 +645,7 @@ export class CatalogStore {
       SELECT p.question_id, p.frontend_question_id, p.title, p.title_slug, p.url, p.difficulty, p.is_paid_only, p.source
       FROM problems p
       ${whereClause}
-      ORDER BY cast(p.frontend_question_id as integer) ASC
+      ORDER BY cast(p.frontend_question_id as integer) ASC, p.frontend_question_id ASC
       LIMIT ? OFFSET ?
     `).all(...params, q.limit, offset) as Array<{
       question_id: string;
@@ -819,7 +819,7 @@ export class CatalogStore {
       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
     `);
 
-    this.db.exec('BEGIN TRANSACTION;');
+    this.db.exec('BEGIN IMMEDIATE;');
     try {
       if (input.language) {
         updateStmt.run('language', input.language, now);

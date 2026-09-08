@@ -12,7 +12,8 @@ import { acquireDatabaseLease } from '../../../packages/database/src/lease.ts';
 
 /** Acquire database ownership and await protected initialization before listening. */
 async function startServer() {
-  const localDir = path.resolve('.local');
+  const repoRoot = path.resolve(import.meta.dirname, '../../..');
+  const localDir = process.env.LOCAL_DIR ? path.resolve(process.env.LOCAL_DIR) : path.join(repoRoot, '.local');
   if (!fs.existsSync(localDir)) {
     fs.mkdirSync(localDir, { recursive: true });
   }

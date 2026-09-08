@@ -263,3 +263,112 @@ it('replays complete summaries including line errors after database and service 
     assert.equal(store.getCatalogRevision(), 1);
   } finally { await app.close(); db.close(); }
 });
+
+it('cleanly rejects non-existent restore source without unhandled ENOENT', async (t) => {
+  const directory = scratch(t);
+  const manager = new BackupManager(directory);
+  const target = join(directory, 'target.sqlite');
+  const db = new DatabaseSync(target);
+  new CatalogStore(db);
+  db.close();
+  const nonExistent = join(directory, 'does-not-exist.sqlite');
+  await assert.rejects(
+    manager.restoreBackup(nonExistent, target),
+    /Cannot restore invalid backup: Backup file not found/,
+  );
+});
+
+it('safely reclaims 0-byte or corrupted lock files during lease acquisition', (t) => {
+  const directory = scratch(t);
+  const dbPath = join(directory, 'target.sqlite');
+  const lockPath = `${dbPath}.lock`;
+
+  // 1. Corrupt 0-byte lock file
+  writeFileSync(lockPath, '');
+  const release1 = acquireDatabaseLease(dbPath);
+  assert.ok(existsSync(lockPath));
+  release1();
+  assert.equal(existsSync(lockPath), false);
+
+  // 2. Corrupt non-JSON content
+  writeFileSync(lockPath, '{invalid_json');
+  const release2 = acquireDatabaseLease(dbPath);
+  assert.ok(existsSync(lockPath));
+  release2();
+  assert.equal(existsSync(lockPath), false);
+});
+
+it('preserves non-ASCII and Chinese tag names with deterministic slug fallback', async () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    const store = new CatalogStore(db);
+    const summary = await store.importJsonl(
+      JSON.stringify({ id: '1', title: 'Chinese Tag Test', difficulty: 'Easy', tags: ['数组', '动态规划'] }),
+    );
+    assert.equal(summary.validCount, 1);
+    assert.equal(summary.insertedCount, 1);
+    const problem = store.getProblem('1', 'frontendId');
+    assert.ok(problem);
+    assert.equal(problem.topicTags.length, 2);
+    assert.deepEqual(problem.topicTags.map(t => t.name).sort(), ['动态规划', '数组']);
+    const tags = store.getAllTags();
+    assert.equal(tags.length, 2);
+    const filtered = store.queryCatalog({ tag: problem.topicTags[0].slug });
+    assert.equal(filtered.total, 1);
+    assert.equal(filtered.items[0].questionFrontendId, '1');
+  } finally { db.close(); }
+});
+
+it('deterministically paginates non-numeric question IDs without cross-page duplicate drift', () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    const store = new CatalogStore(db);
+    // Insert 6 non-numeric IDs that all cast to 0
+    for (const id of ['LCP 03', 'LCP 01', 'LCP 02', 'Offer 01', 'Offer 02', 'Interview 01']) {
+      db.prepare(`
+        INSERT INTO problems (question_id, frontend_question_id, title, title_slug, url, difficulty, is_paid_only, source, updated_at)
+        VALUES (?, ?, ?, ?, 'https://example.org/', 'Easy', 0, 'test', 1)
+      `).run(id, id, `Title ${id}`, `slug-${id}`);
+    }
+    const page1 = store.queryCatalog({ page: 1, limit: 3 });
+    const page2 = store.queryCatalog({ page: 2, limit: 3 });
+    assert.equal(page1.items.length, 3);
+    assert.equal(page2.items.length, 3);
+    const page1Ids = page1.items.map(p => p.questionFrontendId);
+    const page2Ids = page2.items.map(p => p.questionFrontendId);
+    // No intersection between page 1 and page 2
+    for (const id of page1Ids) {
+      assert.ok(!page2Ids.includes(id), `ID ${id} must not appear on both page 1 and page 2`);
+    }
+    assert.equal(new Set([...page1Ids, ...page2Ids]).size, 6);
+  } finally { db.close(); }
+});
+
+it('caps activePreviews memory at limit and evicts oldest uncommitted entries', async () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    const store = new CatalogStore(db);
+    const app = await buildApp({ store, disableStatic: true });
+    try {
+      const previewIds: string[] = [];
+      // Generate 12 previews (limit is 10)
+      for (let i = 1; i <= 12; i++) {
+        const res = await app.inject({
+          method: 'POST',
+          url: '/api/v1/imports/preview',
+          payload: { content: line(String(i)) },
+        });
+        assert.equal(res.statusCode, 200);
+        previewIds.push(res.json().previewId);
+      }
+      // Oldest 2 previews (0 and 1) should have been evicted
+      const evicted1 = await app.inject({ method: 'POST', url: '/api/v1/imports', payload: { previewId: previewIds[0] } });
+      assert.equal(evicted1.statusCode, 404);
+      const evicted2 = await app.inject({ method: 'POST', url: '/api/v1/imports', payload: { previewId: previewIds[1] } });
+      assert.equal(evicted2.statusCode, 404);
+      // Newest preview (11) should still be valid and committable
+      const valid = await app.inject({ method: 'POST', url: '/api/v1/imports', payload: { previewId: previewIds[11] } });
+      assert.equal(valid.statusCode, 200);
+    } finally { await app.close(); }
+  } finally { db.close(); }
+});

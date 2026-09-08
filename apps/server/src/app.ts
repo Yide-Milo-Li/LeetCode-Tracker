@@ -128,6 +128,12 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     for (const [id, active] of activePreviews) {
       if (active.preview.expiresAt <= Date.now()) activePreviews.delete(id);
     }
+    // Cap memory by evicting oldest uncommitted previews when exceeding limit
+    while (activePreviews.size >= 10) {
+      const oldestKey = activePreviews.keys().next().value;
+      if (!oldestKey) break;
+      activePreviews.delete(oldestKey);
+    }
     // Save active preview with 30-minute expiration
     activePreviews.set(preview.previewId, {
       preview,
@@ -293,7 +299,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   // ==========================================
   // Static Assets Serving (Production Web UI)
   // ==========================================
-  const staticRoot = options.staticRoot ?? path.resolve('apps/web/dist');
+  const defaultStaticRoot = path.resolve(import.meta.dirname, '../../web/dist');
+  const staticRoot = options.staticRoot ?? (fs.existsSync(defaultStaticRoot) ? defaultStaticRoot : path.resolve('apps/web/dist'));
   if (!options.disableStatic && fs.existsSync(staticRoot)) {
     await app.register(fastifyStatic, {
       root: staticRoot,

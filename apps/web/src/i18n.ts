@@ -27,6 +27,7 @@ export const translations = {
     catalogLoadFailed: 'Unable to load problems. Please retry.',
     overviewLoadFailed: 'Unable to load the catalog overview or tags. Please retry.',
     fileReadFailed: 'Unable to read this file. Please select it again.',
+    fileTooLarge: 'File exceeds maximum allowed size of 10 MiB.',
     statRevision: 'Catalog Rev.',
 
     // Catalog filters & table
@@ -109,6 +110,7 @@ export const translations = {
     catalogLoadFailed: '题目加载失败，请重试。',
     overviewLoadFailed: '题库概览或标签加载失败，请重试。',
     fileReadFailed: '无法读取文件，请重新选择。',
+    fileTooLarge: '文件大小超过 10 MiB 上限。',
     appTitle: 'LeetCode 题库追踪',
     appSubtitle: '纯离线本地题库工作台',
     navCatalog: '浏览题库',

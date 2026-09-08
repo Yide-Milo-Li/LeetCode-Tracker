@@ -158,3 +158,15 @@ it('handles pagination navigation and disables boundary controls correctly', asy
   assert.ok(nextBtn.hasAttribute('disabled'));
   assert.deepEqual(pageQueries, [1, 2]);
 });
+
+it('rejects oversized files > 10 MiB before reading and shows alert', async () => {
+  mock.method(api, 'getImportHistory', async () => ({ total: 0, items: [] }));
+  const view = await act(async () => render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} />));
+  const fileInput = view.container.querySelector('input[type="file"]') as HTMLInputElement;
+  const hugeFile = new (dom.window as unknown as { File: new (parts: string[], name: string) => File }).File(['dummy'], 'huge.jsonl');
+  Object.defineProperty(hugeFile, 'size', { value: 12 * 1024 * 1024 });
+  await act(async () => {
+    fireEvent.change(fileInput, { target: { files: [hugeFile] } });
+  });
+  assert.match(screen.getByRole('alert').textContent!, /exceeds maximum allowed size of 10 MiB/);
+});

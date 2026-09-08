@@ -80,7 +80,23 @@ export const rawProblemInputSchema = z.object({
 export type RawProblemInput = z.infer<typeof rawProblemInputSchema>;
 
 /**
+ * Generate a deterministic alphanumeric slug for tags with non-ASCII or non-Latin characters.
+ * Uses a lightweight 32-bit integer hash to remain fully browser-compatible without external polyfills.
+ *
+ * @param text Raw tag name.
+ * @returns Deterministic slug matching /^[a-z0-9-]+$/.
+ */
+function fallbackTagSlug(text: string): string {
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) {
+    hash = (Math.imul(31, hash) + text.charCodeAt(i)) | 0;
+  }
+  return `tag-${(hash >>> 0).toString(16)}`;
+}
+
+/**
  * Convert raw tag inputs into deduplicated, validated TopicTag structures.
+ * Generates deterministic fallback slugs for non-Latin / Chinese tag names to prevent silent drops.
  *
  * @param rawTags Array of string or tag objects.
  * @returns Deduplicated list of TopicTag objects.
@@ -93,7 +109,8 @@ export function normalizeTags(rawTags: NonNullable<RawProblemInput['tags']>): To
     const rawName = typeof item === 'string' ? item.trim() : item.name.trim();
     if (!rawName) continue;
 
-    const tagSlug = typeof item === 'object' && item.slug ? slugify(item.slug) : slugify(rawName);
+    const baseSlug = typeof item === 'object' && item.slug ? slugify(item.slug) : slugify(rawName);
+    const tagSlug = baseSlug || fallbackTagSlug(rawName);
     if (!tagSlug || seenSlugs.has(tagSlug)) continue;
 
     seenSlugs.add(tagSlug);
@@ -226,6 +243,7 @@ export const catalogQuerySchema = z.object({
 });
 
 export type CatalogQuery = z.infer<typeof catalogQuerySchema>;
+export type CatalogQueryInput = z.input<typeof catalogQuerySchema>;
 
 /** Aggregated catalog statistics. */
 export const catalogStatsSchema = z.object({
