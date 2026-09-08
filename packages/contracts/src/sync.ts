@@ -1,15 +1,24 @@
 /**
- * Validated data contracts and normalization pipelines for problem catalog ingestion.
+ * Validated data contracts, normalization pipelines, and query interfaces for problem catalog ingestion.
  * Supports Bring-Your-Own-Data (BYOD) via JSON Lines (JSONL) with fault-tolerant parsing.
  */
 import { z } from 'zod';
 
-/** Preserve identifiers verbatim while rejecting empty or whitespace-only values. */
+/**
+ * Helper to validate non-empty string identifiers while rejecting blank or whitespace-only inputs.
+ *
+ * @param max Maximum allowed character length.
+ */
 function nonBlank(max: number) {
   return z.string().min(1).max(max).refine(value => value.trim().length > 0, 'Must not be blank');
 }
 
-/** Convert arbitrary title or tag text into a clean lowercase URL slug. */
+/**
+ * Convert arbitrary title or tag text into a clean lowercase URL slug.
+ *
+ * @param text Raw title or tag string.
+ * @returns Lowercase alphanumeric slug with hyphens.
+ */
 export function slugify(text: string): string {
   return text
     .trim()
@@ -44,7 +53,11 @@ export type CatalogProblem = z.infer<typeof catalogProblemSchema>;
 
 /**
  * Lenient schema for incoming raw lines from LLMs, JSON files, or user exports.
- * Accommodates numeric or string IDs and accepts simple string tags or structured tag objects.
+ * Accommodates numeric or string IDs, case-insensitive difficulties, and optional metadata fields.
+ *
+ * Optional fields (`tags`, `questionId`, `isPaidOnly`, `url`, `titleSlug`, `source`) default to undefined
+ * so the importer can distinguish between omitted fields (which preserve existing DB values) and
+ * explicit values (e.g. `tags: []` indicating tag clearing).
  */
 export const rawProblemInputSchema = z.object({
   id: z.union([z.string(), z.number()]).transform(val => String(val).trim()),
@@ -55,25 +68,55 @@ export const rawProblemInputSchema = z.object({
   }),
   tags: z.array(z.union([
     z.string(),
-    z.object({ name: z.string(), slug: z.string().optional(), id: z.string().optional() })
-  ])).optional().default([]),
+    z.object({ name: z.string(), slug: z.string().optional(), id: z.string().optional() }),
+  ])).optional(),
   questionId: z.union([z.string(), z.number()]).optional().transform(v => v !== undefined ? String(v).trim() : undefined),
   titleSlug: z.string().optional(),
   url: z.string().url().optional(),
-  isPaidOnly: z.union([z.boolean(), z.number()]).optional().transform(v => Boolean(v)),
+  isPaidOnly: z.union([z.boolean(), z.number()]).optional().transform(v => v !== undefined ? Boolean(v) : undefined),
   source: z.string().optional(),
 });
 
 export type RawProblemInput = z.infer<typeof rawProblemInputSchema>;
 
 /**
- * Normalize and auto-derive full problem metadata from a raw input object.
+ * Convert raw tag inputs into deduplicated, validated TopicTag structures.
  *
- * Infers missing fields:
+ * @param rawTags Array of string or tag objects.
+ * @returns Deduplicated list of TopicTag objects.
+ */
+export function normalizeTags(rawTags: NonNullable<RawProblemInput['tags']>): TopicTag[] {
+  const seenSlugs = new Set<string>();
+  const normalized: TopicTag[] = [];
+
+  for (const item of rawTags) {
+    const rawName = typeof item === 'string' ? item.trim() : item.name.trim();
+    if (!rawName) continue;
+
+    const tagSlug = typeof item === 'object' && item.slug ? slugify(item.slug) : slugify(rawName);
+    if (!tagSlug || seenSlugs.has(tagSlug)) continue;
+
+    seenSlugs.add(tagSlug);
+    normalized.push({
+      id: typeof item === 'object' && item.id ? item.id : tagSlug,
+      name: rawName,
+      slug: tagSlug,
+    });
+  }
+
+  return normalized;
+}
+
+/**
+ * Normalize and auto-derive full problem metadata from a raw input object.
+ * Applies default derivation rules for new problem insertion:
  * - `titleSlug`: derived from title via slugify()
  * - `url`: constructed as https://leetcode.com/problems/{slug}/
  * - `questionId`: defaults to id if absent
  * - `topicTags`: deduplicated and normalized to { id, name, slug }
+ *
+ * @param input Raw input object or parsed JSON.
+ * @returns Fully validated CatalogProblem instance.
  */
 export function normalizeProblem(input: unknown): CatalogProblem {
   const parsed = rawProblemInputSchema.parse(input);
@@ -86,24 +129,7 @@ export function normalizeProblem(input: unknown): CatalogProblem {
   const safeUrl = parsed.url || `https://leetcode.com/problems/${safeSlug}/`;
   const internalQuestionId = parsed.questionId || parsed.id;
 
-  // Process and deduplicate topic tags
-  const seenSlugs = new Set<string>();
-  const normalizedTags: TopicTag[] = [];
-
-  for (const item of parsed.tags) {
-    const rawName = typeof item === 'string' ? item.trim() : item.name.trim();
-    if (!rawName) continue;
-
-    const tagSlug = typeof item === 'object' && item.slug ? slugify(item.slug) : slugify(rawName);
-    if (!tagSlug || seenSlugs.has(tagSlug)) continue;
-
-    seenSlugs.add(tagSlug);
-    normalizedTags.push({
-      id: typeof item === 'object' && item.id ? item.id : tagSlug,
-      name: rawName,
-      slug: tagSlug,
-    });
-  }
+  const normalizedTags = parsed.tags ? normalizeTags(parsed.tags) : [];
 
   return catalogProblemSchema.parse({
     questionId: internalQuestionId,
@@ -118,21 +144,75 @@ export function normalizeProblem(input: unknown): CatalogProblem {
   });
 }
 
-/** Result summary of a JSONL or bulk ingestion execution. */
+/** Single error reported for a specific line during JSONL parsing or preflight. */
+export const importErrorLineSchema = z.object({
+  line: z.number().int().positive(),
+  message: z.string(),
+  snippet: z.string().optional(),
+});
+
+export type ImportErrorLine = z.infer<typeof importErrorLineSchema>;
+
+/** Result summary of a committed JSONL or bulk ingestion execution. */
 export const importSummarySchema = z.object({
+  id: z.string().optional(),
+  importedAt: z.number().int().nonnegative().optional(),
   totalLines: z.number().int().nonnegative(),
   validCount: z.number().int().nonnegative(),
   insertedCount: z.number().int().nonnegative(),
   updatedCount: z.number().int().nonnegative(),
+  unchangedCount: z.number().int().nonnegative().default(0),
+  duplicateCount: z.number().int().nonnegative().default(0),
   errorCount: z.number().int().nonnegative(),
-  errors: z.array(z.object({
-    line: z.number().int().positive(),
-    message: z.string(),
-    snippet: z.string().optional(),
-  })),
+  errors: z.array(importErrorLineSchema),
 });
 
 export type ImportSummary = z.infer<typeof importSummarySchema>;
+
+/** Preview item illustrating changes to a single problem. */
+export const importPreviewItemSchema = z.object({
+  frontendId: z.string(),
+  title: z.string(),
+  difficulty: z.enum(['Easy', 'Medium', 'Hard']),
+  action: z.enum(['insert', 'update', 'unchanged']),
+  tags: z.array(z.string()),
+  changes: z.array(z.string()).optional(),
+});
+
+export type ImportPreviewItem = z.infer<typeof importPreviewItemSchema>;
+
+/** Preflight preview result generated before committing an import. */
+export const importPreviewSchema = z.object({
+  previewId: z.string(),
+  catalogRevision: z.number().int().nonnegative(),
+  createdAt: z.number().int().nonnegative(),
+  expiresAt: z.number().int().nonnegative(),
+  totalLines: z.number().int().nonnegative(),
+  validCount: z.number().int().nonnegative(),
+  insertCount: z.number().int().nonnegative(),
+  updateCount: z.number().int().nonnegative(),
+  unchangedCount: z.number().int().nonnegative(),
+  duplicateCount: z.number().int().nonnegative(),
+  errorCount: z.number().int().nonnegative(),
+  errors: z.array(importErrorLineSchema),
+  sampleItems: z.array(importPreviewItemSchema),
+});
+
+export type ImportPreview = z.infer<typeof importPreviewSchema>;
+
+/** Request payload to generate an import preview. */
+export const importPreviewRequestSchema = z.object({
+  content: z.string().max(10 * 1024 * 1024, 'Input content exceeds 10 MiB limit'),
+});
+
+export type ImportPreviewRequest = z.infer<typeof importPreviewRequestSchema>;
+
+/** Request payload to commit an active import preview. */
+export const importCommitRequestSchema = z.object({
+  previewId: z.string().min(1, 'previewId is required'),
+});
+
+export type ImportCommitRequest = z.infer<typeof importCommitRequestSchema>;
 
 /** Query options for reading catalog items. */
 export const catalogQuerySchema = z.object({
@@ -145,3 +225,51 @@ export const catalogQuerySchema = z.object({
 });
 
 export type CatalogQuery = z.infer<typeof catalogQuerySchema>;
+
+/** Aggregated catalog statistics. */
+export const catalogStatsSchema = z.object({
+  totalProblems: z.number().int().nonnegative(),
+  easy: z.number().int().nonnegative(),
+  medium: z.number().int().nonnegative(),
+  hard: z.number().int().nonnegative(),
+  paidOnly: z.number().int().nonnegative(),
+  totalTags: z.number().int().nonnegative(),
+  lastImportedAt: z.number().int().nonnegative().nullable(),
+  catalogRevision: z.number().int().nonnegative(),
+});
+
+export type CatalogStats = z.infer<typeof catalogStatsSchema>;
+
+/** Persisted user preference settings. */
+export const userSettingsSchema = z.object({
+  language: z.enum(['en', 'zh']),
+  theme: z.enum(['light', 'dark', 'system']),
+  updatedAt: z.number().int().nonnegative(),
+});
+
+export type UserSettings = z.infer<typeof userSettingsSchema>;
+
+/** Input schema for updating user preference settings. */
+export const updateSettingsInputSchema = z.object({
+  language: z.enum(['en', 'zh']).optional(),
+  theme: z.enum(['light', 'dark', 'system']).optional(),
+}).refine(data => data.language !== undefined || data.theme !== undefined, {
+  message: 'At least one setting (language or theme) must be provided',
+});
+
+export type UpdateSettingsInput = z.infer<typeof updateSettingsInputSchema>;
+
+/** Single entry in the import audit history. */
+export const importHistoryItemSchema = z.object({
+  id: z.string(),
+  importedAt: z.number().int().nonnegative(),
+  totalLines: z.number().int().nonnegative(),
+  validCount: z.number().int().nonnegative(),
+  insertedCount: z.number().int().nonnegative(),
+  updatedCount: z.number().int().nonnegative(),
+  unchangedCount: z.number().int().nonnegative(),
+  duplicateCount: z.number().int().nonnegative(),
+  errorCount: z.number().int().nonnegative(),
+});
+
+export type ImportHistoryItem = z.infer<typeof importHistoryItemSchema>;

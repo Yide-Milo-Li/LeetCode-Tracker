@@ -10,22 +10,48 @@ You can easily generate problem datasets (such as Blind 75, NeetCode 150, or cus
 
 The MIT license covers repository code, not third-party content. This is an independent project.
 
-## Current status and development
+## Current status: Phase 2 JSONL Catalog Workbench
 
-The public baseline provides TypeScript contracts, SQLite storage, JSONL ingestion, and automated synthetic test suites. Recommendations, the web interface, and Gemini integration are in active planning.
+The repository delivers an offline-first catalog workbench:
+- **Bring-Your-Own-Data (BYOD) Ingestion**: Upload or paste JSON Lines data with preflight change preview, line error breakdown, and atomic SQLite commits.
+- **Local Storage Engine**: Transactional SQLite storage (schema v4) with automatic migration, identity collision resolution, omitted field preservation, and point-in-time backups.
+- **Local Fastify API**: `/api/v1` routes listening strictly on loopback (`127.0.0.1`) with origin validation and write serialization.
+- **Bilingual Web Client**: React/Vite application supporting English and Simplified Chinese, dark/light themes, catalog search, difficulty/tag/premium filters, and import history.
 
-The storage engine implements transactional, idempotent upserts with lenient field deduction (automatic slug and URL generation, case-insensitive difficulties, tag normalization, and fault-tolerant line handling).
+## Quick start
 
 With Node.js 24.15 or later in the 24.x series and npm installed:
 
 ```sh
+# 1. Install dependencies
 npm install
+
+# 2. Run typecheck and automated tests
 npm run check
 npm test
 npm run docs:check
+
+# 3. Build and launch local workbench
+npm run build
+npm start
 ```
 
-These commands validate contracts, parser resilience, and SQLite transactions using synthetic data; they do not populate a real problem database. Node 24's built-in SQLite module may emit an experimental warning.
+Open [http://127.0.0.1:3000](http://127.0.0.1:3000) in your browser to access the local application.
+
+For frontend development with hot-module replacement and API proxy:
+```sh
+npm run dev
+```
+
+To perform an offline database restoration from a backup file:
+```sh
+npm run restore -- <path-to-backup.sqlite> [target-db.sqlite]
+```
+
+To run optional verification against a private local dataset (if `.local/backup-4046.jsonl` exists):
+```sh
+npm run test:private
+```
 
 ## Repository guide
 
@@ -38,4 +64,4 @@ These commands validate contracts, parser resilience, and SQLite transactions us
 
 ## Planned experience
 
-Named strategies assign explicit question counts, difficulty proportions and optional reviews to weekdays. Unassigned days are rest days. Conflicting assignments are rejected. A persistent Chinese/English setting and validated Gemini recommendations are planned.
+Named strategies assign explicit question counts, difficulty proportions and optional reviews to weekdays. Unassigned days are rest days. Conflicting assignments are rejected. A persistent Chinese/English setting and validated Gemini recommendations are planned for subsequent milestones.

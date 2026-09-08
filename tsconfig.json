@@ -12,6 +12,7 @@
       "ES2023",
       "DOM"
     ],
+    "jsx": "react-jsx",
     "types": [
       "node"
     ]
@@ -19,7 +20,10 @@
   "include": [
     "packages/contracts/src/**/*.ts",
     "packages/database/src/**/*.ts",
-    "scripts/check-docs.ts",
-    "tests/catalog-store.test.ts"
+    "apps/server/src/**/*.ts",
+    "apps/web/src/**/*.ts",
+    "apps/web/src/**/*.tsx",
+    "scripts/**/*.ts",
+    "tests/**/*.ts"
   ]
 }

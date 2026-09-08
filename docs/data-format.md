@@ -30,13 +30,14 @@ Each line in a JSONL file must represent a single, independent JSON object descr
 }
 ```
 
-### Normalization and auto-derivation
-The parser in [sync.ts](../packages/contracts/src/sync.ts) automatically normalizes inputs:
-- **`id`**: Accepts numeric or string identifiers (e.g. `1` or `"1"`). Do not assume IDs are strictly sequential.
+### Normalization, defaults, and field preservation
+- **`id`**: Accepts numeric or string identifiers (e.g. `1` or `"1"`). Identifies the frontend question number.
 - **`titleSlug`**: Automatically derived from `title` via lowercase kebab-case (e.g. `"Two Sum"` -> `"two-sum"`).
 - **`url`**: Automatically synthesized as `https://leetcode.com/problems/{slug}/` if omitted.
 - **`difficulty`**: Case-insensitive (`"Easy"`, `"Medium"`, `"Hard"`, `"easy"`, etc.).
-- **`tags`**: Accepts an array of strings (e.g. `["Array", "DP"]`). Each tag is automatically assigned a slug and deduplicated.
+- **`tags`**: Accepts an array of strings (e.g. `["Array", "DP"]`) or tag objects. When omitted during an update, existing tags are preserved. When explicitly set to `[]`, tags are cleared.
+- **`isPaidOnly`**: Optional boolean. When omitted during an update, existing value is preserved. Default for new records is `false`.
+- **Identity Matching**: Existing problems match on `frontend_question_id`. Omitted `questionId` reuses existing internal ID. Conflicting explicit `questionId` is rejected as a line error.
 - **Markdown code fences**: Lines starting with ` ``` ` or blank lines are safely ignored.
 
 ---
@@ -63,17 +64,20 @@ Example line:
 
 ---
 
-## 3. SQLite schema
+## 3. SQLite schema (v4)
 
-The local SQLite catalog schema is defined in [store.ts](../packages/database/src/store.ts) (version 3):
+The local SQLite catalog schema is defined in [store.ts](../packages/database/src/store.ts) (version 4):
 
-- **`problems`**: Stores normalized problem records keyed by `question_id`, with a unique index on `frontend_question_id`.
+- **`problems`**: Stores normalized problem records keyed by `question_id`, with unique index on `frontend_question_id`.
 - **`tags`**: Normalized taxonomy table keyed by `slug`.
 - **`problem_tags`**: Many-to-many relationship table with cascade deletion.
-- **`import_history`**: Audit log recording ingestion timestamps, lines processed, inserted/updated counts, and error counts.
-- **`schema_version`**: Tracks applied database migrations.
+- **`import_history`**: Audit log recording ingestion timestamps, lines processed, inserted/updated/unchanged/duplicate counts, and error counts.
+- **`catalog_meta`**: Key-value metadata storing monotonic `catalog_revision` and `last_imported_at`.
+- **`settings`**: User preferences table storing `language` ('en' | 'zh') and `theme` ('light' | 'dark' | 'system').
+- **`schema_version`**: Tracks applied database schema version.
 
 ### Ingestion guarantees
-- **Idempotency**: Re-importing identical problems updates metadata and refreshes tags in-place (`ON CONFLICT(question_id) DO UPDATE ...`).
-- **Atomic Transactions**: Ingestion batches run within a single SQLite transaction, ensuring zero partial-write corruption.
-- **Performance**: High throughput capable of ingesting over 1,000 problems in under 20ms and 4,000+ problems in under 100ms.
+- **Preflight Inspection**: Validates inputs, detects conflicts, and reports preview diffs before write.
+- **Atomic Transactions**: Problems, tags, audit logs, and catalog revision increment commit together in one transaction.
+- **Consistent Backups**: Native SQLite backups are generated before migration and data changes, retaining 14 daily archives.
+- **Offline Restore**: Offline restoration command validates backup integrity before restoring with safety snapshots.

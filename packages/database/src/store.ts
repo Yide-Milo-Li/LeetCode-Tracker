@@ -1,47 +1,101 @@
 /**
  * High-performance transactional SQLite storage for user-imported problem catalog data.
  * Pure offline persistence: zero network I/O, local storage only.
+ * Implements schema versioning (v4), preflight import previews, atomic multi-table commits,
+ * and integration with consistent backup management.
  */
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import {
   catalogProblemSchema,
   catalogQuerySchema,
-  normalizeProblem,
+  rawProblemInputSchema,
+  normalizeTags,
+  slugify,
   type CatalogProblem,
   type CatalogQuery,
+  type CatalogStats,
+  type ImportErrorLine,
+  type ImportHistoryItem,
+  type ImportPreview,
   type ImportSummary,
   type TopicTag,
+  type UpdateSettingsInput,
+  type UserSettings,
 } from '../../contracts/src/sync.ts';
+import { BackupManager } from './backup.ts';
 
-/** Current database schema version. */
-export const CURRENT_SCHEMA_VERSION = 3;
+/** Supported current database schema version. */
+export const CURRENT_SCHEMA_VERSION = 4;
 
-export type CatalogStats = {
-  totalProblems: number;
-  easy: number;
-  medium: number;
-  hard: number;
-  paidOnly: number;
-  totalTags: number;
-  lastImportedAt: number | null;
-};
+/** Error thrown when attempting to load a database with an unsupported future or legacy schema version. */
+export class UnsupportedSchemaVersionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'UnsupportedSchemaVersionError';
+  }
+}
+
+/** Error thrown when legacy scraper/crawler tables are discovered in the database. */
+export class LegacyCrawlerSchemaError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'LegacyCrawlerSchemaError';
+  }
+}
+
+/** Error thrown when database structures or metadata are missing or corrupted. */
+export class DatabaseCorruptionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DatabaseCorruptionError';
+  }
+}
+
+/** Error thrown when committing against an outdated catalog revision. */
+export class CatalogRevisionMismatchError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CatalogRevisionMismatchError';
+  }
+}
+
+/** Validated atomic operation prepared during import preflight. */
+export interface ValidatedImportOp {
+  action: 'insert' | 'update' | 'unchanged';
+  lineNumber: number;
+  problem: CatalogProblem;
+  changes?: string[];
+}
+
+/** Configuration options for CatalogStore. */
+export interface CatalogStoreOptions {
+  backupDir?: string;
+  skipBackup?: boolean;
+}
 
 /**
  * Storage manager for managing local LeetCode problem catalog datasets.
  */
 export class CatalogStore {
   private readonly db: DatabaseSync;
+  private readonly backupManager?: BackupManager;
+  private readonly skipBackup: boolean;
 
   /**
-   * Initialize catalog storage. Applies schema migrations and configures SQLite pragmas.
+   * Initialize catalog storage. Verifies compatibility, applies migrations, and configures pragmas.
    *
    * @param db Node.js DatabaseSync instance.
+   * @param options Optional configuration including backup directory.
    */
-  constructor(db: DatabaseSync) {
+  constructor(db: DatabaseSync, options: CatalogStoreOptions = {}) {
     this.db = db;
+    this.skipBackup = options.skipBackup ?? false;
+    if (options.backupDir && !this.skipBackup) {
+      this.backupManager = new BackupManager(options.backupDir);
+    }
     this.configurePragmas();
-    this.initSchema();
+    this.initOrMigrateSchema();
   }
 
   /** Configure recommended pragmas for resilience and performance. */
@@ -51,8 +105,58 @@ export class CatalogStore {
     this.db.exec('PRAGMA synchronous = NORMAL;');
   }
 
-  /** Initialize tables and ensure schema is up-to-date. */
-  private initSchema(): void {
+  /**
+   * Verify compatibility, create tables if empty, or perform transactional migration from v3 to v4.
+   */
+  private initOrMigrateSchema(): void {
+    // Check if database has any existing tables
+    const tableRows = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';").all() as Array<{ name: string }>;
+    const tableNames = new Set(tableRows.map(r => r.name));
+
+    // Reject legacy crawler tables
+    const legacyCrawlerTables = ['crawled_checkpoints', 'extension_sync', 'accounts', 'submissions', 'review_stages'];
+    for (const legacy of legacyCrawlerTables) {
+      if (tableNames.has(legacy)) {
+        throw new LegacyCrawlerSchemaError(`Database contains retired scraper/crawler table '${legacy}'. Ingestion requires a clean BYOD catalog.`);
+      }
+    }
+
+    if (tableNames.size === 0) {
+      // Brand new database: create v4 schema directly
+      this.createV4Schema();
+      return;
+    }
+
+    // Existing database: check schema_version
+    if (!tableNames.has('schema_version')) {
+      throw new DatabaseCorruptionError('Existing database is missing required schema_version table.');
+    }
+
+    const verRow = this.db.prepare('SELECT version FROM schema_version LIMIT 1;').get() as { version: number } | undefined;
+    if (!verRow || typeof verRow.version !== 'number') {
+      throw new DatabaseCorruptionError('Invalid or unreadable version in schema_version table.');
+    }
+
+    const version = verRow.version;
+    if (version > CURRENT_SCHEMA_VERSION) {
+      throw new UnsupportedSchemaVersionError(
+        `Database schema version ${version} is newer than supported version ${CURRENT_SCHEMA_VERSION}. Please upgrade application.`
+      );
+    }
+
+    if (version < 3) {
+      throw new UnsupportedSchemaVersionError(
+        `Database schema version ${version} is too old. Only versions 3 and 4 are supported.`
+      );
+    }
+
+    if (version === 3) {
+      this.migrateV3ToV4();
+    }
+  }
+
+  /** Create brand new v4 schema tables and default values. */
+  private createV4Schema(): void {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS schema_version (
         version INTEGER PRIMARY KEY
@@ -94,37 +198,107 @@ export class CatalogStore {
         valid_count INTEGER NOT NULL,
         inserted_count INTEGER NOT NULL,
         updated_count INTEGER NOT NULL,
+        unchanged_count INTEGER NOT NULL DEFAULT 0,
+        duplicate_count INTEGER NOT NULL DEFAULT 0,
         error_count INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS catalog_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
       );
     `);
 
-    // Record or update schema version
-    const ver = this.db.prepare('SELECT version FROM schema_version LIMIT 1').get() as { version: number } | undefined;
-    if (!ver) {
-      this.db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(CURRENT_SCHEMA_VERSION);
-    } else if (ver.version < CURRENT_SCHEMA_VERSION) {
-      this.db.prepare('UPDATE schema_version SET version = ?').run(CURRENT_SCHEMA_VERSION);
-    }
+    const now = Date.now();
+    this.db.prepare('INSERT OR REPLACE INTO schema_version (version) VALUES (?);').run(CURRENT_SCHEMA_VERSION);
+    this.db.prepare("INSERT OR REPLACE INTO catalog_meta (key, value) VALUES ('catalog_revision', '0');").run();
+    this.db.prepare("INSERT OR REPLACE INTO catalog_meta (key, value) VALUES ('last_imported_at', '0');").run();
+    this.db.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('language', 'en', ?);").run(now);
+    this.db.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('theme', 'system', ?);").run(now);
   }
 
   /**
-   * Ingest raw JSON Lines (JSONL) text into the catalog database.
-   *
-   * Features:
-   * - Auto-derives missing slugs and LeetCode problem URLs.
-   * - Tolerates malformed lines without dropping valid lines.
-   * - Atomically persists valid records in a single SQLite transaction using UPSERT.
-   * - Deduplicates and links topic tags.
-   *
-   * @param content Raw text containing one JSON object per line.
-   * @returns Detailed summary with line-by-line error reports and counts.
+   * Migrate existing v3 database to v4 schema within a single atomic transaction.
    */
-  public importJsonl(content: string): ImportSummary {
+  private migrateV3ToV4(): void {
+    // Check if import_history needs new columns
+    const cols = this.db.prepare("PRAGMA table_info('import_history');").all() as Array<{ name: string }>;
+    const colNames = new Set(cols.map(c => c.name));
+
+    this.db.exec('BEGIN TRANSACTION;');
+    try {
+      if (!colNames.has('unchanged_count')) {
+        this.db.exec('ALTER TABLE import_history ADD COLUMN unchanged_count INTEGER NOT NULL DEFAULT 0;');
+      }
+      if (!colNames.has('duplicate_count')) {
+        this.db.exec('ALTER TABLE import_history ADD COLUMN duplicate_count INTEGER NOT NULL DEFAULT 0;');
+      }
+
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS catalog_meta (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS settings (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+      `);
+
+      const countHistory = (this.db.prepare('SELECT count(*) as count FROM import_history;').get() as { count: number }).count;
+      const initialRev = String(countHistory);
+      const lastImport = (this.db.prepare('SELECT max(imported_at) as max_time FROM import_history;').get() as { max_time: number | null }).max_time ?? 0;
+
+      const now = Date.now();
+      this.db.prepare("INSERT OR REPLACE INTO catalog_meta (key, value) VALUES ('catalog_revision', ?);").run(initialRev);
+      this.db.prepare("INSERT OR REPLACE INTO catalog_meta (key, value) VALUES ('last_imported_at', ?);").run(String(lastImport));
+      this.db.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('language', 'en', ?);").run(now);
+      this.db.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('theme', 'system', ?);").run(now);
+      this.db.prepare('UPDATE schema_version SET version = ?;').run(CURRENT_SCHEMA_VERSION);
+
+      this.db.exec('COMMIT;');
+    } catch (err) {
+      this.db.exec('ROLLBACK;');
+      throw err;
+    }
+  }
+
+  /** Get the current catalog integer revision number. */
+  public getCatalogRevision(): number {
+    const row = this.db.prepare("SELECT value FROM catalog_meta WHERE key = 'catalog_revision';").get() as { value: string } | undefined;
+    return row ? parseInt(row.value, 10) : 0;
+  }
+
+  /**
+   * Preflight inspection of raw JSONL text against the active database state.
+   * Detects syntactic errors, intra-batch identical duplicates, intra-batch conflicting entries,
+   * identity conflicts with existing database records, and accurately predicts
+   * whether each valid record will be inserted, updated, or left unchanged.
+   *
+   * Pure read-only operation: zero writes to the database.
+   *
+   * @param content Raw input string containing JSON Lines.
+   * @returns Generated preview metadata and executable list of validated operations.
+   */
+  public previewImport(content: string): { preview: ImportPreview; validOperations: ValidatedImportOp[] } {
     const rawLines = content.split(/\r?\n/);
-    const validProblems: CatalogProblem[] = [];
-    const errors: ImportSummary['errors'] = [];
+    const lineCandidates: Array<{
+      lineNumber: number;
+      raw: ReturnType<typeof rawProblemInputSchema.parse>;
+      lineSnippet: string;
+    }> = [];
+    const errors: ImportErrorLine[] = [];
     let totalLinesCount = 0;
 
+    // 1. Initial parsing and Zod schema validation
     for (let i = 0; i < rawLines.length; i++) {
       const line = rawLines[i].trim();
       if (!line || line.startsWith('```')) {
@@ -136,70 +310,288 @@ export class CatalogStore {
 
       try {
         const json = JSON.parse(line);
-        const normalized = normalizeProblem(json);
-        validProblems.push(normalized);
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const parsed = rawProblemInputSchema.parse(json);
+        lineCandidates.push({
+          lineNumber,
+          raw: parsed,
+          lineSnippet: line.slice(0, 120),
+        });
+      } catch (err) {
         errors.push({
           line: lineNumber,
-          message: msg,
+          message: err instanceof Error ? err.message : String(err),
           snippet: line.slice(0, 120),
         });
       }
     }
 
-    const { inserted, updated } = this.importProblems(validProblems);
+    // 2. Intra-batch duplicate and conflict resolution
+    const seenByFrontendId = new Map<string, typeof lineCandidates[0]>();
+    const seenByExplicitQuestionId = new Map<string, number>();
+    const nonConflictingCandidates: typeof lineCandidates = [];
+    let duplicateCount = 0;
 
-    // Record import audit event
+    for (const cand of lineCandidates) {
+      const frontendId = cand.raw.id;
+      const existingInBatch = seenByFrontendId.get(frontendId);
+
+      if (existingInBatch) {
+        // Compare if fields are completely identical
+        const isIdentical =
+          cand.raw.title === existingInBatch.raw.title &&
+          cand.raw.difficulty === existingInBatch.raw.difficulty &&
+          cand.raw.questionId === existingInBatch.raw.questionId &&
+          cand.raw.titleSlug === existingInBatch.raw.titleSlug &&
+          cand.raw.url === existingInBatch.raw.url &&
+          cand.raw.isPaidOnly === existingInBatch.raw.isPaidOnly &&
+          cand.raw.source === existingInBatch.raw.source &&
+          JSON.stringify(cand.raw.tags) === JSON.stringify(existingInBatch.raw.tags);
+
+        if (isIdentical) {
+          // Exact duplicate line: skip and increment duplicateCount
+          duplicateCount++;
+          continue;
+        } else {
+          // Contradictory definition in same batch
+          errors.push({
+            line: cand.lineNumber,
+            message: `Conflicting problem definition for ID '${frontendId}' contradicts line ${existingInBatch.lineNumber}`,
+            snippet: cand.lineSnippet,
+          });
+          continue;
+        }
+      }
+
+      // Check explicit questionId uniqueness across different frontend IDs in the same batch
+      if (cand.raw.questionId) {
+        const prevLine = seenByExplicitQuestionId.get(cand.raw.questionId);
+        if (prevLine !== undefined) {
+          errors.push({
+            line: cand.lineNumber,
+            message: `Explicit questionId '${cand.raw.questionId}' on line ${cand.lineNumber} conflicts with line ${prevLine}`,
+            snippet: cand.lineSnippet,
+          });
+          continue;
+        }
+        seenByExplicitQuestionId.set(cand.raw.questionId, cand.lineNumber);
+      }
+
+      seenByFrontendId.set(frontendId, cand);
+      nonConflictingCandidates.push(cand);
+    }
+
+    // 3. Database comparison & operation classification
+    const checkByFrontendStmt = this.db.prepare(`
+      SELECT question_id, frontend_question_id, title, title_slug, url, difficulty, is_paid_only, source
+      FROM problems
+      WHERE frontend_question_id = ?
+    `);
+
+    const checkByQuestionIdStmt = this.db.prepare(`
+      SELECT question_id, frontend_question_id
+      FROM problems
+      WHERE question_id = ?
+    `);
+
+    const getExistingTagsStmt = this.db.prepare(`
+      SELECT t.id, t.name, t.slug
+      FROM problem_tags pt
+      JOIN tags t ON pt.tag_slug = t.slug
+      WHERE pt.question_id = ?
+      ORDER BY t.slug ASC
+    `);
+
+    const validOperations: ValidatedImportOp[] = [];
+
+    for (const cand of nonConflictingCandidates) {
+      const existingProblem = checkByFrontendStmt.get(cand.raw.id) as {
+        question_id: string;
+        frontend_question_id: string;
+        title: string;
+        title_slug: string;
+        url: string;
+        difficulty: 'Easy' | 'Medium' | 'Hard';
+        is_paid_only: number;
+        source: string;
+      } | undefined;
+
+      if (existingProblem) {
+        // Problem exists in DB: verify identity consistency
+        if (cand.raw.questionId && cand.raw.questionId !== existingProblem.question_id) {
+          errors.push({
+            line: cand.lineNumber,
+            message: `Explicit questionId '${cand.raw.questionId}' does not match existing questionId '${existingProblem.question_id}' for problem '${cand.raw.id}'`,
+            snippet: cand.lineSnippet,
+          });
+          continue;
+        }
+
+        const internalQuestionId = existingProblem.question_id;
+        const existingTags = getExistingTagsStmt.all(internalQuestionId) as TopicTag[];
+
+        // Determine fields: update provided fields, preserve omitted fields
+        const newTitle = cand.raw.title.trim();
+        const newDifficulty = cand.raw.difficulty;
+        const newSlug = cand.raw.titleSlug ? slugify(cand.raw.titleSlug) : existingProblem.title_slug;
+        const newUrl = cand.raw.url || existingProblem.url;
+        const newPaidOnly = cand.raw.isPaidOnly !== undefined ? cand.raw.isPaidOnly : Boolean(existingProblem.is_paid_only);
+        const newSource = cand.raw.source || existingProblem.source;
+        const newTags = cand.raw.tags !== undefined ? normalizeTags(cand.raw.tags) : existingTags;
+
+        // Detect if anything actually changed
+        const changes: string[] = [];
+        if (newTitle !== existingProblem.title) changes.push('title');
+        if (newDifficulty !== existingProblem.difficulty) changes.push('difficulty');
+        if (newSlug !== existingProblem.title_slug) changes.push('titleSlug');
+        if (newUrl !== existingProblem.url) changes.push('url');
+        if (newPaidOnly !== Boolean(existingProblem.is_paid_only)) changes.push('isPaidOnly');
+        if (newSource !== existingProblem.source) changes.push('source');
+
+        const existingTagSlugs = existingTags.map(t => t.slug).sort().join(',');
+        const newTagSlugs = newTags.map(t => t.slug).sort().join(',');
+        if (existingTagSlugs !== newTagSlugs) changes.push('tags');
+
+        const action: 'update' | 'unchanged' = changes.length > 0 ? 'update' : 'unchanged';
+
+        validOperations.push({
+          action,
+          lineNumber: cand.lineNumber,
+          changes: changes.length > 0 ? changes : undefined,
+          problem: catalogProblemSchema.parse({
+            questionId: internalQuestionId,
+            questionFrontendId: cand.raw.id,
+            title: newTitle,
+            titleSlug: newSlug,
+            url: newUrl,
+            difficulty: newDifficulty,
+            isPaidOnly: newPaidOnly,
+            topicTags: newTags,
+            source: newSource,
+          }),
+        });
+      } else {
+        // New problem: check identity collision
+        const candidateQuestionId = cand.raw.questionId || cand.raw.id;
+        const conflictProblem = checkByQuestionIdStmt.get(candidateQuestionId) as {
+          question_id: string;
+          frontend_question_id: string;
+        } | undefined;
+
+        if (conflictProblem && conflictProblem.frontend_question_id !== cand.raw.id) {
+          errors.push({
+            line: cand.lineNumber,
+            message: `Derived/explicit questionId '${candidateQuestionId}' is already assigned to problem '${conflictProblem.frontend_question_id}'`,
+            snippet: cand.lineSnippet,
+          });
+          continue;
+        }
+
+        // Apply new problem derivation rules
+        const derivedSlug = cand.raw.titleSlug
+          ? slugify(cand.raw.titleSlug)
+          : (slugify(cand.raw.title) || `problem-${cand.raw.id}`);
+        const safeUrl = cand.raw.url || `https://leetcode.com/problems/${derivedSlug}/`;
+        const normalizedTags = cand.raw.tags !== undefined ? normalizeTags(cand.raw.tags) : [];
+
+        validOperations.push({
+          action: 'insert',
+          lineNumber: cand.lineNumber,
+          problem: catalogProblemSchema.parse({
+            questionId: candidateQuestionId,
+            questionFrontendId: cand.raw.id,
+            title: cand.raw.title.trim(),
+            titleSlug: derivedSlug,
+            url: safeUrl,
+            difficulty: cand.raw.difficulty,
+            isPaidOnly: cand.raw.isPaidOnly ?? false,
+            topicTags: normalizedTags,
+            source: cand.raw.source || 'leetcode.com',
+          }),
+        });
+      }
+    }
+
+    const insertCount = validOperations.filter(op => op.action === 'insert').length;
+    const updateCount = validOperations.filter(op => op.action === 'update').length;
+    const unchangedCount = validOperations.filter(op => op.action === 'unchanged').length;
+    const validCount = insertCount + updateCount + unchangedCount;
+
+    // Build sample items for client preview UI
+    const sampleItems = validOperations.slice(0, 100).map(op => ({
+      frontendId: op.problem.questionFrontendId,
+      title: op.problem.title,
+      difficulty: op.problem.difficulty,
+      action: op.action,
+      tags: op.problem.topicTags.map(t => t.name),
+      changes: op.changes,
+    }));
+
     const now = Date.now();
-    this.db.prepare(`
-      INSERT INTO import_history (id, imported_at, total_lines, valid_count, inserted_count, updated_count, error_count)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      randomUUID(),
-      now,
-      totalLinesCount,
-      validProblems.length,
-      inserted,
-      updated,
-      errors.length
-    );
+    const previewId = randomUUID();
 
-    return {
+    const preview: ImportPreview = {
+      previewId,
+      catalogRevision: this.getCatalogRevision(),
+      createdAt: now,
+      expiresAt: now + 30 * 60 * 1000, // 30 minutes validity
       totalLines: totalLinesCount,
-      validCount: validProblems.length,
-      insertedCount: inserted,
-      updatedCount: updated,
+      validCount,
+      insertCount,
+      updateCount,
+      unchangedCount,
+      duplicateCount,
       errorCount: errors.length,
       errors,
+      sampleItems,
     };
+
+    return { preview, validOperations };
   }
 
   /**
-   * Atomically upsert a collection of pre-normalized CatalogProblem objects.
+   * Commit a set of validated operations atomically into SQLite.
+   * Ensures problem mutations, tags, audit history, and catalog revision increment
+   * occur strictly in one SQLite transaction.
    *
-   * @param problems Validated problem entities.
-   * @returns Number of newly inserted vs existing updated problems.
+   * @param previewId Identifier for this import audit entry.
+   * @param operations Validated problem operations to apply.
+   * @param meta Metadata from preflight including line counts and errors.
    */
-  public importProblems(problems: CatalogProblem[]): { inserted: number; updated: number } {
-    if (problems.length === 0) {
-      return { inserted: 0, updated: 0 };
+  public commitImport(
+    previewId: string,
+    operations: ValidatedImportOp[],
+    meta: {
+      totalLines: number;
+      duplicateCount: number;
+      errors: ImportErrorLine[];
+      expectedRevision?: number;
+    },
+  ): ImportSummary {
+    if (meta.expectedRevision !== undefined) {
+      const currentRev = this.getCatalogRevision();
+      if (currentRev !== meta.expectedRevision) {
+        throw new CatalogRevisionMismatchError(
+          `Catalog revision has changed (expected ${meta.expectedRevision}, current is ${currentRev}). Please regenerate preview.`
+        );
+      }
     }
 
-    const checkStmt = this.db.prepare('SELECT question_id FROM problems WHERE frontend_question_id = ?');
     const insertProblemStmt = this.db.prepare(`
       INSERT INTO problems (
         question_id, frontend_question_id, title, title_slug, url, difficulty, is_paid_only, source, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(question_id) DO UPDATE SET
-        frontend_question_id = excluded.frontend_question_id,
-        title = excluded.title,
-        title_slug = excluded.title_slug,
-        url = excluded.url,
-        difficulty = excluded.difficulty,
-        is_paid_only = excluded.is_paid_only,
-        source = excluded.source,
-        updated_at = excluded.updated_at
+    `);
+
+    const updateProblemStmt = this.db.prepare(`
+      UPDATE problems SET
+        title = ?,
+        title_slug = ?,
+        url = ?,
+        difficulty = ?,
+        is_paid_only = ?,
+        source = ?,
+        updated_at = ?
+      WHERE question_id = ?
     `);
 
     const insertTagStmt = this.db.prepare(`
@@ -212,39 +604,90 @@ export class CatalogStore {
       INSERT OR IGNORE INTO problem_tags (question_id, tag_slug) VALUES (?, ?)
     `);
 
+    const insertAuditStmt = this.db.prepare(`
+      INSERT INTO import_history (
+        id, imported_at, total_lines, valid_count, inserted_count, updated_count, unchanged_count, duplicate_count, error_count
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const updateRevisionStmt = this.db.prepare(`
+      UPDATE catalog_meta SET value = ? WHERE key = 'catalog_revision'
+    `);
+
+    const updateLastImportStmt = this.db.prepare(`
+      UPDATE catalog_meta SET value = ? WHERE key = 'last_imported_at'
+    `);
+
     let inserted = 0;
     let updated = 0;
+    let unchanged = 0;
     const now = Date.now();
 
     this.db.exec('BEGIN TRANSACTION;');
     try {
-      for (const p of problems) {
-        const existing = checkStmt.get(p.questionFrontendId);
-        if (existing) {
-          updated++;
-        } else {
+      for (const op of operations) {
+        const p = op.problem;
+
+        if (op.action === 'insert') {
           inserted++;
-        }
+          insertProblemStmt.run(
+            p.questionId,
+            p.questionFrontendId,
+            p.title,
+            p.titleSlug,
+            p.url,
+            p.difficulty,
+            p.isPaidOnly ? 1 : 0,
+            p.source,
+            now
+          );
 
-        insertProblemStmt.run(
-          p.questionId,
-          p.questionFrontendId,
-          p.title,
-          p.titleSlug,
-          p.url,
-          p.difficulty,
-          p.isPaidOnly ? 1 : 0,
-          p.source,
-          now
-        );
+          deleteProblemTagsStmt.run(p.questionId);
+          for (const tag of p.topicTags) {
+            insertTagStmt.run(tag.slug, tag.id, tag.name);
+            linkProblemTagStmt.run(p.questionId, tag.slug);
+          }
+        } else if (op.action === 'update') {
+          updated++;
+          updateProblemStmt.run(
+            p.title,
+            p.titleSlug,
+            p.url,
+            p.difficulty,
+            p.isPaidOnly ? 1 : 0,
+            p.source,
+            now,
+            p.questionId
+          );
 
-        deleteProblemTagsStmt.run(p.questionId);
-
-        for (const tag of p.topicTags) {
-          insertTagStmt.run(tag.slug, tag.id, tag.name);
-          linkProblemTagStmt.run(p.questionId, tag.slug);
+          deleteProblemTagsStmt.run(p.questionId);
+          for (const tag of p.topicTags) {
+            insertTagStmt.run(tag.slug, tag.id, tag.name);
+            linkProblemTagStmt.run(p.questionId, tag.slug);
+          }
+        } else {
+          // Unchanged: preserve updated_at and leave tags intact
+          unchanged++;
         }
       }
+
+      // Increment catalog revision and record last import timestamp
+      const newRev = this.getCatalogRevision() + 1;
+      updateRevisionStmt.run(String(newRev));
+      updateLastImportStmt.run(String(now));
+
+      // Record audit history entry
+      insertAuditStmt.run(
+        previewId,
+        now,
+        meta.totalLines,
+        operations.length,
+        inserted,
+        updated,
+        unchanged,
+        meta.duplicateCount,
+        meta.errors.length
+      );
 
       this.db.exec('COMMIT;');
     } catch (error) {
@@ -252,7 +695,36 @@ export class CatalogStore {
       throw error;
     }
 
-    return { inserted, updated };
+    return {
+      id: previewId,
+      importedAt: now,
+      totalLines: meta.totalLines,
+      validCount: operations.length,
+      insertedCount: inserted,
+      updatedCount: updated,
+      unchangedCount: unchanged,
+      duplicateCount: meta.duplicateCount,
+      errorCount: meta.errors.length,
+      errors: meta.errors,
+    };
+  }
+
+  /**
+   * Ingest raw JSON Lines (JSONL) text into the catalog database in a single step.
+   * Combines preflight inspection and transactional commit.
+   *
+   * @param content Raw text containing one JSON object per line.
+   * @returns Detailed summary with line-by-line error reports and counts.
+   */
+  public importJsonl(content: string): ImportSummary {
+    const { preview, validOperations } = this.previewImport(content);
+
+    return this.commitImport(preview.previewId, validOperations, {
+      totalLines: preview.totalLines,
+      duplicateCount: preview.duplicateCount,
+      errors: preview.errors,
+      expectedRevision: preview.catalogRevision,
+    });
   }
 
   /**
@@ -396,6 +868,13 @@ export class CatalogStore {
   }
 
   /**
+   * Retrieve all official topic tags available in the database.
+   */
+  public getAllTags(): TopicTag[] {
+    return this.db.prepare('SELECT id, name, slug FROM tags ORDER BY name ASC;').all() as TopicTag[];
+  }
+
+  /**
    * Retrieve aggregate statistics of currently stored problems.
    */
   public getCatalogStats(): CatalogStats {
@@ -409,8 +888,8 @@ export class CatalogStore {
       FROM problems
     `).get() as { total: number; easy: number; medium: number; hard: number; paid: number };
 
-    const tagRow = this.db.prepare('SELECT count(*) as total FROM tags').get() as { total: number };
-    const historyRow = this.db.prepare('SELECT max(imported_at) as last_time FROM import_history').get() as { last_time: number | null };
+    const tagRow = this.db.prepare('SELECT count(*) as total FROM tags;').get() as { total: number };
+    const historyRow = this.db.prepare('SELECT max(imported_at) as last_time FROM import_history;').get() as { last_time: number | null };
 
     return {
       totalProblems: statsRow.total,
@@ -420,6 +899,110 @@ export class CatalogStore {
       paidOnly: statsRow.paid,
       totalTags: tagRow.total,
       lastImportedAt: historyRow.last_time,
+      catalogRevision: this.getCatalogRevision(),
     };
+  }
+
+  /**
+   * Query historical import audit records with pagination.
+   */
+  public getImportHistory(options: { page?: number; limit?: number } = {}): {
+    total: number;
+    items: ImportHistoryItem[];
+  } {
+    const page = options.page && options.page > 0 ? options.page : 1;
+    const limit = options.limit && options.limit > 0 ? options.limit : 20;
+    const offset = (page - 1) * limit;
+
+    const totalRow = this.db.prepare('SELECT count(*) as count FROM import_history;').get() as { count: number };
+    const rows = this.db.prepare(`
+      SELECT
+        id, imported_at as importedAt, total_lines as totalLines,
+        valid_count as validCount, inserted_count as insertedCount,
+        updated_count as updatedCount, unchanged_count as unchangedCount,
+        duplicate_count as duplicateCount, error_count as errorCount
+      FROM import_history
+      ORDER BY imported_at DESC
+      LIMIT ? OFFSET ?
+    `).all(limit, offset) as ImportHistoryItem[];
+
+    return {
+      total: totalRow.count,
+      items: rows,
+    };
+  }
+
+  /**
+   * Retrieve a specific import record by audit ID.
+   */
+  public getImportHistoryById(id: string): ImportHistoryItem | null {
+    const row = this.db.prepare(`
+      SELECT
+        id, imported_at as importedAt, total_lines as totalLines,
+        valid_count as validCount, inserted_count as insertedCount,
+        updated_count as updatedCount, unchanged_count as unchangedCount,
+        duplicate_count as duplicateCount, error_count as errorCount
+      FROM import_history
+      WHERE id = ?
+      LIMIT 1
+    `).get(id) as ImportHistoryItem | undefined;
+
+    return row ?? null;
+  }
+
+  /**
+   * Retrieve user preference settings (language, theme).
+   */
+  public getSettings(): UserSettings {
+    const rows = this.db.prepare('SELECT key, value, updated_at FROM settings;').all() as Array<{
+      key: string;
+      value: string;
+      updated_at: number;
+    }>;
+
+    let language: 'en' | 'zh' = 'en';
+    let theme: 'light' | 'dark' | 'system' = 'system';
+    let maxUpdatedAt = 0;
+
+    for (const r of rows) {
+      if (r.key === 'language' && (r.value === 'en' || r.value === 'zh')) {
+        language = r.value;
+      }
+      if (r.key === 'theme' && (r.value === 'light' || r.value === 'dark' || r.value === 'system')) {
+        theme = r.value;
+      }
+      if (r.updated_at > maxUpdatedAt) {
+        maxUpdatedAt = r.updated_at;
+      }
+    }
+
+    return { language, theme, updatedAt: maxUpdatedAt };
+  }
+
+  /**
+   * Atomically update user preference settings.
+   */
+  public updateSettings(input: UpdateSettingsInput): UserSettings {
+    const now = Date.now();
+    const updateStmt = this.db.prepare(`
+      INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+    `);
+
+    this.db.exec('BEGIN TRANSACTION;');
+    try {
+      if (input.language) {
+        updateStmt.run('language', input.language, now);
+      }
+      if (input.theme) {
+        updateStmt.run('theme', input.theme, now);
+      }
+      this.db.exec('COMMIT;');
+    } catch (err) {
+      this.db.exec('ROLLBACK;');
+      throw err;
+    }
+
+    return this.getSettings();
   }
 }
