@@ -9,12 +9,19 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { CatalogStore } from '../packages/database/src/store.ts';
 import { buildApp } from '../apps/server/src/app.ts';
-import { GeminiFormatError, type IGeminiAssistant, type GeminiFormatResult } from '../apps/server/src/gemini.ts';
+import {
+  GeminiAssistant,
+  GeminiFormatError,
+  type IGeminiAssistant,
+  type GeminiFormatResult,
+  type GeminiAssistantStatus,
+} from '../apps/server/src/gemini.ts';
 
 /** Mock Gemini Assistant for hermetic testing. */
 class MockGeminiAssistant implements IGeminiAssistant {
   public configured: boolean = true;
   public model: string = 'models/gemini-3.8-flash';
+  public fallbackModels: string[] = ['models/gemini-3.7-flash', 'models/gemini-3.6-flash'];
   public shouldFail: boolean = false;
   public failureCode: string = 'GEMINI_UNAVAILABLE';
   public failureStatus: number = 503;
@@ -50,8 +57,12 @@ class MockGeminiAssistant implements IGeminiAssistant {
     };
   }
 
-  public getStatus(): { configured: boolean; model: string } {
-    return { configured: this.configured, model: this.model };
+  public getStatus(): GeminiAssistantStatus {
+    return {
+      configured: this.configured,
+      model: this.model,
+      fallbackModels: this.fallbackModels,
+    };
   }
 }
 
@@ -256,6 +267,7 @@ describe('Practice & Progress API Endpoints', () => {
       const statusBody = JSON.parse(statusRes.payload);
       assert.equal(statusBody.configured, true);
       assert.equal(statusBody.model, 'models/gemini-3.8-flash');
+      assert.deepEqual(statusBody.fallbackModels, ['models/gemini-3.7-flash', 'models/gemini-3.6-flash']);
 
       // 2. Format raw text
       const formatRes = await app.inject({
@@ -485,6 +497,278 @@ describe('Practice & Progress API Endpoints', () => {
       // Query again to verify persistence
       const getAgain = await app.inject({ method: 'GET', url: '/api/v1/settings' });
       assert.equal(JSON.parse(getAgain.payload).timezone, 'Asia/Shanghai');
+    });
+  });
+
+  describe('GeminiAssistant Retry and Multi-tier Fallback Unit Tests', () => {
+    it('executes primary model successfully when no errors occur', async () => {
+      const calls: string[] = [];
+      const assistant = new GeminiAssistant({
+        apiKey: 'test-key',
+        model: 'models/gemini-3.8-flash',
+        fallbackModels: ['models/gemini-3.7-flash', 'models/gemini-3.6-flash'],
+        initialBackoffMs: 0,
+        generateContentFn: async ({ model }) => {
+          calls.push(model);
+          return {
+            text: JSON.stringify({
+              candidates: [
+                {
+                  frontendId: '1',
+                  title: 'Two Sum',
+                  lastSubmitted: '2026-01-01',
+                  lastResult: 'Accepted',
+                  submissions: 1,
+                },
+              ],
+            }),
+          };
+        },
+      });
+
+      const res = await assistant.formatProgressText('1. Two Sum | Accepted | 2026-01-01');
+      assert.equal(res.model, 'models/gemini-3.8-flash');
+      assert.equal(res.candidates.length, 1);
+      assert.equal(res.candidates[0].frontendId, '1');
+      assert.deepEqual(calls, ['models/gemini-3.8-flash']);
+    });
+
+    it('retries transient 503 error on primary model and recovers successfully', async () => {
+      const calls: string[] = [];
+      let attempt = 0;
+      const assistant = new GeminiAssistant({
+        apiKey: 'test-key',
+        model: 'models/gemini-3.8-flash',
+        fallbackModels: ['models/gemini-3.7-flash', 'models/gemini-3.6-flash'],
+        maxRetriesPerModel: 2,
+        initialBackoffMs: 0,
+        generateContentFn: async ({ model }) => {
+          calls.push(model);
+          attempt++;
+          if (attempt === 1) {
+            // First attempt fails with transient high demand error
+            throw new Error('503 The model is currently experiencing high demand.');
+          }
+          // Retry attempt succeeds on the same model
+          return {
+            text: JSON.stringify({
+              candidates: [
+                {
+                  frontendId: '1',
+                  title: 'Two Sum',
+                  lastSubmitted: '2026-01-01',
+                  lastResult: 'Accepted',
+                  submissions: 1,
+                },
+              ],
+            }),
+          };
+        },
+      });
+
+      const res = await assistant.formatProgressText('1. Two Sum | Accepted');
+      assert.equal(res.model, 'models/gemini-3.8-flash');
+      assert.equal(res.candidates.length, 1);
+      // Confirms 2 attempts on primary model without escalating to fallback
+      assert.deepEqual(calls, ['models/gemini-3.8-flash', 'models/gemini-3.8-flash']);
+    });
+
+    it('falls back to tier 1 model (models/gemini-3.7-flash) when primary model exhausts retries', async () => {
+      const calls: string[] = [];
+      const assistant = new GeminiAssistant({
+        apiKey: 'test-key',
+        model: 'models/gemini-3.8-flash',
+        fallbackModels: ['models/gemini-3.7-flash', 'models/gemini-3.6-flash'],
+        maxRetriesPerModel: 1, // 1 retry -> 2 attempts total on primary
+        initialBackoffMs: 0,
+        generateContentFn: async ({ model }) => {
+          calls.push(model);
+          if (model === 'models/gemini-3.8-flash') {
+            throw new Error('503 Service Unavailable: overloaded');
+          }
+          return {
+            text: JSON.stringify({
+              candidates: [
+                {
+                  frontendId: '2',
+                  title: 'Add Two Numbers',
+                  lastSubmitted: '2026-01-02',
+                  lastResult: 'Accepted',
+                  submissions: 2,
+                },
+              ],
+            }),
+          };
+        },
+      });
+
+      const res = await assistant.formatProgressText('2. Add Two Numbers | Accepted');
+      // Model tag in result must indicate the fallback model that actually fulfilled the request
+      assert.equal(res.model, 'models/gemini-3.7-flash');
+      assert.equal(res.candidates.length, 1);
+      assert.deepEqual(calls, [
+        'models/gemini-3.8-flash',
+        'models/gemini-3.8-flash',
+        'models/gemini-3.7-flash',
+      ]);
+    });
+
+    it('falls back to tier 2 model (models/gemini-3.6-flash) when tier 1 also fails', async () => {
+      const calls: string[] = [];
+      const assistant = new GeminiAssistant({
+        apiKey: 'test-key',
+        model: 'models/gemini-3.8-flash',
+        fallbackModels: ['models/gemini-3.7-flash', 'models/gemini-3.6-flash'],
+        maxRetriesPerModel: 1,
+        initialBackoffMs: 0,
+        generateContentFn: async ({ model }) => {
+          calls.push(model);
+          if (model !== 'models/gemini-3.6-flash') {
+            throw new Error('503 Service Unavailable');
+          }
+          return {
+            text: JSON.stringify({
+              candidates: [
+                {
+                  frontendId: '3',
+                  title: 'Longest Substring',
+                  lastSubmitted: '2026-01-03',
+                  lastResult: 'Accepted',
+                  submissions: 3,
+                },
+              ],
+            }),
+          };
+        },
+      });
+
+      const res = await assistant.formatProgressText('3. Longest Substring | Accepted');
+      assert.equal(res.model, 'models/gemini-3.6-flash');
+      assert.equal(res.candidates.length, 1);
+      assert.deepEqual(calls, [
+        'models/gemini-3.8-flash',
+        'models/gemini-3.8-flash',
+        'models/gemini-3.7-flash',
+        'models/gemini-3.7-flash',
+        'models/gemini-3.6-flash',
+      ]);
+    });
+
+    it('skips retries on current model and immediately steps down when receiving 404 model-not-found', async () => {
+      const calls: string[] = [];
+      const assistant = new GeminiAssistant({
+        apiKey: 'test-key',
+        model: 'models/unsupported-primary',
+        fallbackModels: ['models/gemini-3.7-flash'],
+        maxRetriesPerModel: 2,
+        initialBackoffMs: 0,
+        generateContentFn: async ({ model }) => {
+          calls.push(model);
+          if (model === 'models/unsupported-primary') {
+            throw new Error('404 models/unsupported-primary is not found');
+          }
+          return {
+            text: JSON.stringify({ candidates: [] }),
+          };
+        },
+      });
+
+      const res = await assistant.formatProgressText('1. Two Sum');
+      assert.equal(res.model, 'models/gemini-3.7-flash');
+      // Deprecated/unknown model must be attempted only once before immediate stepdown
+      assert.deepEqual(calls, ['models/unsupported-primary', 'models/gemini-3.7-flash']);
+    });
+
+    it('aborts immediately and throws 401 when receiving fatal authentication error', async () => {
+      const calls: string[] = [];
+      const assistant = new GeminiAssistant({
+        apiKey: 'invalid-key',
+        model: 'models/gemini-3.8-flash',
+        fallbackModels: ['models/gemini-3.7-flash'],
+        maxRetriesPerModel: 2,
+        initialBackoffMs: 0,
+        generateContentFn: async ({ model }) => {
+          calls.push(model);
+          throw new Error('API_KEY_INVALID: 401 Unauthorized');
+        },
+      });
+
+      await assert.rejects(
+        () => assistant.formatProgressText('1. Two Sum'),
+        (err: GeminiFormatError) => {
+          assert.equal(err.code, 'GEMINI_AUTH_ERROR');
+          assert.equal(err.status, 401);
+          return true;
+        }
+      );
+      // Auth error is fatal across all models; no retries and no fallbacks attempted
+      assert.deepEqual(calls, ['models/gemini-3.8-flash']);
+    });
+
+    it('exhausts all fallback tiers and retries, throwing classified GEMINI_UNAVAILABLE error', async () => {
+      const assistant = new GeminiAssistant({
+        apiKey: 'test-key',
+        model: 'models/gemini-3.8-flash',
+        fallbackModels: ['models/gemini-3.7-flash', 'models/gemini-3.6-flash'],
+        maxRetriesPerModel: 1,
+        initialBackoffMs: 0,
+        generateContentFn: async () => {
+          throw new Error('503 Service Unavailable: high demand');
+        },
+      });
+
+      await assert.rejects(
+        () => assistant.formatProgressText('1. Two Sum'),
+        (err: GeminiFormatError) => {
+          assert.equal(err.code, 'GEMINI_UNAVAILABLE');
+          assert.equal(err.status, 503);
+          assert.ok(err.message.includes('models/gemini-3.8-flash -> models/gemini-3.7-flash -> models/gemini-3.6-flash'));
+          return true;
+        }
+      );
+    });
+
+    it('reports configured status and fallback models chain accurately via getStatus()', () => {
+      const assistant = new GeminiAssistant({
+        apiKey: 'test-key',
+        model: 'models/gemini-3.8-flash',
+        fallbackModels: ['models/gemini-3.7-flash', 'models/gemini-3.6-flash'],
+      });
+      const status = assistant.getStatus();
+      assert.equal(status.configured, true);
+      assert.equal(status.model, 'models/gemini-3.8-flash');
+      assert.deepEqual(status.fallbackModels, ['models/gemini-3.7-flash', 'models/gemini-3.6-flash']);
+    });
+
+    it('handles empty input immediately without making model calls', async () => {
+      let called = false;
+      const assistant = new GeminiAssistant({
+        apiKey: 'test-key',
+        model: 'models/gemini-3.8-flash',
+        generateContentFn: async () => {
+          called = true;
+          return { text: '{}' };
+        },
+      });
+
+      const res = await assistant.formatProgressText('   \n   ');
+      assert.equal(called, false);
+      assert.deepEqual(res.candidates, []);
+      assert.equal(res.model, 'models/gemini-3.8-flash');
+    });
+
+    it('rejects inputs larger than 64 KiB with 413 PAYLOAD_TOO_LARGE', async () => {
+      const assistant = new GeminiAssistant({ apiKey: 'test-key' });
+      const huge = 'x'.repeat(64 * 1024 + 1);
+
+      await assert.rejects(
+        () => assistant.formatProgressText(huge),
+        (err: GeminiFormatError) => {
+          assert.equal(err.code, 'PAYLOAD_TOO_LARGE');
+          assert.equal(err.status, 413);
+          return true;
+        }
+      );
     });
   });
 });

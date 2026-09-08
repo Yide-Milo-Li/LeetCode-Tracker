@@ -27,41 +27,92 @@ export class GeminiFormatError extends Error {
   }
 }
 
+/** Status reported by Gemini assistant. */
+export interface GeminiAssistantStatus {
+  configured: boolean;
+  model: string;
+  fallbackModels?: string[];
+}
+
+/** Function signature for calling content generation, injectable for tests and custom dispatch. */
+export type GeminiGenerateContentFn = (params: {
+  model: string;
+  contents: string;
+  config: {
+    systemInstruction: string;
+    responseMimeType: string;
+    responseSchema: unknown;
+    abortSignal: AbortSignal;
+  };
+}) => Promise<{ text?: string }>;
+
 /** Options for configuring Gemini format assistant. */
 export interface GeminiAssistantOptions {
   apiKey?: string;
   model?: string;
+  fallbackModels?: string[];
+  maxRetriesPerModel?: number;
+  initialBackoffMs?: number;
   timeoutMs?: number;
+  generateContentFn?: GeminiGenerateContentFn;
 }
 
 /** Interface for pluggable format service to allow hermetic unit testing. */
 export interface IGeminiAssistant {
   formatProgressText(rawText: string, batchYear?: number): Promise<GeminiFormatResult>;
-  getStatus(): { configured: boolean; model: string };
+  getStatus(): GeminiAssistantStatus;
+}
+
+/** Promisified delay helper for exponential backoff between retries. */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 /**
  * Gemini format assistant for parsing user-provided LeetCode progress text.
+ * Implements transient-error retries and multi-tier model fallback:
+ * Primary (models/gemini-3.8-flash) -> Tier 1 (models/gemini-3.7-flash) -> Tier 2 (models/gemini-3.6-flash).
  */
 export class GeminiAssistant implements IGeminiAssistant {
   private readonly apiKey?: string;
   private readonly model: string;
+  private readonly fallbackModels: string[];
+  private readonly maxRetriesPerModel: number;
+  private readonly initialBackoffMs: number;
   private readonly timeoutMs: number;
+  private readonly generateContentFn?: GeminiGenerateContentFn;
   private formattingLock: Promise<void> = Promise.resolve();
 
   constructor(options: GeminiAssistantOptions = {}) {
     this.apiKey = options.apiKey || process.env.GEMINI_API_KEY;
     this.model = options.model || process.env.GEMINI_MODEL || 'models/gemini-3.8-flash';
-    this.timeoutMs = options.timeoutMs || 60000;
+
+    if (options.fallbackModels) {
+      this.fallbackModels = options.fallbackModels;
+    } else if (process.env.GEMINI_FALLBACK_MODELS) {
+      this.fallbackModels = process.env.GEMINI_FALLBACK_MODELS.split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
+    } else {
+      this.fallbackModels = ['models/gemini-3.7-flash', 'models/gemini-3.6-flash'];
+    }
+
+    this.maxRetriesPerModel = options.maxRetriesPerModel ?? 2;
+    this.initialBackoffMs = options.initialBackoffMs ?? 1000;
+    this.timeoutMs = options.timeoutMs ?? 60000;
+    this.generateContentFn = options.generateContentFn;
   }
 
   /**
    * Check configuration status without exposing credentials.
+   *
+   * @returns Configuration state, primary active model, and configured fallback model chain.
    */
-  public getStatus(): { configured: boolean; model: string } {
+  public getStatus(): GeminiAssistantStatus {
     return {
       configured: Boolean(this.apiKey && this.apiKey.trim().length > 0),
       model: this.model,
+      fallbackModels: [...this.fallbackModels],
     };
   }
 
@@ -71,6 +122,7 @@ export class GeminiAssistant implements IGeminiAssistant {
    *
    * @param rawText User-provided pasted progress table text (max 64 KiB).
    * @param batchYear Optional default year for incomplete dates.
+   * @returns Structured extraction result including successful model name.
    */
   public async formatProgressText(rawText: string, batchYear?: number): Promise<GeminiFormatResult> {
     if (!this.apiKey || !this.apiKey.trim()) {
@@ -94,18 +146,140 @@ export class GeminiAssistant implements IGeminiAssistant {
       );
     }
 
-    // Mutex serialization: single concurrency
-    const run = this.formattingLock.then(() => this.executeFormat(trimmed, batchYear));
+    // Mutex serialization: single concurrency for AI format requests
+    const run = this.formattingLock.then(() => this.executeFormatWithFallback(trimmed, batchYear));
     this.formattingLock = run.then(() => {}, () => {});
     return run;
   }
 
   /**
-   * Perform LLM request with structured JSON schema output and timeout.
+   * Execute formatting across the primary model and configured fallback models,
+   * retrying transient errors on each model tier before escalating.
+   *
+   * @param rawText Non-empty trimmed progress text.
+   * @param batchYear Optional year context for incomplete dates.
+   * @returns Structured candidate records and the identifier of the successful model.
    */
-  private async executeFormat(rawText: string, batchYear?: number): Promise<GeminiFormatResult> {
-    const ai = new GoogleGenAI({ apiKey: this.apiKey! });
+  private async executeFormatWithFallback(rawText: string, batchYear?: number): Promise<GeminiFormatResult> {
+    const modelsToTry = [this.model, ...this.fallbackModels];
+    const attemptErrors: Array<{ model: string; attempt: number; error: Error }> = [];
 
+    for (let modelIndex = 0; modelIndex < modelsToTry.length; modelIndex++) {
+      const currentModel = modelsToTry[modelIndex];
+
+      for (let attempt = 0; attempt <= this.maxRetriesPerModel; attempt++) {
+        try {
+          return await this.executeModelAttempt(currentModel, rawText, batchYear);
+        } catch (err) {
+          const error = err instanceof Error ? err : new Error(String(err));
+          attemptErrors.push({ model: currentModel, attempt, error });
+
+          // Fatal authentication errors cannot be resolved by retrying or falling back
+          if (this.isFatalAuthError(error)) {
+            throw new GeminiFormatError(
+              'GEMINI_AUTH_ERROR',
+              `Gemini authentication failed: ${error.message}`,
+              401
+            );
+          }
+
+          // Model-not-found errors (404) should not retry on this model, step down to next tier
+          if (this.isModelNotFoundError(error)) {
+            break;
+          }
+
+          // If more retries remain for this model tier, wait with exponential backoff
+          if (attempt < this.maxRetriesPerModel) {
+            const backoffMs = Math.round(this.initialBackoffMs * Math.pow(1.5, attempt));
+            if (backoffMs > 0) {
+              await sleep(backoffMs);
+            }
+          }
+        }
+      }
+    }
+
+    // All models and retries exhausted
+    throw this.buildExhaustedError(modelsToTry, attemptErrors);
+  }
+
+  /** Check if error indicates invalid credentials or permission denial across all models. */
+  private isFatalAuthError(err: Error): boolean {
+    const msg = err.message.toLowerCase();
+    return (
+      msg.includes('api_key_invalid') ||
+      msg.includes('api key not valid') ||
+      msg.includes('unauthenticated') ||
+      msg.includes('permission_denied') ||
+      msg.includes('401') ||
+      msg.includes('403')
+    );
+  }
+
+  /** Check if error indicates model identifier does not exist or is deprecated. */
+  private isModelNotFoundError(err: Error): boolean {
+    const msg = err.message.toLowerCase();
+    return (
+      msg.includes('not_found') ||
+      msg.includes('404') ||
+      msg.includes('is not found') ||
+      msg.includes('unsupported model')
+    );
+  }
+
+  /** Construct aggregated format error when all fallback models and retries fail. */
+  private buildExhaustedError(
+    models: string[],
+    errors: Array<{ model: string; attempt: number; error: Error }>
+  ): GeminiFormatError {
+    const lastError = errors[errors.length - 1]?.error;
+    const lastMsg = lastError ? lastError.message : 'Unknown error';
+
+    const hasUnavailable = errors.some(e =>
+      e.error.message.includes('503') ||
+      e.error.message.includes('UNAVAILABLE') ||
+      e.error.message.includes('high demand')
+    );
+    const hasQuota = errors.some(e =>
+      e.error.message.includes('429') ||
+      e.error.message.includes('RESOURCE_EXHAUSTED') ||
+      e.error.message.includes('quota')
+    );
+    const hasTimeout = errors.some(e =>
+      e.error.message.includes('GEMINI_TIMEOUT') ||
+      e.error.message.includes('timed out') ||
+      e.error.name === 'AbortError'
+    );
+
+    const modelChain = models.join(' -> ');
+    const detail = `Gemini formatting failed across all configured models (${modelChain}). Last error: ${lastMsg}`;
+
+    if (hasUnavailable) {
+      return new GeminiFormatError('GEMINI_UNAVAILABLE', detail, 503);
+    }
+    if (hasQuota) {
+      return new GeminiFormatError('GEMINI_QUOTA_EXCEEDED', detail, 429);
+    }
+    if (hasTimeout) {
+      return new GeminiFormatError('GEMINI_TIMEOUT', detail, 504);
+    }
+
+    return new GeminiFormatError('GEMINI_ERROR', detail, 502);
+  }
+
+  /**
+   * Perform single request attempt for a specific model with structured output.
+   *
+   * @param model Model name to query.
+   * @param rawText Trimmed user text to parse.
+   * @param batchYear Optional year context for incomplete dates.
+   * @returns Structured format result tagged with the executed model.
+   */
+  private async executeModelAttempt(
+    model: string,
+    rawText: string,
+    batchYear?: number
+  ): Promise<GeminiFormatResult> {
     const systemInstruction = `You are a structured data formatting assistant. Your ONLY job is to parse tabular LeetCode progress text into structured records.
 The user pasted text copied from their personal LeetCode Progress page, which typically contains:
 - Last Submitted (e.g. "Aug 26, 2026", "Sep 8", "2026-08-26")
@@ -158,16 +332,32 @@ Do not invent or hallucinate problems not in the input. If lines cannot be parse
     const timeoutHandle = setTimeout(() => abortController.abort(), this.timeoutMs);
 
     try {
-      const response = await ai.models.generateContent({
-        model: this.model,
-        contents: prompt,
-        config: {
-          systemInstruction,
-          responseMimeType: 'application/json',
-          responseSchema,
-          abortSignal: abortController.signal,
-        },
-      });
+      let response: { text?: string };
+
+      if (this.generateContentFn) {
+        response = await this.generateContentFn({
+          model,
+          contents: prompt,
+          config: {
+            systemInstruction,
+            responseMimeType: 'application/json',
+            responseSchema,
+            abortSignal: abortController.signal,
+          },
+        });
+      } else {
+        const ai = new GoogleGenAI({ apiKey: this.apiKey! });
+        response = await ai.models.generateContent({
+          model,
+          contents: prompt,
+          config: {
+            systemInstruction,
+            responseMimeType: 'application/json',
+            responseSchema,
+            abortSignal: abortController.signal,
+          },
+        });
+      }
 
       clearTimeout(timeoutHandle);
 
@@ -197,38 +387,16 @@ Do not invent or hallucinate problems not in the input. If lines cannot be parse
       return {
         candidates,
         unparsedSnippets: parsed.unparsedSnippets ?? [],
-        model: this.model,
+        model,
       };
     } catch (err: unknown) {
       clearTimeout(timeoutHandle);
 
       if (abortController.signal.aborted) {
-        throw new GeminiFormatError(
-          'GEMINI_TIMEOUT',
-          `Gemini formatting timed out after ${Math.round(this.timeoutMs / 1000)} seconds. Please try pasting a smaller batch.`,
-          504
-        );
+        throw new Error(`Gemini formatting timed out on ${model} after ${Math.round(this.timeoutMs / 1000)} seconds.`);
       }
 
-      const message = err instanceof Error ? err.message : String(err);
-
-      if (message.includes('503') || message.includes('UNAVAILABLE') || message.includes('high demand')) {
-        throw new GeminiFormatError(
-          'GEMINI_UNAVAILABLE',
-          'Gemini service is temporarily experiencing high demand. Please try again in a few moments.',
-          503
-        );
-      }
-
-      if (message.includes('429') || message.includes('RESOURCE_EXHAUSTED') || message.includes('quota')) {
-        throw new GeminiFormatError(
-          'GEMINI_QUOTA_EXCEEDED',
-          'Gemini API quota exceeded. Please check your API quota or retry later.',
-          429
-        );
-      }
-
-      throw new GeminiFormatError('GEMINI_ERROR', `Gemini format request failed: ${message}`, 502);
+      throw err instanceof Error ? err : new Error(String(err));
     }
   }
 }
