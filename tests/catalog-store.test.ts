@@ -1,233 +1,215 @@
-import { test } from 'node:test';
+/**
+ * Automated test suite for CatalogStore and JSONL ingestion.
+ * Verifies parsing resilience, idempotent upserts, tag normalization, query filtering, and bulk throughput.
+ */
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import { SyncStore, SyncConflict } from '../packages/database/src/store.ts';
-import type { CatalogProblem, CatalogBatch, Task } from '../packages/contracts/src/sync.ts';
+import { DatabaseSync } from 'node:sqlite';
+import * as fs from 'node:fs';
+import { CatalogStore } from '../packages/database/src/store.ts';
 
-function createSyntheticProblem(id: string, frontendId = id, title = `Synthetic ${id}`, diff: 'Easy' | 'Medium' | 'Hard' = 'Easy', paid = false): CatalogProblem {
-  return {
-    questionId: id,
-    questionFrontendId: frontendId,
-    title,
-    titleSlug: `synthetic-${id}`,
-    url: `https://leetcode.com/problems/synthetic-${id}/`,
-    difficulty: diff,
-    isPaidOnly: paid,
-    topicTags: [
-      { id: 'tag-1', name: 'Array', slug: 'array' },
-      { id: 'tag-2', name: 'Hash Table', slug: 'hash-table' },
-    ],
-    source: 'leetcode.com',
-  };
-}
+describe('CatalogStore & JSONL Ingestion', () => {
+  it('initializes schema and pragmas in memory', () => {
+    const db = new DatabaseSync(':memory:');
+    const store = new CatalogStore(db);
+    const stats = store.getCatalogStats();
+    assert.equal(stats.totalProblems, 0);
+    assert.equal(stats.totalTags, 0);
+    assert.equal(stats.lastImportedAt, null);
+  });
 
-function createBatch(task: Task, items: CatalogProblem[], total = items.length): CatalogBatch {
-  return {
-    runId: task.runId,
-    version: task.version,
-    phase: 'catalog',
-    total,
-    offset: task.offset,
-    items,
-  };
-}
+  it('imports valid JSONL lines with auto-derived metadata', () => {
+    const db = new DatabaseSync(':memory:');
+    const store = new CatalogStore(db);
 
-test('catalog is atomic: staged items commit only on full count and published problems become available', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'tracker-test-'));
-  let store = new SyncStore(join(dir, 'test.sqlite'));
-  try {
-    const task1 = store.nextCatalogTask(1000, true).task!;
-    assert.equal(task1.offset, 0);
+    const jsonl = [
+      '{"id": "1", "title": "Two Sum", "difficulty": "Easy", "tags": ["Array", "Hash Table"]}',
+      '{"id": "2", "title": "Add Two Numbers", "difficulty": "Medium", "tags": ["Linked List", "Math"]}',
+      '{"id": "4", "title": "Median of Two Sorted Arrays", "difficulty": "Hard", "tags": ["Array", "Binary Search"]}'
+    ].join('\n');
 
-    // Page 1 of 2
-    const p1 = createSyntheticProblem('101', '1', 'Problem 1');
-    const b1 = createBatch(task1, [p1], 2);
-    const res1 = store.acceptCatalogBatch(b1, 1000);
-    assert.equal(res1.published, false);
-    assert.equal(store.report().catalog.totalAvailable, 0);
+    const summary = store.importJsonl(jsonl);
+    assert.equal(summary.totalLines, 3);
+    assert.equal(summary.validCount, 3);
+    assert.equal(summary.insertedCount, 3);
+    assert.equal(summary.updatedCount, 0);
+    assert.equal(summary.errorCount, 0);
 
-    // Replaying same batch fails with version conflict
-    assert.throws(() => store.acceptCatalogBatch(b1, 1000), SyncConflict);
+    const p1 = store.getProblem('1', 'frontendId');
+    assert.ok(p1);
+    assert.equal(p1.title, 'Two Sum');
+    assert.equal(p1.titleSlug, 'two-sum');
+    assert.equal(p1.url, 'https://leetcode.com/problems/two-sum/');
+    assert.equal(p1.difficulty, 'Easy');
+    assert.equal(p1.isPaidOnly, false);
+    assert.deepEqual(p1.topicTags.map(t => t.name).sort(), ['Array', 'Hash Table']);
 
-    // Reopen database to verify checkpoint survival
-    store.close();
-    store = new SyncStore(join(dir, 'test.sqlite'));
+    const stats = store.getCatalogStats();
+    assert.equal(stats.totalProblems, 3);
+    assert.equal(stats.easy, 1);
+    assert.equal(stats.medium, 1);
+    assert.equal(stats.hard, 1);
+    assert.ok(stats.totalTags >= 4);
+    assert.ok(stats.lastImportedAt !== null);
+  });
 
-    const task2 = store.nextCatalogTask(2000).task!;
-    assert.equal(task2.offset, 1);
-    assert.equal(task2.version, 1);
+  it('isolates malformed lines and ignores markdown fences', () => {
+    const db = new DatabaseSync(':memory:');
+    const store = new CatalogStore(db);
 
-    // Page 2 of 2 (terminal)
-    const p2 = createSyntheticProblem('102', '2', 'Problem 2', 'Medium', true);
-    const b2 = createBatch(task2, [p2], 2);
-    const res2 = store.acceptCatalogBatch(b2, 2000);
-    assert.equal(res2.published, true);
-    assert.equal(res2.added, 2);
+    const dirtyInput = [
+      '```json',
+      '{"id": "1", "title": "Two Sum", "difficulty": "Easy", "tags": ["Array"]}',
+      '',
+      'CORRUPTED_NON_JSON_LINE',
+      '{"id": "2", "title": "Add Two Numbers", "difficulty": "INVALID_DIFF"}',
+      '{"id": "3", "title": "Longest Substring", "difficulty": "medium", "tags": ["String"]}',
+      '```'
+    ].join('\n');
 
-    const report = store.report();
-    assert.equal(report.catalog.totalAvailable, 2);
-    assert.equal(report.lastSnapshot?.fetchedCount, 2);
-    assert.equal(report.lastSnapshot?.addedCount, 2);
-  } finally {
-    store.close();
-    rmSync(dir, { recursive: true, force: true });
-  }
+    const summary = store.importJsonl(dirtyInput);
+    assert.equal(summary.totalLines, 4); // 4 non-fence non-empty lines
+    assert.equal(summary.validCount, 2); // id 1 and id 3 (lowercase 'medium' normalized to 'Medium')
+    assert.equal(summary.insertedCount, 2);
+    assert.equal(summary.errorCount, 2); // corrupted line and invalid diff line
+    assert.equal(summary.errors.length, 2);
+    assert.equal(summary.errors[0].line, 4);
+    assert.equal(summary.errors[1].line, 5);
+
+    assert.ok(store.getProblem('1', 'frontendId'));
+    assert.ok(store.getProblem('3', 'frontendId'));
+    assert.equal(store.getProblem('2', 'frontendId'), null);
+  });
+
+  it('handles idempotent upserts and updates metadata without duplication', () => {
+    const db = new DatabaseSync(':memory:');
+    const store = new CatalogStore(db);
+
+    // Initial import
+    store.importJsonl('{"id": "1", "title": "Two Sum", "difficulty": "Easy", "tags": ["Array"]}');
+    let p = store.getProblem('1', 'frontendId');
+    assert.equal(p?.topicTags.length, 1);
+    assert.equal(p?.topicTags[0].name, 'Array');
+
+    // Second import updating tags and title
+    const res = store.importJsonl(
+      '{"id": "1", "title": "Two Sum Updated", "difficulty": "Easy", "tags": ["Array", "Hash Table"]}'
+    );
+    assert.equal(res.insertedCount, 0);
+    assert.equal(res.updatedCount, 1);
+
+    p = store.getProblem('1', 'frontendId');
+    assert.equal(p?.title, 'Two Sum Updated');
+    assert.equal(p?.topicTags.length, 2);
+    assert.deepEqual(p?.topicTags.map(t => t.name).sort(), ['Array', 'Hash Table']);
+
+    const stats = store.getCatalogStats();
+    assert.equal(stats.totalProblems, 1);
+  });
+
+  it('queries catalog with pagination, tags and keyword search', () => {
+    const db = new DatabaseSync(':memory:');
+    const store = new CatalogStore(db);
+
+    const input = [
+      '{"id": "1", "title": "Two Sum", "difficulty": "Easy", "tags": ["Array", "Hash Table"]}',
+      '{"id": "2", "title": "Add Two Numbers", "difficulty": "Medium", "tags": ["Linked List"]}',
+      '{"id": "3", "title": "Longest Substring", "difficulty": "Medium", "tags": ["Sliding Window", "Hash Table"]}',
+      '{"id": "15", "title": "3Sum", "difficulty": "Medium", "tags": ["Array", "Two Pointers"]}',
+      '{"id": "20", "title": "Valid Parentheses", "difficulty": "Easy", "tags": ["Stack"]}'
+    ].join('\n');
+
+    store.importJsonl(input);
+
+    // Search by difficulty
+    const easyProblems = store.queryCatalog({ difficulty: 'Easy', page: 1, limit: 10, premium: 'all' });
+    assert.equal(easyProblems.total, 2);
+    assert.deepEqual(easyProblems.items.map(i => i.questionFrontendId), ['1', '20']);
+
+    // Search by tag
+    const hashProblems = store.queryCatalog({ tag: 'hash-table', page: 1, limit: 10, premium: 'all' });
+    assert.equal(hashProblems.total, 2);
+    assert.deepEqual(hashProblems.items.map(i => i.questionFrontendId), ['1', '3']);
+
+    // Keyword search
+    const sumProblems = store.queryCatalog({ search: 'Sum', page: 1, limit: 10, premium: 'all' });
+    assert.equal(sumProblems.total, 2); // Two Sum and 3Sum
+    assert.deepEqual(sumProblems.items.map(i => i.questionFrontendId), ['1', '15']);
+
+    // Pagination
+    const page1 = store.queryCatalog({ page: 1, limit: 2, premium: 'all' });
+    assert.equal(page1.total, 5);
+    assert.equal(page1.items.length, 2);
+    assert.equal(page1.items[0].questionFrontendId, '1');
+    assert.equal(page1.items[1].questionFrontendId, '2');
+
+    const page2 = store.queryCatalog({ page: 2, limit: 2, premium: 'all' });
+    assert.equal(page2.items.length, 2);
+    assert.equal(page2.items[0].questionFrontendId, '3');
+    assert.equal(page2.items[1].questionFrontendId, '15');
+  });
+
+  it('handles high-throughput bulk ingestion of 1,000 synthetic problems smoothly', () => {
+    const db = new DatabaseSync(':memory:');
+    const store = new CatalogStore(db);
+
+    const syntheticLines: string[] = [];
+    for (let i = 1; i <= 1000; i++) {
+      const diff = i % 3 === 0 ? 'Hard' : i % 2 === 0 ? 'Medium' : 'Easy';
+      syntheticLines.push(JSON.stringify({
+        id: String(i),
+        title: `Synthetic Algorithm Challenge ${i}`,
+        difficulty: diff,
+        tags: [`Category-${i % 20}`, `Pattern-${i % 10}`]
+      }));
+    }
+
+    const t0 = performance.now();
+    const summary = store.importJsonl(syntheticLines.join('\n'));
+    const elapsed = performance.now() - t0;
+
+    assert.equal(summary.totalLines, 1000);
+    assert.equal(summary.validCount, 1000);
+    assert.equal(summary.insertedCount, 1000);
+    assert.equal(summary.errorCount, 0);
+
+    const stats = store.getCatalogStats();
+    assert.equal(stats.totalProblems, 1000);
+
+    // Verify lookup of item 999
+    const p999 = store.getProblem('999', 'frontendId');
+    assert.ok(p999);
+    assert.equal(p999.title, 'Synthetic Algorithm Challenge 999');
+    assert.equal(p999.topicTags.length, 2);
+
+    console.log(`    ✓ 1,000 synthetic problems ingested in ${elapsed.toFixed(1)}ms`);
+    assert.ok(elapsed < 2000, `Expected 1,000 problems under 2000ms, took ${elapsed}ms`);
+  });
+
+  it('validates full import of backup-4046.jsonl if present', () => {
+    const backupPath = 'd:/Python code/Leetcode-Tracker/.local/backup-4046.jsonl';
+    if (!fs.existsSync(backupPath)) {
+      return; // Skip if private file is absent
+    }
+
+    const content = fs.readFileSync(backupPath, 'utf-8');
+    const db = new DatabaseSync(':memory:');
+    const store = new CatalogStore(db);
+
+    const t0 = performance.now();
+    const summary = store.importJsonl(content);
+    const elapsed = performance.now() - t0;
+
+    assert.equal(summary.totalLines, 4046);
+    assert.equal(summary.validCount, 4046);
+    assert.equal(summary.insertedCount, 4046);
+    assert.equal(summary.errorCount, 0);
+
+    const stats = store.getCatalogStats();
+    assert.equal(stats.totalProblems, 4046);
+    assert.equal(stats.paidOnly, 782);
+    assert.equal(stats.easy + stats.medium + stats.hard, 4046);
+
+    console.log(`    ✓ 4,046 verified real problems ingested into empty SQLite in ${elapsed.toFixed(1)}ms`);
+  });
 });
-
-test('invalid batches, missing pages, or count discrepancies roll back and preserve existing published catalog', () => {
-  const store = new SyncStore(':memory:');
-  try {
-    // Initial scan with 2 problems
-    const t0 = store.nextCatalogTask(1000, true).task!;
-    const p1 = createSyntheticProblem('1', '1', 'Problem 1');
-    const p2 = createSyntheticProblem('2', '2', 'Problem 2');
-    store.acceptCatalogBatch(createBatch(t0, [p1, p2], 2), 1000);
-    assert.equal(store.report().catalog.totalAvailable, 2);
-
-    // Next scan 24 hours later
-    const t1 = store.nextCatalogTask(1000 + 86400000).task!;
-
-    // Case 1: Wrong offset
-    assert.throws(() => {
-      store.acceptCatalogBatch({ ...createBatch(t1, [p1], 2), offset: 99 }, 1000 + 86400000);
-    }, SyncConflict);
-
-    // Case 2: Duplicate internal questionId within batch
-    assert.throws(() => {
-      store.acceptCatalogBatch(createBatch(t1, [p1, p1], 2), 1000 + 86400000);
-    }, SyncConflict);
-
-    // Existing active problems remain untouched
-    assert.equal(store.report().catalog.totalAvailable, 2);
-  } finally {
-    store.close();
-  }
-});
-
-test('absence detection: absent problems in new catalog are marked available=0 (soft deprecation) rather than deleted', () => {
-  const store = new SyncStore(':memory:');
-  try {
-    // Initial scan with problems 1, 2, 3
-    const t0 = store.nextCatalogTask(1000, true).task!;
-    const p1 = createSyntheticProblem('1', '1', 'Problem 1');
-    const p2 = createSyntheticProblem('2', '2', 'Problem 2');
-    const p3 = createSyntheticProblem('3', '3', 'Problem 3');
-    store.acceptCatalogBatch(createBatch(t0, [p1, p2, p3], 3), 1000);
-
-    assert.equal(store.report().catalog.totalAvailable, 3);
-    assert.equal(store.report().catalog.totalTracked, 3);
-
-    // Second scan: only problem 1 and 2 exist (problem 3 disappeared)
-    const t1 = store.nextCatalogTask(1000 + 86400000).task!;
-    const res = store.acceptCatalogBatch(createBatch(t1, [p1, p2], 2), 1000 + 86400000);
-
-    assert.equal(res.published, true);
-    assert.equal(res.missing, 1);
-
-    // Total available is 2, but total tracked is still 3 (retained for history)
-    const report = store.report();
-    assert.equal(report.catalog.totalAvailable, 2);
-    assert.equal(report.catalog.totalTracked, 3);
-
-    // Problem 3 is soft deprecated
-    const p3Lookup = store.getProblem('3');
-    assert.equal(p3Lookup, null); // unavailable in public query
-  } finally {
-    store.close();
-  }
-});
-
-test('24-hour schedule, backoff, pause, and manual refresh controls', () => {
-  const store = new SyncStore(':memory:');
-  try {
-    // 1. Initial manual refresh triggers run
-    const res1 = store.nextCatalogTask(1000, true);
-    assert.equal(res1.state, 'running');
-    const task1 = res1.task!;
-
-    // 2. Report rate-limit failure -> transitions to backoff
-    const failRes = store.failCatalogTask({
-      runId: task1.runId,
-      version: task1.version,
-      kind: 'rate_limit',
-      retryAfterSeconds: 120,
-    }, 1000);
-    assert.equal(failRes.state, 'backoff');
-    assert.equal(failRes.retryAt, 1000 + 120000);
-
-    // Check before retryAt -> returns backoff
-    const check1 = store.nextCatalogTask(1000 + 50000);
-    assert.equal(check1.state, 'backoff');
-
-    // Check after retryAt -> resumes running
-    const check2 = store.nextCatalogTask(1000 + 130000);
-    assert.equal(check2.state, 'running');
-    assert.equal(check2.task?.offset, 0);
-
-    // 3. Complete scan
-    const p1 = createSyntheticProblem('1', '1', 'Problem 1');
-    store.acceptCatalogBatch(createBatch(check2.task!, [p1], 1), 1000 + 130000);
-
-    // 4. Immediately after completion, state is idle until 24h later
-    const idleCheck = store.nextCatalogTask(1000 + 130001);
-    assert.equal(idleCheck.state, 'idle');
-    assert.equal(idleCheck.nextRunAt, 1000 + 130000 + 86400000);
-
-    // 5. 24 hours later, automatically triggers new scan
-    const dueCheck = store.nextCatalogTask(1000 + 130000 + 86400000);
-    assert.equal(dueCheck.state, 'running');
-
-    // 6. Pause test
-    store.pauseSync();
-    assert.equal(store.nextCatalogTask(1000 + 130000 + 86400000).state, 'paused');
-
-    // 7. Resume test
-    const resumed = store.resumeSync(1000 + 130000 + 86400000);
-    assert.equal(resumed.state, 'running');
-  } finally {
-    store.close();
-  }
-});
-
-test('catalog query filtering: difficulty, tags, premium, search, and pagination', () => {
-  const store = new SyncStore(':memory:');
-  try {
-    const task = store.nextCatalogTask(1000, true).task!;
-    const p1 = createSyntheticProblem('1', '1', 'Two Sum', 'Easy', false);
-    const p2 = createSyntheticProblem('2', '2', 'Add Two Numbers', 'Medium', false);
-    const p3 = createSyntheticProblem('3', '156', 'Binary Tree Upside Down', 'Medium', true);
-    p3.topicTags = [{ id: 't-tree', name: 'Tree', slug: 'tree' }];
-
-    store.acceptCatalogBatch(createBatch(task, [p1, p2, p3], 3), 1000);
-
-    // Test difficulty filter
-    const easyOnly = store.queryProblems({ page: 1, limit: 10, difficulty: 'Easy', premium: 'all' });
-    assert.equal(easyOnly.total, 1);
-    assert.equal(easyOnly.items[0].title, 'Two Sum');
-
-    // Test premium filter
-    const premiumOnly = store.queryProblems({ page: 1, limit: 10, premium: 'true' });
-    assert.equal(premiumOnly.total, 1);
-    assert.equal(premiumOnly.items[0].questionFrontendId, '156');
-
-    // Test tag filter
-    const treeTagged = store.queryProblems({ page: 1, limit: 10, tag: 'tree', premium: 'all' });
-    assert.equal(treeTagged.total, 1);
-    assert.equal(treeTagged.items[0].questionId, '3');
-
-    // Test search filter
-    const searchMatch = store.queryProblems({ page: 1, limit: 10, search: 'Two', premium: 'all' });
-    assert.equal(searchMatch.total, 2);
-
-    // Test single problem lookup
-    const singleBySlug = store.getProblem('synthetic-1');
-    assert.equal(singleBySlug?.questionId, '1');
-    const singleByFrontendId = store.getProblem('156');
-    assert.equal(singleByFrontendId?.questionId, '3');
-  } finally {
-    store.close();
-  }
-});
-

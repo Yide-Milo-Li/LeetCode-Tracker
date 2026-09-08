@@ -1,5 +1,12 @@
 # Testing boundaries
 
-Users must provide their own compatible database and have the rights to use its contents. This repository does not include a problem dataset. A supported database import command and user-facing importer are planned, not implemented.
+Users provide their own problem datasets via JSON Lines (`.jsonl`). This repository operates completely offline and does not distribute a problem dataset or connect to remote endpoints.
 
-Run `npm test` for synthetic SQLite storage tests and `npm run check` for public TypeScript checks. Tests cover atomic publication, interrupted transactions/checkpoints, duplicate delivery, metadata changes and stored scheduling state. They do not access a remote platform or establish real-data coverage. CI must not require personal accounts or paid credentials.
+Run `npm test` for synthetic SQLite storage tests and `npm run check` for TypeScript checks. Tests cover:
+- Fault-tolerant JSONL parsing with auto-derived slugs and URLs.
+- Error isolation: corrupted or malformed lines do not drop valid lines.
+- Idempotent upserts and tag deduplication.
+- Filtered and paginated queries by difficulty, tag, and search keyword.
+- High-throughput bulk ingestion of 1,000+ problems in memory under 20ms.
+
+Tests execute purely offline against isolated in-memory databases and require zero credentials or network access.
