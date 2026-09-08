@@ -1,5 +1,10 @@
 # Shared packages
 
-Users must provide their own compatible database and have the rights to use its contents. This repository does not include a problem dataset. A supported database import command and user-facing importer are planned, not implemented.
+Users supply JSON Lines (`.jsonl`) through the local workbench. The repository distributes contracts and storage code, not a problem dataset; storage performs no network requests.
 
-The public packages provide validated data contracts and SQLite storage with transactional batches, catalog queries and synthetic tests. Storage performs no network requests. Schema creation is embedded in `database/src/store.ts`; there is no standalone migration runner yet. Domain rules and Gemini integration are planned. See [data format](../docs/data-format.md).
+- `contracts`: Zod input schemas, normalized catalog types, preview and import responses, queries, and settings.
+- `database`: SQLite v5 storage, read-only schema inspection, preview validation, atomic commits, durable result replay, consistent snapshots, and offline recovery.
+
+Use `await CatalogStore.open(db, { backupDir })` for backed storage. Migration backups finish before schema changes; `await store.commitImport(...)` and `await store.importJsonl(...)` finish required backups before mutations. The synchronous constructor is for unbacked storage and rejects a configured backup directory unless explicitly skipped.
+
+Schema creation and v3/v4 migration are embedded in the store. See the [data format](../docs/data-format.md) and [recovery guide](../scripts/README.md). Practice-domain rules and Gemini integration remain planned.

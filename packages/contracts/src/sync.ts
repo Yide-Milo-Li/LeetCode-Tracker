@@ -156,6 +156,7 @@ export type ImportErrorLine = z.infer<typeof importErrorLineSchema>;
 /** Result summary of a committed JSONL or bulk ingestion execution. */
 export const importSummarySchema = z.object({
   id: z.string().optional(),
+  errorsUnavailable: z.boolean().optional(),
   importedAt: z.number().int().nonnegative().optional(),
   totalLines: z.number().int().nonnegative(),
   validCount: z.number().int().nonnegative(),

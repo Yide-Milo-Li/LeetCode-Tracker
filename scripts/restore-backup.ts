@@ -1,7 +1,7 @@
 /**
  * Offline database backup restoration utility.
  * Verifies backup file integrity and schema compatibility before performing restore.
- * Preserves existing target database with a timestamped safety copy.
+ * Preserves existing target database with a uniquely named consistent safety snapshot.
  *
  * Usage:
  *   node scripts/restore-backup.ts <backup-file-path> [target-db-path]
@@ -9,6 +9,7 @@
 import { resolve } from 'node:path';
 import { BackupManager } from '../packages/database/src/backup.ts';
 
+/** Restore a supported backup while holding exclusive application ownership of the target. */
 async function main() {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
@@ -33,7 +34,7 @@ async function main() {
   }
 
   console.log(`[Restore] Backup is valid (Schema v${verification.version}, Problems: ${verification.problemCount ?? 0}).`);
-  console.log('[Restore] Executing atomic restore...');
+  console.log('[Restore] Executing SQLite restore (the local application must be stopped)...');
 
   try {
     const result = await backupManager.restoreBackup(backupPath, targetDbPath);

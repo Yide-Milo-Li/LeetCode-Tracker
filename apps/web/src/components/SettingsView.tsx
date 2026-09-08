@@ -14,13 +14,11 @@ import {
   History,
   Languages,
   Palette,
-  ArrowRight,
 } from 'lucide-react';
 import {
   api,
   type ImportHistoryItem,
   type ImportPreview,
-  type UserSettings,
 } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
 
@@ -31,6 +29,7 @@ interface SettingsViewProps {
   currentTheme: 'light' | 'dark' | 'system';
 }
 
+/** Keep preview responses bound to the current input and serialize commit interaction. */
 export const SettingsView: React.FC<SettingsViewProps> = ({
   lang,
   onLanguageChange,
@@ -55,10 +54,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [history, setHistory] = useState<ImportHistoryItem[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // A generation covers file reads and previews; edits invalidate every older response.
+  const inputGeneration = useRef(0);
+  const previewGeneration = useRef<number | null>(null);
+  const committing = useRef(false);
+
   useEffect(() => {
     loadHistory();
+    return () => { inputGeneration.current += 1; };
   }, []);
 
+  /** Invalidate pending reads and previews before changing the displayed input. */
+  function invalidateInput() {
+    inputGeneration.current += 1;
+    previewGeneration.current = null;
+    setPreview(null);
+    setPreviewLoading(false);
+    setAlertMsg(null);
+    return inputGeneration.current;
+  }
+
+  /** Refresh the recent committed imports after mounting or a successful write. */
   async function loadHistory() {
     try {
       const res = await api.getImportHistory(1, 10);
@@ -68,9 +84,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   }
 
+  /** Read the latest selected file; ignore reads superseded by an edit or clear. */
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || committing.current) return;
+    const generation = invalidateInput();
+    setContent('');
 
     setSelectedFileName(file.name);
     const sizeInKb = (file.size / 1024).toFixed(1);
@@ -78,34 +97,48 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
     const reader = new FileReader();
     reader.onload = (event) => {
+      if (generation !== inputGeneration.current) return;
       const text = event.target?.result as string;
       setContent(text);
       setPreview(null);
       setAlertMsg(null);
     };
+    reader.onerror = () => {
+      if (generation !== inputGeneration.current) return;
+      setAlertMsg({ type: 'danger', text: t.fileReadFailed });
+    };
     reader.readAsText(file);
   }
 
+  /** Only expose a response if its source content is still current. */
   async function handlePreview() {
+    if (committing.current) return;
     if (!content.trim()) {
       setAlertMsg({ type: 'danger', text: lang === 'zh' ? '请先上传文件或粘贴 JSONL 内容' : 'Please provide JSONL content first' });
       return;
     }
 
+    const generation = invalidateInput();
     setPreviewLoading(true);
     setAlertMsg(null);
     try {
       const p = await api.previewImport(content);
+      if (generation !== inputGeneration.current) return;
+      previewGeneration.current = generation;
       setPreview(p);
     } catch (err) {
+      if (generation !== inputGeneration.current) return;
       setAlertMsg({ type: 'danger', text: err instanceof Error ? err.message : 'Preview generation failed' });
     } finally {
-      setPreviewLoading(false);
+      if (generation === inputGeneration.current) setPreviewLoading(false);
     }
   }
 
+  /** Commit only the current preview, freezing inputs until the request settles. */
   async function handleCommit() {
-    if (!preview || preview.validCount === 0) return;
+    if (committing.current || !preview || preview.validCount === 0 ||
+        previewGeneration.current !== inputGeneration.current) return;
+    committing.current = true;
 
     setCommitLoading(true);
     setAlertMsg(null);
@@ -118,6 +151,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           .replace('{updated}', String(summary.updatedCount))
           .replace('{unchanged}', String(summary.unchangedCount)),
       });
+      inputGeneration.current += 1;
+      previewGeneration.current = null;
       // Clear input and preview
       setPreview(null);
       setContent('');
@@ -129,11 +164,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     } catch (err) {
       setAlertMsg({ type: 'danger', text: err instanceof Error ? err.message : 'Commit failed' });
     } finally {
+      committing.current = false;
       setCommitLoading(false);
     }
   }
 
+  /** Clear the input and invalidate responses that may still arrive. */
   function handleClear() {
+    if (committing.current) return;
+    invalidateInput();
     setContent('');
     setPreview(null);
     setSelectedFileName(null);
@@ -212,7 +251,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <p className="card-desc">{t.workbenchDesc}</p>
 
         {alertMsg && (
-          <div className={`alert alert-${alertMsg.type}`}>
+          <div role="alert" className={`alert alert-${alertMsg.type}`}>
             {alertMsg.type === 'success' ? <CheckCircle2 size={18} /> : <AlertTriangle size={18} />}
             <span>{alertMsg.text}</span>
           </div>
@@ -222,6 +261,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem' }}>
           <button
             className={`btn btn-sm ${mode === 'upload' ? 'btn-primary' : 'btn-outline'}`}
+            disabled={commitLoading}
             onClick={() => setMode('upload')}
           >
             <UploadCloud size={14} />
@@ -229,6 +269,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </button>
           <button
             className={`btn btn-sm ${mode === 'paste' ? 'btn-primary' : 'btn-outline'}`}
+            disabled={commitLoading}
             onClick={() => setMode('paste')}
           >
             <FileText size={14} />
@@ -241,10 +282,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div>
             <div
               className="upload-dropzone"
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => { if (!committing.current) fileInputRef.current?.click(); }}
             >
               <input
                 type="file"
+                disabled={commitLoading}
                 ref={fileInputRef}
                 accept=".jsonl,.txt,application/json"
                 style={{ display: 'none' }}
@@ -268,7 +310,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               className="paste-textarea"
               placeholder={t.pastePlaceholder}
               value={content}
-              onChange={(e) => { setContent(e.target.value); setPreview(null); }}
+              disabled={commitLoading}
+              onChange={(e) => { if (!committing.current) { invalidateInput(); setContent(e.target.value); } }}
             />
           </div>
         )}
@@ -278,12 +321,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <button
             className="btn btn-primary"
             onClick={handlePreview}
-            disabled={previewLoading || !content.trim()}
+            disabled={commitLoading || previewLoading || !content.trim()}
           >
             {previewLoading ? (lang === 'zh' ? '正在分析...' : 'Analyzing...') : t.btnPreview}
           </button>
           {content.trim() && (
-            <button className="btn btn-outline" onClick={handleClear}>
+            <button className="btn btn-outline" disabled={commitLoading} onClick={handleClear}>
               <RotateCcw size={14} />
               {t.btnClear}
             </button>

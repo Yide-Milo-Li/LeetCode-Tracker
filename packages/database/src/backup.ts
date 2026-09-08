@@ -1,10 +1,13 @@
 /**
  * Consistent offline database backup, integrity verification, and restore manager.
- * Leverages Node.js 24 native SQLite backup API without network overhead or third-party drivers.
+ * Uses Node.js 24 native SQLite backup API without network overhead or third-party drivers.
  */
 import { DatabaseSync, backup } from 'node:sqlite';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { inspectCatalogSchema } from './schema.ts';
+import { acquireDatabaseLease } from './lease.ts';
 
 /** Result of backup file validation. */
 export interface BackupVerificationResult {
@@ -60,7 +63,7 @@ export class BackupManager {
     }
 
     // Temporary path to ensure atomic write
-    const tempPath = `${targetPath}.tmp-${Date.now()}`;
+    const tempPath = `${targetPath}.tmp-${randomUUID()}`;
     try {
       await backup(db, tempPath);
       // Verify the generated temp backup before replacing target
@@ -69,9 +72,7 @@ export class BackupManager {
         throw new Error(`Generated backup failed integrity check: ${verification.error}`);
       }
 
-      if (fs.existsSync(targetPath)) {
-        fs.unlinkSync(targetPath);
-      }
+      // Replace only a closed snapshot, never an active SQLite database.
       fs.renameSync(tempPath, targetPath);
     } catch (err) {
       if (fs.existsSync(tempPath)) {
@@ -103,8 +104,8 @@ export class BackupManager {
 
   /**
    * Create pre-import snapshots before applying mutations:
-   * 1. `pre-import-latest.sqlite` (overwritten on each import)
-   * 2. `daily-YYYY-MM-DD.sqlite` (daily archive, retains up to 14 latest distinct days)
+   * 1. `pre-import-latest.sqlite` (replaced before each catalog-changing import)
+   * 2. `daily-YYYY-MM-DD.sqlite` (first change per UTC day; 14 latest distinct days)
    *
    * @param db Active database before import.
    * @returns Paths of created snapshots.
@@ -123,7 +124,7 @@ export class BackupManager {
     const dateStr = now.toISOString().split('T')[0];
     const dailyFilename = `daily-${dateStr}.sqlite`;
     const dailyPath = path.join(this.backupDir, dailyFilename);
-    await this.createBackup(db, dailyPath);
+    if (!fs.existsSync(dailyPath)) await this.createBackup(db, dailyPath);
 
     // 3. Prune daily backups beyond 14 days
     this.pruneDailyBackups(14);
@@ -174,36 +175,9 @@ export class BackupManager {
     try {
       const db = new DatabaseSync(backupPath, { readOnly: true });
       try {
-        // Run SQLite integrity check
-        const integrity = db.prepare('PRAGMA integrity_check;').get() as { integrity_check?: string } | undefined;
-        if (!integrity || integrity.integrity_check !== 'ok') {
-          return { valid: false, error: `Corrupt SQLite file: integrity_check returned '${integrity?.integrity_check}'` };
-        }
-
-        // Check schema version table
-        const versionRow = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version';").get();
-        if (!versionRow) {
-          return { valid: false, error: 'Missing schema_version table in backup' };
-        }
-
-        const ver = db.prepare('SELECT version FROM schema_version LIMIT 1;').get() as { version: number } | undefined;
-        if (!ver || typeof ver.version !== 'number') {
-          return { valid: false, error: 'Invalid or missing schema version number in backup' };
-        }
-
-        // Check problems table
-        const problemsTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='problems';").get();
-        let problemCount = 0;
-        if (problemsTable) {
-          const countRow = db.prepare('SELECT count(*) as total FROM problems;').get() as { total: number };
-          problemCount = countRow.total;
-        }
-
-        return {
-          valid: true,
-          version: ver.version,
-          problemCount,
-        };
+        const version = inspectCatalogSchema(db);
+        const { total } = db.prepare('SELECT count(*) AS total FROM problems').get() as { total: number };
+        return { valid: true, version: version!, problemCount: total };
       } finally {
         db.close();
       }
@@ -216,53 +190,49 @@ export class BackupManager {
   }
 
   /**
-   * Perform an offline restore from a verified backup into the target database file.
-   * Creates a safety backup of the current target file before overwriting.
-   *
-   * @param backupPath Verified backup file path.
-   * @param targetDbPath Destination database path.
+   * Restore through SQLite so committed WAL pages participate in both snapshots.
+   * The local application must be stopped. A process lease prevents concurrent server startup.
+   * Invalid sources never replace the target; a consistent safety snapshot survives failures.
    */
   public async restoreBackup(backupPath: string, targetDbPath: string): Promise<RestoreResult> {
-    const verification = this.verifyBackup(backupPath);
-    if (!verification.valid) {
-      throw new Error(`Cannot restore invalid backup: ${verification.error}`);
+    const sourcePath = path.resolve(backupPath);
+    const targetPath = path.resolve(targetDbPath);
+    if (sourcePath === targetPath || (fs.existsSync(targetPath) && fs.realpathSync(sourcePath) === fs.realpathSync(targetPath))) {
+      throw new Error('Source backup and restore target must be different files');
     }
-
+    const verification = this.verifyBackup(sourcePath);
+    if (!verification.valid) throw new Error(`Cannot restore invalid backup: ${verification.error}`);
+    const release = acquireDatabaseLease(targetPath);
+    const staged = `${targetPath}.restore-${randomUUID()}.sqlite`;
     let safetyCopyPath: string | undefined;
-
-    // Preserve existing target database if it exists
-    if (fs.existsSync(targetDbPath)) {
-      safetyCopyPath = `${targetDbPath}.pre-restore-${Date.now()}.sqlite`;
-      fs.copyFileSync(targetDbPath, safetyCopyPath);
-    }
-
+    let replacementStarted = false;
     try {
-      fs.copyFileSync(backupPath, targetDbPath);
-
-      // Verify restored target database
-      const restoredCheck = this.verifyBackup(targetDbPath);
-      if (!restoredCheck.valid) {
-        throw new Error(`Restored database failed integrity check: ${restoredCheck.error}`);
+      const source = new DatabaseSync(sourcePath, { readOnly: true });
+      try { await this.createBackup(source, staged); } finally { source.close(); }
+      if (fs.existsSync(targetPath)) {
+        const current = new DatabaseSync(targetPath, { readOnly: true });
+        safetyCopyPath = `${targetPath}.pre-restore-${randomUUID()}.sqlite`;
+        try { await this.createBackup(current, safetyCopyPath); } finally { current.close(); }
       }
-
-      return {
-        success: true,
-        targetPath: targetDbPath,
-        safetyCopyPath,
-        restoredVersion: restoredCheck.version!,
-        restoredProblems: restoredCheck.problemCount ?? 0,
-      };
-    } catch (err) {
-      // Attempt rollback to safety copy if restore failed
-      if (safetyCopyPath && fs.existsSync(safetyCopyPath)) {
-        try {
-          fs.copyFileSync(safetyCopyPath, targetDbPath);
-        } catch {
-          // safety copy remains preserved
-        }
+      const snapshot = new DatabaseSync(staged, { readOnly: true });
+      try {
+        replacementStarted = true;
+        // SQLite replaces destination pages transactionally, including its existing WAL state.
+        await backup(snapshot, targetPath);
+      } finally { snapshot.close(); }
+      const restored = this.verifyBackup(targetPath);
+      if (!restored.valid) throw new Error(`Restored database failed validation: ${restored.error}`);
+      return { success: true, targetPath, safetyCopyPath, restoredVersion: restored.version!, restoredProblems: restored.problemCount! };
+    } catch (error) {
+      if (replacementStarted && safetyCopyPath) {
+        const safety = new DatabaseSync(safetyCopyPath, { readOnly: true });
+        try { await backup(safety, targetPath); } catch (rollbackError) {
+          throw new AggregateError([error, rollbackError], `Restore and rollback failed; safety snapshot retained at ${safetyCopyPath}`);
+        } finally { safety.close(); }
       }
-      throw err;
+      throw error;
+    } finally {
+      try { if (fs.existsSync(staged)) fs.unlinkSync(staged); } finally { release(); }
     }
   }
 }
-

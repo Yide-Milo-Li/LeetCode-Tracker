@@ -454,3 +454,8 @@ html.dark .alert-info {
 .paste-textarea:focus {
   border-color: var(--primary);
 }
+
+/* Keep failure messages readable against the darker danger surface. */
+html.dark .alert-danger {
+  color: #fecaca;
+}

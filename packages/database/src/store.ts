@@ -1,13 +1,14 @@
 /**
  * High-performance transactional SQLite storage for user-imported problem catalog data.
  * Pure offline persistence: zero network I/O, local storage only.
- * Implements schema versioning (v4), preflight import previews, atomic multi-table commits,
+ * Implements schema versioning (v5), preflight import previews, atomic multi-table commits,
  * and integration with consistent backup management.
  */
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import {
   catalogProblemSchema,
+  importSummarySchema,
   catalogQuerySchema,
   rawProblemInputSchema,
   normalizeTags,
@@ -25,32 +26,8 @@ import {
 } from '../../contracts/src/sync.ts';
 import { BackupManager } from './backup.ts';
 
-/** Supported current database schema version. */
-export const CURRENT_SCHEMA_VERSION = 4;
-
-/** Error thrown when attempting to load a database with an unsupported future or legacy schema version. */
-export class UnsupportedSchemaVersionError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'UnsupportedSchemaVersionError';
-  }
-}
-
-/** Error thrown when legacy scraper/crawler tables are discovered in the database. */
-export class LegacyCrawlerSchemaError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'LegacyCrawlerSchemaError';
-  }
-}
-
-/** Error thrown when database structures or metadata are missing or corrupted. */
-export class DatabaseCorruptionError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'DatabaseCorruptionError';
-  }
-}
+import { CURRENT_SCHEMA_VERSION, inspectCatalogSchema } from './schema.ts';
+export { CURRENT_SCHEMA_VERSION, DatabaseCorruptionError, LegacyCrawlerSchemaError, UnsupportedSchemaVersionError } from './schema.ts';
 
 /** Error thrown when committing against an outdated catalog revision. */
 export class CatalogRevisionMismatchError extends Error {
@@ -79,23 +56,33 @@ export interface CatalogStoreOptions {
  */
 export class CatalogStore {
   private readonly db: DatabaseSync;
-  private readonly backupManager?: BackupManager;
-  private readonly skipBackup: boolean;
+  private backupManager?: BackupManager;
+  private writeQueue: Promise<void> = Promise.resolve();
 
   /**
-   * Initialize catalog storage. Verifies compatibility, applies migrations, and configures pragmas.
+   * Initialize catalog storage. Verifies compatibility and initializes unbacked storage. Use open() for production backups.
    *
    * @param db Node.js DatabaseSync instance.
    * @param options Optional configuration including backup directory.
    */
   constructor(db: DatabaseSync, options: CatalogStoreOptions = {}) {
-    this.db = db;
-    this.skipBackup = options.skipBackup ?? false;
-    if (options.backupDir && !this.skipBackup) {
-      this.backupManager = new BackupManager(options.backupDir);
+    if (options.backupDir && !options.skipBackup) {
+      throw new Error('Use await CatalogStore.open(db, options) to enable required backups');
     }
-    this.configurePragmas();
+    this.db = db;
     this.initOrMigrateSchema();
+  }
+
+  /** Open production storage only after a consistent pre-migration backup succeeds. */
+  public static async open(db: DatabaseSync, options: CatalogStoreOptions = {}): Promise<CatalogStore> {
+    const version = inspectCatalogSchema(db, true);
+    const manager = options.backupDir && !options.skipBackup ? new BackupManager(options.backupDir) : undefined;
+    if (version !== null && version < CURRENT_SCHEMA_VERSION && manager) {
+      await manager.performMigrationBackup(db, version, CURRENT_SCHEMA_VERSION);
+    }
+    const store = new CatalogStore(db, { skipBackup: true });
+    store.backupManager = manager;
+    return store;
   }
 
   /** Configure recommended pragmas for resilience and performance. */
@@ -106,57 +93,35 @@ export class CatalogStore {
   }
 
   /**
-   * Verify compatibility, create tables if empty, or perform transactional migration from v3 to v4.
+   * Verify compatibility, create tables if empty, or upgrade supported historical schemas atomically to the current version.
    */
   private initOrMigrateSchema(): void {
-    // Check if database has any existing tables
-    const tableRows = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';").all() as Array<{ name: string }>;
-    const tableNames = new Set(tableRows.map(r => r.name));
-
-    // Reject legacy crawler tables
-    const legacyCrawlerTables = ['crawled_checkpoints', 'extension_sync', 'accounts', 'submissions', 'review_stages'];
-    for (const legacy of legacyCrawlerTables) {
-      if (tableNames.has(legacy)) {
-        throw new LegacyCrawlerSchemaError(`Database contains retired scraper/crawler table '${legacy}'. Ingestion requires a clean BYOD catalog.`);
+    const version = inspectCatalogSchema(this.db, true);
+    // Compatibility checks precede persistent journal-mode changes.
+    this.configurePragmas();
+    if (version === CURRENT_SCHEMA_VERSION) return;
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      if (version === null) {
+        this.createSchema();
+      } else {
+        if (version === 3) this.migrateV3ToV4();
+        this.db.exec(`CREATE TABLE import_results (
+          id TEXT PRIMARY KEY REFERENCES import_history(id) ON DELETE CASCADE,
+          summary_json TEXT NOT NULL
+        )`);
+        this.db.prepare('UPDATE schema_version SET version = ?').run(CURRENT_SCHEMA_VERSION);
       }
-    }
-
-    if (tableNames.size === 0) {
-      // Brand new database: create v4 schema directly
-      this.createV4Schema();
-      return;
-    }
-
-    // Existing database: check schema_version
-    if (!tableNames.has('schema_version')) {
-      throw new DatabaseCorruptionError('Existing database is missing required schema_version table.');
-    }
-
-    const verRow = this.db.prepare('SELECT version FROM schema_version LIMIT 1;').get() as { version: number } | undefined;
-    if (!verRow || typeof verRow.version !== 'number') {
-      throw new DatabaseCorruptionError('Invalid or unreadable version in schema_version table.');
-    }
-
-    const version = verRow.version;
-    if (version > CURRENT_SCHEMA_VERSION) {
-      throw new UnsupportedSchemaVersionError(
-        `Database schema version ${version} is newer than supported version ${CURRENT_SCHEMA_VERSION}. Please upgrade application.`
-      );
-    }
-
-    if (version < 3) {
-      throw new UnsupportedSchemaVersionError(
-        `Database schema version ${version} is too old. Only versions 3 and 4 are supported.`
-      );
-    }
-
-    if (version === 3) {
-      this.migrateV3ToV4();
+      inspectCatalogSchema(this.db);
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
     }
   }
 
-  /** Create brand new v4 schema tables and default values. */
-  private createV4Schema(): void {
+  /** Create the current schema tables and default values. */
+  private createSchema(): void {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS schema_version (
         version INTEGER PRIMARY KEY
@@ -203,6 +168,11 @@ export class CatalogStore {
         error_count INTEGER NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS import_results (
+        id TEXT PRIMARY KEY REFERENCES import_history(id) ON DELETE CASCADE,
+        summary_json TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS catalog_meta (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
@@ -231,44 +201,38 @@ export class CatalogStore {
     const cols = this.db.prepare("PRAGMA table_info('import_history');").all() as Array<{ name: string }>;
     const colNames = new Set(cols.map(c => c.name));
 
-    this.db.exec('BEGIN TRANSACTION;');
-    try {
-      if (!colNames.has('unchanged_count')) {
-        this.db.exec('ALTER TABLE import_history ADD COLUMN unchanged_count INTEGER NOT NULL DEFAULT 0;');
-      }
-      if (!colNames.has('duplicate_count')) {
-        this.db.exec('ALTER TABLE import_history ADD COLUMN duplicate_count INTEGER NOT NULL DEFAULT 0;');
-      }
-
-      this.db.exec(`
-        CREATE TABLE IF NOT EXISTS catalog_meta (
-          key TEXT PRIMARY KEY,
-          value TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS settings (
-          key TEXT PRIMARY KEY,
-          value TEXT NOT NULL,
-          updated_at INTEGER NOT NULL
-        );
-      `);
-
-      const countHistory = (this.db.prepare('SELECT count(*) as count FROM import_history;').get() as { count: number }).count;
-      const initialRev = String(countHistory);
-      const lastImport = (this.db.prepare('SELECT max(imported_at) as max_time FROM import_history;').get() as { max_time: number | null }).max_time ?? 0;
-
-      const now = Date.now();
-      this.db.prepare("INSERT OR REPLACE INTO catalog_meta (key, value) VALUES ('catalog_revision', ?);").run(initialRev);
-      this.db.prepare("INSERT OR REPLACE INTO catalog_meta (key, value) VALUES ('last_imported_at', ?);").run(String(lastImport));
-      this.db.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('language', 'en', ?);").run(now);
-      this.db.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('theme', 'system', ?);").run(now);
-      this.db.prepare('UPDATE schema_version SET version = ?;').run(CURRENT_SCHEMA_VERSION);
-
-      this.db.exec('COMMIT;');
-    } catch (err) {
-      this.db.exec('ROLLBACK;');
-      throw err;
+    // Called inside the outer schema-upgrade transaction.
+    if (!colNames.has('unchanged_count')) {
+      this.db.exec('ALTER TABLE import_history ADD COLUMN unchanged_count INTEGER NOT NULL DEFAULT 0;');
     }
+    if (!colNames.has('duplicate_count')) {
+      this.db.exec('ALTER TABLE import_history ADD COLUMN duplicate_count INTEGER NOT NULL DEFAULT 0;');
+    }
+
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS catalog_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+    `);
+
+    const countHistory = (this.db.prepare('SELECT count(*) as count FROM import_history;').get() as { count: number }).count;
+    const initialRev = String(countHistory);
+    const lastImport = (this.db.prepare('SELECT max(imported_at) as max_time FROM import_history;').get() as { max_time: number | null }).max_time ?? 0;
+
+    const now = Date.now();
+    this.db.prepare("INSERT OR REPLACE INTO catalog_meta (key, value) VALUES ('catalog_revision', ?);").run(initialRev);
+    this.db.prepare("INSERT OR REPLACE INTO catalog_meta (key, value) VALUES ('last_imported_at', ?);").run(String(lastImport));
+    this.db.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('language', 'en', ?);").run(now);
+    this.db.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('theme', 'system', ?);").run(now);
+    this.db.prepare('UPDATE schema_version SET version = ?;').run(4);
+
   }
 
   /** Get the current catalog integer revision number. */
@@ -289,262 +253,94 @@ export class CatalogStore {
    * @returns Generated preview metadata and executable list of validated operations.
    */
   public previewImport(content: string): { preview: ImportPreview; validOperations: ValidatedImportOp[] } {
-    const rawLines = content.split(/\r?\n/);
-    const lineCandidates: Array<{
-      lineNumber: number;
-      raw: ReturnType<typeof rawProblemInputSchema.parse>;
-      lineSnippet: string;
-    }> = [];
+    type Candidate = { raw: ReturnType<typeof rawProblemInputSchema.parse>; line: number; snippet: string };
+    const groups = new Map<string, Candidate[]>();
     const errors: ImportErrorLine[] = [];
-    let totalLinesCount = 0;
-
-    // 1. Initial parsing and Zod schema validation
-    for (let i = 0; i < rawLines.length; i++) {
-      const line = rawLines[i].trim();
-      if (!line || line.startsWith('```')) {
+    let totalLines = 0;
+    for (const [index, rawLine] of content.split(/\r?\n/).entries()) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('```')) continue;
+      totalLines++;
+      try {
+        const raw = rawProblemInputSchema.parse(JSON.parse(line));
+        const group = groups.get(raw.id) ?? [];
+        group.push({ raw, line: index + 1, snippet: line.slice(0, 120) });
+        groups.set(raw.id, group);
+      } catch (error) {
+        errors.push({ line: index + 1, snippet: line.slice(0, 120), message: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    /** Reject every occurrence so file order never selects a conflicting winner. */
+    const reject = (group: Candidate[], message: string): void => {
+      for (const item of group) errors.push({ line: item.line, snippet: item.snippet, message });
+    };
+    /** Compare taxonomy values, including names and IDs, independently of input ordering. */
+    const tagSignature = (tags: TopicTag[]): string => JSON.stringify(tags.map(t => [t.slug, t.id, t.name]).sort((a, b) => a[0].localeCompare(b[0])));
+    const candidates: { group: Candidate[]; op: ValidatedImportOp }[] = [];
+    for (const group of groups.values()) {
+      const raw = group[0].raw;
+      if (group.some(item => JSON.stringify(item.raw) !== JSON.stringify(raw))) {
+        reject(group, `Conflicting problem definitions for ID '${raw.id}' on lines ${group.map(item => item.line).join(', ')}`);
         continue;
       }
-
-      totalLinesCount++;
-      const lineNumber = i + 1;
-
       try {
-        const json = JSON.parse(line);
-        const parsed = rawProblemInputSchema.parse(json);
-        lineCandidates.push({
-          lineNumber,
-          raw: parsed,
-          lineSnippet: line.slice(0, 120),
+        const existing = this.getProblem(raw.id, 'frontendId');
+        if (existing && raw.questionId !== undefined && raw.questionId !== existing.questionId) {
+          throw new Error(`Explicit questionId '${raw.questionId}' does not match existing questionId '${existing.questionId}' for problem '${raw.id}'`);
+        }
+        const questionId = existing?.questionId ?? raw.questionId ?? raw.id;
+        const owner = this.db.prepare('SELECT frontend_question_id FROM problems WHERE question_id = ?').get(questionId) as { frontend_question_id: string } | undefined;
+        if (owner && owner.frontend_question_id !== raw.id) throw new Error(`Internal questionId '${questionId}' is already assigned to problem '${owner.frontend_question_id}'`);
+        const titleSlug = raw.titleSlug !== undefined ? slugify(raw.titleSlug) : existing?.titleSlug ?? (slugify(raw.title) || `problem-${raw.id}`);
+        const problem = catalogProblemSchema.parse({
+          questionId, questionFrontendId: raw.id, title: raw.title.trim(), difficulty: raw.difficulty,
+          titleSlug,
+          url: raw.url ?? existing?.url ?? `https://leetcode.com/problems/${titleSlug}/`,
+          isPaidOnly: raw.isPaidOnly ?? existing?.isPaidOnly ?? false,
+          source: raw.source ?? existing?.source ?? 'leetcode.com',
+          topicTags: raw.tags !== undefined ? normalizeTags(raw.tags) : existing?.topicTags ?? [],
         });
-      } catch (err) {
-        errors.push({
-          line: lineNumber,
-          message: err instanceof Error ? err.message : String(err),
-          snippet: line.slice(0, 120),
-        });
-      }
-    }
-
-    // 2. Intra-batch duplicate and conflict resolution
-    const seenByFrontendId = new Map<string, typeof lineCandidates[0]>();
-    const seenByExplicitQuestionId = new Map<string, number>();
-    const nonConflictingCandidates: typeof lineCandidates = [];
-    let duplicateCount = 0;
-
-    for (const cand of lineCandidates) {
-      const frontendId = cand.raw.id;
-      const existingInBatch = seenByFrontendId.get(frontendId);
-
-      if (existingInBatch) {
-        // Compare if fields are completely identical
-        const isIdentical =
-          cand.raw.title === existingInBatch.raw.title &&
-          cand.raw.difficulty === existingInBatch.raw.difficulty &&
-          cand.raw.questionId === existingInBatch.raw.questionId &&
-          cand.raw.titleSlug === existingInBatch.raw.titleSlug &&
-          cand.raw.url === existingInBatch.raw.url &&
-          cand.raw.isPaidOnly === existingInBatch.raw.isPaidOnly &&
-          cand.raw.source === existingInBatch.raw.source &&
-          JSON.stringify(cand.raw.tags) === JSON.stringify(existingInBatch.raw.tags);
-
-        if (isIdentical) {
-          // Exact duplicate line: skip and increment duplicateCount
-          duplicateCount++;
-          continue;
-        } else {
-          // Contradictory definition in same batch
-          errors.push({
-            line: cand.lineNumber,
-            message: `Conflicting problem definition for ID '${frontendId}' contradicts line ${existingInBatch.lineNumber}`,
-            snippet: cand.lineSnippet,
-          });
-          continue;
-        }
-      }
-
-      // Check explicit questionId uniqueness across different frontend IDs in the same batch
-      if (cand.raw.questionId) {
-        const prevLine = seenByExplicitQuestionId.get(cand.raw.questionId);
-        if (prevLine !== undefined) {
-          errors.push({
-            line: cand.lineNumber,
-            message: `Explicit questionId '${cand.raw.questionId}' on line ${cand.lineNumber} conflicts with line ${prevLine}`,
-            snippet: cand.lineSnippet,
-          });
-          continue;
-        }
-        seenByExplicitQuestionId.set(cand.raw.questionId, cand.lineNumber);
-      }
-
-      seenByFrontendId.set(frontendId, cand);
-      nonConflictingCandidates.push(cand);
-    }
-
-    // 3. Database comparison & operation classification
-    const checkByFrontendStmt = this.db.prepare(`
-      SELECT question_id, frontend_question_id, title, title_slug, url, difficulty, is_paid_only, source
-      FROM problems
-      WHERE frontend_question_id = ?
-    `);
-
-    const checkByQuestionIdStmt = this.db.prepare(`
-      SELECT question_id, frontend_question_id
-      FROM problems
-      WHERE question_id = ?
-    `);
-
-    const getExistingTagsStmt = this.db.prepare(`
-      SELECT t.id, t.name, t.slug
-      FROM problem_tags pt
-      JOIN tags t ON pt.tag_slug = t.slug
-      WHERE pt.question_id = ?
-      ORDER BY t.slug ASC
-    `);
-
-    const validOperations: ValidatedImportOp[] = [];
-
-    for (const cand of nonConflictingCandidates) {
-      const existingProblem = checkByFrontendStmt.get(cand.raw.id) as {
-        question_id: string;
-        frontend_question_id: string;
-        title: string;
-        title_slug: string;
-        url: string;
-        difficulty: 'Easy' | 'Medium' | 'Hard';
-        is_paid_only: number;
-        source: string;
-      } | undefined;
-
-      if (existingProblem) {
-        // Problem exists in DB: verify identity consistency
-        if (cand.raw.questionId && cand.raw.questionId !== existingProblem.question_id) {
-          errors.push({
-            line: cand.lineNumber,
-            message: `Explicit questionId '${cand.raw.questionId}' does not match existing questionId '${existingProblem.question_id}' for problem '${cand.raw.id}'`,
-            snippet: cand.lineSnippet,
-          });
-          continue;
-        }
-
-        const internalQuestionId = existingProblem.question_id;
-        const existingTags = getExistingTagsStmt.all(internalQuestionId) as TopicTag[];
-
-        // Determine fields: update provided fields, preserve omitted fields
-        const newTitle = cand.raw.title.trim();
-        const newDifficulty = cand.raw.difficulty;
-        const newSlug = cand.raw.titleSlug ? slugify(cand.raw.titleSlug) : existingProblem.title_slug;
-        const newUrl = cand.raw.url || existingProblem.url;
-        const newPaidOnly = cand.raw.isPaidOnly !== undefined ? cand.raw.isPaidOnly : Boolean(existingProblem.is_paid_only);
-        const newSource = cand.raw.source || existingProblem.source;
-        const newTags = cand.raw.tags !== undefined ? normalizeTags(cand.raw.tags) : existingTags;
-
-        // Detect if anything actually changed
         const changes: string[] = [];
-        if (newTitle !== existingProblem.title) changes.push('title');
-        if (newDifficulty !== existingProblem.difficulty) changes.push('difficulty');
-        if (newSlug !== existingProblem.title_slug) changes.push('titleSlug');
-        if (newUrl !== existingProblem.url) changes.push('url');
-        if (newPaidOnly !== Boolean(existingProblem.is_paid_only)) changes.push('isPaidOnly');
-        if (newSource !== existingProblem.source) changes.push('source');
-
-        const existingTagSlugs = existingTags.map(t => t.slug).sort().join(',');
-        const newTagSlugs = newTags.map(t => t.slug).sort().join(',');
-        if (existingTagSlugs !== newTagSlugs) changes.push('tags');
-
-        const action: 'update' | 'unchanged' = changes.length > 0 ? 'update' : 'unchanged';
-
-        validOperations.push({
-          action,
-          lineNumber: cand.lineNumber,
-          changes: changes.length > 0 ? changes : undefined,
-          problem: catalogProblemSchema.parse({
-            questionId: internalQuestionId,
-            questionFrontendId: cand.raw.id,
-            title: newTitle,
-            titleSlug: newSlug,
-            url: newUrl,
-            difficulty: newDifficulty,
-            isPaidOnly: newPaidOnly,
-            topicTags: newTags,
-            source: newSource,
-          }),
-        });
-      } else {
-        // New problem: check identity collision
-        const candidateQuestionId = cand.raw.questionId || cand.raw.id;
-        const conflictProblem = checkByQuestionIdStmt.get(candidateQuestionId) as {
-          question_id: string;
-          frontend_question_id: string;
-        } | undefined;
-
-        if (conflictProblem && conflictProblem.frontend_question_id !== cand.raw.id) {
-          errors.push({
-            line: cand.lineNumber,
-            message: `Derived/explicit questionId '${candidateQuestionId}' is already assigned to problem '${conflictProblem.frontend_question_id}'`,
-            snippet: cand.lineSnippet,
-          });
-          continue;
+        if (existing) {
+          for (const field of ['title', 'difficulty', 'titleSlug', 'url', 'isPaidOnly', 'source'] as const) {
+            if (problem[field] !== existing[field]) changes.push(field);
+          }
+          if (tagSignature(problem.topicTags) !== tagSignature(existing.topicTags)) changes.push('tags');
         }
-
-        // Apply new problem derivation rules
-        const derivedSlug = cand.raw.titleSlug
-          ? slugify(cand.raw.titleSlug)
-          : (slugify(cand.raw.title) || `problem-${cand.raw.id}`);
-        const safeUrl = cand.raw.url || `https://leetcode.com/problems/${derivedSlug}/`;
-        const normalizedTags = cand.raw.tags !== undefined ? normalizeTags(cand.raw.tags) : [];
-
-        validOperations.push({
-          action: 'insert',
-          lineNumber: cand.lineNumber,
-          problem: catalogProblemSchema.parse({
-            questionId: candidateQuestionId,
-            questionFrontendId: cand.raw.id,
-            title: cand.raw.title.trim(),
-            titleSlug: derivedSlug,
-            url: safeUrl,
-            difficulty: cand.raw.difficulty,
-            isPaidOnly: cand.raw.isPaidOnly ?? false,
-            topicTags: normalizedTags,
-            source: cand.raw.source || 'leetcode.com',
-          }),
-        });
+        candidates.push({ group, op: { problem, action: !existing ? 'insert' : changes.length ? 'update' : 'unchanged', changes, lineNumber: group[0].line } });
+      } catch (error) {
+        // Final canonical validation is still a line error, not an aborted preview.
+        reject(group, error instanceof Error ? error.message : String(error));
       }
     }
-
-    const insertCount = validOperations.filter(op => op.action === 'insert').length;
-    const updateCount = validOperations.filter(op => op.action === 'update').length;
-    const unchangedCount = validOperations.filter(op => op.action === 'unchanged').length;
-    const validCount = insertCount + updateCount + unchangedCount;
-
-    // Build sample items for client preview UI
-    const sampleItems = validOperations.slice(0, 100).map(op => ({
-      frontendId: op.problem.questionFrontendId,
-      title: op.problem.title,
-      difficulty: op.problem.difficulty,
-      action: op.action,
-      tags: op.problem.topicTags.map(t => t.name),
-      changes: op.changes,
-    }));
-
+    const byInternalId = new Map<string, typeof candidates>();
+    for (const candidate of candidates) {
+      const group = byInternalId.get(candidate.op.problem.questionId) ?? [];
+      group.push(candidate);
+      byInternalId.set(candidate.op.problem.questionId, group);
+    }
+    const validOperations: ValidatedImportOp[] = [];
+    let duplicateCount = 0;
+    for (const group of byInternalId.values()) {
+      if (group.length > 1) {
+        for (const item of group) reject(item.group, `Conflicting resolved questionId '${item.op.problem.questionId}' across multiple problem IDs`);
+      } else {
+        validOperations.push(group[0].op);
+        duplicateCount += group[0].group.length - 1;
+      }
+    }
+    validOperations.sort((a, b) => a.lineNumber - b.lineNumber);
+    errors.sort((a, b) => a.line - b.line);
     const now = Date.now();
-    const previewId = randomUUID();
-
     const preview: ImportPreview = {
-      previewId,
-      catalogRevision: this.getCatalogRevision(),
-      createdAt: now,
-      expiresAt: now + 30 * 60 * 1000, // 30 minutes validity
-      totalLines: totalLinesCount,
-      validCount,
-      insertCount,
-      updateCount,
-      unchangedCount,
-      duplicateCount,
-      errorCount: errors.length,
-      errors,
-      sampleItems,
+      previewId: randomUUID(), catalogRevision: this.getCatalogRevision(), createdAt: now, expiresAt: now + 30 * 60 * 1000,
+      totalLines, validCount: validOperations.length,
+      insertCount: validOperations.filter(op => op.action === 'insert').length,
+      updateCount: validOperations.filter(op => op.action === 'update').length,
+      unchangedCount: validOperations.filter(op => op.action === 'unchanged').length,
+      duplicateCount, errorCount: errors.length, errors,
+      sampleItems: validOperations.slice(0, 100).map(op => ({ frontendId: op.problem.questionFrontendId, title: op.problem.title, difficulty: op.problem.difficulty, action: op.action, tags: op.problem.topicTags.map(tag => tag.name), changes: op.changes })),
     };
-
     return { preview, validOperations };
   }
 
@@ -557,7 +353,27 @@ export class CatalogStore {
    * @param operations Validated problem operations to apply.
    * @param meta Metadata from preflight including line counts and errors.
    */
-  public commitImport(
+  public async commitImport(
+    previewId: string,
+    operations: ValidatedImportOp[],
+    meta: { totalLines: number; duplicateCount: number; errors: ImportErrorLine[]; expectedRevision?: number },
+  ): Promise<ImportSummary> {
+    const run = this.writeQueue.then(async () => {
+      const previous = this.getImportResult(previewId);
+      if (previous) return previous;
+      if (operations.length === 0) throw new Error('Cannot commit an import with no valid records');
+      if (meta.expectedRevision !== undefined && this.getCatalogRevision() !== meta.expectedRevision) throw new CatalogRevisionMismatchError('Catalog changed; regenerate the preview');
+      if (this.backupManager && operations.some(op => op.action !== 'unchanged')) {
+        await this.backupManager.performPreImportBackup(this.db);
+      }
+      return this.commitPreparedImport(previewId, operations, meta);
+    });
+    this.writeQueue = run.then(() => {}, () => {});
+    return run;
+  }
+
+  /** Commit prepared records and their replayable result in one SQLite transaction. */
+  private commitPreparedImport(
     previewId: string,
     operations: ValidatedImportOp[],
     meta: {
@@ -567,15 +383,6 @@ export class CatalogStore {
       expectedRevision?: number;
     },
   ): ImportSummary {
-    if (meta.expectedRevision !== undefined) {
-      const currentRev = this.getCatalogRevision();
-      if (currentRev !== meta.expectedRevision) {
-        throw new CatalogRevisionMismatchError(
-          `Catalog revision has changed (expected ${meta.expectedRevision}, current is ${currentRev}). Please regenerate preview.`
-        );
-      }
-    }
-
     const insertProblemStmt = this.db.prepare(`
       INSERT INTO problems (
         question_id, frontend_question_id, title, title_slug, url, difficulty, is_paid_only, source, updated_at
@@ -596,7 +403,7 @@ export class CatalogStore {
 
     const insertTagStmt = this.db.prepare(`
       INSERT INTO tags (slug, id, name) VALUES (?, ?, ?)
-      ON CONFLICT(slug) DO UPDATE SET name = excluded.name
+      ON CONFLICT(slug) DO UPDATE SET id = excluded.id, name = excluded.name
     `);
 
     const deleteProblemTagsStmt = this.db.prepare('DELETE FROM problem_tags WHERE question_id = ?');
@@ -623,8 +430,17 @@ export class CatalogStore {
     let unchanged = 0;
     const now = Date.now();
 
-    this.db.exec('BEGIN TRANSACTION;');
+    this.db.exec('BEGIN IMMEDIATE;');
     try {
+      if (meta.expectedRevision !== undefined) {
+        const currentRev = this.getCatalogRevision();
+        if (currentRev !== meta.expectedRevision) {
+          throw new CatalogRevisionMismatchError(
+            `Catalog revision has changed (expected ${meta.expectedRevision}, current is ${currentRev}). Please regenerate preview.`
+          );
+        }
+      }
+
       for (const op of operations) {
         const p = op.problem;
 
@@ -689,24 +505,26 @@ export class CatalogStore {
         meta.errors.length
       );
 
+      const summary: ImportSummary = {
+        id: previewId,
+        importedAt: now,
+        totalLines: meta.totalLines,
+        validCount: operations.length,
+        insertedCount: inserted,
+        updatedCount: updated,
+        unchangedCount: unchanged,
+        duplicateCount: meta.duplicateCount,
+        errorCount: meta.errors.length,
+        errors: meta.errors,
+      };
+      this.db.prepare('INSERT INTO import_results (id, summary_json) VALUES (?, ?)').run(previewId, JSON.stringify(summary));
       this.db.exec('COMMIT;');
     } catch (error) {
       this.db.exec('ROLLBACK;');
       throw error;
     }
 
-    return {
-      id: previewId,
-      importedAt: now,
-      totalLines: meta.totalLines,
-      validCount: operations.length,
-      insertedCount: inserted,
-      updatedCount: updated,
-      unchangedCount: unchanged,
-      duplicateCount: meta.duplicateCount,
-      errorCount: meta.errors.length,
-      errors: meta.errors,
-    };
+    return this.getImportResult(previewId)!;
   }
 
   /**
@@ -716,9 +534,13 @@ export class CatalogStore {
    * @param content Raw text containing one JSON object per line.
    * @returns Detailed summary with line-by-line error reports and counts.
    */
-  public importJsonl(content: string): ImportSummary {
+  public async importJsonl(content: string): Promise<ImportSummary> {
     const { preview, validOperations } = this.previewImport(content);
 
+    if (validOperations.length === 0) return {
+      totalLines: preview.totalLines, validCount: 0, insertedCount: 0, updatedCount: 0,
+      unchangedCount: 0, duplicateCount: preview.duplicateCount, errorCount: preview.errorCount, errors: preview.errors,
+    };
     return this.commitImport(preview.previewId, validOperations, {
       totalLines: preview.totalLines,
       duplicateCount: preview.duplicateCount,
@@ -948,6 +770,14 @@ export class CatalogStore {
     `).get(id) as ImportHistoryItem | undefined;
 
     return row ?? null;
+  }
+
+  /** Read a durable replay result; legacy audits explicitly lack original line-error details. */
+  public getImportResult(id: string): ImportSummary | null {
+    const row = this.db.prepare('SELECT summary_json FROM import_results WHERE id = ?').get(id) as { summary_json: string } | undefined;
+    if (row) return importSummarySchema.parse(JSON.parse(row.summary_json));
+    const legacy = this.getImportHistoryById(id);
+    return legacy ? { ...legacy, errors: [], errorsUnavailable: legacy.errorCount > 0 } : null;
   }
 
   /**

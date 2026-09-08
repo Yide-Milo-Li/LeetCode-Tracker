@@ -6,6 +6,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { CatalogStore } from '../packages/database/src/store.ts';
 import { buildApp } from '../apps/server/src/app.ts';
 
@@ -140,7 +143,7 @@ describe('Fastify Local API (/api/v1)', () => {
     const preview = JSON.parse(previewRes.payload);
 
     // 2. Interleaved DB mutation modifies revision
-    store.importJsonl('{"id": "99", "title": "Interleaved Problem", "difficulty": "Hard"}');
+    await store.importJsonl('{"id": "99", "title": "Interleaved Problem", "difficulty": "Hard"}');
     assert.equal(store.getCatalogRevision(), 1);
 
     // 3. Attempting to commit earlier preview must fail with 409 CATALOG_CHANGED
@@ -160,7 +163,7 @@ describe('Fastify Local API (/api/v1)', () => {
     const store = new CatalogStore(db, { skipBackup: true });
     const app = await buildApp({ store, disableStatic: true });
 
-    store.importJsonl([
+    await store.importJsonl([
       '{"id": "1", "title": "Two Sum", "difficulty": "Easy", "tags": ["Array"]}',
       '{"id": "2", "title": "Add Two Numbers", "difficulty": "Medium", "tags": ["Linked List"]}',
       '{"id": "3", "title": "3Sum", "difficulty": "Medium", "tags": ["Array", "Two Pointers"]}',
@@ -225,10 +228,14 @@ describe('Fastify Local API (/api/v1)', () => {
     assert.equal(body.error, 'FORBIDDEN_HOST');
   });
 
-  it('serves built web assets and SPA fallback from Fastify server', async () => {
+  it('serves static assets and SPA fallback without a pre-existing build', async (t) => {
+    const staticRoot = mkdtempSync(join(tmpdir(), 'catalog-static-test-'));
+    writeFileSync(join(staticRoot, 'index.html'), '<title>LeetCode Tracker</title><div id="root"></div>');
+    t.after(() => rmSync(staticRoot, { recursive: true, force: true }));
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
-    const app = await buildApp({ store, disableStatic: false });
+    const app = await buildApp({ store, staticRoot });
+    t.after(async () => { await app.close(); db.close(); });
 
     // Root index.html
     const rootRes = await app.inject({ method: 'GET', url: '/' });

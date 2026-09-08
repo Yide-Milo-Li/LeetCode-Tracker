@@ -17,8 +17,8 @@ import {
 } from '../packages/database/src/store.ts';
 import { BackupManager } from '../packages/database/src/backup.ts';
 
-describe('CatalogStore & JSONL Ingestion', () => {
-  it('initializes v4 schema, pragmas, and default metadata in empty memory database', () => {
+describe('CatalogStore & JSONL Ingestion', async () => {
+  it('initializes current schema, pragmas, and default metadata in empty memory database', () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
     const stats = store.getCatalogStats();
@@ -32,7 +32,7 @@ describe('CatalogStore & JSONL Ingestion', () => {
     assert.equal(settings.theme, 'system');
   });
 
-  it('imports valid JSONL lines with auto-derived metadata', () => {
+  it('imports valid JSONL lines with auto-derived metadata', async () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
 
@@ -42,7 +42,7 @@ describe('CatalogStore & JSONL Ingestion', () => {
       '{"id": "4", "title": "Median of Two Sorted Arrays", "difficulty": "Hard", "tags": ["Array", "Binary Search"]}'
     ].join('\n');
 
-    const summary = store.importJsonl(jsonl);
+    const summary = await store.importJsonl(jsonl);
     assert.equal(summary.totalLines, 3);
     assert.equal(summary.validCount, 3);
     assert.equal(summary.insertedCount, 3);
@@ -70,7 +70,7 @@ describe('CatalogStore & JSONL Ingestion', () => {
     assert.equal(stats.catalogRevision, 1);
   });
 
-  it('isolates malformed lines and ignores markdown fences', () => {
+  it('isolates malformed lines and ignores markdown fences', async () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
 
@@ -84,7 +84,7 @@ describe('CatalogStore & JSONL Ingestion', () => {
       '```'
     ].join('\n');
 
-    const summary = store.importJsonl(dirtyInput);
+    const summary = await store.importJsonl(dirtyInput);
     assert.equal(summary.totalLines, 4); // 4 non-fence non-empty lines
     assert.equal(summary.validCount, 2); // id 1 and id 3
     assert.equal(summary.insertedCount, 2);
@@ -98,12 +98,12 @@ describe('CatalogStore & JSONL Ingestion', () => {
     assert.equal(store.getProblem('2', 'frontendId'), null);
   });
 
-  it('preserves omitted fields on update and allows explicit clearing', () => {
+  it('preserves omitted fields on update and allows explicit clearing', async () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
 
     // 1. Initial import with full metadata
-    store.importJsonl(JSON.stringify({
+    await store.importJsonl(JSON.stringify({
       id: '100',
       questionId: 'internal-100',
       title: 'Original Title',
@@ -121,7 +121,7 @@ describe('CatalogStore & JSONL Ingestion', () => {
     assert.equal(original.topicTags.length, 2);
 
     // 2. Update with only id, title, and difficulty (tags, isPaidOnly, url, questionId omitted)
-    const updateRes = store.importJsonl(JSON.stringify({
+    const updateRes = await store.importJsonl(JSON.stringify({
       id: '100',
       title: 'Updated Title',
       difficulty: 'Hard',
@@ -142,7 +142,7 @@ describe('CatalogStore & JSONL Ingestion', () => {
     assert.equal(updated.topicTags.length, 2);
 
     // 3. Update with explicit empty tags `tags: []` to clear tags
-    store.importJsonl(JSON.stringify({
+    await store.importJsonl(JSON.stringify({
       id: '100',
       title: 'Updated Title',
       difficulty: 'Hard',
@@ -158,7 +158,7 @@ describe('CatalogStore & JSONL Ingestion', () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
 
-    store.importJsonl(JSON.stringify({
+    await store.importJsonl(JSON.stringify({
       id: '1',
       title: 'Two Sum',
       difficulty: 'Easy',
@@ -171,7 +171,7 @@ describe('CatalogStore & JSONL Ingestion', () => {
     await new Promise(r => setTimeout(r, 10));
 
     // Re-import exact same problem data
-    const summary2 = store.importJsonl(JSON.stringify({
+    const summary2 = await store.importJsonl(JSON.stringify({
       id: '1',
       title: 'Two Sum',
       difficulty: 'Easy',
@@ -187,12 +187,12 @@ describe('CatalogStore & JSONL Ingestion', () => {
     assert.equal(secondTime, firstTime, 'Unchanged problem must retain its original updated_at timestamp');
   });
 
-  it('matches existing problems by frontendId and rejects conflicting explicit questionId as line error', () => {
+  it('matches existing problems by frontendId and rejects conflicting explicit questionId as line error', async () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
 
     // Initial problem where questionId != frontendId
-    store.importJsonl(JSON.stringify({
+    await store.importJsonl(JSON.stringify({
       id: '1',
       questionId: 'internal-id-999',
       title: 'Two Sum',
@@ -200,7 +200,7 @@ describe('CatalogStore & JSONL Ingestion', () => {
     }));
 
     // 1. Simplified import without questionId should match and reuse internal-id-999
-    const res1 = store.importJsonl(JSON.stringify({
+    const res1 = await store.importJsonl(JSON.stringify({
       id: '1',
       title: 'Two Sum Simplified',
       difficulty: 'Easy',
@@ -213,7 +213,7 @@ describe('CatalogStore & JSONL Ingestion', () => {
     assert.equal(p?.questionId, 'internal-id-999');
 
     // 2. Import with a contradictory questionId must produce a line error, not corrupt DB
-    const res2 = store.importJsonl(JSON.stringify({
+    const res2 = await store.importJsonl(JSON.stringify({
       id: '1',
       questionId: 'wrong-conflicting-id',
       title: 'Two Sum Bad',
@@ -228,7 +228,7 @@ describe('CatalogStore & JSONL Ingestion', () => {
     assert.equal(pStillSafe?.questionId, 'internal-id-999');
   });
 
-  it('deduplicates intra-batch identical lines and flags intra-batch contradictory conflicts', () => {
+  it('deduplicates intra-batch identical lines and flags intra-batch contradictory conflicts', async () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
 
@@ -241,31 +241,26 @@ describe('CatalogStore & JSONL Ingestion', () => {
       '{"id": "4", "title": "Problem 4", "difficulty": "Easy", "questionId": "same-qid"}', // questionId conflict
     ].join('\n');
 
-    const summary = store.importJsonl(batch);
+    const summary = await store.importJsonl(batch);
 
-    // Line 1: valid insert
-    // Line 2: duplicate (duplicateCount = 1)
-    // Line 3: valid insert
-    // Line 4: conflict error
-    // Line 5: valid insert
-    // Line 6: conflict error
+    // All occurrences of contradictory IDs are excluded; only problem 1 is valid.
     assert.equal(summary.totalLines, 6);
     assert.equal(summary.duplicateCount, 1);
-    assert.equal(summary.errorCount, 2);
-    assert.equal(summary.validCount, 3);
-    assert.equal(summary.insertedCount, 3);
+    assert.equal(summary.errorCount, 4);
+    assert.equal(summary.validCount, 1);
+    assert.equal(summary.insertedCount, 1);
 
     // Verify mathematical relation: totalLines = validCount + duplicateCount + errorCount
     assert.equal(summary.totalLines, summary.validCount + summary.duplicateCount + summary.errorCount);
     assert.equal(summary.validCount, summary.insertedCount + summary.updatedCount + summary.unchangedCount);
   });
 
-  it('rolls back all mutations if audit or transaction fails', () => {
+  it('rolls back all mutations if audit or transaction fails', async () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
 
     // Seed one problem
-    store.importJsonl(JSON.stringify({ id: '1', title: 'Two Sum', difficulty: 'Easy' }));
+    await store.importJsonl(JSON.stringify({ id: '1', title: 'Two Sum', difficulty: 'Easy' }));
     assert.equal(store.getCatalogStats().totalProblems, 1);
 
     // Corrupt import_history trigger to simulate transaction failure during commit
@@ -276,8 +271,8 @@ describe('CatalogStore & JSONL Ingestion', () => {
       END;
     `);
 
-    assert.throws(() => {
-      store.importJsonl(JSON.stringify({ id: '2', title: 'New Problem Should Roll Back', difficulty: 'Medium' }));
+    await assert.rejects(async () => {
+      await store.importJsonl(JSON.stringify({ id: '2', title: 'New Problem Should Roll Back', difficulty: 'Medium' }));
     }, /Simulated audit insertion failure/);
 
     // Verify that problem 2 was NOT committed due to rollback
@@ -319,7 +314,7 @@ describe('CatalogStore & JSONL Ingestion', () => {
     }, DatabaseCorruptionError);
   });
 
-  it('successfully migrates v3 database to v4 within a transaction', () => {
+  it('successfully migrates v3 database to the current schema within a transaction', () => {
     const db = new DatabaseSync(':memory:');
     // Setup v3 schema
     db.exec(`
@@ -415,7 +410,7 @@ describe('CatalogStore & JSONL Ingestion', () => {
       // 1. Create source database with data
       const db = new DatabaseSync(dbPath);
       const store = new CatalogStore(db, { backupDir, skipBackup: true });
-      store.importJsonl(JSON.stringify({ id: '1', title: 'Test Problem', difficulty: 'Easy' }));
+      await store.importJsonl(JSON.stringify({ id: '1', title: 'Test Problem', difficulty: 'Easy' }));
       db.close();
 
       // 2. Open db again with BackupManager
@@ -467,7 +462,7 @@ describe('CatalogStore & JSONL Ingestion', () => {
     }
   });
 
-  it('handles high-throughput bulk ingestion of 1,000 synthetic problems smoothly', () => {
+  it('handles high-throughput bulk ingestion of 1,000 synthetic problems smoothly', async () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
 
@@ -483,7 +478,7 @@ describe('CatalogStore & JSONL Ingestion', () => {
     }
 
     const t0 = performance.now();
-    const summary = store.importJsonl(syntheticLines.join('\n'));
+    const summary = await store.importJsonl(syntheticLines.join('\n'));
     const elapsed = performance.now() - t0;
 
     assert.equal(summary.totalLines, 1000);

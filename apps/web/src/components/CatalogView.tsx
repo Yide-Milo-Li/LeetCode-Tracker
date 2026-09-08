@@ -4,13 +4,12 @@
 import React, { useEffect, useState } from 'react';
 import {
   Search,
-  ExternalLink,
   FilterX,
   Database,
   Layers,
   Sparkles,
 } from 'lucide-react';
-import { api, type CatalogProblem, type CatalogStats, type TopicTag } from '../api.ts';
+import { api, type CatalogProblem, type CatalogStats, type CatalogQuery, type TopicTag } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
 
 interface CatalogViewProps {
@@ -18,6 +17,7 @@ interface CatalogViewProps {
   onNavigateSettings: () => void;
 }
 
+/** Browse current results while keeping failed and superseded requests out of empty states. */
 export const CatalogView: React.FC<CatalogViewProps> = ({ lang, onNavigateSettings }) => {
   const t = translations[lang];
 
@@ -28,62 +28,54 @@ export const CatalogView: React.FC<CatalogViewProps> = ({ lang, onNavigateSettin
 
   // Filters state
   const [search, setSearch] = useState('');
-  const [difficulty, setDifficulty] = useState<string>('');
+  const [difficulty, setDifficulty] = useState<NonNullable<CatalogQuery['difficulty']> | ''>('');
   const [tag, setTag] = useState<string>('');
-  const [premium, setPremium] = useState<string>('all');
+  const [premium, setPremium] = useState<NonNullable<CatalogQuery['premium']>>('all');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(50);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [overviewLoading, setOverviewLoading] = useState(true);
+  const [overviewError, setOverviewError] = useState(false);
+  const [catalogError, setCatalogError] = useState(false);
+  const [retry, setRetry] = useState(0);
 
-  // Load stats and tags on mount
   useEffect(() => {
-    loadStats();
-    loadTags();
-  }, []);
+    let active = true;
+    setOverviewLoading(true);
+    setOverviewError(false);
+    Promise.all([api.getCatalogStats(), api.getAllTags()]).then(([metrics, topics]) => {
+      if (!active) return;
+      setStats(metrics);
+      setTags(topics.tags);
+    }).catch(() => {
+      if (active) setOverviewError(true);
+    }).finally(() => {
+      if (active) setOverviewLoading(false);
+    });
+    return () => { active = false; };
+  }, [retry]);
 
-  // Reload problems on filter changes
   useEffect(() => {
-    loadProblems();
-  }, [search, difficulty, tag, premium, page, limit]);
-
-  async function loadStats() {
-    try {
-      const res = await api.getCatalogStats();
-      setStats(res);
-    } catch (err) {
-      console.error('Failed to load stats:', err);
-    }
-  }
-
-  async function loadTags() {
-    try {
-      const res = await api.getAllTags();
-      setTags(res.tags);
-    } catch (err) {
-      console.error('Failed to load tags:', err);
-    }
-  }
-
-  async function loadProblems() {
+    // Filter requests can finish out of order. Only the current request owns the view.
+    let active = true;
     setLoading(true);
-    try {
-      const res = await api.getCatalog({
-        page,
-        limit,
-        search: search.trim() || undefined,
-        difficulty: (difficulty as any) || undefined,
-        tag: tag || undefined,
-        premium: (premium as any) || 'all',
-      });
+    setCatalogError(false);
+    api.getCatalog({
+      page, limit, search: search.trim() || undefined,
+      difficulty: difficulty || undefined, tag: tag || undefined, premium,
+    }).then((res) => {
+      if (!active) return;
       setProblems(res.items);
       setTotal(res.total);
-    } catch (err) {
-      console.error('Failed to load problems:', err);
-    } finally {
-      setLoading(false);
-    }
-  }
+    }).catch(() => {
+      if (active) setCatalogError(true);
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => { active = false; };
+  }, [search, difficulty, tag, premium, page, limit, retry]);
 
+  /** Reset every filter together and return to the first result page. */
   function handleResetFilters() {
     setSearch('');
     setDifficulty('');
@@ -99,7 +91,7 @@ export const CatalogView: React.FC<CatalogViewProps> = ({ lang, onNavigateSettin
     ? new Date(stats.lastImportedAt).toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US')
     : t.never;
 
-  // Safe external URL validator
+  /** Allow only HTTP(S) links when rendering user-supplied problem URLs. */
   function getSafeUrl(url: string): string | null {
     try {
       const parsed = new URL(url);
@@ -115,7 +107,13 @@ export const CatalogView: React.FC<CatalogViewProps> = ({ lang, onNavigateSettin
   return (
     <div>
       {/* Overview Metrics Cards */}
-      <div className="metrics-grid">
+      {(overviewError || catalogError) && (
+        <div role="alert" className="alert alert-danger">
+          <span>{overviewError ? t.overviewLoadFailed : t.catalogLoadFailed}</span>
+          <button className="btn btn-outline btn-sm" onClick={() => setRetry((value) => value + 1)}>{t.retry}</button>
+        </div>
+      )}
+      {overviewLoading ? <p role="status">{t.loadingOverview}</p> : !overviewError && stats && <div className="metrics-grid">
         <div className="metric-card">
           <div className="metric-label">{t.statTotal}</div>
           <div className="metric-value">{stats?.totalProblems ?? 0}</div>
@@ -147,7 +145,7 @@ export const CatalogView: React.FC<CatalogViewProps> = ({ lang, onNavigateSettin
           <div className="metric-value">{stats?.paidOnly ?? 0}</div>
           <div className="metric-sub">{t.statLastImport}: {formattedLastImport}</div>
         </div>
-      </div>
+      </div>}
 
       {/* Filter and Search Bar */}
       <div className="card" style={{ padding: '1rem 1.25rem', marginBottom: '1rem' }}>
@@ -167,7 +165,7 @@ export const CatalogView: React.FC<CatalogViewProps> = ({ lang, onNavigateSettin
           <select
             className="select-field"
             value={difficulty}
-            onChange={(e) => { setDifficulty(e.target.value); setPage(1); }}
+            onChange={(e) => { setDifficulty(e.target.value as NonNullable<CatalogQuery['difficulty']> | ''); setPage(1); }}
           >
             <option value="">{t.allDifficulties}</option>
             <option value="Easy">Easy / 简单</option>
@@ -190,7 +188,7 @@ export const CatalogView: React.FC<CatalogViewProps> = ({ lang, onNavigateSettin
           <select
             className="select-field"
             value={premium}
-            onChange={(e) => { setPremium(e.target.value); setPage(1); }}
+            onChange={(e) => { setPremium(e.target.value as NonNullable<CatalogQuery['premium']>); setPage(1); }}
           >
             <option value="all">{t.allPricing}</option>
             <option value="false">{t.freeOnly}</option>
@@ -206,7 +204,7 @@ export const CatalogView: React.FC<CatalogViewProps> = ({ lang, onNavigateSettin
       </div>
 
       {/* Main Problems Table or Empty State */}
-      {stats && stats.totalProblems === 0 ? (
+      {loading ? <p role="status">{t.loadingCatalog}</p> : catalogError ? null : !overviewError && !overviewLoading && stats && stats.totalProblems === 0 && problems.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', padding: '3.5rem 1.5rem' }}>
           <Database size={48} style={{ margin: '0 auto 1rem auto', color: 'var(--text-muted)' }} />
           <h3 className="card-title" style={{ justifyContent: 'center' }}>{t.noProblemsInDb}</h3>
@@ -293,7 +291,7 @@ export const CatalogView: React.FC<CatalogViewProps> = ({ lang, onNavigateSettin
       )}
 
       {/* Pagination Controls */}
-      {total > 0 && (
+      {!loading && !catalogError && total > 0 && (
         <div className="pagination-bar">
           <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
             {t.pageInfo

@@ -88,6 +88,8 @@ export interface ImportSummary {
   duplicateCount: number;
   errorCount: number;
   errors: ImportErrorLine[];
+  /** Historical imports may have counts but no persisted line details. */
+  errorsUnavailable?: boolean;
 }
 
 export interface ImportHistoryItem {

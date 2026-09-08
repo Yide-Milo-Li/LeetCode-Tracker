@@ -14,7 +14,7 @@ The MIT license covers repository code, not third-party content. This is an inde
 
 The repository delivers an offline-first catalog workbench:
 - **Bring-Your-Own-Data (BYOD) Ingestion**: Upload or paste JSON Lines data with preflight change preview, line error breakdown, and atomic SQLite commits.
-- **Local Storage Engine**: Transactional SQLite storage (schema v4) with automatic migration, identity collision resolution, omitted field preservation, and point-in-time backups.
+- **Local Storage Engine**: Transactional SQLite storage (schema v5) with automatic migration, identity conflict rejection, omitted field preservation, and point-in-time backups.
 - **Local Fastify API**: `/api/v1` routes listening strictly on loopback (`127.0.0.1`) with origin validation and write serialization.
 - **Bilingual Web Client**: React/Vite application supporting English and Simplified Chinese, dark/light themes, catalog search, difficulty/tag/premium filters, and import history.
 
@@ -48,10 +48,13 @@ To perform an offline database restoration from a backup file:
 npm run restore -- <path-to-backup.sqlite> [target-db.sqlite]
 ```
 
-To run optional verification against a private local dataset (if `.local/backup-4046.jsonl` exists):
-```sh
+To verify the private 4,046-record fixture without modifying it, supply its path explicitly in PowerShell:
+```powershell
+$env:PRIVATE_BACKUP_PATH = 'D:\path\to\backup-4046.jsonl'
 npm run test:private
 ```
+
+Default tests need neither a dataset nor a built frontend. Stop the local server before restoring; see the [backup and recovery instructions](scripts/README.md).
 
 ## Repository guide
 
@@ -64,4 +67,4 @@ npm run test:private
 
 ## Planned experience
 
-Named strategies assign explicit question counts, difficulty proportions and optional reviews to weekdays. Unassigned days are rest days. Conflicting assignments are rejected. A persistent Chinese/English setting and validated Gemini recommendations are planned for subsequent milestones.
+Named strategies assign explicit question counts, difficulty proportions and optional reviews to weekdays. Unassigned days are rest days. Conflicting assignments are rejected. Chinese/English preferences are already persistent. Practice scheduling and validated Gemini recommendations remain planned.

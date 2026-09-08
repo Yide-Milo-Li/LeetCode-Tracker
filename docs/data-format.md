@@ -64,13 +64,14 @@ Example line:
 
 ---
 
-## 3. SQLite schema (v4)
+## 3. SQLite schema (v5)
 
-The local SQLite catalog schema is defined in [store.ts](../packages/database/src/store.ts) (version 4):
+The local SQLite catalog schema is defined in [store.ts](../packages/database/src/store.ts) (version 5):
 
 - **`problems`**: Stores normalized problem records keyed by `question_id`, with unique index on `frontend_question_id`.
 - **`tags`**: Normalized taxonomy table keyed by `slug`.
 - **`problem_tags`**: Many-to-many relationship table with cascade deletion.
+- **`import_results`**: Complete committed response, including line errors, keyed by import ID for durable retry replay.
 - **`import_history`**: Audit log recording ingestion timestamps, lines processed, inserted/updated/unchanged/duplicate counts, and error counts.
 - **`catalog_meta`**: Key-value metadata storing monotonic `catalog_revision` and `last_imported_at`.
 - **`settings`**: User preferences table storing `language` ('en' | 'zh') and `theme` ('light' | 'dark' | 'system').
@@ -78,6 +79,16 @@ The local SQLite catalog schema is defined in [store.ts](../packages/database/sr
 
 ### Ingestion guarantees
 - **Preflight Inspection**: Validates inputs, detects conflicts, and reports preview diffs before write.
-- **Atomic Transactions**: Problems, tags, audit logs, and catalog revision increment commit together in one transaction.
+- **Atomic Transactions**: Problems, tags, audit logs, complete import results, and catalog revision increment commit together in one transaction.
 - **Consistent Backups**: Native SQLite backups are generated before migration and data changes, retaining 14 daily archives.
 - **Offline Restore**: Offline restoration command validates backup integrity before restoring with safety snapshots.
+
+### Conflicts and retry behavior
+
+All members of a contradictory frontend-ID group are excluded, regardless of line order. Collisions are also checked after internal IDs have been preserved or derived. Identical valid rows count as duplicates; normalization failures remain line errors. Tag differences include ID, name, and slug, while tag order alone is not a change. Tag metadata is shared by slug across the catalog, so an explicit rename affects every problem linked to that tag.
+
+New problems default to internal ID `id`, derived slug and URL, empty tags, `isPaidOnly: false`, and `source: "leetcode.com"`. Updates preserve omitted optional metadata, including slug and URL, even when the title changes.
+
+An uncommitted preview expires after 30 minutes or is lost at server restart. A committed ID can be retried after restart and returns the persisted full result. Historical v3/v4 imports retain their counts; missing historical line details cannot be reconstructed and are marked `errorsUnavailable: true` when applicable.
+
+Startup and restore share read-only checks of supported versions (3, 4, 5), required tables/columns/keys, relations, metadata, and SQLite integrity. The standalone server awaits a verified backup before upgrading v3/v4 to v5 and before an import changes catalog records. Backup failure aborts the operation. An unchanged-only import records history and revision but does not replace the previous data-change snapshot.

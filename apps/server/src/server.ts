@@ -8,7 +8,9 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { CatalogStore } from '../../../packages/database/src/store.ts';
 import { buildApp } from './app.ts';
+import { acquireDatabaseLease } from '../../../packages/database/src/lease.ts';
 
+/** Acquire database ownership and await protected initialization before listening. */
 async function startServer() {
   const localDir = path.resolve('.local');
   if (!fs.existsSync(localDir)) {
@@ -20,32 +22,43 @@ async function startServer() {
   const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
   const host = '127.0.0.1';
 
-  console.log(`[Server] Opening catalog database: ${dbPath}`);
-  const db = new DatabaseSync(dbPath);
-  const store = new CatalogStore(db, { backupDir });
+  const release = acquireDatabaseLease(dbPath);
+  let opened: DatabaseSync | undefined;
+  try {
+    console.log(`[Server] Opening catalog database: ${dbPath}`);
+    const db = new DatabaseSync(dbPath);
+    opened = db;
+    const store = await CatalogStore.open(db, { backupDir });
 
-  const app = await buildApp({ store });
+    const app = await buildApp({ store });
 
-  const address = await app.listen({ host, port });
-  console.log(`✓ LeetCode Tracker local workbench listening at: ${address}`);
-  console.log(`  API: ${address}/api/v1/catalog/stats`);
-  console.log(`  Web: ${address}/`);
+    const address = await app.listen({ host, port });
+    console.log(`✓ LeetCode Tracker local workbench listening at: ${address}`);
+    console.log(`  API: ${address}/api/v1/catalog/stats`);
+    console.log(`  Web: ${address}/`);
 
-  const gracefulShutdown = async (signal: string) => {
-    console.log(`\n[Server] Received ${signal}, closing server and database...`);
-    try {
-      await app.close();
-      db.close();
-      console.log('✓ Clean shutdown complete.');
-      process.exit(0);
-    } catch (err) {
-      console.error('Error during shutdown:', err);
-      process.exit(1);
-    }
-  };
+    /** Finish pending requests before closing the database and releasing its lease. */
+    const gracefulShutdown = async (signal: string) => {
+      console.log(`\n[Server] Received ${signal}, closing server and database...`);
+      try {
+        await app.close();
+        db.close();
+        release();
+        console.log('✓ Clean shutdown complete.');
+        process.exit(0);
+      } catch (err) {
+        release();
+        console.error('Error during shutdown:', err);
+        process.exit(1);
+      }
+    };
 
-  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  } catch (error) {
+    try { opened?.close(); } finally { release(); }
+    throw error;
+  }
 }
 
 startServer().catch(err => {

@@ -14,7 +14,6 @@ import {
   importPreviewRequestSchema,
   updateSettingsInputSchema,
   type ImportPreview,
-  type ImportSummary,
 } from '../../../packages/contracts/src/sync.ts';
 import {
   CatalogStore,
@@ -34,6 +33,7 @@ interface ActivePreview {
 class AsyncLock {
   private queue: Promise<void> = Promise.resolve();
 
+  /** Queue writes and release the queue even if a preceding operation fails. */
   public async run<T>(fn: () => Promise<T> | T): Promise<T> {
     const result = this.queue.then(fn);
     this.queue = result.then(() => {}, () => {});
@@ -58,9 +58,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const { store } = options;
   const writeLock = new AsyncLock();
 
-  // Active previews map and committed imports cache for idempotency
+  // Only uncommitted previews live in memory; committed results survive restarts.
   const activePreviews = new Map<string, ActivePreview>();
-  const committedSummaries = new Map<string, ImportSummary>();
 
   const app = Fastify({
     bodyLimit: 15 * 1024 * 1024, // 15 MiB limit for bulk JSONL files
@@ -126,6 +125,9 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
     const { preview, validOperations } = store.previewImport(content);
 
+    for (const [id, active] of activePreviews) {
+      if (active.preview.expiresAt <= Date.now()) activePreviews.delete(id);
+    }
     // Save active preview with 30-minute expiration
     activePreviews.set(preview.previewId, {
       preview,
@@ -149,8 +151,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
     const { previewId } = parseRes.data;
 
-    // 1. Check idempotency cache (handles retry on network dropped response)
-    const existingSummary = committedSummaries.get(previewId);
+    // 1. Replay the durable result before requiring a live preview.
+    const existingSummary = store.getImportResult(previewId);
     if (existingSummary) {
       return reply.status(200).send(existingSummary);
     }
@@ -202,8 +204,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         });
       });
 
-      // Cache for idempotency & remove from pending
-      committedSummaries.set(previewId, summary);
+      // The transaction persisted the result; the input preview can be released.
       activePreviews.delete(previewId);
 
       return reply.status(200).send(summary);
@@ -234,7 +235,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   /** GET /api/v1/imports/:id: Retrieve details of a specific import */
   app.get('/api/v1/imports/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    const item = store.getImportHistoryById(id);
+    const item = store.getImportResult(id);
     if (!item) {
       return reply.status(404).send({
         error: 'IMPORT_NOT_FOUND',
@@ -299,8 +300,9 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       prefix: '/',
     });
 
-    app.setNotFoundHandler((_request, reply) => {
-      reply.sendFile('index.html');
+    app.setNotFoundHandler((request, reply) => {
+      if (request.url.startsWith('/api/')) return reply.status(404).send({ error: 'NOT_FOUND', message: 'Unknown API route' });
+      return reply.sendFile('index.html');
     });
   }
 
