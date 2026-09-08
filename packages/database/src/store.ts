@@ -291,6 +291,9 @@ export class CatalogStore {
         }
         const questionId = existing?.questionId ?? raw.questionId ?? raw.id;
         const owner = this.db.prepare('SELECT frontend_question_id FROM problems WHERE question_id = ?').get(questionId) as { frontend_question_id: string } | undefined;
+        if (owner && owner.frontend_question_id !== raw.id) {
+          throw new Error(`Internal questionId '${questionId}' is already assigned to problem '${owner.frontend_question_id}'`);
+        }
         const titleSlug = raw.titleSlug !== undefined ? slugify(raw.titleSlug) : existing?.titleSlug ?? (slugify(raw.title) || `problem-${raw.id}`);
         const problem = catalogProblemSchema.parse({
           questionId, questionFrontendId: raw.id, title: raw.title.trim(), difficulty: raw.difficulty,

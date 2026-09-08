@@ -1,6 +1,6 @@
 # Testing boundaries
 
-Run `npm test` for 51 synthetic tests: 45 storage/API tests and 6 rendered React DOM regressions. `npm run test:web` runs the latter separately. `npm run check` includes TypeScript and TSX test files. Tests use in-memory or temporary databases and never require private data, credentials, remote services, or `apps/web/dist`.
+Run `npm test` for 52 synthetic tests: 46 storage/API tests and 6 rendered React DOM regressions. `npm run test:web` runs the latter separately. `npm run check` includes TypeScript and TSX test files. Tests use in-memory or temporary databases and never require private data, credentials, remote services, or `apps/web/dist`.
 
 Coverage includes:
 

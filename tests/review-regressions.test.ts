@@ -372,3 +372,34 @@ it('caps activePreviews memory at limit and evicts oldest uncommitted entries', 
     } finally { await app.close(); }
   } finally { db.close(); }
 });
+
+it('rejects candidate with questionId conflicting with an existing database record as line error', async () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    const store = new CatalogStore(db);
+    // 1. Seed initial problem with id 1 and internal questionId 1
+    await store.importJsonl(JSON.stringify({ id: '1', title: 'Problem One', difficulty: 'Easy' }));
+    assert.equal(store.getCatalogStats().totalProblems, 1);
+
+    // 2. Preview new problem with id 2 but explicit questionId 1 (conflicts with existing problem 1)
+    const previewRes = store.previewImport(
+      JSON.stringify({ id: '2', questionId: '1', title: 'Problem Two Conflicting', difficulty: 'Medium' }),
+    );
+    assert.equal(previewRes.preview.validCount, 0);
+    assert.equal(previewRes.preview.errorCount, 1);
+    assert.match(previewRes.preview.errors[0].message, /Internal questionId '1' is already assigned to problem '1'/);
+
+    // 3. Batch import containing the conflicting line alongside a valid line must isolate error and commit valid
+    const summary = await store.importJsonl([
+      JSON.stringify({ id: '2', questionId: '1', title: 'Problem Two Conflicting', difficulty: 'Medium' }),
+      JSON.stringify({ id: '3', title: 'Problem Three Valid', difficulty: 'Hard' }),
+    ].join('\n'));
+
+    assert.equal(summary.validCount, 1);
+    assert.equal(summary.insertedCount, 1);
+    assert.equal(summary.errorCount, 1);
+    assert.equal(store.getCatalogStats().totalProblems, 2);
+    assert.ok(store.getProblem('3', 'frontendId'));
+    assert.equal(store.getProblem('2', 'frontendId'), null);
+  } finally { db.close(); }
+});
