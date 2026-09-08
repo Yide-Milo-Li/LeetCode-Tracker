@@ -121,3 +121,40 @@ it('a delayed old filter response cannot replace the newer search results', asyn
   assert.equal(screen.queryByText('Old result'), null);
   assert.ok(screen.getByText('New result'));
 });
+
+it('handles pagination navigation and disables boundary controls correctly', async () => {
+  overview();
+  const pageQueries: number[] = [];
+  mock.method(api, 'getCatalog', async (query: { page?: number; limit?: number }) => {
+    pageQueries.push(query.page ?? 1);
+    const page = query.page ?? 1;
+    const item: CatalogProblem = {
+      questionId: `P${page}`,
+      questionFrontendId: `${page}`,
+      title: `Problem on Page ${page}`,
+      titleSlug: `problem-${page}`,
+      url: 'https://example.org/',
+      difficulty: 'Easy',
+      isPaidOnly: false,
+      topicTags: [],
+      source: 'jsonl',
+    };
+    return { items: [item], total: 75, page, limit: 50 };
+  });
+
+  await act(async () => { render(<CatalogView lang="en" onNavigateSettings={() => {}} />); });
+
+  // On page 1: total 75 with limit 50 means 2 pages
+  assert.ok(screen.getByText('Page 1 of 2 (75 problems)'));
+  const prevBtn = screen.getByRole('button', { name: 'Previous' });
+  const nextBtn = screen.getByRole('button', { name: 'Next' });
+  assert.ok(prevBtn.hasAttribute('disabled'));
+  assert.equal(nextBtn.hasAttribute('disabled'), false);
+
+  // Click Next -> advances to page 2
+  await act(async () => { fireEvent.click(nextBtn); });
+  assert.ok(screen.getByText('Page 2 of 2 (75 problems)'));
+  assert.equal(prevBtn.hasAttribute('disabled'), false);
+  assert.ok(nextBtn.hasAttribute('disabled'));
+  assert.deepEqual(pageQueries, [1, 2]);
+});
