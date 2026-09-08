@@ -1,0 +1,26 @@
+{
+  "name": "leetcode-tracker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24.15.0 <25"
+  },
+  "workspaces": [
+    "packages/contracts",
+    "packages/database"
+  ],
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "node --test tests/catalog-store.test.ts",
+    "docs:check": "node scripts/check-docs.ts"
+  },
+  "dependencies": {
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "~5.9.3"
+  }
+}
