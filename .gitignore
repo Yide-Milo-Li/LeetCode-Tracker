@@ -179,3 +179,37 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+
+# TypeScript workspace and generated browser extension
+.vscode/
+node_modules/
+dist/
+*.tsbuildinfo
+coverage/
+.env.*
+!.env.example
+# Personal runtime data is additionally excluded locally via .git/info/exclude.
+.local/
+
+# Local-only components and data artifacts
+/apps/api/
+/apps/extension/
+/packages/integrations/
+/scripts/build.ts
+/scripts/report.ts
+/scripts/start.ps1
+/scripts/stop.ps1
+/tests/adapter.test.ts
+/tests/api.test.ts
+/tests/sync.test.ts
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.sql.gz
+*.dump
+/backups/
+/exports/
+/data/
