@@ -11,6 +11,7 @@ export const translations = {
     appTitle: 'LeetCode Tracker',
     appSubtitle: 'Offline BYOD Catalog',
     navCatalog: 'Problem Catalog',
+    navPractice: 'Practice & Progress',
     navSettings: 'Settings & Ingestion',
 
     // Stats
@@ -30,6 +31,14 @@ export const translations = {
     fileTooLarge: 'File exceeds maximum allowed size of 10 MiB.',
     statRevision: 'Catalog Rev.',
 
+    // Practice & Solved Stats
+    statSolvedProblems: 'Solved Problems',
+    statManualPractices: 'Manual Practice Logs',
+    statSnapshots: 'Progress Snapshots',
+    statAcceptedSnapshots: 'Accepted Snapshots',
+    statusSolved: 'Solved',
+    statusUnsolved: 'Unsolved',
+
     // Catalog filters & table
     searchPlaceholder: 'Search by title or ID (e.g. 1 or Two Sum)...',
     allDifficulties: 'All Difficulties',
@@ -42,6 +51,7 @@ export const translations = {
     tableDifficulty: 'Difficulty',
     tableTags: 'Tags',
     tableLink: 'Link',
+    tableActions: 'Actions',
     openLink: 'Open ↗',
     noProblems: 'No matching problems found.',
     noProblemsInDb: 'Your local problem catalog is empty.',
@@ -51,16 +61,69 @@ export const translations = {
     next: 'Next',
     perPage: 'per page',
 
+    // Manual Practice Quick Log
+    logPractice: 'Log Practice',
+    quickLogTitle: 'Log Practice Session',
+    practicedAtLabel: 'Practice Timestamp / Date',
+    precisionDatetime: 'Date & Time',
+    precisionDate: 'Date only',
+    completedLabel: 'Completed / Solved',
+    notesLabel: 'Notes & Reflections',
+    notesPlaceholder: 'Notes, algorithm strategy, time/space complexity, edge cases...',
+    btnSavePractice: 'Save Record',
+    btnCancel: 'Cancel',
+    savingPractice: 'Saving...',
+    practiceLoggedSuccess: 'Practice record saved successfully!',
+    practiceHistory: 'Recent Practice Logs',
+    noPracticeHistory: 'No practice logs recorded yet for this problem.',
+    btnRevoke: 'Revoke',
+    recordRevoked: 'Record revoked',
+
+    // Progress Import & Gemini Assistant Workbench
+    progressWorkbenchTitle: 'LeetCode Progress Import & AI Assistant',
+    progressWorkbenchDesc: 'Paste your raw LeetCode progress text or submission page contents. Use Gemini AI to structure items, inspect diffs, and resolve conflicts before committing.',
+    geminiStatus: 'Gemini Assistant Status',
+    geminiActive: 'Active ({model})',
+    geminiNotConfigured: 'Not configured (set GEMINI_API_KEY in .env)',
+    rawTextLabel: 'Raw Progress / Submissions Text',
+    rawTextPlaceholder: 'Paste LeetCode submissions text here, for example:\n1. Two Sum  Accepted  5 submissions  2026-01-15\n2. Add Two Numbers  Wrong Answer  2 submissions  02-01',
+    batchYearLabel: 'Batch Year (fallback when year is omitted)',
+    btnFormatAI: 'Format with Gemini AI',
+    btnPreviewProgress: 'Preview Progress Diff',
+    parsingAI: 'Structuring text with Gemini...',
+    formatSuccess: 'Structured {count} candidate problem(s)',
+    unparsedWarning: '{count} snippet(s) could not be parsed',
+    previewProgressTitle: 'Progress Import Preflight Analysis',
+    tableCurrent: 'Current Record',
+    tableIncoming: 'Incoming Record',
+    tableConflictReason: 'Conflict Reason',
+    tableConfirmOverride: 'Confirm Override',
+    tableLastResult: 'Last Result',
+    tableSubmissions: 'Submissions',
+    tableLastDate: 'Last Submission',
+    confirmAllConflicts: 'Confirm All Conflicts',
+    btnCommitProgress: 'Confirm & Commit Snapshots',
+    progressCommitSuccess: 'Progress import committed! Inserted: {inserted}, Updated: {updated}, Unchanged: {unchanged}.',
+
+    // Conflict Descriptions
+    conflictOlderDate: 'Incoming date is older than existing record',
+    conflictDecreasedSubmissions: 'Incoming submission count decreased',
+    conflictSameDateDiffResult: 'Same submission date/count with conflicting result',
+    conflictIntraBatch: 'Contradictory records within incoming batch',
+    conflictUnmatched: 'Problem not found in catalog',
+
     // Settings
     preferencesTitle: 'Application Preferences',
-    preferencesDesc: 'Configure interface language and visual appearance.',
+    preferencesDesc: 'Configure interface language, appearance theme, and display timezone.',
     langLabel: 'Language',
     themeLabel: 'Theme',
     themeLight: 'Light',
     themeDark: 'Dark',
     themeSystem: 'System',
+    timezoneLabel: 'Display Timezone',
+    timezoneDesc: 'Timezone used when logging practice records and formatting dates.',
 
-    // Import Workbench
+    // Catalog Ingestion Workbench
     workbenchTitle: 'JSON Lines Ingestion Workbench',
     workbenchDesc: 'Upload or paste your LeetCode problem datasets in JSONL format. Inspect preview differences before committing.',
     tabUpload: 'Upload File (.jsonl)',
@@ -79,6 +142,7 @@ export const translations = {
     metricUnchanged: 'Unchanged',
     metricDuplicates: 'Duplicates',
     metricErrors: 'Errors',
+    metricConflicts: 'Conflicts',
     errorTableTitle: 'Parsing & Identity Errors ({count})',
     sampleTitle: 'Change Preview Sample (First {count})',
     tableLine: 'Line',
@@ -89,6 +153,9 @@ export const translations = {
     actionInsert: 'Insert',
     actionUpdate: 'Update',
     actionUnchanged: 'Unchanged',
+    actionConflict: 'Conflict',
+    actionDuplicate: 'Duplicate',
+    actionError: 'Error',
     importSuccessMsg: 'Successfully committed import! Inserted: {inserted}, Updated: {updated}, Unchanged: {unchanged}.',
 
     // History
@@ -114,6 +181,7 @@ export const translations = {
     appTitle: 'LeetCode 题库追踪',
     appSubtitle: '纯离线本地题库工作台',
     navCatalog: '浏览题库',
+    navPractice: '刷题与进度',
     navSettings: '设置与数据导入',
 
     // Stats
@@ -125,6 +193,14 @@ export const translations = {
     statLastImport: '最近导入时间',
     never: '从未导入',
     statRevision: '题库版本号',
+
+    // Practice & Solved Stats
+    statSolvedProblems: '已解决题目',
+    statManualPractices: '手动刷题记录',
+    statSnapshots: '进度快照数',
+    statAcceptedSnapshots: '通过题目数',
+    statusSolved: '已解出',
+    statusUnsolved: '未解出',
 
     // Catalog filters & table
     searchPlaceholder: '按题号或标题搜索（例如 1 或 Two Sum）...',
@@ -138,6 +214,7 @@ export const translations = {
     tableDifficulty: '难度',
     tableTags: '标签',
     tableLink: '官方链接',
+    tableActions: '操作',
     openLink: '打开 ↗',
     noProblems: '未找到符合条件的题目。',
     noProblemsInDb: '本地题库当前为空。',
@@ -147,16 +224,69 @@ export const translations = {
     next: '下一页',
     perPage: '条/页',
 
+    // Manual Practice Quick Log
+    logPractice: '打卡刷题',
+    quickLogTitle: '记录刷题打卡',
+    practicedAtLabel: '练习时间 / 日期',
+    precisionDatetime: '日期与时间',
+    precisionDate: '仅日期',
+    completedLabel: '已完成 / 已解出',
+    notesLabel: '题解思路与总结',
+    notesPlaceholder: '记录思路、时空复杂度、边界坑点...',
+    btnSavePractice: '保存记录',
+    btnCancel: '取消',
+    savingPractice: '保存中...',
+    practiceLoggedSuccess: '刷题打卡记录保存成功！',
+    practiceHistory: '历史练习记录',
+    noPracticeHistory: '该题目暂无练习记录。',
+    btnRevoke: '撤销',
+    recordRevoked: '记录已撤销',
+
+    // Progress Import & Gemini Assistant Workbench
+    progressWorkbenchTitle: 'LeetCode 刷题进度导入与 AI 助手',
+    progressWorkbenchDesc: '粘贴 LeetCode 个人进度或提交列表文本。通过 Gemini AI 提取结构化记录，在写入 SQLite 前预检差异并确认冲突。',
+    geminiStatus: 'Gemini AI 助手状态',
+    geminiActive: '正常运行 ({model})',
+    geminiNotConfigured: '未配置（请在 .env 中设置 GEMINI_API_KEY）',
+    rawTextLabel: '原始刷题进度 / 提交文本',
+    rawTextPlaceholder: '在此处粘贴 LeetCode 提交记录文本，例如：\n1. 两数之和  通过  5 次提交  2026-01-15\n2. 两数相加  解答错误  2 次提交  02-01',
+    batchYearLabel: '缺省年份（文本中缺少年份时补全）',
+    btnFormatAI: '通过 Gemini AI 智能提取',
+    btnPreviewProgress: '预检进度差异',
+    parsingAI: 'Gemini 正在结构化解析文本...',
+    formatSuccess: '成功提取 {count} 条题目候选记录',
+    unparsedWarning: '有 {count} 段文本未能识别',
+    previewProgressTitle: '进度快照预检对比分析',
+    tableCurrent: '当前数据库记录',
+    tableIncoming: '拟导入新记录',
+    tableConflictReason: '冲突原因',
+    tableConfirmOverride: '确认覆盖',
+    tableLastResult: '最后结果',
+    tableSubmissions: '提交次数',
+    tableLastDate: '最后提交时间',
+    confirmAllConflicts: '全部确认覆盖',
+    btnCommitProgress: '确认并持久化进度快照',
+    progressCommitSuccess: '进度快照导入成功！新增: {inserted}，更新: {updated}，未变化: {unchanged}。',
+
+    // Conflict Descriptions
+    conflictOlderDate: '拟导入日期早于数据库已有记录',
+    conflictDecreasedSubmissions: '拟导入提交次数少于已有记录',
+    conflictSameDateDiffResult: '同一提交日期和次数，但判题结果冲突',
+    conflictIntraBatch: '本次导入批次内存在自相矛盾记录',
+    conflictUnmatched: '在本地题库中未找到对应题目',
+
     // Settings
     preferencesTitle: '界面与通用偏好',
-    preferencesDesc: '设置应用的显示语言与主题外观。',
+    preferencesDesc: '设置应用的显示语言、外观主题以及练习时间戳的时区。',
     langLabel: '界面语言',
     themeLabel: '外观主题',
     themeLight: '浅色模式',
     themeDark: '深色模式',
     themeSystem: '跟随系统',
+    timezoneLabel: '显示时区',
+    timezoneDesc: '用于刷题记录打卡和展示时间戳的时区。',
 
-    // Import Workbench
+    // Catalog Ingestion Workbench
     workbenchTitle: 'JSON Lines 题库导入工作台',
     workbenchDesc: '上传或粘贴您的 JSONL 题目记录。在正式写入数据库之前，系统会预检变更与行错误。',
     tabUpload: '文件上传 (.jsonl)',
@@ -175,6 +305,7 @@ export const translations = {
     metricUnchanged: '保持不变',
     metricDuplicates: '同批重复',
     metricErrors: '错误行数',
+    metricConflicts: '待确认冲突',
     errorTableTitle: '解析与身份冲突错误 ({count})',
     sampleTitle: '题目变更样例预览（前 {count} 项）',
     tableLine: '行号',
@@ -185,6 +316,9 @@ export const translations = {
     actionInsert: '新增',
     actionUpdate: '更新',
     actionUnchanged: '未变化',
+    actionConflict: '冲突',
+    actionDuplicate: '重复',
+    actionError: '错误',
     importSuccessMsg: '导入成功并已持久化！新增: {inserted}，更新: {updated}，未变化: {unchanged}。',
 
     // History

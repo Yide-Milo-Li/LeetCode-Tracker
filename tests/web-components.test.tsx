@@ -13,6 +13,8 @@ const { render, fireEvent, screen, act, cleanup } = await import('@testing-libra
 const { api } = await import('../apps/web/src/api.ts');
 const { SettingsView } = await import('../apps/web/src/components/SettingsView.tsx');
 const { CatalogView } = await import('../apps/web/src/components/CatalogView.tsx');
+const { PracticeLogModal } = await import('../apps/web/src/components/PracticeLogModal.tsx');
+const { ProgressWorkbench } = await import('../apps/web/src/components/ProgressWorkbench.tsx');
 
 afterEach(() => { cleanup(); mock.restoreAll(); });
 
@@ -35,6 +37,7 @@ function preview(id: string): ImportPreview {
 /** Mount the paste flow after its independent history request settles. */
 async function settings() {
   mock.method(api, 'getImportHistory', async () => ({ total: 0, items: [] }));
+  mock.method(api, 'getSettings', async () => ({ language: 'en', theme: 'light', timezone: null, updatedAt: 0 }));
   await act(async () => { render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} />); });
   fireEvent.click(screen.getByRole('button', { name: 'Paste Raw JSONL' }));
   return screen.getByRole('textbox') as HTMLTextAreaElement;
@@ -83,6 +86,7 @@ it('clear discards a delayed preview failure without resurrecting an alert', asy
 function overview() {
   mock.method(api, 'getCatalogStats', async () => ({ totalProblems: 2, easy: 2, medium: 0, hard: 0, paidOnly: 0, totalTags: 0, lastImportedAt: 1, catalogRevision: 1 }));
   mock.method(api, 'getAllTags', async () => ({ tags: [] }));
+  mock.method(api, 'getPracticeStats', async () => ({ uniqueSolvedProblems: 0, totalManualPractices: 0, completedManualPractices: 0, uncompletedManualPractices: 0, totalSnapshots: 0, acceptedSnapshots: 0, lastActivityAt: null, practiceRevision: 0 }));
 }
 
 /** Wrap synthetic items in the API's paginated response shape. */
@@ -161,6 +165,7 @@ it('handles pagination navigation and disables boundary controls correctly', asy
 
 it('rejects oversized files > 10 MiB before reading and shows alert', async () => {
   mock.method(api, 'getImportHistory', async () => ({ total: 0, items: [] }));
+  mock.method(api, 'getSettings', async () => ({ language: 'en', theme: 'light', timezone: null, updatedAt: 0 }));
   const view = await act(async () => render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} />));
   const fileInput = view.container.querySelector('input[type="file"]') as HTMLInputElement;
   const hugeFile = new (dom.window as unknown as { File: new (parts: string[], name: string) => File }).File(['dummy'], 'huge.jsonl');
@@ -169,4 +174,246 @@ it('rejects oversized files > 10 MiB before reading and shows alert', async () =
     fireEvent.change(fileInput, { target: { files: [hugeFile] } });
   });
   assert.match(screen.getByRole('alert').textContent!, /exceeds maximum allowed size of 10 MiB/);
+});
+
+it('logs practice sessions and revokes past practice records in PracticeLogModal', async () => {
+  const problem: CatalogProblem = {
+    questionId: 'q1',
+    questionFrontendId: '1',
+    title: 'Two Sum',
+    titleSlug: 'two-sum',
+    url: 'https://leetcode.com/problems/two-sum/',
+    difficulty: 'Easy',
+    isPaidOnly: false,
+    topicTags: [],
+    source: 'jsonl',
+  };
+
+  const existingRecord = {
+    id: 'rec-1',
+    questionId: 'q1',
+    questionFrontendId: '1',
+    problemTitle: 'Two Sum',
+    completed: true,
+    practicedAt: '2026-03-01T12:00:00.000Z',
+    timePrecision: 'datetime' as const,
+    notes: 'Existing solution note',
+    status: 'active' as const,
+    createdAt: 100,
+    updatedAt: 100,
+    revokedAt: null,
+  };
+
+  mock.method(api, 'getPracticeRecords', async () => ({
+    total: 1,
+    page: 1,
+    limit: 20,
+    items: [existingRecord],
+  }));
+
+  const createCalls = mock.method(api, 'createPracticeRecord', async (input: any) => ({
+    ...existingRecord,
+    id: 'rec-2',
+    notes: input.notes,
+  }));
+
+  const revokeCalls = mock.method(api, 'revokePracticeRecord', async () => ({
+    ...existingRecord,
+    status: 'revoked' as const,
+    revokedAt: 200,
+  }));
+
+  await act(async () => {
+    render(<PracticeLogModal problem={problem} lang="en" onClose={() => {}} />);
+  });
+
+  // Verify problem info and existing history are displayed
+  assert.ok(screen.getByText(/Log Practice Session: #1 Two Sum/));
+  assert.ok(screen.getByText('Existing solution note'));
+
+  // Switch precision to Date only
+  fireEvent.click(screen.getByRole('button', { name: 'Date only' }));
+
+  // Enter notes
+  const notesTextarea = screen.getByPlaceholderText(/Notes, algorithm strategy/);
+  fireEvent.change(notesTextarea, { target: { value: 'Solved with Map in O(N)' } });
+
+  // Submit practice form
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Save Record' }));
+  });
+
+  assert.equal(createCalls.mock.callCount(), 1);
+  const createArg = createCalls.mock.calls[0].arguments[0];
+  assert.equal(createArg.questionFrontendId, '1');
+  assert.equal(createArg.timePrecision, 'date');
+  assert.equal(createArg.notes, 'Solved with Map in O(N)');
+
+  // Revoke existing record
+  await act(async () => {
+    fireEvent.click(screen.getByTitle('Revoke'));
+  });
+  assert.equal(revokeCalls.mock.callCount(), 1);
+  assert.equal(revokeCalls.mock.calls[0].arguments[0], 'rec-1');
+});
+
+it('formats raw text, reviews preview diff with conflict override, and commits in ProgressWorkbench', async () => {
+  mock.method(api, 'getPracticeStats', async () => ({
+    uniqueSolvedProblems: 42,
+    totalManualPractices: 60,
+    completedManualPractices: 50,
+    uncompletedManualPractices: 10,
+    totalSnapshots: 40,
+    acceptedSnapshots: 38,
+    lastActivityAt: 12345,
+    practiceRevision: 5,
+  }));
+
+  mock.method(api, 'getProgressImportStatus', async () => ({
+    configured: true,
+    model: 'models/gemini-3.8-flash',
+  }));
+
+  mock.method(api, 'getProgressSnapshots', async () => ({
+    total: 0,
+    page: 1,
+    limit: 20,
+    items: [],
+  }));
+
+  const mockFormat = mock.method(api, 'formatWithGemini', async () => ({
+    candidates: [
+      {
+        frontendId: '1',
+        title: 'Two Sum',
+        lastResult: 'Accepted',
+        lastSubmitted: '2026-01-15',
+        submissions: 3,
+      },
+    ],
+    unparsedSnippets: [],
+    model: 'models/gemini-3.8-flash',
+  }));
+
+  const mockPreview = mock.method(api, 'previewProgressImport', async () => ({
+    previewId: 'prev-progress-1',
+    catalogRevision: 1,
+    practiceRevision: 1,
+    createdAt: 100,
+    expiresAt: 200,
+    totalCandidates: 1,
+    validCount: 1,
+    insertCount: 0,
+    updateCount: 0,
+    unchangedCount: 0,
+    conflictCount: 1,
+    duplicateCount: 0,
+    errorCount: 0,
+    items: [
+      {
+        frontendId: '1',
+        problemTitle: 'Two Sum',
+        difficulty: 'Easy' as const,
+        action: 'conflict' as const,
+        conflictType: 'older_date' as const,
+        conflictReason: 'Incoming date is older than existing record',
+        allowedToCommit: false,
+        currentSnapshot: {
+          lastSubmittedAt: '2026-02-01',
+          timePrecision: 'date' as const,
+          lastResult: 'Accepted',
+          totalSubmissions: 5,
+        },
+        incomingSnapshot: {
+          lastSubmittedAt: '2026-01-15',
+          timePrecision: 'date' as const,
+          lastResult: 'Accepted',
+          totalSubmissions: 3,
+        },
+      },
+    ],
+    errors: [],
+  }));
+
+  const mockCommit = mock.method(api, 'commitProgressImport', async () => ({
+    id: 'batch-1',
+    importedAt: 300,
+    totalCandidates: 1,
+    validCount: 1,
+    insertedCount: 0,
+    updatedCount: 1,
+    unchangedCount: 0,
+    conflictCount: 1,
+    duplicateCount: 0,
+    errorCount: 0,
+    errors: [],
+  }));
+
+  await act(async () => {
+    render(<ProgressWorkbench lang="en" />);
+  });
+
+  // Verify stats cards render
+  assert.ok(screen.getByText('42'));
+  assert.ok(screen.getByText(/Active \(models\/gemini-3.8-flash\)/));
+
+  // Enter text
+  const rawInput = screen.getByPlaceholderText(/Paste LeetCode submissions text here/);
+  fireEvent.change(rawInput, { target: { value: '1. Two Sum Accepted 3 2026-01-15' } });
+
+  // Format with AI
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Format with Gemini AI' }));
+  });
+
+  assert.equal(mockFormat.mock.callCount(), 1);
+  assert.equal(mockPreview.mock.callCount(), 1);
+
+  // Verify preview diff is displayed
+  assert.ok(screen.getByText(/Progress Import Preflight Analysis/));
+  assert.ok(screen.getByText(/Detected 1 conflict\(s\)/));
+
+  // Toggle conflict override checkbox
+  const confirmBtn = screen.getByTitle('Confirm Override');
+  fireEvent.click(confirmBtn);
+
+  // Commit
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm & Commit Snapshots' }));
+  });
+
+  assert.equal(mockCommit.mock.callCount(), 1);
+  assert.deepEqual(mockCommit.mock.calls[0].arguments, ['prev-progress-1', ['1']]);
+  assert.match(screen.getByRole('alert').textContent!, /Progress import committed/);
+});
+
+it('updates and persists timezone preference in SettingsView', async () => {
+  mock.method(api, 'getImportHistory', async () => ({ total: 0, items: [] }));
+  mock.method(api, 'getSettings', async () => ({
+    language: 'en',
+    theme: 'light',
+    timezone: 'UTC',
+    updatedAt: 1,
+  }));
+
+  const updateCalls = mock.method(api, 'updateSettings', async (payload: any) => ({
+    language: 'en' as const,
+    theme: 'light' as const,
+    timezone: payload.timezone,
+    updatedAt: 2,
+  }));
+
+  const view = await act(async () =>
+    render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} />)
+  );
+
+  const timezoneSelect = view.container.querySelector('select') as HTMLSelectElement;
+  assert.ok(timezoneSelect);
+
+  await act(async () => {
+    fireEvent.change(timezoneSelect, { target: { value: 'Asia/Shanghai' } });
+  });
+
+  assert.equal(updateCalls.mock.callCount(), 1);
+  assert.deepEqual(updateCalls.mock.calls[0].arguments[0], { timezone: 'Asia/Shanghai' });
 });

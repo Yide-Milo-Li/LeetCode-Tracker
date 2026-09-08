@@ -2,12 +2,13 @@
 
 | Area | State | Boundary |
 | --- | --- | --- |
-| Contracts and SQLite storage (v5) | Implemented & locally verified | Validated JSONL parsing, metadata normalization, atomic upserts, tag cascade relations, catalog revision tracking, and audit history |
-| Preflight preview & conflict detection | Implemented & locally verified | 30-minute preview cache, intra-batch conflict/duplicate checks, identity collision checks, and field-level diff prediction |
-| Local Fastify API (/api/v1) | Implemented & locally verified | Preview, transactional commit, durable retries across restarts, catalog query/search/filter, tag list, stats, and settings routes on 127.0.0.1 |
-| Bilingual web workbench (`apps/web`) | Implemented & locally verified | React/Vite UI with catalog filtering, file/paste ingestion workbench, diff preview, line error tables, and bilingual dark/light themes |
+| Contracts and SQLite storage (v6) | Implemented & locally verified | Schema v6: problems, tags, practice records with revision tracking, progress snapshots with versioned history, import audit history/results, and user timezone |
+| Preflight preview & conflict detection | Implemented & locally verified | Evaluates older dates, decreased submissions, same date/count conflicting results, intra-batch contradictions, and unmatched problems with explicit confirmation |
+| Local Fastify API (/api/v1) | Implemented & locally verified | CRUD for practice records, snapshot version history, Gemini formatting, preview/commit, stats, and settings on 127.0.0.1 |
+| Gemini AI format assistant | Implemented & locally verified | Server-side structured extraction via `@google/genai` with `models/gemini-3.8-flash`, 64 KiB input limit, mutex lock, and safe error mapping |
+| Bilingual web workbench (`apps/web`) | Implemented & locally verified | React/Vite UI with catalog filtering, practice quick-log modal, progress import workbench with diff review and conflict confirmation, stats, and timezone preference |
 | Backup, retention, and restore | Implemented & locally verified | Node native SQLite backup API, pre-import latest, pre-migration snapshots, 14 first-change UTC daily backups, and offline restore utility |
-| Automated test suite | Locally verified | 52 automated synthetic tests (46 storage/API + 6 React DOM) covering parser, storage, migrations, API, static fixtures, lease recovery, identity collisions, and UI races; separate private backup test |
+| Automated test suite | Locally verified | 74 automated synthetic tests (65 storage/API + 9 React DOM) covering practice records, snapshots, conflicts, Gemini assistant mock, and timezone settings |
 | User-provided dataset | Required | Pure BYOD model; no dataset distributed; users generate via LLM prompts or import custom lists |
 | Practice scheduling & recommendations | Planned | Next milestone: practice strategies and deterministic recommendation engine |
 | Production deployment | Not released | Local storage checks and loopback delivery are not public deployment evidence |

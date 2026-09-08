@@ -3,14 +3,15 @@
  * Manages view routing (Catalog vs Settings), global theme, and bilingual language state.
  */
 import React, { useEffect, useState } from 'react';
-import { BookOpen, Settings, Sun, Moon, Laptop } from 'lucide-react';
+import { BookOpen, Settings, Sun, Moon, Laptop, CheckCircle2 } from 'lucide-react';
 import { CatalogView } from './components/CatalogView.tsx';
 import { SettingsView } from './components/SettingsView.tsx';
+import { ProgressWorkbench } from './components/ProgressWorkbench.tsx';
 import { api } from './api.ts';
 import { translations, type Language } from './i18n.ts';
 
 export const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'catalog' | 'settings'>('catalog');
+  const [activeTab, setActiveTab] = useState<'catalog' | 'practice' | 'settings'>('catalog');
   const [lang, setLang] = useState<Language>('en');
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
 
@@ -89,6 +90,13 @@ export const App: React.FC = () => {
               {t.navCatalog}
             </button>
             <button
+              className={`nav-tab-btn ${activeTab === 'practice' ? 'active' : ''}`}
+              onClick={() => setActiveTab('practice')}
+            >
+              <CheckCircle2 size={16} />
+              {t.navPractice}
+            </button>
+            <button
               className={`nav-tab-btn ${activeTab === 'settings' ? 'active' : ''}`}
               onClick={() => setActiveTab('settings')}
             >
@@ -124,6 +132,8 @@ export const App: React.FC = () => {
       <main className="container">
         {activeTab === 'catalog' ? (
           <CatalogView lang={lang} onNavigateSettings={() => setActiveTab('settings')} />
+        ) : activeTab === 'practice' ? (
+          <ProgressWorkbench lang={lang} />
         ) : (
           <SettingsView
             lang={lang}

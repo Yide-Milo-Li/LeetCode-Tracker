@@ -8,9 +8,12 @@ import {
   Database,
   Layers,
   Sparkles,
+  CalendarPlus,
+  TrendingUp,
 } from 'lucide-react';
-import { api, type CatalogProblem, type CatalogStats, type CatalogQuery, type TopicTag } from '../api.ts';
+import { api, type CatalogProblem, type CatalogStats, type CatalogQuery, type TopicTag, type PracticeStats } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
+import { PracticeLogModal } from './PracticeLogModal.tsx';
 
 interface CatalogViewProps {
   lang: Language;
@@ -25,6 +28,8 @@ export const CatalogView: React.FC<CatalogViewProps> = ({ lang, onNavigateSettin
   const [tags, setTags] = useState<TopicTag[]>([]);
   const [problems, setProblems] = useState<CatalogProblem[]>([]);
   const [total, setTotal] = useState(0);
+  const [practiceStats, setPracticeStats] = useState<PracticeStats | null>(null);
+  const [selectedProblemForPractice, setSelectedProblemForPractice] = useState<CatalogProblem | null>(null);
 
   // Filters state
   const [search, setSearch] = useState('');
@@ -43,10 +48,11 @@ export const CatalogView: React.FC<CatalogViewProps> = ({ lang, onNavigateSettin
     let active = true;
     setOverviewLoading(true);
     setOverviewError(false);
-    Promise.all([api.getCatalogStats(), api.getAllTags()]).then(([metrics, topics]) => {
+    Promise.all([api.getCatalogStats(), api.getAllTags(), api.getPracticeStats()]).then(([metrics, topics, pStats]) => {
       if (!active) return;
       setStats(metrics);
       setTags(topics.tags);
+      setPracticeStats(pStats);
     }).catch(() => {
       if (active) setOverviewError(true);
     }).finally(() => {
@@ -141,6 +147,18 @@ export const CatalogView: React.FC<CatalogViewProps> = ({ lang, onNavigateSettin
           </div>
         </div>
         <div className="metric-card">
+          <div className="metric-label" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--primary)' }}>
+            <TrendingUp size={14} />
+            {t.statSolvedProblems}
+          </div>
+          <div className="metric-value" style={{ color: 'var(--primary)' }}>
+            {practiceStats?.uniqueSolvedProblems ?? 0}
+          </div>
+          <div className="metric-sub">
+            {stats?.totalProblems ? Math.round(((practiceStats?.uniqueSolvedProblems ?? 0) / stats.totalProblems) * 100) : 0}% of catalog
+          </div>
+        </div>
+        <div className="metric-card">
           <div className="metric-label">{t.statPremium}</div>
           <div className="metric-value">{stats?.paidOnly ?? 0}</div>
           <div className="metric-sub">{t.statLastImport}: {formattedLastImport}</div>
@@ -231,7 +249,7 @@ export const CatalogView: React.FC<CatalogViewProps> = ({ lang, onNavigateSettin
                 <th>{t.tableTitle}</th>
                 <th style={{ width: '110px' }}>{t.tableDifficulty}</th>
                 <th>{t.tableTags}</th>
-                <th style={{ width: '100px', textAlign: 'right' }}>{t.tableLink}</th>
+                <th style={{ width: '180px', textAlign: 'right' }}>{t.tableActions}</th>
               </tr>
             </thead>
             <tbody>
@@ -267,20 +285,29 @@ export const CatalogView: React.FC<CatalogViewProps> = ({ lang, onNavigateSettin
                         )}
                       </div>
                     </td>
-                    <td style={{ textAlign: 'right' }}>
-                      {safeUrl ? (
-                        <a
-                          href={safeUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <div style={{ display: 'inline-flex', gap: '0.5rem', alignItems: 'center' }}>
+                        <button
                           className="btn btn-outline btn-sm"
-                          style={{ textDecoration: 'none', display: 'inline-flex' }}
+                          onClick={() => setSelectedProblemForPractice(p)}
+                          title={t.logPractice}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
                         >
-                          <span>{t.openLink}</span>
-                        </a>
-                      ) : (
-                        <span style={{ color: 'var(--text-muted)' }}>-</span>
-                      )}
+                          <CalendarPlus size={13} />
+                          <span>{t.logPractice}</span>
+                        </button>
+                        {safeUrl && (
+                          <a
+                            href={safeUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="btn btn-outline btn-sm"
+                            style={{ textDecoration: 'none', display: 'inline-flex' }}
+                          >
+                            <span>{t.openLink}</span>
+                          </a>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -326,6 +353,17 @@ export const CatalogView: React.FC<CatalogViewProps> = ({ lang, onNavigateSettin
             </button>
           </div>
         </div>
+      )}
+
+      {selectedProblemForPractice && (
+        <PracticeLogModal
+          problem={selectedProblemForPractice}
+          lang={lang}
+          onClose={() => setSelectedProblemForPractice(null)}
+          onRecordSaved={() => {
+            api.getPracticeStats().then((ps) => setPracticeStats(ps)).catch(() => {});
+          }}
+        />
       )}
     </div>
   );

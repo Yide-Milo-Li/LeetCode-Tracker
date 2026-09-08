@@ -64,31 +64,43 @@ Example line:
 
 ---
 
-## 3. SQLite schema (v5)
+## 3. SQLite schema (v6)
 
-The local SQLite catalog schema is defined in [store.ts](../packages/database/src/store.ts) (version 5):
+The local SQLite catalog schema is defined in [store.ts](../packages/database/src/store.ts) (version 6):
 
 - **`problems`**: Stores normalized problem records keyed by `question_id`, with unique index on `frontend_question_id`.
 - **`tags`**: Normalized taxonomy table keyed by `slug`.
 - **`problem_tags`**: Many-to-many relationship table with cascade deletion.
+- **`practice_records`**: Manual practice sessions with datetime/date precision, completed flag, notes, and soft-revocation audit fields (`status`, `revoked_at`, `revoked_reason`).
+- **`progress_snapshots`**: Single current progress snapshot per internal problem (`last_submitted_at`, `time_precision`, `last_result`, `total_submissions`, `has_accepted`, `version`).
+- **`progress_snapshot_history`**: Versioned historical snapshots retained for audit trail on every update or revocation.
+- **`progress_import_history`**: Audit log recording progress import timestamps, candidates processed, inserted/updated/unchanged/conflict/error counts.
+- **`progress_import_results`**: Durable serialized replay of progress import summaries.
 - **`import_results`**: Complete committed response, including line errors, keyed by import ID for durable retry replay.
 - **`import_history`**: Audit log recording ingestion timestamps, lines processed, inserted/updated/unchanged/duplicate counts, and error counts.
-- **`catalog_meta`**: Key-value metadata storing monotonic `catalog_revision` and `last_imported_at`.
-- **`settings`**: User preferences table storing `language` ('en' | 'zh') and `theme` ('light' | 'dark' | 'system').
+- **`catalog_meta`**: Key-value metadata storing monotonic `catalog_revision`, `practice_revision`, and `last_imported_at`.
+- **`settings`**: User preferences table storing `language` ('en' | 'zh'), `theme` ('light' | 'dark' | 'system'), and `timezone` (string | null).
 - **`schema_version`**: Tracks applied database schema version.
 
-### Ingestion guarantees
-- **Preflight Inspection**: Validates inputs, detects conflicts, and reports preview diffs before write.
-- **Atomic Transactions**: Problems, tags, audit logs, complete import results, and catalog revision increment commit together in one transaction.
-- **Consistent Backups**: Native SQLite backups are generated before migration and data changes, retaining 14 daily archives.
-- **Offline Restore**: Offline restoration command validates backup integrity before restoring with safety snapshots.
+---
 
-### Conflicts and retry behavior
+## 4. Manual practice records & progress snapshots
 
-All members of a contradictory frontend-ID group are excluded, regardless of line order. Collisions are also checked after internal IDs have been preserved or derived. Identical valid rows count as duplicates; normalization failures remain line errors. Tag differences include ID, name, and slug, while tag order alone is not a change. Tag metadata is shared by slug across the catalog, so an explicit rename affects every problem linked to that tag.
+- **Completion Proof Rule**: A problem is considered solved if it has an active completed manual practice record OR a progress snapshot with `has_accepted = 1`.
+- **Snapshot Replacement Without Deltas**: Progress snapshot ingestion records the exact incoming snapshot values without computing synthetic submission deltas.
+- **Conflict Evaluation**:
+  - `older_date`: Incoming submission timestamp is older than existing snapshot.
+  - `decreased_submissions`: Incoming submission count is lower than existing snapshot.
+  - `conflicting_result_same_date_count`: Same date and submission count, but differing results.
+  - `intra_batch_contradiction`: Contradictory items for the same problem within one batch.
+  - `unmatched_problem`: Problem frontend ID or title not matched in catalog.
+- **Conflict Confirmation**: Conflicted records require explicit confirmation via `confirmedFrontendIds` before commit. Unconfirmed conflicts are safely skipped.
 
-New problems default to internal ID `id`, derived slug and URL, empty tags, `isPaidOnly: false`, and `source: "leetcode.com"`. Updates preserve omitted optional metadata, including slug and URL, even when the title changes.
+---
 
-An uncommitted preview expires after 30 minutes or is lost at server restart. A committed ID can be retried after restart and returns the persisted full result. Historical v3/v4 imports retain their counts; missing historical line details cannot be reconstructed and are marked `errorsUnavailable: true` when applicable.
+## 5. Gemini AI format assistant
 
-Startup and restore share read-only checks of supported versions (3, 4, 5), required tables/columns/keys, relations, metadata, and SQLite integrity. The standalone server awaits a verified backup before upgrading v3/v4 to v5 and before an import changes catalog records. Backup failure aborts the operation. An unchanged-only import records history and revision but does not replace the previous data-change snapshot.
+- **Model**: `models/gemini-3.8-flash` via official `@google/genai` SDK structured outputs.
+- **Server-Side Execution**: Credentials remain strictly on the server in `.env`; no API key is exposed to the browser.
+- **Rate & Concurrency Controls**: Serialized mutex lock (at most 1 concurrent AI parse call), 64 KiB input limit (up to 200 candidate problems), and 60s abort timeout.
+- **Structured Output Schema**: Extracts `frontendId`, `title`, `lastSubmitted`, `lastResult`, and `submissions`. If the year is omitted in raw text, falls back to the user-specified `batchYear`.

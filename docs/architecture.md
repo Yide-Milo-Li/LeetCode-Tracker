@@ -1,13 +1,13 @@
 # Architecture
 
-The repository baseline implements an offline-first, Bring-Your-Own-Data (BYOD) practice workbench. It provides shared TypeScript contracts, transactional SQLite storage (schema v5), a local Fastify loopback API, and a bilingual React web client.
+The repository baseline implements an offline-first, Bring-Your-Own-Data (BYOD) practice workbench. It provides shared TypeScript contracts, transactional SQLite storage (schema v6), a local Fastify loopback API, a server-side Gemini structured format assistant, and a bilingual React web client.
 
 ## Component structure
 
-- **`packages/contracts`**: Validated Zod schemas and normalization pipelines for JSON Lines parsing, preflight preview, import summaries, catalog filtering, and settings.
-- **`packages/database`**: High-performance SQLite engine (`DatabaseSync`) managing schema migrations (v3/v4 to v5), preflight validation, atomic multi-table writes, point-in-time backups via native Node SQLite backup, daily backup pruning, and offline restore.
-- **`apps/server`**: Local Fastify API bound to `127.0.0.1`. Exposes `/api/v1` endpoints with request validation, write serialization mutex, and production static web asset hosting.
-- **`apps/web`**: React/Vite single-page application providing catalog search/filtering and the JSONL ingestion workbench with change previews, line error reports, and bilingual controls.
+- **`packages/contracts`**: Validated Zod schemas and normalization pipelines for JSON Lines parsing, preflight preview, import summaries, catalog filtering, manual practice records, progress snapshots, conflict evaluation, and settings.
+- **`packages/database`**: High-performance SQLite engine (`DatabaseSync`) managing schema migrations (v3/v4/v5 to v6), preflight validation, atomic multi-table writes, point-in-time backups via native Node SQLite backup, daily backup pruning, and offline restore.
+- **`apps/server`**: Local Fastify API bound to `127.0.0.1`. Exposes `/api/v1` endpoints for catalog, imports, practice records, progress snapshots, and Gemini format assistant (`models/gemini-3.8-flash`) with write serialization mutex and static SPA hosting.
+- **`apps/web`**: React/Vite single-page application providing catalog search/filtering, practice quick-log modal, progress import & AI assistant workbench, diff preview, conflict resolution, and bilingual controls.
 
 ## Ingestion pipeline
 

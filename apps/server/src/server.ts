@@ -10,8 +10,17 @@ import { CatalogStore } from '../../../packages/database/src/store.ts';
 import { buildApp } from './app.ts';
 import { acquireDatabaseLease } from '../../../packages/database/src/lease.ts';
 
+if (typeof process.loadEnvFile === 'function') {
+  try {
+    process.loadEnvFile();
+  } catch {
+    // .env is optional
+  }
+}
+
 /** Acquire database ownership and await protected initialization before listening. */
 async function startServer() {
+
   const repoRoot = path.resolve(import.meta.dirname, '../../..');
   const localDir = process.env.LOCAL_DIR ? path.resolve(process.env.LOCAL_DIR) : path.join(repoRoot, '.local');
   if (!fs.existsSync(localDir)) {

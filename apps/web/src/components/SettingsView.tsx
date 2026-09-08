@@ -14,6 +14,7 @@ import {
   History,
   Languages,
   Palette,
+  Globe,
 } from 'lucide-react';
 import {
   api,
@@ -52,6 +53,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   // History state
   const [history, setHistory] = useState<ImportHistoryItem[]>([]);
+  const [currentTimezone, setCurrentTimezone] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // A generation covers file reads and previews; edits invalidate every older response.
@@ -61,8 +63,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   useEffect(() => {
     loadHistory();
+    api.getSettings()
+      .then((s) => {
+        if (s.timezone) setCurrentTimezone(s.timezone);
+      })
+      .catch((err) => console.error('Failed to load timezone:', err));
     return () => { inputGeneration.current += 1; };
   }, []);
+
+  async function handleTimezoneChange(newTz: string | null) {
+    setCurrentTimezone(newTz);
+    try {
+      await api.updateSettings({ timezone: newTz });
+    } catch (err) {
+      console.error('Failed to save timezone:', err);
+    }
+  }
 
   /** Invalidate pending reads and previews before changing the displayed input. */
   function invalidateInput() {
@@ -250,6 +266,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 {t.themeSystem}
               </button>
             </div>
+          </div>
+
+          <div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.5rem' }}>
+              <Globe size={16} />
+              {t.timezoneLabel}
+            </label>
+            <select
+              className="select-field"
+              value={currentTimezone || ''}
+              onChange={(e) => handleTimezoneChange(e.target.value || null)}
+              style={{ minWidth: '200px' }}
+            >
+              <option value="">UTC (Default)</option>
+              <option value="Asia/Shanghai">Asia/Shanghai (CST +08:00)</option>
+              <option value="Asia/Tokyo">Asia/Tokyo (JST +09:00)</option>
+              <option value="America/New_York">America/New_York (EST/EDT)</option>
+              <option value="America/Los_Angeles">America/Los_Angeles (PST/PDT)</option>
+              <option value="Europe/London">Europe/London (GMT/BST)</option>
+              <option value="Europe/Paris">Europe/Paris (CET/CEST)</option>
+            </select>
           </div>
         </div>
       </div>

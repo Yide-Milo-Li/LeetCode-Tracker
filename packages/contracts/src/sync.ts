@@ -263,6 +263,7 @@ export type CatalogStats = z.infer<typeof catalogStatsSchema>;
 export const userSettingsSchema = z.object({
   language: z.enum(['en', 'zh']),
   theme: z.enum(['light', 'dark', 'system']),
+  timezone: z.string().max(100).nullable().default(null),
   updatedAt: z.number().int().nonnegative(),
 });
 
@@ -272,9 +273,11 @@ export type UserSettings = z.infer<typeof userSettingsSchema>;
 export const updateSettingsInputSchema = z.object({
   language: z.enum(['en', 'zh']).optional(),
   theme: z.enum(['light', 'dark', 'system']).optional(),
-}).refine(data => data.language !== undefined || data.theme !== undefined, {
-  message: 'At least one setting (language or theme) must be provided',
+  timezone: z.string().max(100).nullable().optional(),
+}).refine(data => data.language !== undefined || data.theme !== undefined || data.timezone !== undefined, {
+  message: 'At least one setting (language, theme, or timezone) must be provided',
 });
+
 
 export type UpdateSettingsInput = z.infer<typeof updateSettingsInputSchema>;
 

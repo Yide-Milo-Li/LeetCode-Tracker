@@ -18,8 +18,9 @@
     "build": "vite build apps/web",
     "start": "node apps/server/src/server.ts",
     "check": "tsc --noEmit",
-    "test": "node --test tests/catalog-store.test.ts tests/server-api.test.ts tests/review-regressions.test.ts && npm run test:web",
+    "test": "node --test tests/catalog-store.test.ts tests/server-api.test.ts tests/review-regressions.test.ts tests/practice-store.test.ts tests/server-practice-api.test.ts && npm run test:web",
     "test:private": "node --test tests/private-backup.test.ts",
+
     "restore": "node scripts/restore-backup.ts",
     "docs:check": "node scripts/check-docs.ts",
     "test:web": "node --import tsx --test tests/web-components.test.tsx"
