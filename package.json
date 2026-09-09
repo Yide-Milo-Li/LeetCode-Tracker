@@ -19,7 +19,7 @@
     "build": "vite build apps/web",
     "start": "node apps/server/src/server.ts",
     "check": "tsc --noEmit",
-    "test": "node --test tests/phase4-closure-verification.test.ts tests/planning-remediation.test.ts tests/time.test.ts tests/catalog-store.test.ts tests/server-api.test.ts tests/review-regressions.test.ts tests/practice-store.test.ts tests/server-practice-api.test.ts tests/planning-domain-store.test.ts tests/server-planning-api.test.ts tests/dashboard-domain-store.test.ts tests/server-dashboard-api.test.ts && npm run test:web",
+    "test": "node --test tests/phase4-closure-verification.test.ts tests/phase5-closure-verification.test.ts tests/planning-remediation.test.ts tests/time.test.ts tests/catalog-store.test.ts tests/server-api.test.ts tests/review-regressions.test.ts tests/practice-store.test.ts tests/server-practice-api.test.ts tests/planning-domain-store.test.ts tests/server-planning-api.test.ts tests/dashboard-domain-store.test.ts tests/server-dashboard-api.test.ts && npm run test:web",
     "test:private": "node --test tests/private-backup.test.ts",
     "restore": "node scripts/restore-backup.ts",
     "docs:check": "node scripts/check-docs.ts",
