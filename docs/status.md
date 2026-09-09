@@ -1,48 +1,51 @@
 # Implementation status
 
-| Area | State | Boundary |
+## Phase 6 desktop refactor — local implementation
+
+The desktop refactor is implemented. The current verification uses synthetic catalog/practice data, isolated SQLite stores and injected Gemini responses. It is not a live-provider or release claim.
+
+| Area | Implemented behavior | Evidence boundary |
 | --- | --- | --- |
-| Contracts and SQLite storage (v7) | Implemented & locally verified | Schema v7: problems, tags, practice records with revision tracking, progress snapshots with versioned history, import audit history/results, strategies, weekday schedules, daily plans, and user timezone |
-| Preflight preview & conflict detection | Implemented & locally verified | Evaluates older dates, decreased submissions, same date/count conflicting results, intra-batch contradictions, and unmatched problems with explicit confirmation |
-| Local Fastify API (/api/v1) | Implemented & locally verified | CRUD for practice records, snapshot version history, Gemini formatting, preview/commit, stats, planning lifecycle, read-only dashboard overview & activity history on 127.0.0.1 |
-| Gemini AI format & planning assistant | Implemented & locally verified | Server-side structured extraction, prompt override parsing, and candidate recommendation via `@google/genai` with fallback cascade (`models/gemini-3.5-flash`, `models/gemini-3.5-flash-lite`, `models/gemini-3.6-flash`, `models/gemini-3.7-flash`), 64 KiB input limit, mutex lock, and safe error mapping |
-| Recommendation & planning engine | Implemented & locally verified | Deterministic quota distribution, weekday strategy scheduling, review tracking, single/batch replacement, and validated prompt overrides |
-| Dashboard & activity insights | Implemented & locally verified | Cumulative KPIs, today summary card with `generatedCount`, yearly heatmap, 30-day Recharts trend, difficulty & tag distributions, recent activity feed, and slide-over history drawer with `revision` |
-| Bilingual web workbench (`apps/web`) | Implemented & locally verified | React/Vite UI with catalog filtering, practice quick-log, progress import workbench, today plan execution view, strategies view, overview dashboard, and timezone preference; desktop-only layout support (1024px, 1440px, 1920px) |
-| Backup, retention, and restore | Implemented & locally verified | Node native SQLite backup API, pre-import latest, pre-migration snapshots, 14 first-change UTC daily backups, and offline restore utility; verified with deep-equality assertion and zero-write resilience |
-| Automated test suite | Locally verified | 156 automated synthetic offline tests (134 storage/domain/API + 22 React DOM); isolated live external Gemini suite (`test:live`, 4 tests); desktop browser screenshot suite (`verify:desktop`, 19 test points) |
-| User-provided dataset | Required | Pure BYOD model; no dataset distributed; users generate via LLM prompts or import custom lists |
-| Production deployment | Not released | Local storage checks and loopback delivery are not public deployment evidence |
+| Navigation | Today default, Problems, Progress; bottom Settings; contextual schedule and import workspaces | React DOM and isolated desktop Chrome |
+| Today | Seven-day overview, generated denominator/shortage, completion circles, exact evidence details, replacement, overrides and version history | Domain/API/DOM tests plus local browser flows |
+| Practice reliability | Nullable duration, exact GET, optional operation IDs, persistent atomic replay, revision-safe editing and scoped revocation | Synthetic file-backed migration/restart/recovery and API tests |
+| Progress | Records/Statistics, search-first historical manual entry, five-step import, per-problem consent, paginated snapshots and audit correction/revocation | Mocked formatter with real local validation/SQLite writes |
+| Problems | Existing filters/page sizes, details/history, contextual recording, separate JSONL workspace and paginated import results | DOM race/freeze tests and local browser import |
+| Preferences and accessibility | English/Chinese, warm light/dark/system themes, explicit timezone save, reduced motion, labelled fields and focus-managed overlays | DOM/system-theme assertions and desktop screenshots |
+| Statistics | Existing metrics, yearly heatmap, 30-day trend, difficulty/tags, historical records and coverage; seven-day view reuses the same projection | Domain tests, including 23/25-hour DST days |
+| Publication | No Phase 6 commit, push or deployment | The separately authorized baseline commit is 86592fd |
 
-## Phase 5 audit remediation & verification (2026-09-09)
+## Current checks
 
-The audit findings from Phase 5 closure review have been addressed with local regression evidence:
+The acceptance follow-up integration suite passes 182 tests: 142 storage/domain/API and 40 React DOM tests. Type checking, frontend build, documentation link checks and `git diff --check` are required alongside the suite. The original pre-refactor baseline had 156 passing tests (134 + 22); the first Phase 6 handoff had 175 (142 + 33). These remain separate historical checkpoints.
 
-1. **Real Gemini validation (`npm run test:live`)**:
-   - Isolated from the default offline synthetic suite into `tests/live-gemini-verification.test.ts`.
-   - Strictly asserts non-local model execution (`assert.notEqual(result.model, 'local')`), non-empty AI problem selection, bilingual encouragement/reasoning, and schema-compliant natural-language prompt override parsing (`parseOverridePrompt`).
-   - Active cascade: primary `models/gemini-3.5-flash`, with fallbacks to `models/gemini-3.5-flash-lite`, `models/gemini-3.6-flash`, and `models/gemini-3.7-flash`. Rate-limiting cooldowns protect free-tier quotas.
-2. **Strict timezone date resolution & pending deduplication**:
-   - `resolveEventDate` strictly checks date-only mapping uniqueness across source and user zones using `getZonedDayInterval`. Unset userZone and cross-day intervals are marked `isPending: true`.
-   - `calculateDashboardStats` deduplicates redundant events *before* incrementing `pendingDateCount`, ensuring 100% parity between KPI count and activity stream count.
-3. **Backup/restore deep equality & zero-write resilience**:
-   - `tests/phase5-closure-verification.test.ts` validates full deep equality (`assert.deepEqual`) across database tables, strategies, schedules, plans, snapshots, and dashboard computations after offline backup and restore.
-   - Asserts that all Dashboard read operations (`getDashboardRawData`, `calculateDashboardStats`) maintain zero-write resilience without mutating plans, settings, or audit tables.
-4. **Contract completions**:
-   - `DashboardDailySummary` includes `generatedCount: number` to distinguish generated target from strategy dailyCount.
-   - `DashboardActivityListResponse` includes `revision: RevisionStamp` for data freshness tracking.
-5. **Desktop browser verification (`npm run verify:desktop`)**:
-   - Automated via Chrome DevTools Protocol (CDP) using native Node 24 `WebSocket` on loopback port 3088.
-   - 19 screenshots captured in `.local/evidence/phase5-desktop/` across 1024x768, 1440x900, 1920x1080 in light/dark themes and EN/ZH locales, covering initial dashboard, today plan, completion marking, KPI increment (+1), history drawer, undo completion, and keyboard focus rings.
-6. **Expected non-fatal development artifacts**:
-   - Vite rolldown/chunk size warning (>500 kB) for single-bundle web client.
-   - JSDOM Recharts `width(0) and height(0)` warnings during DOM testing.
-   - `@fastify/static` audit advisory.
+The desktop harness in [verify-refactor-browser.ts](../scripts/verify-refactor-browser.ts) uses actual React, Fastify and SQLite on a random loopback port with a separate Chrome profile. It checks eight destinations at 1024/1440/1920 pixels in English/Chinese and light/dark themes. It validates persisted preferences after a full document reload and stores screenshots, interactions and network evidence under ignored `.local/evidence/phase6/browser/`. See [testing boundaries](../tests/README.md).
 
-## Review repair verification (2026-09-08)
+The final follow-up browser run passed 96 page combinations, 108 overlay combinations and 18 workflow groups, producing 262 screenshots. It captured zero exceptions, console errors, console warnings or external page requests. Coverage includes long localized content, real keyboard completion, current-snapshot pagination, formatter failure and expired-preview recovery. All five required engineering commands passed. The original 96-layout, 11-flow, 88-screenshot run remains historical. The ignored handoff and 59-row implemented migration map distinguish browser flows from domain/API/DOM coverage. Eighteen explicit semantic token contrast pairs passed; this is not a complete WCAG certification or assistive-technology audit.
 
-The review findings against the initial catalog workbench have local fixes and regression evidence. Verification includes backup failures blocking writes, WAL-aware safety/restore snapshots, v3/v4 to v5 migration, durable complete import-result replay, stricter schema/identity checks, frontend response ordering and retry states, non-existent restore source protection, corrupted lock recovery, non-ASCII tag slug preservation, deterministic catalog pagination, server preview memory capping, and client drag/size guards.
+The follow-up applies the official Impeccable audit, hardening and polish guidance manually to the approved local design. The Impeccable CLI/context detector was not installed or executed. Its guidance does not expand the desktop-only scope or authorize live-provider/private-data access.
 
-The default 156 tests, type checking, build, and documentation checks pass locally. A fresh public-file copy passed installation and tests before any frontend build. Manual and automated browser checks use synthetic data and an isolated loopback server; the original local database and private JSONL backup remain unchanged. These repairs have local verification evidence; no public release or deployment has been performed.
+## Repairs discovered during this refactor
 
-Known limits: old v3/v4 history cannot recover line-error details that were never stored; restore ownership applies to this application rather than unrelated SQLite tools. Installation reports an existing `@fastify/static` advisory and build output includes Vite dependency deprecation warnings; dependency remediation is separate from the 12 review fixes.
+- Clearing an in-flight manual search now ends its loading state and rejects obsolete results.
+- Parallel completion writes queue optional detail prompts. Closing a pending save now reports its outcome and offers the original failed draft for same-record retry.
+- Today strategy lookup and Statistics source totals have working retry paths. Date projections invalidate on timezone changes and local-day rollover.
+- Problem details reuses the manual editor inside one drawer, with focus transferred into the form and restored on return. Browser history closes outgoing overlays.
+- Hidden Statistics suspends the chart renderer, eliminating the observed zero-size warnings in the isolated browser run without resetting the selected year.
+- The completion glyph, compact seven-day strip and 640px strategy/adjustment drawers now more closely follow the approved design. Model metadata is retained in version history; the main plan uses a concise recommendation-source label. Large KPI values adapt to desktop width.
+- The synthetic v7-to-v8 restore test additionally compares complete dashboard inputs and source totals, then edits/clears duration and rejects changed-payload operation replay after restore.
+
+- An existing fixed-24-hour day calculation was incorrect across daylight-saving transitions; independent midnight boundaries now retain 23/25-hour days.
+- An empty DELETE request must not advertise a JSON body; the client now sets JSON Content-Type only when a body is sent.
+- A successful practice write remains completion evidence when background plan refresh fails. Corrections/revocations update only the acknowledged record and reuse the existing domain ordering rule.
+- Import result history now retains rejected candidate details corresponding to its error count.
+- A preliminary screenshot harness used same-document hash navigation and incorrectly labelled repeated theme/language images. That preliminary matrix was rejected; the current harness forces a new document and asserts actual language/theme.
+- A later empty-catalog fixture omitted the tag response shape and initially retained unrelated solved totals. The fixture was corrected across catalog/tag/practice summaries before final acceptance; this was not a production API response.
+- A pre-existing Phase 5 test combined a fixed query date with the real clock used for plan generation. It failed when the Tokyo calendar day advanced during this run. The fixture now freezes the generation clock to its query instant; all behavioral assertions remain.
+- Static legacy styles were extracted and deduplicated; fonts, surfaces and semantic colors follow desktop tokens.
+
+## Limits and historical evidence
+
+No original private database, golden JSONL, environment file or live Gemini call was used for this refactor. No public release, clean-machine distribution validation or dependency upgrade was performed. The existing Vite plugin deprecation/chunk-size warnings and JSDOM Recharts zero-dimension warnings remain non-fatal. The bundle has grown with shared domain validation and the expanded workspaces; chunk splitting is not part of this delivery. A previously reported dependency advisory was not reassessed through a network audit here.
+
+Phase 5's 156-test baseline and its earlier browser/live-suite documentation remain historical. The live Gemini command is optional and separate from the default suite; its presence does not establish that it ran during Phase 6. Old import histories cannot reconstruct error details that were never stored. The first implementation lacked local Impeccable instructions; the acceptance follow-up retrieved its official guidance and applied it alongside PRODUCT.md, DESIGN.md and the approved gallery.

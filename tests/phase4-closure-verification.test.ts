@@ -134,7 +134,7 @@ describe('Phase 4 Closure Gate Verification', () => {
     const restoreResult = await backupManager.restoreBackup(backupFile, restorePath);
     assert.equal(restoreResult.success, true);
     assert.equal(restoreResult.restoredProblems, 5);
-    assert.equal(restoreResult.restoredVersion, 7);
+    assert.equal(restoreResult.restoredVersion, 8);
 
     // 8. Reopen database and verify all data integrity
     const restoredDb = new DatabaseSync(restorePath);

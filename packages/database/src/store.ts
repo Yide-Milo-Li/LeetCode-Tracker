@@ -56,6 +56,7 @@ import {
 } from '../../contracts/src/practice.ts';
 import { BackupManager } from './backup.ts';
 import { createPlanningSchema } from './planning-schema.ts';
+import { createPracticeMetadataSchema } from './practice-schema.ts';
 import { PlanningStore } from './planning-store.ts';
 
 
@@ -67,6 +68,16 @@ export class CatalogRevisionMismatchError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'CatalogRevisionMismatchError';
+  }
+}
+
+/** Stable conflict code for replay payload mismatch or stale practice edits. */
+export class PracticeConflictError extends Error {
+  public readonly code: 'OPERATION_CONFLICT' | 'RECORD_REVISION_MISMATCH';
+  constructor(code: 'OPERATION_CONFLICT' | 'RECORD_REVISION_MISMATCH', message: string) {
+    super(message);
+    this.name = 'PracticeConflictError';
+    this.code = code;
   }
 }
 
@@ -151,7 +162,9 @@ export class CatalogStore {
           this.migrateV5ToV6();
         }
       }
-      createPlanningSchema(this.db);
+      // v7 initialization projects snapshot evidence. Never replay it when upgrading v7.
+      if (version === null || version < 7) createPlanningSchema(this.db);
+      createPracticeMetadataSchema(this.db);
       inspectCatalogSchema(this.db);
       this.db.exec('COMMIT');
     } catch (error) {
@@ -1065,7 +1078,6 @@ export class CatalogStore {
     return this.getSettings();
   }
 
-  /** Get the current practice integer revision number. */
   /** Record one observed snapshot success; correction invalidates the previous source chain. */
   private recordSnapshotSuccess(questionId: string, version: number, at: string, precision: TimePrecision, result: string, zone: string | null, correction: boolean, now: number): void {
     if (correction) this.db.prepare('DELETE FROM snapshot_successes WHERE question_id=?').run(questionId);
@@ -1087,6 +1099,16 @@ export class CatalogStore {
     return next;
   }
 
+  /** Resolve a durable creation receipt without requiring a new backup for a read-only replay. */
+  private replayPracticeOperation(operationId: string | undefined, fingerprint: string): PracticeRecord | null {
+    if (!operationId) return null;
+    const replay = this.db.prepare('SELECT fingerprint, record_id FROM practice_operations WHERE id=?')
+      .get(operationId) as { fingerprint: string; record_id: string } | undefined;
+    if (!replay) return null;
+    if (replay.fingerprint !== fingerprint) throw new PracticeConflictError('OPERATION_CONFLICT', 'This operation identifier was already used for different practice content.');
+    return this.getPracticeRecord(replay.record_id);
+  }
+
   /**
    * Add a manual practice record for a specific problem.
    *
@@ -1095,26 +1117,36 @@ export class CatalogStore {
    */
   public async createPracticeRecord(input: CreatePracticeRecordInput): Promise<PracticeRecord> {
     const validated = createPracticeRecordSchema.parse(input);
+    // Normalize optional creation fields without consulting mutable preferences. A retry
+    // still represents the same intent if the user changes timezone after the first save.
+    const precision: TimePrecision = validated.timePrecision ?? (validated.practicedAt.includes('T') ? 'datetime' : 'date');
+    const fingerprint = JSON.stringify([
+      validated.questionFrontendId, validated.completed, validated.practicedAt, precision,
+      validated.notes ?? null, validated.durationMinutes ?? null, validated.sourceTimezone ?? null,
+    ]);
     const problem = this.getProblem(validated.questionFrontendId, 'frontendId');
     if (!problem) {
       throw new Error(`Problem '${validated.questionFrontendId}' not found in catalog.`);
     }
 
     const run = this.writeQueue.then(async () => {
+      const replay = this.replayPracticeOperation(validated.operationId, fingerprint);
+      if (replay) return replay;
       if (this.backupManager) {
         await this.backupManager.performPreImportBackup(this.db);
       }
 
       const id = randomUUID();
       const now = Date.now();
-      const precision: TimePrecision = validated.timePrecision ?? (
-        validated.practicedAt.includes('T') || (validated.practicedAt.includes(' ') && validated.practicedAt.includes(':'))
-          ? 'datetime'
-          : 'date'
-      );
 
       this.db.exec('BEGIN IMMEDIATE;');
       try {
+        // Recheck under the write transaction after the asynchronous backup boundary.
+        const concurrentReplay = this.replayPracticeOperation(validated.operationId, fingerprint);
+        if (concurrentReplay) {
+          this.db.exec('COMMIT;');
+          return concurrentReplay;
+        }
         this.db.prepare(`
           INSERT INTO practice_records (
             id, question_id, completed, practiced_at, time_precision, notes, status, created_at, updated_at, revoked_at
@@ -1131,6 +1163,12 @@ export class CatalogStore {
         );
 
         this.db.prepare('UPDATE practice_records SET source_timezone=? WHERE id=?').run(validated.sourceTimezone ?? this.getSettings().timezone, id);
+        this.db.prepare('UPDATE practice_records SET duration_minutes=? WHERE id=?').run(validated.durationMinutes ?? null, id);
+        if (validated.operationId) {
+          // The operation identity and record are committed together, including after a lost response.
+          this.db.prepare('INSERT INTO practice_operations(id,fingerprint,record_id) VALUES(?,?,?)')
+            .run(validated.operationId, fingerprint, id);
+        }
 
         this.incrementPracticeRevision();
         this.db.exec('COMMIT;');
@@ -1161,6 +1199,9 @@ export class CatalogStore {
       if (!existing || existing.status === 'revoked') {
         throw new Error(`Practice record '${id}' not found or has been revoked.`);
       }
+      if (validated.expectedRevision !== undefined && validated.expectedRevision !== existing.revision) {
+        throw new PracticeConflictError('RECORD_REVISION_MISMATCH', 'This practice record changed. Reload it before saving your correction.');
+      }
 
       if (this.backupManager) {
         await this.backupManager.performPreImportBackup(this.db);
@@ -1172,6 +1213,7 @@ export class CatalogStore {
       const timePrecision = validated.timePrecision ?? existing.timePrecision;
       if (!isEventTime(practicedAt, timePrecision)) throw new Error('Invalid event date, precision or UTC offset');
       const notes = validated.notes !== undefined ? validated.notes : existing.notes;
+      const durationMinutes = validated.durationMinutes !== undefined ? validated.durationMinutes : existing.durationMinutes;
 
       this.db.exec('BEGIN IMMEDIATE;');
       try {
@@ -1181,9 +1223,9 @@ export class CatalogStore {
             practiced_at = ?,
             time_precision = ?,
             notes = ?,
-            updated_at = ?
+            updated_at = ?, duration_minutes = ?, revision = revision + 1
           WHERE id = ? AND status = 'active'
-        `).run(completed, practicedAt, timePrecision, notes, now, id);
+        `).run(completed, practicedAt, timePrecision, notes, now, durationMinutes, id);
         if (validated.sourceTimezone !== undefined) this.db.prepare('UPDATE practice_records SET source_timezone=? WHERE id=?').run(validated.sourceTimezone, id);
 
         this.incrementPracticeRevision();
@@ -1206,11 +1248,14 @@ export class CatalogStore {
    * @param id Identifier of the practice record to revoke.
    * @returns Revoked practice record entity.
    */
-  public async revokePracticeRecord(id: string): Promise<PracticeRecord> {
+  public async revokePracticeRecord(id: string, expectedRevision?: number): Promise<PracticeRecord> {
     const run = this.writeQueue.then(async () => {
       const existing = this.getPracticeRecord(id);
       if (!existing || existing.status === 'revoked') {
         throw new Error(`Practice record '${id}' not found or already revoked.`);
+      }
+      if (expectedRevision !== undefined && expectedRevision !== existing.revision) {
+        throw new PracticeConflictError('RECORD_REVISION_MISMATCH', 'This practice record changed. Reload it before revoking.');
       }
 
       if (this.backupManager) {
@@ -1224,7 +1269,7 @@ export class CatalogStore {
           UPDATE practice_records SET
             status = 'revoked',
             revoked_at = ?,
-            updated_at = ?
+            updated_at = ?, revision = revision + 1
           WHERE id = ?
         `).run(now, now, id);
 
@@ -1249,7 +1294,7 @@ export class CatalogStore {
     const row = this.db.prepare(`
       SELECT
         pr.id, pr.question_id, pr.completed, pr.practiced_at, pr.time_precision, pr.notes,
-        pr.status, pr.created_at, pr.updated_at, pr.revoked_at,
+        pr.status, pr.created_at, pr.updated_at, pr.revoked_at, pr.duration_minutes, pr.source_timezone, pr.revision,
         p.frontend_question_id, p.title as problem_title
       FROM practice_records pr
       JOIN problems p ON pr.question_id = p.question_id
@@ -1262,6 +1307,9 @@ export class CatalogStore {
       practiced_at: string;
       time_precision: 'datetime' | 'date';
       notes: string | null;
+      duration_minutes: number | null;
+      source_timezone: string | null;
+      revision: number;
       status: 'active' | 'revoked';
       created_at: number;
       updated_at: number;
@@ -1280,6 +1328,9 @@ export class CatalogStore {
       practicedAt: row.practiced_at,
       timePrecision: row.time_precision,
       notes: row.notes,
+      durationMinutes: row.duration_minutes,
+      sourceTimezone: row.source_timezone,
+      revision: row.revision,
       status: row.status,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
@@ -1327,7 +1378,7 @@ export class CatalogStore {
     const rows = this.db.prepare(`
       SELECT
         pr.id, pr.question_id, pr.completed, pr.practiced_at, pr.time_precision, pr.notes,
-        pr.status, pr.created_at, pr.updated_at, pr.revoked_at,
+        pr.status, pr.created_at, pr.updated_at, pr.revoked_at, pr.duration_minutes, pr.source_timezone, pr.revision,
         p.frontend_question_id, p.title as problem_title
       FROM practice_records pr
       JOIN problems p ON pr.question_id = p.question_id
@@ -1341,6 +1392,9 @@ export class CatalogStore {
       practiced_at: string;
       time_precision: 'datetime' | 'date';
       notes: string | null;
+      duration_minutes: number | null;
+      source_timezone: string | null;
+      revision: number;
       status: 'active' | 'revoked';
       created_at: number;
       updated_at: number;
@@ -1362,6 +1416,9 @@ export class CatalogStore {
         practicedAt: r.practiced_at,
         timePrecision: r.time_precision,
         notes: r.notes,
+        durationMinutes: r.duration_minutes,
+        sourceTimezone: r.source_timezone,
+        revision: r.revision,
         status: r.status,
         createdAt: r.created_at,
         updatedAt: r.updated_at,
@@ -2053,7 +2110,10 @@ export class CatalogStore {
           conflictCount: preview.conflictCount,
           duplicateCount: preview.duplicateCount,
           errorCount: preview.errorCount,
-          errors: preview.errors,
+          // Persist rejected matched/unmatched candidates too, so result history explains every error count.
+          errors: [...preview.errors, ...preview.items.flatMap((item, index) => item.action === 'error'
+            ? [{ index, message: `#${item.frontendId}: ${item.error ?? item.conflictType ?? 'Invalid candidate'}` }]
+            : [])],
         };
 
         this.db.prepare(`
@@ -2280,7 +2340,7 @@ export class CatalogStore {
       SELECT
         id, question_id as questionId, completed, practiced_at as practicedAt,
         time_precision as timePrecision, source_timezone as sourceTimezone,
-        notes, status, created_at as createdAt,
+        notes, duration_minutes as durationMinutes, revision, status, created_at as createdAt,
         updated_at as updatedAt, revoked_at as revokedAt
       FROM practice_records
       WHERE status = 'active'

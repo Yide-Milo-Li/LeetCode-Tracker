@@ -10,7 +10,7 @@ Run `npm run build` then `npm start` from the repository root with Node.js 24.15
 
 ## Backup policy
 
-Startup verifies schema compatibility and awaits a pre-migration snapshot before upgrading older schemas to v7. Before any catalog-changing import, it creates `pre-import-latest.sqlite` and, if absent, the first snapshot for that UTC date as `daily-YYYY-MM-DD.sqlite`. The latest 14 distinct daily snapshots are retained. Migration snapshots and pre-restore safety snapshots are retained separately. A failed required snapshot aborts migration or import; unchanged-only imports preserve the existing pre-change snapshot.
+Startup verifies schema compatibility and awaits a pre-migration snapshot before upgrading older schemas to v8. Before any catalog-changing import, it creates `pre-import-latest.sqlite` and, if absent, the first snapshot for that UTC date as `daily-YYYY-MM-DD.sqlite`. The latest 14 distinct daily snapshots are retained. Migration snapshots and pre-restore safety snapshots are retained separately. A failed required snapshot aborts migration or import; unchanged-only imports preserve the existing pre-change snapshot.
 
 ## Offline restore
 
@@ -20,7 +20,7 @@ Stop the server and close other database clients, then run:
 npm run restore -- <backup-file.sqlite> [target-db.sqlite]
 ```
 
-The default target is `.local/tracker.sqlite`. Supported sources have valid schema v3, v4, v5, v6, or v7. Unsupported or structurally incomplete sources are rejected before changing the target. An existing target must be readable and pass validation to produce its safety snapshot; if it cannot, restore into a new target path and retain the original for investigation.
+The default target is `.local/tracker.sqlite`. Supported sources have valid schema v3, v4, v5, v6, v7, or v8. Unsupported or structurally incomplete sources are rejected before changing the target. An existing target must be readable and pass validation to produce its safety snapshot; if it cannot, restore into a new target path and retain the original for investigation.
 
 The command uses SQLite snapshots for both source and destination, so committed WAL data is included. It preserves the current destination as `<target>.pre-restore-<unique-id>.sqlite`, restores the selected snapshot, and verifies the result. A failed replacement triggers a rollback attempt; the safety snapshot remains available. Do not manually delete WAL or SHM files to perform recovery.
 
@@ -34,4 +34,6 @@ To run automated desktop browser verification and capture desktop-only evidence 
 npm run verify:desktop
 ```
 
-This uses `scripts/verify-desktop-browser.ts`, connecting directly to Chrome via Chrome DevTools Protocol (CDP) over Node 24 native `WebSocket` on loopback port 3088, saving screenshots to `.local/evidence/phase5-desktop/`.
+Build first with `npm run build`. This runs `scripts/verify-refactor-browser.ts` against an in-memory synthetic SQLite store, an injected Gemini stub and a random loopback port. It launches Chrome at the documented Windows installation path with a separate ignored profile and connects through native CDP/WebSocket. No environment file, original database, private JSONL or real model is required. Outputs are screenshots and `report.json` under `.local/evidence/phase6/browser/`.
+
+The matrix verifies persisted language/theme after a full document reload, checks all eight destinations and nine overlay families at three widths, and exercises durable practice writes, all dismissal paths, keyboard focus, both imports and snapshot audits. Real mouse events target the active, non-inert surface. A response-stage disconnect occurs after the real practice INSERT to verify replay. Browser console messages and animation states accompany screenshots in the manifest. Set `VERIFY_OUTPUT_DIR` to place all generated evidence outside the checkout. The old Phase 5 script and its evidence are historical; the current npm command does not run it.

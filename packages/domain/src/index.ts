@@ -145,11 +145,13 @@ export function getZonedDayInterval(dateStr: string, zone: string): { start: num
     const localUtc = Date.UTC(+map.year, +map.month - 1, +map.day, hour, +map.minute, +map.second);
     return localUtc - epoch;
   };
-  const offset = getOffset(approxUtc);
-  const start = approxUtc - offset;
-  const refinedOffset = getOffset(start);
-  const exactStart = approxUtc - refinedOffset;
-  const exactEnd = exactStart + 86400000 - 1;
+  // Resolve both local midnights independently: DST calendar days are not always 24 hours.
+  const midnight = (utc: number) => {
+    const first = utc - getOffset(utc);
+    return utc - getOffset(first);
+  };
+  const exactStart = midnight(approxUtc);
+  const exactEnd = midnight(Date.UTC(y, m - 1, d + 1)) - 1;
   return { start: exactStart, end: exactEnd };
 }
 

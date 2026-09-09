@@ -275,14 +275,8 @@ it('renders DashboardView with cumulative KPIs, distributions, and freshness sta
   assert.ok(screen.getByText('25'), 'Should render total manual count');
   assert.ok(screen.getByText('30'), 'Should render total snapshot count');
 
-  // Verify Today Summary card
-  assert.ok(screen.getByText('Core Algorithms'), 'Should display strategy name');
-  assert.ok(screen.getByText(/2 \/ 3/i), 'Should display 2 / 3 completed progress');
-
-  // Verify Navigation button to Today Plan
-  const goToTodayBtn = screen.getByRole('button', { name: translations.en.todaySummaryGoToToday });
-  fireEvent.click(goToTodayBtn);
-  assert.equal(navigatedToday, true, 'Clicking Go to Today Plan should trigger onNavigateToToday');
+  // Execution controls moved to Today; this tab remains read-only analysis.
+  assert.equal(screen.queryByRole('button', { name: translations.en.todaySummaryGoToToday }), null);
 
   // Verify Distributions & Tags
   assert.ok(screen.getByText('Dynamic Programming'), 'Should display top tag');
@@ -295,34 +289,16 @@ it('renders DashboardView with cumulative KPIs, distributions, and freshness sta
   );
 });
 
-it('renders setup banner in DashboardView when planController reports setup required', async () => {
-  const mockData = createMockDashboardData();
-  mockData.todaySummary.status = 'setup';
-  mock.method(api, 'getDashboard', async () => mockData);
-
-  const planController = createMockPlanController({
-    ensureResult: { status: 'setup', plan: null },
-    plan: null,
-  });
-  let navigatedSettings = false;
-
-  await act(async () => {
-    render(
-      <DashboardView
-        lang="en"
-        planController={planController}
-        onNavigateToToday={() => {}}
-        onNavigateToSettings={() => { navigatedSettings = true; }}
-      />
-    );
-  });
-
-  assert.ok(screen.getByText(translations.en.todaySummarySetup), 'Should display setup pill');
-  assert.ok(screen.getByText(translations.en.setupTimezoneDesc), 'Should show timezone setup description');
-
-  const settingsBtn = screen.getByRole('button', { name: new RegExp(translations.en.navSettings, 'i') });
-  fireEvent.click(settingsBtn);
-  assert.equal(navigatedSettings, true, 'Clicking settings button should trigger onNavigateToSettings');
+it('keeps Statistics read-only when timezone setup is required', async () => {
+  const data = createMockDashboardData();
+  data.dataStatus.userTimezone = null;
+  mock.method(api, 'getDashboard', async () => data);
+  const writes = mock.method(api, 'updateSettings', async () => { throw new Error('Unexpected write'); });
+  const ensure = mock.method(api, 'ensureDailyPlan', async () => { throw new Error('Unexpected generation'); });
+  await act(async () => { render(<DashboardView lang="en" />); });
+  assert.equal(writes.mock.callCount(), 0);
+  assert.equal(ensure.mock.callCount(), 0);
+  assert.ok(screen.getByText(translations.en.setupTimezoneTitle));
 });
 
 it('opens ActivityHistoryDrawer pre-filtered by date when clicking a heatmap cell', async () => {
@@ -332,7 +308,7 @@ it('opens ActivityHistoryDrawer pre-filtered by date when clicking a heatmap cel
   const mockActivities: DashboardActivityListResponse = {
     total: 1,
     page: 1,
-    limit: 15,
+    limit: 20,
     totalPages: 1,
     revision: { catalog: 1, practice: 1, planning: 1, timezone: 'UTC' },
     items: [
@@ -383,15 +359,15 @@ it('opens ActivityHistoryDrawer pre-filtered by date when clicking a heatmap cel
   // Drawer should open and fetch activities for 2026-03-30
   assert.equal(requestedDate, '2026-03-30', 'getDashboardActivities should be called with clicked date');
   assert.ok(screen.getByRole('dialog'), 'ActivityHistoryDrawer should be open');
-  assert.ok(screen.getByText(translations.en.activityDrawerTitle), 'Drawer title should be visible');
+  assert.ok(screen.getByRole('heading', { name: 'Activity history' }), 'Drawer title should be visible');
 });
 
 it('ActivityHistoryDrawer handles filtering, pagination, and keyboard escape close', async () => {
   let queryParams: any = null;
   const mockActivitiesPage1: DashboardActivityListResponse = {
-    total: 20,
+    total: 40,
     page: 1,
-    limit: 15,
+    limit: 20,
     totalPages: 2,
     revision: { catalog: 1, practice: 1, planning: 1, timezone: 'UTC' },
     items: [
@@ -413,9 +389,9 @@ it('ActivityHistoryDrawer handles filtering, pagination, and keyboard escape clo
   };
 
   const mockActivitiesPage2: DashboardActivityListResponse = {
-    total: 20,
+    total: 40,
     page: 2,
-    limit: 15,
+    limit: 20,
     totalPages: 2,
     revision: { catalog: 1, practice: 1, planning: 1, timezone: 'UTC' },
     items: [
@@ -473,7 +449,7 @@ it('ActivityHistoryDrawer handles filtering, pagination, and keyboard escape clo
   assert.equal(queryParams?.page, 2);
 
   // Clear filters
-  const clearBtn = screen.getByRole('button', { name: new RegExp(translations.en.clearFilters, 'i') });
+  const clearBtn = screen.getByRole('button', { name: 'Reset filters' });
   await act(async () => {
     fireEvent.click(clearBtn);
   });
@@ -481,7 +457,7 @@ it('ActivityHistoryDrawer handles filtering, pagination, and keyboard escape clo
   assert.equal(queryParams?.source, 'all');
 
   // Keyboard Escape key closes the drawer
-  fireEvent.keyDown(window, { key: 'Escape' });
+  fireEvent.keyDown(document, { key: 'Escape' });
   assert.equal(closed, true, 'Escape key should trigger onClose');
 });
 

@@ -1,10 +1,10 @@
 /**
  * Comprehensive Phase 5 closure gate verification test.
  * Verifies:
- * 1. Backup, restore, and restart reconciliation of SQLite v7 database containing
+ * 1. Backup, restore, and restart reconciliation of the current SQLite schema containing
  *    dashboard statistics, snapshot successes, planning data, and practice records.
  * 2. Deterministic local plan fallback and dashboard resilience when Gemini assistant errors.
- * 3. Real external Gemini assistant execution using synthetic inputs and server credentials.
+ * External Gemini validation lives in a separate explicitly invoked live suite.
  */
 import { it, describe, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -108,7 +108,10 @@ describe('Phase 5 Closure Gate Verification', () => {
     return dir;
   }
 
-  it('performs complete backup, restore, and restart reconciliation on SQLite v7 with dashboard stats and snapshot successes', async () => {
+  it('performs complete backup, restore, and restart reconciliation on SQLite v8 with dashboard stats and snapshot successes', async (context) => {
+    // Plan generation and historical analytics must share one clock, including across Tokyo midnight.
+    const fixedNow = Date.parse('2026-09-09T12:00:00Z');
+    context.mock.method(Date, 'now', () => fixedNow);
     const dir = makeTempDir();
     const dbPath = path.join(dir, 'original-p5.db');
     const backupDir = path.join(dir, 'backups-p5');
@@ -192,8 +195,6 @@ describe('Phase 5 Closure Gate Verification', () => {
     const preRawData = store.getDashboardRawData();
     assert.equal(preRawData.snapshotSuccesses.length, 2); // Problems #2 and #4
 
-    const fixedNow = Date.parse('2026-09-09T12:00:00Z');
-
     // Build real pre-backup todaySummary from planningService
     const preTodaySummary = buildTodaySummary(planningStore, planningService, 'Asia/Tokyo', fixedNow);
     assert.equal(preTodaySummary.status, 'ready');
@@ -241,7 +242,7 @@ describe('Phase 5 Closure Gate Verification', () => {
     const restoreResult = await backupManager.restoreBackup(backupFile, restorePath);
     assert.equal(restoreResult.success, true);
     assert.equal(restoreResult.restoredProblems, 5);
-    assert.equal(restoreResult.restoredVersion, 7);
+    assert.equal(restoreResult.restoredVersion, 8);
 
     // 10. Reopen database and verify full-fidelity integrity
     const restoredDb = new DatabaseSync(restorePath);

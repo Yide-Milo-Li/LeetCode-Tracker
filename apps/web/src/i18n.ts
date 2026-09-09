@@ -62,7 +62,7 @@ export const translations = {
     perPage: 'per page',
 
     // Manual Practice Quick Log
-    logPractice: 'Log Practice',
+    logPractice: 'Record practice',
     quickLogTitle: 'Log Practice Session',
     practicedAtLabel: 'Practice Timestamp / Date',
     precisionDatetime: 'Date & Time',
@@ -124,7 +124,7 @@ export const translations = {
     timezoneDesc: 'Timezone used when logging practice records and formatting dates.',
 
     // Catalog Ingestion Workbench
-    workbenchTitle: 'JSON Lines Ingestion Workbench',
+    workbenchTitle: 'Add JSONL problems',
     workbenchDesc: 'Upload or paste your LeetCode problem datasets in JSONL format. Inspect preview differences before committing.',
     tabUpload: 'Upload File (.jsonl)',
     tabPaste: 'Paste Raw JSONL',
@@ -270,7 +270,7 @@ export const translations = {
     difficultyDistTitle: 'Difficulty Mastery',
     topTagsTitle: 'Top 10 Topic Tags',
     recentActivityTitle: 'Recent Activities',
-    viewFullHistory: 'View Full History Drawer',
+    viewFullHistory: 'View full history',
     noRecentActivity: 'No recent activities recorded.',
     activityDrawerTitle: 'Activity History',
     filterDate: 'Filter by Date',
@@ -347,7 +347,7 @@ export const translations = {
     perPage: '条/页',
 
     // Manual Practice Quick Log
-    logPractice: '打卡刷题',
+    logPractice: '记录练习',
     quickLogTitle: '记录刷题打卡',
     practicedAtLabel: '练习时间 / 日期',
     precisionDatetime: '日期与时间',
@@ -555,7 +555,7 @@ export const translations = {
     difficultyDistTitle: '难度掌握分布',
     topTagsTitle: '热门算法标签 Top 10',
     recentActivityTitle: '近期活动记录',
-    viewFullHistory: '查看完整历史抽屉',
+    viewFullHistory: '查看完整记录',
     noRecentActivity: '暂无近期活动记录。',
     activityDrawerTitle: '练习活动历史',
     filterDate: '按日期筛选',

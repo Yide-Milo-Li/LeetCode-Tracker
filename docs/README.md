@@ -1,10 +1,11 @@
 # Documentation index
 
-Users must provide their own compatible database and have the rights to use its contents. This repository does not include a problem dataset. A supported database import command and user-facing importer are planned, not implemented.
+Users provide their own JSONL problem metadata with appropriate usage rights. The application creates its own SQLite database. Catalog import and progress import are separate implemented workflows; the repository contains no dataset.
 
-All maintained documentation is English. The planned interface supports Chinese and English.
+All maintained documentation is English. The implemented desktop interface supports Chinese and English, with three main destinations: Today, Problems and Progress.
 
 - [Requirements](requirements.md)
+- [Desktop workflow guide](desktop-workflow.md)
 - [Architecture](architecture.md)
 - [Data format](data-format.md)
 - [Roadmap](roadmap.md)

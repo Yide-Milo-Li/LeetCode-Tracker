@@ -1,6 +1,6 @@
 /**
  * Dashboard View component.
- * Default landing page displaying cumulative metrics, today's plan summary,
+ * Read-only statistics tab displaying cumulative metrics,
  * interactive yearly activity heatmap, 30-day activity trend chart,
  * difficulty & tag distributions, recent activities, and drawer triggers.
  */
@@ -10,6 +10,7 @@ import {
   Calendar,
   Flame,
   CheckCircle2,
+  Circle,
   FileText,
   Clock,
   ChevronRight,
@@ -28,36 +29,58 @@ import {
   Tooltip as RechartsTooltip,
   CartesianGrid,
 } from 'recharts';
-import {
-  api,
-  type DashboardResponse,
-  type RecentActivityItem,
-  type YearlyActivityDay,
-} from '../api.ts';
+import { api, type DashboardResponse, type RecentActivityItem, type YearlyActivityDay } from '../api.ts';
 import type { UseDailyPlanReturn } from '../hooks/useDailyPlan.ts';
 import { translations, type Language } from '../i18n.ts';
 import { ActivityHistoryDrawer } from './ActivityHistoryDrawer.tsx';
+import { useWorkspace } from '../workspace.tsx';
+import { Feedback } from './ui.tsx';
 
 interface DashboardViewProps {
   lang: Language;
-  planController: UseDailyPlanReturn;
-  onNavigateToToday: () => void;
-  onNavigateToSettings: () => void;
+  active?: boolean;
+  planController?: UseDailyPlanReturn;
+  onNavigateToToday?: () => void;
+  onNavigateToSettings?: () => void;
 }
 
+/** Render read-only analysis; plan generation belongs exclusively to the application controller. */
 export const DashboardView: React.FC<DashboardViewProps> = ({
   lang,
+  active = true,
   planController,
   onNavigateToToday,
   onNavigateToSettings,
 }) => {
   const t = translations[lang];
+  const workspace = useWorkspace();
 
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<DashboardResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
-  const [timezoneNotice, setTimezoneNotice] = useState<string | null>(null);
+  const [sourceStats, setSourceStats] = useState<Awaited<ReturnType<typeof api.getPracticeStats>> | null>(
+    null,
+  );
+  const [sourceError, setSourceError] = useState('');
+  const [sourceRetry, setSourceRetry] = useState(0);
+  useEffect(() => {
+    let active = true;
+    api
+      .getPracticeStats()
+      .then((value) => {
+        if (active) {
+          setSourceStats(value);
+          setSourceError('');
+        }
+      })
+      .catch((err) => {
+        if (active) setSourceError(String(err.message));
+      });
+    return () => {
+      active = false;
+    };
+  }, [workspace.revision, sourceRetry]);
 
   // History Drawer state
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -86,24 +109,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       if (res.yearlyActivity.year) {
         setSelectedYear(res.yearlyActivity.year);
       }
-
-      // Auto-detect browser timezone on first launch if timezone is null
-      if (res.dataStatus.userTimezone === null) {
-        try {
-          const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
-          if (detected) {
-            await api.updateSettings({ timezone: detected });
-            setTimezoneNotice(t.timezoneAutoDetected.replace('{tz}', detected));
-            const refreshed = await api.getDashboard(year);
-            if (seq === dashboardSeqRef.current) {
-              setData(refreshed);
-            }
-            planController.refresh();
-          }
-        } catch {
-          // Graceful fallback if detection or saving fails
-        }
-      }
     } catch (err: unknown) {
       if (seq !== dashboardSeqRef.current) return;
       setError(err instanceof Error ? err.message : 'Failed to load dashboard data.');
@@ -112,11 +117,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         setLoading(false);
       }
     }
-  }, [planController, t.timezoneAutoDetected]);
+  }, []);
 
   useEffect(() => {
     fetchDashboard(selectedYear);
-  }, [selectedYear, fetchDashboard]);
+  }, [selectedYear, fetchDashboard, workspace.revision]);
 
   // Year choices (current year and past 2 years)
   const currentCalYear = new Date().getFullYear();
@@ -189,12 +194,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     setIsDrawerOpen(true);
   };
 
-  const handleCellKeyDown = (
-    e: React.KeyboardEvent,
-    dateStr: string,
-    wIdx: number,
-    dIdx: number
-  ) => {
+  const handleCellKeyDown = (e: React.KeyboardEvent, dateStr: string, wIdx: number, dIdx: number) => {
     let targetDateStr: string | null = null;
     if (e.key === 'ArrowUp') {
       if (dIdx > 0) {
@@ -218,7 +218,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       return;
     }
 
-    if (targetDateStr) {
+    if (targetDateStr && targetDateStr.startsWith(String(selectedYear))) {
       e.preventDefault();
       setFocusedDate(targetDateStr);
       const targetEl = document.querySelector<HTMLElement>(`[data-date="${targetDateStr}"]`);
@@ -233,54 +233,29 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div>
           <h1 className="dashboard-title">
             <Trophy className="w-7 h-7 text-indigo-600 dark:text-indigo-400" />
-            {t.dashboardTitle}
+            {lang === 'zh' ? '统计' : 'Statistics'}
           </h1>
-          <p className="dashboard-subtitle">
-            {t.dashboardSubtitle}
-          </p>
+          <p className="dashboard-subtitle">{t.dashboardSubtitle}</p>
         </div>
 
         <div className="flex items-center gap-2">
           <button
             onClick={async () => {
-              await Promise.all([
-                fetchDashboard(selectedYear),
-                planController.refresh(),
-              ]);
+              await fetchDashboard(selectedYear);
             }}
             disabled={loading}
-            className="btn btn-secondary"
-            style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem' }}
+            className="btn btn-secondary u-font-size-13px u-padding-0-35rem-0-75rem"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            {t.retry}
+            {lang === 'zh' ? '刷新' : 'Refresh'}
           </button>
         </div>
       </div>
 
-      {/* Auto-detected timezone notice */}
-      {timezoneNotice && (
-        <div className="timezone-detected-banner">
-          <Sparkles className="w-4 h-4 flex-shrink-0" />
-          <span>{timezoneNotice}</span>
-          <button
-            onClick={() => setTimezoneNotice(null)}
-            className="btn-icon"
-            style={{ marginLeft: 'auto', border: 'none', background: 'transparent' }}
-            aria-label="Dismiss notice"
-          >
-            ✕
-          </button>
-        </div>
-      )}
-
-      {error && (
-        <div className="alert alert-error" style={{ fontSize: '0.875rem' }}>
-          {error}
-        </div>
-      )}
-
       {/* KPI Cards Grid */}
+      {error && (
+        <Feedback retry={{ label: t.retry, run: () => void fetchDashboard(selectedYear) }}>{error}</Feedback>
+      )}
       <div className="kpi-grid">
         {/* Unique Solved */}
         <div className="kpi-card">
@@ -288,9 +263,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <Trophy className="w-4 h-4 text-emerald-500" />
             {t.kpiUniqueSolved}
           </div>
-          <div className="kpi-value">
-            {data ? data.overview.uniqueSolvedProblems : '—'}
-          </div>
+          <div className="kpi-value">{data ? data.overview.uniqueSolvedProblems : '—'}</div>
           <div className="kpi-unit">{t.problemsUnit}</div>
         </div>
 
@@ -300,9 +273,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <Calendar className="w-4 h-4 text-indigo-500" />
             {t.kpiSolvedThisWeek}
           </div>
-          <div className="kpi-value" style={{ color: 'var(--primary)' }}>
-            {data ? data.overview.solvedThisWeek : '—'}
-          </div>
+          <div className="kpi-value u-color-primary">{data ? data.overview.solvedThisWeek : '—'}</div>
           <div className="kpi-unit">{t.problemsUnit}</div>
         </div>
 
@@ -312,9 +283,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <Flame className="w-4 h-4 text-amber-500" />
             {t.kpiStreak}
           </div>
-          <div className="kpi-value" style={{ color: 'var(--warning)' }}>
-            {data ? data.overview.currentStreak : '—'}
-          </div>
+          <div className="kpi-value u-color-warning">{data ? data.overview.currentStreak : '—'}</div>
           <div className="kpi-unit">{t.daysUnit}</div>
         </div>
 
@@ -324,9 +293,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <FileText className="w-4 h-4 text-blue-500" />
             {t.kpiTotalManual}
           </div>
-          <div className="kpi-value">
-            {data ? data.overview.totalManualPractices : '—'}
-          </div>
+          <div className="kpi-value">{data ? data.overview.totalManualPractices : '—'}</div>
           <div className="kpi-unit">{t.sourceManual}</div>
         </div>
 
@@ -336,114 +303,29 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <Layers className="w-4 h-4 text-purple-500" />
             {t.kpiTotalSnapshots}
           </div>
-          <div className="kpi-value">
-            {data ? data.overview.totalSnapshotSubmissions : '—'}
-          </div>
+          <div className="kpi-value">{data ? data.overview.totalSnapshotSubmissions : '—'}</div>
           <div className="kpi-unit">{t.sourceSnapshot}</div>
-        </div>
-      </div>
-
-      {/* Today's Task Summary Banner */}
-      <div className="today-summary-banner">
-        <div className="today-summary-info">
-          <div className="today-summary-title-row">
-            <Sparkles className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-            <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: 0 }}>
-              {t.todaySummaryTitle}
-            </h2>
-
-            {/* Status pill based on shared plan controller */}
-            {planController.loading ? (
-              <span className="badge badge-neutral" style={{ animation: 'pulse 1.5s infinite' }}>
-                {t.todaySummaryGenerating}
-              </span>
-            ) : planController.ensureResult?.status === 'setup' ? (
-              <span className="badge badge-warning">
-                {t.todaySummarySetup}
-              </span>
-            ) : planController.ensureResult?.status === 'rest' ? (
-              <span className="badge badge-neutral">
-                {t.todaySummaryRest}
-              </span>
-            ) : planController.error ? (
-              <span className="badge badge-danger">
-                {t.todaySummaryFailed}
-              </span>
-            ) : planController.plan ? (
-              <span className="badge badge-success">
-                {t.todaySummaryReady}
-              </span>
-            ) : null}
-          </div>
-
-          <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', margin: '0.25rem 0 0 0' }}>
-            {planController.plan ? (
-              <>
-                <strong style={{ color: 'var(--primary)' }}>
-                  {data?.todaySummary.strategyName ?? 'Personalized Plan'}
-                </strong>
-                {' • '}
-                <span>
-                  {t.todaySummaryProgress
-                    .replace('{completed}', String(planController.plan.items.filter(i => i.completed).length))
-                    .replace('{target}', String(planController.plan.items.length))}
-                </span>
-                {data?.todaySummary.shortage && data.todaySummary.shortage > 0 ? (
-                  <span style={{ color: 'var(--warning)', marginLeft: '0.5rem' }}>
-                    {t.todaySummaryShortage.replace('{shortage}', String(data.todaySummary.shortage))}
-                  </span>
-                ) : null}
-              </>
-            ) : planController.ensureResult?.status === 'rest' ? (
-              t.restDayDesc
-            ) : planController.ensureResult?.status === 'setup' ? (
-              t.setupTimezoneDesc
-            ) : (
-              t.todaySubtitle
-            )}
-          </p>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          {planController.ensureResult?.status === 'setup' ? (
-            <button
-              onClick={onNavigateToSettings}
-              className="btn btn-primary"
-              style={{ fontSize: '0.75rem', padding: '0.4rem 0.8rem' }}
-            >
-              {t.navSettings}
-              <ArrowRight className="w-3.5 h-3.5" style={{ marginLeft: '0.25rem' }} />
-            </button>
-          ) : (
-            <button
-              onClick={onNavigateToToday}
-              className="btn btn-primary"
-              style={{ fontSize: '0.75rem', padding: '0.4rem 0.8rem' }}
-            >
-              {t.todaySummaryGoToToday}
-            </button>
-          )}
         </div>
       </div>
 
       {/* Yearly Activity Heatmap */}
       <div className="heatmap-card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <div className="u-display-flex u-justify-content-space-between u-align-items-center u-margin-bottom-1rem u-flex-wrap-wrap u-gap-0-5rem">
+          <div className="u-display-flex u-align-items-center u-gap-0-5rem">
             <Calendar className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-            <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: 0 }}>
-              {t.heatmapTitle}
-            </h2>
+            <h2 className="u-font-size-1rem u-font-weight-700 u-margin-0">{t.heatmapTitle}</h2>
           </div>
 
           {/* Year selector */}
-          <div style={{ display: 'flex', gap: '0.25rem', background: 'var(--bg-card-muted)', padding: '0.25rem', borderRadius: 'var(--radius)' }}>
-            {availableYears.map(year => (
+          <div className="u-display-flex u-gap-0-25rem u-background-bg-card-muted u-padding-0-25rem u-border-radius-radius">
+            {availableYears.map((year) => (
               <button
                 key={year}
                 onClick={() => setSelectedYear(year)}
-                className={`btn ${selectedYear === year ? 'btn-primary' : 'btn-ghost'}`}
-                style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
+                className={
+                  `btn ${selectedYear === year ? 'btn-primary' : 'btn-ghost'}` +
+                  ' u-font-size-13px u-padding-0-2rem-0-5rem'
+                }
               >
                 {year}
               </button>
@@ -472,8 +354,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     }
                   }
 
-                  const label = `${dateStr}: ${activeCount} active, ${solvedCount} solved`;
-                  const isCurrentFocused = inYear && (dateStr === focusedDate || (!focusedDate && wIdx === 0 && dIdx === 0));
+                  const label =
+                    lang === 'zh'
+                      ? `${dateStr}：${activeCount} 题有活动，${solvedCount} 题完成`
+                      : `${dateStr}: ${activeCount} active, ${solvedCount} solved`;
+                  const isCurrentFocused =
+                    inYear && (dateStr === focusedDate || (!focusedDate && wIdx === 0 && dIdx === 0));
 
                   return (
                     <button
@@ -481,8 +367,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       type="button"
                       data-date={dateStr}
                       onClick={() => handleCellClick(dateStr)}
-                      onKeyDown={e => handleCellKeyDown(e, dateStr, wIdx, dIdx)}
-                      onMouseEnter={e => {
+                      onKeyDown={(e) => handleCellKeyDown(e, dateStr, wIdx, dIdx)}
+                      onMouseEnter={(e) => {
                         if (activity && inYear) {
                           const rect = e.currentTarget.getBoundingClientRect();
                           setHoveredDay({
@@ -493,7 +379,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         }
                       }}
                       onMouseLeave={() => setHoveredDay(null)}
-                      onFocus={e => {
+                      onFocus={(e) => {
                         setFocusedDate(dateStr);
                         if (activity && inYear) {
                           const rect = e.currentTarget.getBoundingClientRect();
@@ -518,21 +404,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
         {/* Heatmap Floating Tooltip */}
         {hoveredDay && (
-          <div
-            className="heatmap-tooltip"
-            style={{ left: `${hoveredDay.x}px`, top: `${hoveredDay.y}px` }}
-          >
-            <div style={{ fontWeight: 600 }}>{hoveredDay.day.date}</div>
+          <div className="heatmap-tooltip" style={{ left: `${hoveredDay.x}px`, top: `${hoveredDay.y}px` }}>
+            <div className="u-font-weight-600">{hoveredDay.day.date}</div>
             <div>
-              {hoveredDay.day.activeProblemCount} {t.trendActiveProblems}, {hoveredDay.day.solvedProblemCount} {t.trendSolvedProblems}
+              {hoveredDay.day.activeProblemCount} {t.trendActiveProblems}, {hoveredDay.day.solvedProblemCount}{' '}
+              {t.trendSolvedProblems}
             </div>
           </div>
         )}
 
         {/* Heatmap Legend */}
         <div className="heatmap-legend">
-          <span style={{ fontSize: '0.75rem' }}>
-            {data?.yearlyActivity.days.length ?? 0} {t.daysUnit} with recorded activity
+          <span className="u-font-size-13px">
+            {data?.yearlyActivity.days.length ?? 0}{' '}
+            {lang === 'zh' ? '天有已知记录' : 'days with known activity'}
           </span>
           <div className="heatmap-legend-scale">
             <span>{t.heatmapLess}</span>
@@ -547,55 +432,44 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       {/* 30-Day Activity Trend Chart */}
       <div className="trend-card">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+        <div className="u-display-flex u-align-items-center u-gap-0-5rem u-margin-bottom-0-5rem">
           <Clock className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-          <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: 0 }}>
-            {t.trend30DaysTitle}
-          </h2>
+          <h2 className="u-font-size-1rem u-font-weight-700 u-margin-0">{t.trend30DaysTitle}</h2>
         </div>
 
+        <div className="chart-legend">
+          <span>
+            <i className="legend-active" />
+            {t.trendActiveProblems}
+          </span>
+          <span>
+            <i className="legend-completed" />
+            {t.trendSolvedProblems}
+          </span>
+        </div>
         <div className="trend-chart-wrapper">
-          {data?.trend30Days && data.trend30Days.length > 0 ? (
+          {active && data?.trend30Days && data.trend30Days.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%" minHeight={260}>
               <AreaChart data={data.trend30Days} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="activeGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.4} />
-                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0.0} />
-                  </linearGradient>
-                  <linearGradient id="solvedGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.4} />
-                    <stop offset="95%" stopColor="#10b981" stopOpacity={0.0} />
-                  </linearGradient>
-                </defs>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(156, 163, 175, 0.2)" />
                 <XAxis
                   dataKey="date"
-                  tickFormatter={d => d.slice(5)}
-                  stroke="#9ca3af"
-                  fontSize={11}
+                  tickFormatter={(d) => d.slice(5)}
+                  stroke="var(--text-muted)"
+                  fontSize={13}
                   tickLine={false}
                 />
-                <YAxis allowDecimals={false} stroke="#9ca3af" fontSize={11} tickLine={false} />
+                <YAxis allowDecimals={false} stroke="var(--text-muted)" fontSize={13} tickLine={false} />
                 <RechartsTooltip
                   content={({ active, payload, label }) => {
                     if (active && payload && payload.length) {
                       return (
-                        <div
-                          style={{
-                            padding: '0.5rem 0.75rem',
-                            backgroundColor: 'var(--bg-card)',
-                            border: '1px solid var(--border-color)',
-                            borderRadius: 'var(--radius)',
-                            boxShadow: 'var(--shadow-md)',
-                            fontSize: '0.75rem',
-                          }}
-                        >
-                          <div style={{ fontWeight: 600, color: 'var(--text-main)' }}>{label}</div>
-                          <div style={{ color: 'var(--primary)', marginTop: '0.2rem' }}>
+                        <div className="u-padding-0-5rem-0-75rem u-background-color-bg-card u-border-1px-solid-border-color u-border-radius-radius u-box-shadow-shadow-md u-font-size-13px">
+                          <div className="u-font-weight-600 u-color-text-main">{label}</div>
+                          <div className="u-color-primary u-margin-top-0-2rem">
                             {t.trendActiveProblems}: {payload[0]?.value}
                           </div>
-                          <div style={{ color: 'var(--success)' }}>
+                          <div className="u-color-success">
                             {t.trendSolvedProblems}: {payload[1]?.value}
                           </div>
                         </div>
@@ -605,27 +479,30 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   }}
                 />
                 <Area
+                  isAnimationActive={false}
                   type="monotone"
                   dataKey="activeCount"
                   name={t.trendActiveProblems}
-                  stroke="#6366f1"
+                  stroke="var(--text-muted)"
+                  strokeDasharray="5 3"
                   strokeWidth={2}
                   fillOpacity={1}
-                  fill="url(#activeGrad)"
+                  fill="var(--muted-surface)"
                 />
                 <Area
+                  isAnimationActive={false}
                   type="monotone"
                   dataKey="completedCount"
                   name={t.trendSolvedProblems}
-                  stroke="#10b981"
+                  stroke="var(--primary)"
                   strokeWidth={2}
                   fillOpacity={1}
-                  fill="url(#solvedGrad)"
+                  fill="var(--selected)"
                 />
               </AreaChart>
             </ResponsiveContainer>
           ) : (
-            <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+            <div className="u-height-100 u-display-flex u-align-items-center u-justify-content-center u-font-size-13px u-color-text-muted">
               {t.noProblems}
             </div>
           )}
@@ -637,36 +514,27 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         {/* Difficulty Distribution */}
         <div className="distribution-card">
           <div>
-            <h2 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1rem' }}>
+            <h2 className="u-font-size-1rem u-font-weight-700 u-margin-bottom-1rem">
               {t.difficultyDistTitle}
             </h2>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-              {(['Easy', 'Medium', 'Hard'] as const).map(diff => {
+            <div className="u-display-flex u-flex-direction-column u-gap-0-85rem">
+              {(['Easy', 'Medium', 'Hard'] as const).map((diff) => {
                 const count = data?.difficultyDistribution[diff] ?? { solved: 0, total: 0 };
                 const pct = count.total > 0 ? Math.round((count.solved / count.total) * 100) : 0;
                 const badgeColor =
-                  diff === 'Easy'
-                    ? 'var(--success)'
-                    : diff === 'Medium'
-                    ? 'var(--warning)'
-                    : 'var(--danger)';
+                  diff === 'Easy' ? 'var(--success)' : diff === 'Medium' ? 'var(--warning)' : 'var(--danger)';
 
                 return (
                   <div key={diff}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: '0.25rem' }}>
-                      <span style={{ fontWeight: 600 }}>
-                        {t[`stat${diff}` as keyof typeof t] || diff}
-                      </span>
-                      <span style={{ color: 'var(--text-muted)' }}>
-                        <strong style={{ color: 'var(--text-main)' }}>{count.solved}</strong> / {count.total} ({pct}%)
+                    <div className="u-display-flex u-justify-content-space-between u-font-size-13px u-margin-bottom-0-25rem">
+                      <span className="u-font-weight-600">{t[`stat${diff}` as keyof typeof t] || diff}</span>
+                      <span className="u-color-text-muted">
+                        <strong className="u-color-text-main">{count.solved}</strong> / {count.total} ({pct}%)
                       </span>
                     </div>
                     <div className="diff-track">
-                      <div
-                        className="diff-fill"
-                        style={{ width: `${pct}%`, backgroundColor: badgeColor }}
-                      />
+                      <div className="diff-fill" style={{ width: `${pct}%`, backgroundColor: badgeColor }} />
                     </div>
                   </div>
                 );
@@ -678,13 +546,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         {/* Top 10 Tags */}
         <div className="distribution-card">
           <div>
-            <h2 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1rem' }}>
-              {t.topTagsTitle}
-            </h2>
+            <h2 className="u-font-size-1rem u-font-weight-700 u-margin-bottom-1rem">{t.topTagsTitle}</h2>
 
             {data?.topTags && data.topTags.length > 0 ? (
               <div className="top-tags-wrap">
-                {data.topTags.map(tag => (
+                {data.topTags.map((tag) => (
                   <div key={tag.tagSlug} className="top-tag-chip">
                     <span>{tag.tagName}</span>
                     <span className="top-tag-count">{tag.solvedCount}</span>
@@ -692,7 +558,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 ))}
               </div>
             ) : (
-              <div style={{ padding: '2rem 0', textAlign: 'center', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+              <div className="u-padding-2rem-0 u-text-align-center u-font-size-13px u-color-text-muted">
                 {t.noProblems}
               </div>
             )}
@@ -702,64 +568,57 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       {/* Recent Activities Section & History Drawer Trigger */}
       <div className="recent-activity-card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <div className="u-display-flex u-justify-content-space-between u-align-items-center u-margin-bottom-1rem">
+          <div className="u-display-flex u-align-items-center u-gap-0-5rem">
             <Clock className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-            <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: 0 }}>
-              {t.recentActivityTitle}
-            </h2>
+            <h2 className="u-font-size-1rem u-font-weight-700 u-margin-0">{t.recentActivityTitle}</h2>
           </div>
 
           <button
             onClick={handleOpenDrawerAll}
-            className="btn btn-ghost"
-            style={{ fontSize: '0.75rem', color: 'var(--primary)', padding: '0.25rem 0.5rem' }}
+            className="btn btn-ghost u-font-size-13px u-color-primary u-padding-0-25rem-0-5rem"
           >
             {t.viewFullHistory}
-            <ChevronRight className="w-4 h-4" style={{ marginLeft: '0.2rem' }} />
+            <ChevronRight className="w-4 h-4 u-margin-left-0-2rem" />
           </button>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+        <div className="u-display-flex u-flex-direction-column u-gap-0-5rem">
           {data?.recentActivities && data.recentActivities.length > 0 ? (
             data.recentActivities.slice(0, 10).map((item: RecentActivityItem) => {
               const isAccepted = item.status === 'completed' || item.status === 'accepted';
               return (
-                <div
-                  key={`${item.source}-${item.id}`}
-                  className="recent-activity-item"
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
+                <div key={`${item.source}-${item.id}`} className="recent-activity-item">
+                  <div className="u-display-flex u-align-items-center u-gap-0-5rem u-min-width-0">
                     {isAccepted ? (
-                      <CheckCircle2 className="w-4 h-4 text-emerald-500" style={{ flexShrink: 0 }} />
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500 u-flex-shrink-0" />
                     ) : (
-                      <CheckCircle2 className="w-4 h-4 text-gray-300 dark:text-gray-600" style={{ flexShrink: 0 }} />
+                      <Circle className="w-4 h-4 text-gray-300 dark:text-gray-600 u-flex-shrink-0" />
                     )}
-                    <span style={{ fontWeight: 600, color: 'var(--text-muted)' }}>
-                      #{item.questionFrontendId}
-                    </span>
-                    <span style={{ fontWeight: 500, color: 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <span className="u-font-weight-600 u-color-text-muted">#{item.questionFrontendId}</span>
+                    <span className="u-font-weight-500 u-color-text-main u-overflow-hidden u-text-overflow-ellipsis u-white-space-nowrap">
                       {item.problemTitle}
                     </span>
                     <span
-                      className={`badge ${
-                        item.difficulty === 'Easy'
-                          ? 'badge-success'
-                          : item.difficulty === 'Medium'
-                          ? 'badge-warning'
-                          : 'badge-danger'
-                      }`}
-                      style={{ fontSize: '0.625rem', padding: '0.1rem 0.4rem', flexShrink: 0 }}
+                      className={
+                        `badge ${
+                          item.difficulty === 'Easy'
+                            ? 'badge-success'
+                            : item.difficulty === 'Medium'
+                              ? 'badge-warning'
+                              : 'badge-danger'
+                        }` + ' u-font-size-13px u-padding-0-1rem-0-4rem u-flex-shrink-0'
+                      }
                     >
                       {item.difficulty}
                     </span>
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexShrink: 0, color: 'var(--text-muted)' }}>
-                    <span style={{ fontFamily: 'monospace', fontSize: '0.6875rem' }}>
+                  <div className="u-display-flex u-align-items-center u-gap-0-75rem u-flex-shrink-0 u-color-text-muted">
+                    <span className="u-font-family-monospace u-font-size-13px">
                       {item.timePrecision === 'datetime' ? item.timestamp.slice(0, 10) : item.timestamp}
                     </span>
-                    <span className="badge badge-neutral" style={{ fontSize: '0.625rem', padding: '0.1rem 0.4rem' }}>
+                    <span className="badge badge-neutral u-font-size-13px u-padding-0-1rem-0-4rem">
                       {item.source === 'manual' ? t.sourceManual : t.sourceSnapshot}
                     </span>
                   </div>
@@ -767,18 +626,59 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               );
             })
           ) : (
-            <div style={{ padding: '1.5rem 0', textAlign: 'center', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+            <div className="u-padding-1-5rem-0 u-text-align-center u-font-size-13px u-color-text-muted">
               {t.noRecentActivity}
             </div>
           )}
         </div>
       </div>
 
+      <details className="workspace-details">
+        <summary>{lang === 'zh' ? '活动数据表与来源说明' : 'Activity data and source coverage'}</summary>
+        <p className="coverage-note">
+          {lang === 'zh'
+            ? '没有记录不代表没有练习。手动记录和有效导入依据按题目与日期去重；这不是历史任务完成率。标签可重叠，分布之和可能超过已完成题数。'
+            : 'No record does not prove inactivity. Manual records and valid imported evidence are deduplicated by problem and date; this is not a historical task completion rate. Tags overlap, so their totals may exceed solved problems.'}
+        </p>
+        {sourceError && <Feedback retry={{ label: lang === 'zh' ? '重试来源统计' : 'Retry source totals', run: () => setSourceRetry((value) => value + 1) }}>{sourceError}</Feedback>}
+        {sourceStats && (
+          <dl className="detail-grid">
+            <dt>{lang === 'zh' ? '手动练习 / 完成 / 未完成' : 'Manual / completed / not completed'}</dt>
+            <dd>
+              {sourceStats.totalManualPractices} / {sourceStats.completedManualPractices} /{' '}
+              {sourceStats.uncompletedManualPractices}
+            </dd>
+            <dt>{lang === 'zh' ? '有效快照 / 含通过记录' : 'Active snapshots / with Accepted evidence'}</dt>
+            <dd>
+              {sourceStats.totalSnapshots} / {sourceStats.acceptedSnapshots}
+            </dd>
+          </dl>
+        )}
+        <table className="data-table">
+          <caption>{lang === 'zh' ? '最近 30 天活动' : 'Last 30 days of activity'}</caption>
+          <thead>
+            <tr>
+              <th>{lang === 'zh' ? '日期' : 'Date'}</th>
+              <th>{t.trendActiveProblems}</th>
+              <th>{t.trendSolvedProblems}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data?.trend30Days.map((day) => (
+              <tr key={day.date}>
+                <td>{day.date}</td>
+                <td>{day.activeCount}</td>
+                <td>{day.completedCount}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </details>
       {/* Data Status & Freshness Footer */}
       {data?.dataStatus && (
         <div className="data-status-bar">
           <div className="data-status-row">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+            <div className="u-display-flex u-align-items-center u-gap-1rem u-flex-wrap-wrap">
               <span>
                 <strong>{t.catalogLastUpdated}:</strong>{' '}
                 {data.dataStatus.catalogUpdatedAt
@@ -792,18 +692,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   : t.never}
               </span>
               <span>
-                <strong>{t.userTimezoneLabel}:</strong>{' '}
-                {data.dataStatus.userTimezone || t.setupTimezoneTitle}
+                <strong>{t.userTimezoneLabel}:</strong> {data.dataStatus.userTimezone || t.setupTimezoneTitle}
               </span>
             </div>
           </div>
 
           {data.dataStatus.pendingDateCount > 0 && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--warning)', padding: '0.4rem 0' }}>
+            <div className="u-display-flex u-align-items-center u-gap-0-5rem u-color-warning u-padding-0-4rem-0">
               <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-              <span>
-                {t.pendingDatesNotice.replace('{count}', String(data.dataStatus.pendingDateCount))}
-              </span>
+              <span>{t.pendingDatesNotice.replace('{count}', String(data.dataStatus.pendingDateCount))}</span>
             </div>
           )}
         </div>

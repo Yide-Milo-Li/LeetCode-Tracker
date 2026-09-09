@@ -11,6 +11,8 @@ Object.defineProperty(globalThis, 'navigator', { configurable: true, value: dom.
 const React = await import('react');
 const { render, fireEvent, screen, act, cleanup } = await import('@testing-library/react');
 const { api } = await import('../apps/web/src/api.ts');
+const { CatalogImportWorkspace } = await import('../apps/web/src/components/CatalogImportWorkspace.tsx');
+const { PracticeWorkspace } = await import('../apps/web/src/components/PracticeWorkspace.tsx');
 const { SettingsView } = await import('../apps/web/src/components/SettingsView.tsx');
 const { CatalogView } = await import('../apps/web/src/components/CatalogView.tsx');
 const { PracticeLogModal } = await import('../apps/web/src/components/PracticeLogModal.tsx');
@@ -38,7 +40,7 @@ function preview(id: string): ImportPreview {
 async function settings() {
   mock.method(api, 'getImportHistory', async () => ({ total: 0, items: [] }));
   mock.method(api, 'getSettings', async () => ({ language: 'en', theme: 'light', timezone: null, updatedAt: 0 }));
-  await act(async () => { render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} />); });
+  await act(async () => { render(<CatalogImportWorkspace lang="en" />); });
   fireEvent.click(screen.getByRole('button', { name: 'Paste Raw JSONL' }));
   return screen.getByRole('textbox') as HTMLTextAreaElement;
 }
@@ -107,11 +109,11 @@ it('shows failed requests explicitly and retry recovers without a false empty ca
   assert.match(screen.getByRole('alert').textContent!, /Unable to load/);
   assert.equal(screen.queryByText('No matching problems found.'), null);
   assert.equal(screen.queryByText('Never'), null);
-  assert.equal(view.container.querySelector('.metrics-grid'), null);
+  assert.equal(view.container.querySelector('.catalog-overview'), null);
   failed = false;
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Retry' })); });
   assert.equal(screen.queryByRole('alert'), null);
-  assert.ok(screen.getByText('Recovered'));
+  assert.ok(screen.getByRole('button', { name: 'Recovered' }));
 });
 
 it('a delayed old filter response cannot replace the newer search results', async () => {
@@ -119,11 +121,11 @@ it('a delayed old filter response cannot replace the newer search results', asyn
   const old = deferred<ReturnType<typeof results>>();
   mock.method(api, 'getCatalog', (query: { search?: string }) => query.search ? Promise.resolve(results('New result')) : old.promise);
   await act(async () => { render(<CatalogView lang="en" onNavigateSettings={() => {}} />); });
-  await act(async () => { fireEvent.change(screen.getByRole('textbox'), { target: { value: 'new' } }); });
-  assert.ok(screen.getByText('New result'));
+  await act(async () => { fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'new' } }); });
+  assert.ok(screen.getByRole('button', { name: 'New result' }));
   await act(async () => { old.resolve(results('Old result')); });
   assert.equal(screen.queryByText('Old result'), null);
-  assert.ok(screen.getByText('New result'));
+  assert.ok(screen.getByRole('button', { name: 'New result' }));
 });
 
 it('handles pagination navigation and disables boundary controls correctly', async () => {
@@ -149,7 +151,7 @@ it('handles pagination navigation and disables boundary controls correctly', asy
   await act(async () => { render(<CatalogView lang="en" onNavigateSettings={() => {}} />); });
 
   // On page 1: total 75 with limit 50 means 2 pages
-  assert.ok(screen.getByText('Page 1 of 2 (75 problems)'));
+  assert.ok(screen.getByText('Page 1 of 2 · 75 records'));
   const prevBtn = screen.getByRole('button', { name: 'Previous' });
   const nextBtn = screen.getByRole('button', { name: 'Next' });
   assert.ok(prevBtn.hasAttribute('disabled'));
@@ -157,7 +159,7 @@ it('handles pagination navigation and disables boundary controls correctly', asy
 
   // Click Next -> advances to page 2
   await act(async () => { fireEvent.click(nextBtn); });
-  assert.ok(screen.getByText('Page 2 of 2 (75 problems)'));
+  assert.ok(screen.getByText('Page 2 of 2 · 75 records'));
   assert.equal(prevBtn.hasAttribute('disabled'), false);
   assert.ok(nextBtn.hasAttribute('disabled'));
   assert.deepEqual(pageQueries, [1, 2]);
@@ -166,7 +168,7 @@ it('handles pagination navigation and disables boundary controls correctly', asy
 it('rejects oversized files > 10 MiB before reading and shows alert', async () => {
   mock.method(api, 'getImportHistory', async () => ({ total: 0, items: [] }));
   mock.method(api, 'getSettings', async () => ({ language: 'en', theme: 'light', timezone: null, updatedAt: 0 }));
-  const view = await act(async () => render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} />));
+  const view = await act(async () => render(<CatalogImportWorkspace lang="en" />));
   const fileInput = view.container.querySelector('input[type="file"]') as HTMLInputElement;
   const hugeFile = new (dom.window as unknown as { File: new (parts: string[], name: string) => File }).File(['dummy'], 'huge.jsonl');
   Object.defineProperty(hugeFile, 'size', { value: 12 * 1024 * 1024 });
@@ -198,6 +200,7 @@ it('logs practice sessions and revokes past practice records in PracticeLogModal
     practicedAt: '2026-03-01T12:00:00.000Z',
     timePrecision: 'datetime' as const,
     notes: 'Existing solution note',
+    durationMinutes: null, sourceTimezone: 'UTC', revision: 1,
     status: 'active' as const,
     createdAt: 100,
     updatedAt: 100,
@@ -227,37 +230,30 @@ it('logs practice sessions and revokes past practice records in PracticeLogModal
     render(<PracticeLogModal problem={problem} lang="en" onClose={() => {}} />);
   });
 
-  // Verify problem info and existing history are displayed
-  assert.ok(screen.getByText(/Log Practice Session: #1 Two Sum/));
-  assert.ok(screen.getByText('Existing solution note'));
-
-  // Switch precision to Date only
-  fireEvent.click(screen.getByRole('button', { name: 'Date only' }));
-
-  // Enter notes
-  const notesTextarea = screen.getByPlaceholderText(/Notes, algorithm strategy/);
-  fireEvent.change(notesTextarea, { target: { value: 'Solved with Map in O(N)' } });
-
-  // Submit practice form
-  await act(async () => {
-    fireEvent.click(screen.getByRole('button', { name: 'Save Record' }));
-  });
-
+  // Manual entry remains date-aware and creates exactly one practice.
+  assert.ok(screen.getByText(/#1 Two Sum/));
+  fireEvent.change(screen.getByLabelText('Time precision'), { target: { value: 'date' } });
+  fireEvent.change(screen.getByLabelText('Notes (optional)'), { target: { value: 'Solved with Map in O(N)' } });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save record' })); });
   assert.equal(createCalls.mock.callCount(), 1);
   const createArg = createCalls.mock.calls[0].arguments[0];
   assert.equal(createArg.questionFrontendId, '1');
   assert.equal(createArg.timePrecision, 'date');
   assert.equal(createArg.notes, 'Solved with Map in O(N)');
-
-  // Revoke existing record
-  await act(async () => {
-    fireEvent.click(screen.getByTitle('Revoke'));
-  });
+  assert.ok(createArg.operationId);
+  cleanup();
+  // Revocation moved into the shared exact-record detail, with explicit confirmation.
+  await act(async () => { render(<PracticeWorkspace request={{ mode: 'detail', record: existingRecord }} lang="en" onClose={() => {}} />); });
+  assert.ok(screen.getByText('Existing solution note'));
+  fireEvent.click(screen.getByRole('button', { name: 'Revoke this record' }));
+  assert.equal(revokeCalls.mock.callCount(), 0);
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Confirm revoke' })); });
   assert.equal(revokeCalls.mock.callCount(), 1);
-  assert.equal(revokeCalls.mock.calls[0].arguments[0], 'rec-1');
+  assert.deepEqual(revokeCalls.mock.calls[0].arguments, ['rec-1', 1]);
 });
 
 it('formats raw text, reviews preview diff with conflict override, and commits in ProgressWorkbench', async () => {
+  mock.method(api, 'getProgressImportHistory', async () => ({ total: 0, items: [] }));
   mock.method(api, 'getPracticeStats', async () => ({
     uniqueSolvedProblems: 42,
     totalManualPractices: 60,
@@ -300,7 +296,7 @@ it('formats raw text, reviews preview diff with conflict override, and commits i
     catalogRevision: 1,
     practiceRevision: 1,
     createdAt: 100,
-    expiresAt: 200,
+    expiresAt: Date.now() + 600000,
     totalCandidates: 1,
     validCount: 1,
     insertCount: 0,
@@ -353,38 +349,25 @@ it('formats raw text, reviews preview diff with conflict override, and commits i
     render(<ProgressWorkbench lang="en" />);
   });
 
-  // Verify stats cards render
-  assert.ok(screen.getByText('42'));
-  assert.ok(screen.getByText(/Active \(models\/gemini-3.8-flash\)/));
-
-  // Enter text
-  const rawInput = screen.getByPlaceholderText(/Paste LeetCode submissions text here/);
+  // Formatting no longer implies preview or consent: every step remains reviewable.
+  const rawInput = screen.getByLabelText('Progress content');
   fireEvent.change(rawInput, { target: { value: '1. Two Sum Accepted 3 2026-01-15' } });
-
-  // Format with AI
-  await act(async () => {
-    fireEvent.click(screen.getByRole('button', { name: 'Format with Gemini AI' }));
-  });
-
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Organize content' })); });
   assert.equal(mockFormat.mock.callCount(), 1);
+  assert.equal(mockPreview.mock.callCount(), 0);
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Generate preview' })); });
   assert.equal(mockPreview.mock.callCount(), 1);
-
-  // Verify preview diff is displayed
-  assert.ok(screen.getByText(/Progress Import Preflight Analysis/));
-  assert.ok(screen.getByText(/Detected 1 conflict\(s\)/));
-
-  // Toggle conflict override checkbox
-  const confirmBtn = screen.getByTitle('Confirm Override');
-  fireEvent.click(confirmBtn);
-
-  // Commit
-  await act(async () => {
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm & Commit Snapshots' }));
-  });
-
+  assert.ok(screen.getByText('Incoming date is older than existing record'));
+  assert.match(screen.getByText(/2026-02-01/).textContent!, /5/);
+  assert.match(screen.getByText(/2026-01-15/).textContent!, /3/);
+  assert.equal(screen.getByRole('button', { name: 'Continue to confirmation' }).hasAttribute('disabled'), true);
+  fireEvent.click(screen.getByRole('checkbox', { name: /I reviewed this problem/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Continue to confirmation' }));
+  assert.equal(mockCommit.mock.callCount(), 0);
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Confirm import' })); });
   assert.equal(mockCommit.mock.callCount(), 1);
   assert.deepEqual(mockCommit.mock.calls[0].arguments, ['prev-progress-1', ['1']]);
-  assert.match(screen.getByRole('alert').textContent!, /Progress import committed/);
+  assert.match(screen.getByRole('status').textContent!, /Progress imported/);
 });
 
 it('updates and persists timezone preference in SettingsView', async () => {
@@ -407,13 +390,15 @@ it('updates and persists timezone preference in SettingsView', async () => {
     render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} />)
   );
 
-  const timezoneSelect = view.container.querySelector('select') as HTMLSelectElement;
+  const timezoneSelect = screen.getByLabelText('IANA timezone') as HTMLInputElement;
   assert.ok(timezoneSelect);
 
   await act(async () => {
     fireEvent.change(timezoneSelect, { target: { value: 'Asia/Shanghai' } });
   });
 
+  assert.equal(updateCalls.mock.callCount(), 0, 'Changing the draft must not save before confirmation');
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save timezone' })); });
   assert.equal(updateCalls.mock.callCount(), 1);
   assert.deepEqual(updateCalls.mock.calls[0].arguments[0], { timezone: 'Asia/Shanghai' });
 });

@@ -30,7 +30,10 @@ const { translations } = await import('../apps/web/src/i18n.ts');
 
 it('background refresh preserves unsaved prompt and does not overlap requests', async () => {
   let tick!: () => void;
-  mock.method(globalThis, 'setInterval', (callback: () => void) => { tick = callback; return 1 as any; });
+  mock.method(globalThis, 'setInterval', (callback: () => void) => {
+    tick = callback;
+    return 1 as any;
+  });
   mock.method(globalThis, 'clearInterval', () => {});
   const visibility = Object.getOwnPropertyDescriptor(document, 'visibilityState');
   Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
@@ -38,19 +41,29 @@ it('background refresh preserves unsaved prompt and does not overlap requests', 
   let calls = 0;
   mock.method(api, 'ensureDailyPlan', async () => {
     calls++;
-    if (calls > 1) await new Promise<void>(r => { release = r; });
+    if (calls > 1)
+      await new Promise<void>((r) => {
+        release = r;
+      });
     return { status: 'rest' as const, plan: null };
   });
   try {
-    await act(async () => { render(<TodayPlanView lang="en" onNavigateToSettings={() => {}} />); });
+    await act(async () => {
+      render(<TodayPlanView lang="en" onNavigateToSettings={() => {}} />);
+    });
     fireEvent.click(screen.getByText(translations.en.createTemporaryPlan));
     const field = screen.getByPlaceholderText(/dynamic programming questions today/i) as HTMLTextAreaElement;
     fireEvent.change(field, { target: { value: 'Unsaved instructions' } });
-    await act(async () => { tick(); tick(); });
+    await act(async () => {
+      tick();
+      tick();
+    });
     assert.equal(calls, 2);
     assert.equal(field.isConnected, true);
     assert.equal(field.value, 'Unsaved instructions');
-    await act(async () => { release(); });
+    await act(async () => {
+      release();
+    });
     assert.equal(field.isConnected, true);
     assert.equal(field.value, 'Unsaved instructions');
   } finally {
@@ -61,16 +74,46 @@ it('background refresh preserves unsaved prompt and does not overlap requests', 
 
 it('unresolved prompts require an explicit manual preview before confirmation', async () => {
   const plan = createMockPlan();
-  const result: OverridePreview = { id: 'preview', date: plan.date, expiresAt: Date.now() + 10000, base: plan.rules, rules: {}, changed: [], issues: [], unresolved: ['Unknown required tag'], candidateCount: 1, counts: { Easy: 1, Medium: 1, Hard: 0 }, revision: { catalog: 1, practice: 1, planning: 1, timezone: 'UTC' }, planVersion: 1 };
-  const preview = mock.method(api, 'previewDailyPlanOverride', async (input: Parameters<typeof api.previewDailyPlanOverride>[0]) => ({ ...result, unresolved: input.rules ? [] : result.unresolved }));
-  await act(async () => { render(<PromptOverrideModal isOpen lang="en" currentPlan={plan} onClose={() => {}} onApplied={() => {}} />); });
-  fireEvent.change(screen.getByPlaceholderText(/dynamic programming questions today/i), { target: { value: 'Unknown tag only' } });
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Parse with AI/i })); });
+  const result: OverridePreview = {
+    id: 'preview',
+    date: plan.date,
+    expiresAt: Date.now() + 10000,
+    base: plan.rules,
+    rules: {},
+    changed: [],
+    issues: [],
+    unresolved: ['Unknown required tag'],
+    candidateCount: 1,
+    counts: { Easy: 1, Medium: 1, Hard: 0 },
+    revision: { catalog: 1, practice: 1, planning: 1, timezone: 'UTC' },
+    planVersion: 1,
+  };
+  const preview = mock.method(
+    api,
+    'previewDailyPlanOverride',
+    async (input: Parameters<typeof api.previewDailyPlanOverride>[0]) => ({
+      ...result,
+      unresolved: input.rules ? [] : result.unresolved,
+    }),
+  );
+  await act(async () => {
+    render(
+      <PromptOverrideModal isOpen lang="en" currentPlan={plan} onClose={() => {}} onApplied={() => {}} />,
+    );
+  });
+  fireEvent.change(screen.getByPlaceholderText(/dynamic programming questions today/i), {
+    target: { value: 'Unknown tag only' },
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: /Parse with AI/i }));
+  });
   const confirm = screen.getByRole('button', { name: /Apply to Unfinished Slots/i }) as HTMLButtonElement;
   assert.equal(confirm.disabled, true);
   fireEvent.click(screen.getByText('Edit rules manually'));
   fireEvent.change(screen.getByLabelText('Daily count'), { target: { value: '3' } });
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Preview edited rules' })); });
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Preview edited rules' }));
+  });
   assert.equal(preview.mock.calls[1].arguments[0].prompt, undefined);
   assert.equal(preview.mock.calls[1].arguments[0].rules?.dailyCount, 3);
   assert.equal(confirm.disabled, false);
@@ -165,7 +208,14 @@ it('renders setup view when timezone is not configured and triggers navigation c
 
   let navigated = false;
   await act(async () => {
-    render(<TodayPlanView lang="en" onNavigateToSettings={() => { navigated = true; }} />);
+    render(
+      <TodayPlanView
+        lang="en"
+        onNavigateToSettings={() => {
+          navigated = true;
+        }}
+      />,
+    );
   });
 
   assert.ok(screen.getByText('Timezone Setup Required'));
@@ -218,13 +268,17 @@ it('renders active daily plan and triggers single problem item replacement', asy
   });
 
   // Check encouragement quote and items
-  assert.ok(screen.getByText(/"Great job! Keep pushing your DP skills today."/));
-  assert.ok(screen.getByText(/70\. Climbing Stairs/));
-  assert.ok(screen.getByText(/198\. House Robber/));
-  assert.ok(screen.getByText('1 / 2 (50%)'));
+  assert.ok(screen.getByText(/Great job! Keep pushing your DP skills today./));
+  assert.ok(screen.getByRole('heading', { name: /70\. Climbing Stairs/ }));
+  assert.ok(screen.getByRole('heading', { name: /198\. House Robber/ }));
+  const progress = screen.getByRole('progressbar') as HTMLProgressElement;
+  assert.equal(progress.value, 1);
+  assert.equal(progress.max, 2);
 
   // Trigger replace on the first (uncompleted) item
-  const replaceBtn = screen.getByRole('button', { name: /^Replace$/ });
+  const replaceBtn = screen
+    .getAllByRole('button', { name: /^Replace$/ })
+    .find((button) => !button.hasAttribute('disabled'))!;
   await act(async () => {
     fireEvent.click(replaceBtn);
   });
@@ -236,7 +290,7 @@ it('renders active daily plan and triggers single problem item replacement', asy
   ]);
 
   // Ensure updated problem is shown
-  assert.ok(screen.getByText(/746\. Min Cost Climbing Stairs/));
+  assert.ok(screen.getByRole('heading', { name: /746\. Min Cost Climbing Stairs/ }));
 });
 
 it('renders weekly schedule and allows creating new strategy with 100% difficulty validation', async () => {
@@ -331,6 +385,19 @@ it('renders weekly schedule and allows creating new strategy with 100% difficult
 
   assert.equal(saveBtn.hasAttribute('disabled'), false);
 
+  // A visible ownership conflict names the actual weekday and preserves the complete draft.
+  const monday = screen.getByRole('button', { name: 'Mon' });
+  await act(async () => {
+    fireEvent.click(monday);
+  });
+  await act(async () => {
+    fireEvent.click(saveBtn);
+  });
+  assert.equal(createMock.mock.callCount(), 0);
+  assert.ok(screen.getAllByText(/Monday — Graph Mastery/).length > 0);
+  assert.equal((nameInput as HTMLInputElement).value, 'Speedrun Easy');
+  fireEvent.click(monday);
+
   // Submit
   await act(async () => {
     fireEvent.click(saveBtn);
@@ -370,11 +437,15 @@ it('parses natural language override preview and commits via PromptOverrideModal
     render(
       <PromptOverrideModal
         isOpen={true}
-        onClose={() => { closed = true; }}
-        onApplied={(p) => { appliedPlan = p; }}
+        onClose={() => {
+          closed = true;
+        }}
+        onApplied={(p) => {
+          appliedPlan = p;
+        }}
         currentPlan={currentPlan}
         lang="en"
-      />
+      />,
     );
   });
 
@@ -394,7 +465,6 @@ it('parses natural language override preview and commits via PromptOverrideModal
 
   // Verify preview renders candidate count and warnings
   assert.ok(screen.getByText('15'));
-
 
   // Click Apply to Unfinished Slots
   await act(async () => {

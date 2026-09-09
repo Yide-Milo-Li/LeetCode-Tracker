@@ -1,370 +1,409 @@
-/**
- * Catalog browsing, search, multi-dimensional filtering, and metrics view.
- */
-import React, { useEffect, useState } from 'react';
+/** Local catalog discovery, filtering, metadata details and contextual manual recording. */
+import React, { useEffect, useRef, useState } from 'react';
 import {
-  Search,
-  FilterX,
-  Database,
-  Layers,
-  Sparkles,
-  CalendarPlus,
-  TrendingUp,
-} from 'lucide-react';
-import { api, type CatalogProblem, type CatalogStats, type CatalogQuery, type TopicTag, type PracticeStats } from '../api.ts';
+  api,
+  type CatalogProblem,
+  type CatalogStats,
+  type CatalogQuery,
+  type TopicTag,
+  type PracticeStats,
+} from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
-import { PracticeLogModal } from './PracticeLogModal.tsx';
+import { useWorkspace } from '../workspace.tsx';
+import { Dialog, Feedback, Field, PageHeader, Pagination } from './ui.tsx';
+import { PracticeEditor, PracticeHistory } from './PracticeWorkspace.tsx';
 
-interface CatalogViewProps {
-  lang: Language;
-  onNavigateSettings: () => void;
+/** Render only HTTP(S) links from user-provided catalog metadata. */
+function safeUrl(value: string): string | undefined {
+  try {
+    const url = new URL(value);
+    return ['https:', 'http:'].includes(url.protocol) ? url.href : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
-/** Browse current results while keeping failed and superseded requests out of empty states. */
-export const CatalogView: React.FC<CatalogViewProps> = ({ lang, onNavigateSettings }) => {
+/** Retain filter state and reject out-of-order responses while catalog/import mutations refresh current data. */
+export function CatalogView({
+  lang,
+  onNavigateSettings,
+}: {
+  lang: Language;
+  onNavigateSettings: () => void;
+}) {
   const t = translations[lang];
-
+  const zh = lang === 'zh';
+  const workspace = useWorkspace();
   const [stats, setStats] = useState<CatalogStats | null>(null);
   const [tags, setTags] = useState<TopicTag[]>([]);
-  const [problems, setProblems] = useState<CatalogProblem[]>([]);
-  const [total, setTotal] = useState(0);
   const [practiceStats, setPracticeStats] = useState<PracticeStats | null>(null);
-  const [selectedProblemForPractice, setSelectedProblemForPractice] = useState<CatalogProblem | null>(null);
-
-  // Filters state
+  const [items, setItems] = useState<CatalogProblem[]>([]);
+  const [total, setTotal] = useState(0);
   const [search, setSearch] = useState('');
-  const [difficulty, setDifficulty] = useState<NonNullable<CatalogQuery['difficulty']> | ''>('');
-  const [tag, setTag] = useState<string>('');
+  const [difficulty, setDifficulty] = useState<CatalogQuery['difficulty']>();
+  const [tag, setTag] = useState('');
   const [premium, setPremium] = useState<NonNullable<CatalogQuery['premium']>>('all');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(50);
   const [loading, setLoading] = useState(true);
   const [overviewLoading, setOverviewLoading] = useState(true);
-  const [overviewError, setOverviewError] = useState(false);
-  const [catalogError, setCatalogError] = useState(false);
+  const [error, setError] = useState('');
+  const [overviewError, setOverviewError] = useState('');
   const [retry, setRetry] = useState(0);
-
+  const [selected, setSelected] = useState<CatalogProblem | null>(null);
+  const [recording, setRecording] = useState(false);
+  const detailBody = useRef<HTMLDivElement>(null);
+  const recordTrigger = useRef<HTMLButtonElement>(null);
+  const wasRecording = useRef(false);
+  useEffect(() => {
+    // The drawer stays mounted between steps, so focus must follow the replaced content explicitly.
+    if (recording) detailBody.current?.querySelector<HTMLElement>('input:not(:disabled), select:not(:disabled), textarea:not(:disabled)')?.focus();
+    else if (wasRecording.current) recordTrigger.current?.focus();
+    wasRecording.current = recording;
+  }, [recording]);
   useEffect(() => {
     let active = true;
     setOverviewLoading(true);
-    setOverviewError(false);
-    Promise.all([api.getCatalogStats(), api.getAllTags(), api.getPracticeStats()]).then(([metrics, topics, pStats]) => {
-      if (!active) return;
-      setStats(metrics);
-      setTags(topics.tags);
-      setPracticeStats(pStats);
-    }).catch(() => {
-      if (active) setOverviewError(true);
-    }).finally(() => {
-      if (active) setOverviewLoading(false);
-    });
-    return () => { active = false; };
-  }, [retry]);
-
+    Promise.all([api.getCatalogStats(), api.getAllTags(), api.getPracticeStats()])
+      .then(([metrics, topics, practices]) => {
+        if (active) {
+          setStats(metrics);
+          setTags(topics.tags);
+          setPracticeStats(practices);
+          setOverviewError('');
+        }
+      })
+      .catch((err) => {
+        if (active) setOverviewError(t.overviewLoadFailed + ': ' + err.message);
+      })
+      .finally(() => {
+        if (active) setOverviewLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [workspace.revision, retry]);
   useEffect(() => {
-    // Filter requests can finish out of order. Only the current request owns the view.
     let active = true;
     setLoading(true);
-    setCatalogError(false);
-    api.getCatalog({
-      page, limit, search: search.trim() || undefined,
-      difficulty: difficulty || undefined, tag: tag || undefined, premium,
-    }).then((res) => {
-      if (!active) return;
-      setProblems(res.items);
-      setTotal(res.total);
-    }).catch(() => {
-      if (active) setCatalogError(true);
-    }).finally(() => {
-      if (active) setLoading(false);
-    });
-    return () => { active = false; };
-  }, [search, difficulty, tag, premium, page, limit, retry]);
-
-  /** Reset every filter together and return to the first result page. */
-  function handleResetFilters() {
+    setError('');
+    api
+      .getCatalog({
+        page,
+        limit,
+        search: search.trim() || undefined,
+        difficulty,
+        tag: tag || undefined,
+        premium,
+      })
+      .then((data) => {
+        if (active) {
+          setItems(data.items);
+          setTotal(data.total);
+          if (page > Math.max(1, Math.ceil(data.total / limit)))
+            setPage(Math.max(1, Math.ceil(data.total / limit)));
+        }
+      })
+      .catch((err) => {
+        if (active) setError(t.catalogLoadFailed + ': ' + err.message);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [search, difficulty, tag, premium, page, limit, workspace.revision, retry]);
+  /** Reset all query dimensions together, including the current page. */
+  function reset() {
     setSearch('');
-    setDifficulty('');
+    setDifficulty(undefined);
     setTag('');
     setPremium('all');
     setPage(1);
   }
-
-  const totalPages = Math.ceil(total / limit) || 1;
-
-  // Format date helper
-  const formattedLastImport = stats?.lastImportedAt
-    ? new Date(stats.lastImportedAt).toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US')
-    : t.never;
-
-  /** Allow only HTTP(S) links when rendering user-supplied problem URLs. */
-  function getSafeUrl(url: string): string | null {
-    try {
-      const parsed = new URL(url);
-      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-        return parsed.toString();
-      }
-    } catch {
-      // invalid URL
-    }
-    return null;
-  }
-
   return (
-    <div>
-      {/* Overview Metrics Cards */}
-      {(overviewError || catalogError) && (
-        <div role="alert" className="alert alert-danger">
-          <span>{overviewError ? t.overviewLoadFailed : t.catalogLoadFailed}</span>
-          <button className="btn btn-outline btn-sm" onClick={() => setRetry((value) => value + 1)}>{t.retry}</button>
-        </div>
+    <div className="catalog-view">
+      <PageHeader
+        title={zh ? '题库' : 'Problems'}
+        description={
+          zh ? '从你的本地题库，找到下一道值得练习的题。' : 'Find your next problem in your local collection.'
+        }
+        actions={
+          <button className="btn btn-primary" onClick={onNavigateSettings}>
+            {zh ? '导入题库' : 'Import problems'}
+          </button>
+        }
+      />
+      {(error || overviewError) && (
+        <Feedback retry={{ label: t.retry, run: () => setRetry((n) => n + 1) }}>
+          {error || overviewError}
+        </Feedback>
       )}
-      {overviewLoading ? <p role="status">{t.loadingOverview}</p> : !overviewError && stats && <div className="metrics-grid">
-        <div className="metric-card">
-          <div className="metric-label">{t.statTotal}</div>
-          <div className="metric-value">{stats?.totalProblems ?? 0}</div>
-          <div className="metric-sub">{t.statRevision}: {stats?.catalogRevision ?? 0}</div>
-        </div>
-        <div className="metric-card">
-          <div className="metric-label" style={{ color: 'var(--easy)' }}>{t.statEasy}</div>
-          <div className="metric-value" style={{ color: 'var(--easy)' }}>{stats?.easy ?? 0}</div>
-          <div className="metric-sub">
-            {stats?.totalProblems ? Math.round(((stats.easy / stats.totalProblems) * 100)) : 0}%
+      {overviewLoading && !stats ? (
+        <p role="status">{t.loadingOverview}</p>
+      ) : (
+        stats && (
+          <div className="catalog-overview">
+            <div className="summary-counts">
+              <span>
+                {t.statTotal} <strong>{stats.totalProblems}</strong>
+              </span>
+              <span className="easy-text">
+                {t.statEasy} {stats.easy}
+              </span>
+              <span className="warning-text">
+                {t.statMedium} {stats.medium}
+              </span>
+              <span className="danger-text">
+                {t.statHard} {stats.hard}
+              </span>
+              <span>
+                {t.statSolvedProblems} {practiceStats?.uniqueSolvedProblems ?? '—'}
+              </span>
+            </div>
+            <details>
+              <summary>{zh ? '题库概况' : 'Catalog details'}</summary>
+              <dl className="detail-grid">
+                <dt>{t.statPremium}</dt>
+                <dd>{stats.paidOnly}</dd>
+                <dt>{zh ? '标签数' : 'Tags'}</dt>
+                <dd>{stats.totalTags}</dd>
+                <dt>{t.statRevision}</dt>
+                <dd>{stats.catalogRevision}</dd>
+                <dt>{t.statLastImport}</dt>
+                <dd>
+                  {stats.lastImportedAt
+                    ? new Date(stats.lastImportedAt).toLocaleString(zh ? 'zh-CN' : 'en-US', {
+                        timeZone: workspace.timezone ?? 'UTC',
+                      })
+                    : t.never}
+                </dd>
+                <dt>{zh ? '完成覆盖' : 'Solved coverage'}</dt>
+                <dd>
+                  {stats.totalProblems
+                    ? Math.round(((practiceStats?.uniqueSolvedProblems ?? 0) / stats.totalProblems) * 100)
+                    : 0}
+                  %
+                </dd>
+              </dl>
+            </details>
           </div>
-        </div>
-        <div className="metric-card">
-          <div className="metric-label" style={{ color: 'var(--medium)' }}>{t.statMedium}</div>
-          <div className="metric-value" style={{ color: 'var(--medium)' }}>{stats?.medium ?? 0}</div>
-          <div className="metric-sub">
-            {stats?.totalProblems ? Math.round(((stats.medium / stats.totalProblems) * 100)) : 0}%
-          </div>
-        </div>
-        <div className="metric-card">
-          <div className="metric-label" style={{ color: 'var(--hard)' }}>{t.statHard}</div>
-          <div className="metric-value" style={{ color: 'var(--hard)' }}>{stats?.hard ?? 0}</div>
-          <div className="metric-sub">
-            {stats?.totalProblems ? Math.round(((stats.hard / stats.totalProblems) * 100)) : 0}%
-          </div>
-        </div>
-        <div className="metric-card">
-          <div className="metric-label" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--primary)' }}>
-            <TrendingUp size={14} />
-            {t.statSolvedProblems}
-          </div>
-          <div className="metric-value" style={{ color: 'var(--primary)' }}>
-            {practiceStats?.uniqueSolvedProblems ?? 0}
-          </div>
-          <div className="metric-sub">
-            {stats?.totalProblems ? Math.round(((practiceStats?.uniqueSolvedProblems ?? 0) / stats.totalProblems) * 100) : 0}% of catalog
-          </div>
-        </div>
-        <div className="metric-card">
-          <div className="metric-label">{t.statPremium}</div>
-          <div className="metric-value">{stats?.paidOnly ?? 0}</div>
-          <div className="metric-sub">{t.statLastImport}: {formattedLastImport}</div>
-        </div>
-      </div>}
-
-      {/* Filter and Search Bar */}
-      <div className="card" style={{ padding: '1rem 1.25rem', marginBottom: '1rem' }}>
-        <div className="filters-bar" style={{ marginBottom: 0 }}>
-          <div style={{ position: 'relative', flex: '1 1 240px' }}>
-            <Search size={16} style={{ position: 'absolute', left: 10, top: 11, color: 'var(--text-muted)' }} />
-            <input
-              type="text"
-              className="input-field"
-              style={{ width: '100%', paddingLeft: '2rem' }}
-              placeholder={t.searchPlaceholder}
-              value={search}
-              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-            />
-          </div>
-
+        )
+      )}
+      <div className="filter-toolbar">
+        <Field label={zh ? '搜索题目' : 'Search problems'}>
+          <input
+            type="search"
+            value={search}
+            placeholder={t.searchPlaceholder}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
+          />
+        </Field>
+        <Field label={zh ? '难度' : 'Difficulty'}>
           <select
-            className="select-field"
-            value={difficulty}
-            onChange={(e) => { setDifficulty(e.target.value as NonNullable<CatalogQuery['difficulty']> | ''); setPage(1); }}
+            value={difficulty ?? ''}
+            onChange={(e) => {
+              setDifficulty((e.target.value as CatalogQuery['difficulty']) || undefined);
+              setPage(1);
+            }}
           >
             <option value="">{t.allDifficulties}</option>
-            <option value="Easy">Easy / 简单</option>
-            <option value="Medium">Medium / 中等</option>
-            <option value="Hard">Hard / 困难</option>
-          </select>
-
-          <select
-            className="select-field"
-            value={tag}
-            onChange={(e) => { setTag(e.target.value); setPage(1); }}
-            style={{ maxWidth: 200 }}
-          >
-            <option value="">{t.allTags}</option>
-            {tags.map((tg) => (
-              <option key={tg.slug} value={tg.slug}>{tg.name}</option>
+            {(['Easy', 'Medium', 'Hard'] as const).map((diff) => (
+              <option value={diff} key={diff}>
+                {t[('stat' + diff) as keyof typeof t]}
+              </option>
             ))}
           </select>
-
+        </Field>
+        <Field label={zh ? '标签' : 'Tags'}>
           <select
-            className="select-field"
+            value={tag}
+            onChange={(e) => {
+              setTag(e.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="">{t.allTags}</option>
+            {tags.map((item) => (
+              <option value={item.slug} key={item.slug}>
+                {item.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label={zh ? '付费范围' : 'Access'}>
+          <select
             value={premium}
-            onChange={(e) => { setPremium(e.target.value as NonNullable<CatalogQuery['premium']>); setPage(1); }}
+            onChange={(e) => {
+              setPremium(e.target.value as typeof premium);
+              setPage(1);
+            }}
           >
             <option value="all">{t.allPricing}</option>
             <option value="false">{t.freeOnly}</option>
             <option value="true">{t.premiumOnly}</option>
           </select>
-
-          {(search || difficulty || tag || premium !== 'all') && (
-            <button className="btn btn-outline btn-sm" onClick={handleResetFilters} title="Reset filters">
-              <FilterX size={14} />
-            </button>
-          )}
-        </div>
+        </Field>
+        <button className="btn btn-secondary" onClick={reset}>
+          {zh ? '重置' : 'Reset'}
+        </button>
       </div>
-
-      {/* Main Problems Table or Empty State */}
-      {loading ? <p role="status">{t.loadingCatalog}</p> : catalogError ? null : !overviewError && !overviewLoading && stats && stats.totalProblems === 0 && problems.length === 0 ? (
-        <div className="card" style={{ textAlign: 'center', padding: '3.5rem 1.5rem' }}>
-          <Database size={48} style={{ margin: '0 auto 1rem auto', color: 'var(--text-muted)' }} />
-          <h3 className="card-title" style={{ justifyContent: 'center' }}>{t.noProblemsInDb}</h3>
-          <p className="card-desc">{t.importPrompt}</p>
+      {loading && <p role="status">{t.loadingCatalog}</p>}
+      {!loading && !error && !overviewError && stats?.totalProblems === 0 ? (
+        <section className="empty-state">
+          <h2>{t.noProblemsInDb}</h2>
+          <p>
+            {zh
+              ? '导入你自行提供的 JSONL 题目数据，即可开始。'
+              : 'Import your own JSONL problem data to get started.'}
+          </p>
           <button className="btn btn-primary" onClick={onNavigateSettings}>
-            <Sparkles size={16} />
-            {t.navSettings}
+            {zh ? '导入题库' : 'Import problems'}
           </button>
-        </div>
-      ) : problems.length === 0 && !loading ? (
-        <div className="card" style={{ textAlign: 'center', padding: '3rem 1.5rem' }}>
-          <Layers size={40} style={{ margin: '0 auto 0.75rem auto', color: 'var(--text-muted)' }} />
-          <p style={{ color: 'var(--text-muted)', marginBottom: '1rem' }}>{t.noProblems}</p>
-          <button className="btn btn-outline btn-sm" onClick={handleResetFilters}>
-            {lang === 'zh' ? '清空筛选条件' : 'Clear Filters'}
+        </section>
+      ) : !loading && !error && !items.length ? (
+        <section className="empty-state">
+          <p>{t.noProblems}</p>
+          <button className="btn btn-secondary" onClick={reset}>
+            {zh ? '清空筛选条件' : 'Clear filters'}
           </button>
-        </div>
+        </section>
       ) : (
         <div className="table-container">
-          <table className="data-table">
+          <table className="data-table problem-table">
             <thead>
               <tr>
-                <th style={{ width: '80px' }}>{t.tableId}</th>
-                <th>{t.tableTitle}</th>
-                <th style={{ width: '110px' }}>{t.tableDifficulty}</th>
-                <th>{t.tableTags}</th>
-                <th style={{ width: '180px', textAlign: 'right' }}>{t.tableActions}</th>
+                <th>{zh ? '题号' : 'No.'}</th>
+                <th>{zh ? '题目' : 'Problem'}</th>
+                <th>{zh ? '难度' : 'Difficulty'}</th>
+                <th>{zh ? '标签' : 'Tags'}</th>
+                <th>{zh ? '操作' : 'Actions'}</th>
               </tr>
             </thead>
             <tbody>
-              {problems.map((p) => {
-                const safeUrl = getSafeUrl(p.url);
-                return (
-                  <tr key={p.questionFrontendId}>
-                    <td style={{ fontWeight: 600, color: 'var(--text-muted)' }}>
-                      #{p.questionFrontendId}
-                    </td>
-                    <td>
-                      <span style={{ fontWeight: 500 }}>{p.title}</span>
-                      {p.isPaidOnly && (
-                        <span className="badge badge-premium">PREMIUM</span>
+              {items.map((problem) => (
+                <tr key={problem.questionId}>
+                  <td className="muted">{problem.questionFrontendId}</td>
+                  <td>
+                    <button className="problem-title-button" onClick={() => setSelected(problem)}>
+                      {problem.title}
+                    </button>
+                    {problem.isPaidOnly && <small className="pending-label">Premium</small>}
+                  </td>
+                  <td>
+                    <span className={'difficulty ' + problem.difficulty.toLowerCase()}>
+                      {t[('stat' + problem.difficulty) as keyof typeof t]}
+                    </span>
+                  </td>
+                  <td>
+                    <div className="tag-list">
+                      {problem.topicTags.slice(0, 2).map((item) => (
+                        <span className="tag-chip" key={item.slug}>
+                          {item.name}
+                        </span>
+                      ))}
+                      {problem.topicTags.length > 2 && (
+                        <span className="muted">+{problem.topicTags.length - 2}</span>
                       )}
-                    </td>
-                    <td>
-                      <span className={`badge badge-${p.difficulty.toLowerCase()}`}>
-                        {p.difficulty}
-                      </span>
-                    </td>
-                    <td>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
-                        {p.topicTags.slice(0, 4).map((tg) => (
-                          <span key={tg.slug} className="badge badge-tag">
-                            {tg.name}
-                          </span>
-                        ))}
-                        {p.topicTags.length > 4 && (
-                          <span className="badge badge-tag" title={p.topicTags.slice(4).map(t => t.name).join(', ')}>
-                            +{p.topicTags.length - 4}
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      <div style={{ display: 'inline-flex', gap: '0.5rem', alignItems: 'center' }}>
-                        <button
-                          className="btn btn-outline btn-sm"
-                          onClick={() => setSelectedProblemForPractice(p)}
-                          title={t.logPractice}
-                          style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
+                    </div>
+                  </td>
+                  <td>
+                    <div className="action-row">
+                      <button
+                        className="text-link"
+                        onClick={() => workspace.openPractice({ mode: 'manual', problem })}
+                      >
+                        {t.logPractice}
+                      </button>
+                      {safeUrl(problem.url) && (
+                        <a
+                          className="text-link"
+                          href={safeUrl(problem.url)}
+                          target="_blank"
+                          rel="noopener noreferrer"
                         >
-                          <CalendarPlus size={13} />
-                          <span>{t.logPractice}</span>
-                        </button>
-                        {safeUrl && (
-                          <a
-                            href={safeUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="btn btn-outline btn-sm"
-                            style={{ textDecoration: 'none', display: 'inline-flex' }}
-                          >
-                            <span>{t.openLink}</span>
-                          </a>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
+                          {t.openLink}
+                        </a>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
       )}
-
-      {/* Pagination Controls */}
-      {!loading && !catalogError && total > 0 && (
-        <div className="pagination-bar">
-          <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
-            {t.pageInfo
-              .replace('{page}', String(page))
-              .replace('{totalPages}', String(totalPages))
-              .replace('{total}', String(total))}
-          </div>
-          <div className="pagination-controls">
-            <select
-              className="select-field"
-              value={limit}
-              onChange={(e) => { setLimit(Number(e.target.value)); setPage(1); }}
-              style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
-            >
-              <option value={20}>20 {t.perPage}</option>
-              <option value={50}>50 {t.perPage}</option>
-              <option value={100}>100 {t.perPage}</option>
-            </select>
-            <button
-              className="btn btn-outline btn-sm"
-              disabled={page <= 1}
-              onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-            >
-              {t.prev}
-            </button>
-            <button
-              className="btn btn-outline btn-sm"
-              disabled={page >= totalPages}
-              onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
-            >
-              {t.next}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {selectedProblemForPractice && (
-        <PracticeLogModal
-          problem={selectedProblemForPractice}
+      <Pagination
+        lang={lang}
+        page={page}
+        total={total}
+        limit={limit}
+        onPage={setPage}
+        onLimit={(n) => {
+          setLimit(n);
+          setPage(1);
+        }}
+      />
+      {selected && (
+        <Dialog
+          title={recording ? t.logPractice : zh ? '题目详情' : 'Problem details'}
           lang={lang}
-          onClose={() => setSelectedProblemForPractice(null)}
-          onRecordSaved={() => {
-            api.getPracticeStats().then((ps) => setPracticeStats(ps)).catch(() => {});
-          }}
-        />
+          onClose={() => { setSelected(null); setRecording(false); }}
+          drawer
+        >
+          <div ref={detailBody}>
+          {recording ? <PracticeEditor lang={lang} problem={selected} onSaved={() => setRecording(false)} onCancel={() => setRecording(false)} /> : <>
+          <span className={'difficulty ' + selected.difficulty.toLowerCase()}>
+            {t[('stat' + selected.difficulty) as keyof typeof t]}
+          </span>
+          <h2 className="section-space">
+            #{selected.questionFrontendId} {selected.title}
+          </h2>
+          <div className="tag-list">
+            {selected.topicTags.map((item) => (
+              <span className="tag-chip" key={item.slug}>
+                {item.name}
+              </span>
+            ))}
+          </div>
+          <dl className="detail-grid">
+            <dt>{zh ? '来源' : 'Source'}</dt>
+            <dd>{selected.source}</dd>
+            <dt>{zh ? '访问' : 'Access'}</dt>
+            <dd>{selected.isPaidOnly ? 'Premium' : zh ? '免费' : 'Free'}</dd>
+            <dt>{zh ? '本地题目标识' : 'Local problem ID'}</dt>
+            <dd>{selected.questionId}</dd>
+          </dl>
+          <div className="action-row">
+            {safeUrl(selected.url) && (
+              <a
+                className="btn btn-secondary"
+                href={safeUrl(selected.url)}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {t.openLink}
+              </a>
+            )}
+            <button
+              ref={recordTrigger}
+              className="btn btn-primary"
+              onClick={() => setRecording(true)}
+            >
+              {t.logPractice}
+            </button>
+          </div>
+          <div className="section-space">
+            <PracticeHistory problem={selected} lang={lang} />
+          </div>
+          </>}
+          </div>
+        </Dialog>
       )}
     </div>
   );
-};
+}

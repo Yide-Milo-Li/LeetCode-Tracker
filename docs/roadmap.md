@@ -1,9 +1,9 @@
 # Roadmap
 
-1. Maintain contracts, SQLite storage and synthetic tests.
-2. Define and implement validated user-data import, schema compatibility checks, migrations and backup/restore. Verify failure preserves existing data.
-3. Implement explicit strategies, conflict-safe weekday assignments, rest days and versioned recommendations.
-4. Add validated Gemini selection and a bilingual web interface.
-5. Validate clean installation, recovery, CI and release artifacts.
+1. **Implemented:** BYOD JSONL catalog validation, identity protection, atomic imports, supported schema migration and offline backup/restore.
+2. **Implemented:** Manual practices, imported progress snapshots, server conflict validation and Gemini-assisted candidate formatting.
+3. **Implemented:** Explicit strategies, weekday conflict protection, review rules, rest days and versioned recommendations.
+4. **Implemented:** Desktop Today/Problems/Progress refactor, contextual imports, reliable practice completion and consolidated statistics.
+5. **Separate future work:** Clean installation/distribution packaging, dependency review, CI/release procedures and any live-provider validation explicitly authorized for a later phase.
 
-Users provide their own compatible database with appropriate usage rights. No dataset is distributed. Each milestone requires its own implementation and verification; a successful synthetic test is not real-data validation.
+Each implemented area has synthetic/local evidence described in [status](status.md). This is not private-data validation, hosted deployment or publication. Users supply JSONL metadata with appropriate usage rights; no dataset is distributed. Mobile UI and multi-user hosting are outside the current scope.

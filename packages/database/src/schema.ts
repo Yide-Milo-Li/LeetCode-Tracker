@@ -1,7 +1,7 @@
 /** Read-only compatibility checks shared by storage initialization and recovery. */
 import type { DatabaseSync } from 'node:sqlite';
 
-export const CURRENT_SCHEMA_VERSION = 7;
+export const CURRENT_SCHEMA_VERSION = 8;
 
 /** Unsupported historical or future catalog layout. */
 export class UnsupportedSchemaVersionError extends Error {
@@ -56,7 +56,7 @@ export function inspectCatalogSchema(db: DatabaseSync, allowEmpty = false): numb
   }
   if (versions.length !== 1 || !Number.isInteger(versions[0].version)) throw new DatabaseCorruptionError('Exactly one integer schema version is required');
   const version = versions[0].version;
-  if (![3, 4, 5, 6, CURRENT_SCHEMA_VERSION].includes(version)) throw new UnsupportedSchemaVersionError(`Unsupported catalog schema version ${version}; supported versions are 3, 4, 5, 6 and ${CURRENT_SCHEMA_VERSION}`);
+  if (![3, 4, 5, 6, 7, CURRENT_SCHEMA_VERSION].includes(version)) throw new UnsupportedSchemaVersionError(`Unsupported catalog schema version ${version}; supported versions are 3 through ${CURRENT_SCHEMA_VERSION}`);
   const required = { ...columns };
   if (version >= 4) {
     required.import_history = [...columns.import_history, 'unchanged_count', 'duplicate_count'];
@@ -84,6 +84,10 @@ export function inspectCatalogSchema(db: DatabaseSync, allowEmpty = false): numb
       snapshot_successes: ['question_id', 'version', 'event_time', 'precision', 'source_timezone', 'recorded_at'],
       problem_review_state: ['question_id', 'payload_json', 'practice_revision'],
     });
+  }
+  if (version >= 8) {
+    required.practice_records = [...required.practice_records, 'duration_minutes', 'revision'];
+    required.practice_operations = ['id', 'fingerprint', 'record_id'];
   }
   for (const [table, names] of Object.entries(required)) {
     if (!tables.has(table)) throw new DatabaseCorruptionError(`Missing required table '${table}'`);
@@ -158,6 +162,11 @@ export function inspectCatalogSchema(db: DatabaseSync, allowEmpty = false): numb
       const links = db.prepare('SELECT * FROM pragma_foreign_key_list(?)').all(table) as { from: string; table: string; to: string }[];
       if (!links.some(f => f.from === from && f.table === parent && f.to === to)) throw new DatabaseCorruptionError(`Missing planning foreign key ${table}`);
     }
+  }
+  if (version >= 8) {
+    requireKey(db, 'practice_operations', ['id']);
+    const links = db.prepare("SELECT * FROM pragma_foreign_key_list('practice_operations')").all() as { from: string; table: string; to: string }[];
+    if (!links.some(link => link.from === 'record_id' && link.table === 'practice_records' && link.to === 'id')) throw new DatabaseCorruptionError('Missing practice operation record foreign key');
   }
   const integrity = db.prepare('PRAGMA integrity_check').all() as { integrity_check: string }[];
   if (integrity.length !== 1 || integrity[0].integrity_check !== 'ok' || db.prepare('PRAGMA foreign_key_check').all().length) throw new DatabaseCorruptionError('Database integrity or foreign-key check failed');

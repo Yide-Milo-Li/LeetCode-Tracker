@@ -1,35 +1,13 @@
-/**
- * Today's Plan view component.
- * Displays daily recommended problems, AI encouragement, completion status,
- * single & batch question replacement, and prompt temporary override controls.
- */
-import React, { useEffect, useState, useCallback, useRef } from 'react';
-import {
-  Sparkles,
-  Coffee,
-  CheckCircle2,
-  Circle,
-  RefreshCw,
-  Clock,
-  Settings,
-  AlertTriangle,
-  History,
-  ExternalLink,
-  ChevronRight,
-  ShieldCheck,
-  Cpu,
-} from 'lucide-react';
-import {
-  api,
-  type DailyPlan,
-  type PlanItem,
-  type CatalogProblem,
-  type EnsureResult,
-} from '../api.ts';
+/** Today's execution surface: compact known activity, server-owned plan and reliable completion circles. */
+import React, { useEffect, useRef, useState } from 'react';
+import { Check, Circle, RefreshCw, ExternalLink, CalendarDays, MoreHorizontal } from 'lucide-react';
+import { api, type DailyPlan, type DashboardResponse, type PlanItem, type Strategy } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
 import { PromptOverrideModal } from './PromptOverrideModal.tsx';
-import { PracticeLogModal } from './PracticeLogModal.tsx';
 import { useDailyPlan, type UseDailyPlanReturn } from '../hooks/useDailyPlan.ts';
+import { useWorkspace } from '../workspace.tsx';
+import { createPractice } from '../practice-service.ts';
+import { Dialog, Feedback, PageHeader } from './ui.tsx';
 
 interface TodayPlanViewProps {
   lang: Language;
@@ -38,410 +16,477 @@ interface TodayPlanViewProps {
   planController?: UseDailyPlanReturn;
 }
 
-const TodayPlanViewInner: React.FC<TodayPlanViewProps & { planController: UseDailyPlanReturn }> = ({
+/** Read the same deduplicated activity series used by Statistics; missing data is never inferred. */
+function RecentOverview({ lang }: { lang: Language }) {
+  const workspace = useWorkspace();
+  const [data, setData] = useState<DashboardResponse | null>(null);
+  const [error, setError] = useState('');
+  const [retry, setRetry] = useState(0);
+  useEffect(() => {
+    let active = true;
+    api
+      .getDashboard()
+      .then((value) => {
+        if (active) {
+          setData(value);
+          setError('');
+        }
+      })
+      .catch((err) => {
+        if (active) setError(String(err.message));
+      });
+    return () => {
+      active = false;
+    };
+  }, [workspace.revision, retry]);
+  const days = data?.dataStatus.userTimezone ? data.trend30Days.slice(-7) : [];
+  const max = Math.max(1, ...days.map((day) => day.completedCount));
+  return (
+    <section className="recent-overview" aria-label={lang === 'zh' ? '最近 7 天' : 'Last 7 days'}>
+      <div>
+        <span className="eyebrow">
+          {lang === 'zh' ? '最近 7 天 · 含今天' : 'LAST 7 DAYS · INCLUDING TODAY'}
+        </span>
+        <p>
+          {data && !data.dataStatus.userTimezone ? (
+            lang === 'zh' ? (
+              '请先确认时区'
+            ) : (
+              'Confirm your timezone first'
+            )
+          ) : data ? (
+            <>
+              <strong>{data.overview.currentStreak}</strong>{' '}
+              {lang === 'zh' ? '天连续有记录' : 'day activity streak'}
+            </>
+          ) : error ? (
+            lang === 'zh' ? (
+              '近期记录暂不可用'
+            ) : (
+              'Recent records unavailable'
+            )
+          ) : lang === 'zh' ? (
+            '正在读取近期记录…'
+          ) : (
+            'Loading recent records…'
+          )}
+        </p>
+      </div>
+      <div
+        className="mini-chart"
+        role="img"
+        aria-label={days.map((d) => d.date + ': ' + d.completedCount).join('; ') || (lang === 'zh' ? '每日记录尚不可用' : 'Daily activity not available yet')}
+      >
+        {days.map((day) => (
+          <div className="mini-day" key={day.date} title={day.date + ': ' + day.completedCount}>
+            <span className="mini-count">{day.completedCount}</span>
+            <div className="mini-bar-track">
+              <span style={{ height: Math.max(3, (day.completedCount / max) * 32) }} />
+            </div>
+            <small>{day.date.slice(5)}</small>
+          </div>
+        ))}
+      </div>
+      <div className="overview-note">
+        {data && (
+          <small>
+            {!data.dataStatus.userTimezone
+              ? lang === 'zh'
+                ? '设置时区后显示每日分布'
+                : 'Set a timezone to assign daily activity'
+              : days.every((d) => !d.activeCount)
+                ? lang === 'zh'
+                  ? '这 7 天暂无已知记录'
+                  : 'No known activity in these 7 days'
+                : lang === 'zh'
+                  ? '含计划外练习和有效导入记录'
+                  : 'Includes extra practice and valid imports'}
+          </small>
+        )}
+        <button className="text-link" onClick={() => workspace.navigate('statistics')}>
+          {lang === 'zh' ? '查看完整统计 →' : 'View full statistics →'}
+        </button>
+      </div>
+      {error && (
+        <Feedback retry={{ label: lang === 'zh' ? '重试' : 'Retry', run: () => setRetry((n) => n + 1) }}>
+          {error}
+        </Feedback>
+      )}
+    </section>
+  );
+}
+
+/** Keep plan refreshes independent of language/theme, and scope save state to a single task row. */
+function TodayPlanViewInner({
   lang,
   onNavigateToSettings,
-  onNavigateToDashboard,
-  planController,
-}) => {
+  planController: controller,
+}: TodayPlanViewProps & { planController: UseDailyPlanReturn }) {
+  const zh = lang === 'zh';
   const t = translations[lang];
-  const controller = planController;
+  const workspace = useWorkspace();
+  const [override, setOverride] = useState(false);
+  const [versions, setVersions] = useState<DailyPlan[] | null>(null);
+  const [localError, setLocalError] = useState('');
+  const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState<Set<string>>(new Set());
+  const locks = useRef(new Set<string>());
+  const [strategies, setStrategies] = useState<Strategy[] | null>(null);
+  const [strategyRetry, setStrategyRetry] = useState(0);
+  useEffect(() => {
+    let active = true;
+    api
+      .getStrategies()
+      .then((items) => {
+        if (active) setStrategies(items);
+      })
+      .catch((err) => {
+        if (active) setLocalError(String(err.message));
+      });
+    return () => {
+      active = false;
+    };
+  }, [workspace.revision, strategyRetry]);
+  const plan = controller.ensureResult?.plan;
+  const completed = plan?.items.filter((item) => item.completed).length ?? 0;
+  const strategy = strategies?.find((s) => s.id === plan?.strategyId);
 
-  const {
-    loading,
-    ensureResult,
-    error: controllerError,
-    replacingItemId,
-    replacingBatch,
-    replaceOne,
-    replaceAllUnfinished,
-    onOverrideCommitted,
-    onPracticeLogged,
-    refresh: loadDailyPlan,
-  } = controller;
-
-  const [localError, setLocalError] = useState<string | null>(null);
-  const error = controllerError || localError;
-
-  // Modals
-  const [isOverrideOpen, setIsOverrideOpen] = useState(false);
-  const [logModalProblem, setLogModalProblem] = useState<CatalogProblem | null>(null);
-  const [showVersions, setShowVersions] = useState(false);
-  const [versions, setVersions] = useState<DailyPlan[]>([]);
-
-  async function handleReplaceOne(item: PlanItem) {
-    setLocalError(null);
+  /** The base record succeeds before optional fields open; uncertain retries reuse the original timestamp. */
+  async function complete(item: PlanItem) {
+    if (!plan || locks.current.has(item.id)) return;
+    if (item.completed) {
+      workspace.openPractice({ mode: 'evidence', item });
+      return;
+    }
+    locks.current.add(item.id);
+    setSaving(new Set(locks.current));
+    setRowErrors((old) => ({ ...old, [item.id]: '' }));
     try {
-      await replaceOne(item);
-    } catch (err: unknown) {
-      setLocalError(err instanceof Error ? err.message : 'Failed to replace item.');
+      const record = await createPractice('today:' + plan.id + ':' + item.id, {
+        questionFrontendId: item.problem.questionFrontendId,
+        completed: true,
+        practicedAt: new Date().toISOString(),
+        timePrecision: 'datetime',
+      });
+      workspace.notifyMutation(record);
+      workspace.openPractice({ mode: 'enrich', record });
+    } catch (err) {
+      setRowErrors((old) => ({ ...old, [item.id]: err instanceof Error ? err.message : String(err) }));
+    } finally {
+      locks.current.delete(item.id);
+      setSaving(new Set(locks.current));
     }
   }
-
-  async function handleReplaceAllUnfinished() {
-    setLocalError(null);
+  /** Version history is read-only; failure leaves the current plan and all rows in place. */
+  async function showVersions() {
+    if (!plan) return;
     try {
-      await replaceAllUnfinished();
-    } catch (err: unknown) {
-      setLocalError(err instanceof Error ? err.message : 'Failed to replace unfinished items.');
+      setVersions(await api.getPlanVersions(plan.id));
+    } catch (err) {
+      setLocalError(String((err as Error).message));
     }
   }
-
-  async function loadVersions() {
-    if (!ensureResult?.plan) return;
-    try {
-      const v = await api.getPlanVersions(ensureResult.plan.id);
-      setVersions(v);
-      setShowVersions(true);
-    } catch (err: unknown) {
-      setLocalError(err instanceof Error ? err.message : 'Failed to load version history.');
-    }
-  }
-
-  if (loading) {
-    return (
-      <div className="empty-state">
-        <RefreshCw size={28} className="spin primary-icon" />
-        <p>{t.loadingCatalog}</p>
-      </div>
-    );
-  }
-
-  // 1. Timezone Setup Required View
-  if (ensureResult?.status === 'setup') {
-    return (
-      <div className="plan-setup-card">
-        <Clock size={40} className="warning-icon" />
-        <h3 className="section-title">{t.setupTimezoneTitle}</h3>
-        <p className="text-muted" style={{ maxWidth: '500px', margin: '0.5rem auto 1.5rem auto' }}>
-          {t.setupTimezoneDesc}
-        </p>
-        <button className="btn btn-primary" onClick={onNavigateToSettings}>
-          <Settings size={16} />
-          {t.navSettings}
-        </button>
-      </div>
-    );
-  }
-
-  // 2. Rest Day View
-  if (ensureResult?.status === 'rest') {
-    return (
-      <div className="plan-rest-card">
-        <Coffee size={44} className="primary-icon" />
-        <h3 className="section-title">{t.restDayTitle}</h3>
-        <p className="text-muted" style={{ maxWidth: '520px', margin: '0.5rem auto 1.5rem auto' }}>
-          {t.restDayDesc}
-        </p>
-        <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
-          <button className="btn btn-primary" onClick={() => setIsOverrideOpen(true)}>
-            <Sparkles size={16} />
-            {t.createTemporaryPlan}
-          </button>
-          <button className="btn btn-secondary" onClick={loadDailyPlan}>
-            <RefreshCw size={16} />
-            {t.retry}
-          </button>
-        </div>
-
-        <PromptOverrideModal
-          isOpen={isOverrideOpen}
-          onClose={() => setIsOverrideOpen(false)}
-          onApplied={(newPlan) => onOverrideCommitted(newPlan)}
-          currentPlan={null}
-          lang={lang}
-        />
-      </div>
-    );
-  }
-
-  const plan = ensureResult?.plan;
-  if (!plan) {
-    return (
-      <div className="empty-state">
-        <p>{t.noPlans}</p>
-        <button className="btn btn-primary" onClick={loadDailyPlan} style={{ marginTop: '1rem' }}>
-          {t.retry}
-        </button>
-      </div>
-    );
-  }
-
-  const completedCount = plan.items.filter((i) => i.completed).length;
-  const totalCount = plan.items.length;
-  const progressPercent = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
-
   return (
-    <div className="today-view-container">
-      {/* Header bar */}
-      <div className="view-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          {onNavigateToDashboard && (
-            <button
-              className="btn btn-secondary btn-sm"
-              onClick={onNavigateToDashboard}
-            >
-              ← {t.navDashboard}
-            </button>
-          )}
-          <div>
-            <h2 className="view-title" style={{ margin: 0 }}>{t.todayTitle}</h2>
-            <p className="view-subtitle">{t.todaySubtitle}</p>
-          </div>
-        </div>
-
-        <div className="plan-meta-pills">
-          <span className="badge badge-info">
-            <Clock size={12} />
-            {plan.date} ({plan.timezone})
-          </span>
-          <span className={`badge ${plan.source === 'gemini' ? 'badge-primary' : 'badge-secondary'}`}>
-            {plan.source === 'gemini' ? <Cpu size={12} /> : <ShieldCheck size={12} />}
-            {plan.source === 'gemini' ? (plan.model || t.sourceGemini) : t.sourceLocal}
-          </span>
-          <button className="badge badge-outline btn-badge" onClick={loadVersions} title="View version history">
-            <History size={12} />
-            v{plan.version}
+    <div className="today-view">
+      <PageHeader
+        title={zh ? '今日' : 'Today'}
+        description={zh ? '让每一次练习，成为一点进步。' : 'A little practice. A little progress.'}
+        actions={
+          <button className="btn btn-secondary" onClick={() => workspace.navigate('schedule')}>
+            <CalendarDays size={16} />
+            {zh ? '学习安排' : 'Study schedule'}
           </button>
-        </div>
-      </div>
-
-      {error && (
-        <div className="alert alert-danger" style={{ marginBottom: '1.25rem' }}>
-          <AlertTriangle size={16} />
-          <span>{error}</span>
-        </div>
+        }
+      />
+      <RecentOverview lang={lang} />
+      {(controller.error || localError) && (
+        <Feedback
+          retry={{
+            label: t.retry,
+            run: () => {
+              setLocalError('');
+              setStrategyRetry((value) => value + 1);
+              void controller.refresh();
+            },
+          }}
+        >
+          {controller.error || localError}
+        </Feedback>
       )}
-
-      {/* Daily Encouragement Banner */}
-      <div className="encouragement-banner">
-        <div className="encouragement-header">
-          <Sparkles size={18} className="primary-icon" />
-          <span className="encouragement-title">{t.encouragementTitle}</span>
+      {controller.loading && !plan ? (
+        <div className="plan-skeleton" role="status">
+          <RefreshCw className="spin" size={20} />
+          <p>{zh ? '正在准备今日计划…' : 'Preparing today’s plan…'}</p>
+          <div />
+          <div />
+          <div />
         </div>
-        <p className="encouragement-quote">
-          "{plan.encouragement[lang] || plan.encouragement.en}"
-        </p>
-      </div>
-
-      {/* Progress & Quota Bar */}
-      <div className="plan-progress-card">
-        <div className="progress-header-row">
-          <div className="progress-label-group">
-            <span className="progress-title">{t.completedCount}</span>
-            <span className="progress-stats">
-              {completedCount} / {totalCount} ({progressPercent}%)
-            </span>
-          </div>
-          <div className="action-buttons-row">
-            <button
-              className="btn btn-secondary btn-sm"
-              onClick={handleReplaceAllUnfinished}
-              disabled={replacingBatch || completedCount === totalCount}
-              title={t.replaceAllUnfinished}
-            >
-              <RefreshCw size={14} className={replacingBatch ? 'spin' : ''} />
-              {t.replaceAllUnfinished}
+      ) : controller.ensureResult?.status === 'setup' ? (
+        <section className="empty-state">
+          <h2>{t.setupTimezoneTitle}</h2>
+          <p>{t.setupTimezoneDesc}</p>
+          <button className="btn btn-primary" onClick={onNavigateToSettings}>
+            {t.navSettings}
+          </button>
+        </section>
+      ) : controller.ensureResult?.status === 'rest' ? (
+        <section className="empty-state">
+          <h2>
+            {strategies?.length === 0 ? (zh ? '还没有学习安排' : 'No study schedule yet') : t.restDayTitle}
+          </h2>
+          <p>
+            {strategies?.length === 0
+              ? zh
+                ? '选择适合自己的节奏，配置后再开始。'
+                : 'Choose your study rhythm when you’re ready.'
+              : t.restDayDesc}
+          </p>
+          <div className="action-row">
+            <button className="btn btn-primary" onClick={() => workspace.navigate('schedule')}>
+              {zh ? '设置学习安排' : 'Set study schedule'}
             </button>
-            <button
-              className="btn btn-primary btn-sm"
-              onClick={() => setIsOverrideOpen(true)}
-              title={t.promptOverride}
-            >
-              <Sparkles size={14} />
-              {t.promptOverride}
+            <button className="btn btn-secondary" onClick={() => setOverride(true)}>
+              {t.createTemporaryPlan}
             </button>
           </div>
-        </div>
-
-        <div className="progress-bar-bg">
-          <div className="progress-bar-fill" style={{ width: `${progressPercent}%` }} />
-        </div>
-      </div>
-
-      {/* Notices banner if present */}
-      {plan.notices.length > 0 && (
-        <div className="alert alert-warning" style={{ marginBottom: '1.5rem' }}>
-          <AlertTriangle size={16} />
-          <div>
-            <strong>{t.noticesTitle}:</strong>
-            <ul style={{ paddingLeft: '1.25rem', marginTop: '0.25rem' }}>
-              {plan.notices.map((notice, idx) => (
-                <li key={idx}>{notice[lang] || notice.en}</li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      )}
-
-      {/* Problem Cards List */}
-      <div className="plan-items-grid">
-        {plan.items.map((item, idx) => {
-          const isReplacing = replacingItemId === item.id;
-          const diffClass = `difficulty-${item.problem.difficulty.toLowerCase()}`;
-
-          return (
-            <div key={item.id} className={`plan-item-card ${item.completed ? 'completed' : ''}`}>
-              <div className="item-header-row">
-                <div className="item-index-badge">#{idx + 1}</div>
-                <div className="item-badges-group">
-                  <span className={`badge ${diffClass}`}>
-                    {t[`stat${item.problem.difficulty}` as keyof typeof t] || item.problem.difficulty}
-                  </span>
-                  <span className={`badge ${item.kind === 'review' ? 'badge-warning' : 'badge-secondary'}`}>
-                    {item.kind === 'review' ? t.kindReview : t.kindNew}
-                  </span>
-                  {item.problem.isPaidOnly && (
-                    <span className="badge badge-warning">{t.statPremium}</span>
-                  )}
-                </div>
-
-                <div className="item-status-indicator">
-                  {item.completed ? (
-                    <span className="status-tag status-solved">
-                      <CheckCircle2 size={16} />
-                      {t.alreadyCompleted}
-                    </span>
-                  ) : (
-                    <span className="status-tag status-unsolved">
-                      <Circle size={16} />
-                      {t.statusUnsolved}
-                    </span>
-                  )}
-                </div>
+        </section>
+      ) : plan ? (
+        <>
+          <section className="today-plan-summary">
+            <div className="section-heading">
+              <div>
+                <span className="eyebrow">
+                  {plan.date} · {plan.timezone}
+                </span>
+                <h2>{zh ? '今日计划' : 'Today’s plan'}</h2>
+                <p className="muted">
+                  {strategy?.name ?? (zh ? '临时计划' : 'Temporary plan')}
+                  {plan.strategyVersion ? ' · v' + plan.strategyVersion : ''} ·{' '}
+                  {plan.source === 'local'
+                    ? zh
+                      ? '本地推荐'
+                      : 'Local recommendations'
+                    : zh ? 'Gemini 推荐' : 'Gemini recommendations'}
+                </p>
               </div>
-
-              <div className="item-body">
-                <h4 className="item-problem-title">
-                  <a
-                    href={item.problem.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="problem-link"
-                  >
-                    <span>{item.problem.questionFrontendId}. {item.problem.title}</span>
-                    <ExternalLink size={14} className="ext-icon" />
-                  </a>
-                </h4>
-
-                {/* Topic tags */}
-                {item.problem.topicTags.length > 0 && (
-                  <div className="item-tags-row">
-                    {item.problem.topicTags.slice(0, 3).map((tag) => (
-                      <span key={tag.slug} className="tag-chip">
+              <div className="plan-completion">
+                <strong>
+                  {completed}
+                  <span> / {plan.items.length}</span>
+                </strong>
+                <small>{zh ? '已完成 / 已生成' : 'completed / generated'}</small>
+              </div>
+            </div>
+            <progress
+              value={completed}
+              max={Math.max(1, plan.items.length)}
+              aria-label={zh ? '今日完成进度' : 'Today completion progress'}
+            />
+            <div className="section-heading">
+              <p className="muted">{plan.encouragement[lang] || plan.encouragement.en}</p>
+              <div className="action-row">
+                <button className="btn btn-secondary btn-sm" onClick={() => setOverride(true)}>
+                  {zh ? '调整今天' : 'Adjust today'}
+                </button>
+                <details className="action-menu">
+                  <summary aria-label={zh ? '更多计划操作' : 'More plan actions'}>
+                    <MoreHorizontal size={20} />
+                  </summary>
+                  <div>
+                    <button
+                      disabled={
+                        controller.replacingBatch ||
+                        Boolean(controller.replacingItemId) ||
+                        completed === plan.items.length ||
+                        saving.size > 0
+                      }
+                      onClick={() => void controller.replaceAllUnfinished()}
+                    >
+                      {t.replaceAllUnfinished}
+                    </button>
+                    <button onClick={showVersions}>
+                      {t.planVersions} · v{plan.version}
+                    </button>
+                  </div>
+                </details>
+              </div>
+            </div>
+          </section>
+          {plan.items.length < plan.rules.dailyCount && (
+            <Feedback tone="warning">
+              {zh ? '候选题目不足，缺口 ' : 'Not enough eligible candidates. Short by '}
+              {plan.rules.dailyCount - plan.items.length}
+              {zh ? ' 题。已生成题目仍可练习。' : ' problems. The generated plan is ready to use.'}
+            </Feedback>
+          )}
+          {plan.notices.length > 0 && (
+            <Feedback tone="warning">
+              <ul>
+                {plan.notices.map((notice, index) => (
+                  <li key={index}>{notice[lang] || notice.en}</li>
+                ))}
+              </ul>
+            </Feedback>
+          )}
+          <div className="today-problems">
+            {plan.items.map((item) => (
+              <article className={'today-problem ' + (item.completed ? 'completed' : '')} key={item.id}>
+                <button
+                  className="completion-circle"
+                  aria-label={
+                    (item.completed
+                      ? zh
+                        ? '查看完成记录：'
+                        : 'View completion records: '
+                      : zh
+                        ? '记录完成：'
+                        : 'Mark complete: ') + item.problem.title
+                  }
+                  aria-pressed={item.completed}
+                  aria-busy={saving.has(item.id)}
+                  disabled={
+                    saving.has(item.id) || controller.replacingBatch || controller.replacingItemId === item.id
+                  }
+                  onClick={() => void complete(item)}
+                >
+                  {saving.has(item.id) ? (
+                    <RefreshCw className="spin" size={19} />
+                  ) : item.completed ? (
+                    <Check size={20} />
+                  ) : (
+                    <Circle size={26} />
+                  )}
+                </button>
+                <div className="problem-content">
+                  <h3>
+                    <span className="problem-number">{item.problem.questionFrontendId}.</span>{' '}
+                    {item.problem.title}
+                  </h3>
+                  <div className="problem-meta">
+                    <span className={'difficulty ' + item.problem.difficulty.toLowerCase()}>
+                      {t[('stat' + item.problem.difficulty) as keyof typeof t]}
+                    </span>
+                    {item.kind === 'review' && <span className="tag-chip">{t.kindReview}</span>}
+                    {item.problem.isPaidOnly && <span className="tag-chip">{t.statPremium}</span>}
+                    {item.problem.topicTags.slice(0, 2).map((tag) => (
+                      <span className="tag-chip" key={tag.slug}>
                         {tag.name}
                       </span>
                     ))}
+                    {item.problem.topicTags.length > 2 && (
+                      <details className="tag-overflow">
+                        <summary>
+                          +{item.problem.topicTags.length - 2} {zh ? '标签' : 'tags'}
+                        </summary>
+                        <div>
+                          {item.problem.topicTags.slice(2).map((tag) => (
+                            <span className="tag-chip" key={tag.slug}>
+                              {tag.name}
+                            </span>
+                          ))}
+                        </div>
+                      </details>
+                    )}
                   </div>
-                )}
-
-                {/* Reason */}
-                <p className="item-reason-text">
-                  {item.reason[lang] || item.reason.en}
-                </p>
-              </div>
-
-              <div className="item-footer-actions">
-                {!item.completed ? (
-                  <>
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => handleReplaceOne(item)}
-                      disabled={isReplacing || replacingBatch}
-                    >
-                      <RefreshCw size={13} className={isReplacing ? 'spin' : ''} />
-                      {t.replaceOne}
-                    </button>
-                    <button
-                      className="btn btn-primary btn-sm"
-                      onClick={() => setLogModalProblem(item.problem)}
-                    >
-                      <CheckCircle2 size={13} />
-                      {t.markComplete}
-                    </button>
-                  </>
-                ) : (
-                  <div className="completed-info-text">
-                    <CheckCircle2 size={14} className="success-icon" />
-                    <span>{t.alreadyCompleted}</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Version History Drawer / Modal */}
-      {showVersions && (
-        <div className="modal-backdrop" onClick={() => setShowVersions(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px' }}>
-            <div className="modal-header">
-              <h3 className="modal-title">{t.planVersions} ({plan.date})</h3>
-              <button className="btn-icon" onClick={() => setShowVersions(false)}>✕</button>
-            </div>
-            <div className="modal-body">
-              <div className="version-list">
-                {versions.map((v) => (
-                  <div key={v.version} className={`version-card ${v.version === plan.version ? 'current-ver' : ''}`}>
-                    <div className="version-card-header">
-                      <strong>v{v.version}</strong>
-                      <span className="badge badge-secondary">{v.action}</span>
-                      <span className="text-muted" style={{ fontSize: '0.8rem', marginLeft: 'auto' }}>
-                        {new Date(v.updatedAt).toLocaleTimeString()}
-                      </span>
-                    </div>
-                    <p className="text-muted" style={{ fontSize: '0.85rem', margin: '0.25rem 0' }}>
-                      {v.items.length} items • {v.items.map((i) => `${i.problem.questionFrontendId} (${i.problem.difficulty})`).join(', ')}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-secondary" onClick={() => setShowVersions(false)}>
-                {t.cancel}
-              </button>
-            </div>
+                  <p className="recommendation-reason">{item.reason[lang] || item.reason.en}</p>
+                  {rowErrors[item.id] && (
+                    <Feedback retry={{ label: t.retry, run: () => void complete(item) }}>
+                      {rowErrors[item.id]}
+                    </Feedback>
+                  )}
+                </div>
+                <div className="problem-actions">
+                  <a
+                    className="btn btn-secondary btn-sm"
+                    href={/^https?:\/\//i.test(item.problem.url) ? item.problem.url : undefined}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {zh ? '打开题目' : 'Open problem'}
+                    <ExternalLink size={14} />
+                  </a>
+                  <button
+                    className="text-link"
+                    disabled={
+                      item.completed ||
+                      saving.has(item.id) ||
+                      controller.replacingBatch ||
+                      Boolean(controller.replacingItemId)
+                    }
+                    onClick={() => void controller.replaceOne(item)}
+                  >
+                    <RefreshCw size={14} className={controller.replacingItemId === item.id ? 'spin' : ''} />
+                    {t.replaceOne}
+                  </button>
+                  <button
+                    className="text-link"
+                    onClick={() => workspace.openPractice({ mode: 'manual', problem: item.problem })}
+                  >
+                    {zh ? '记录练习' : 'Record practice'}
+                  </button>
+                </div>
+              </article>
+            ))}
           </div>
-        </div>
+        </>
+      ) : (
+        !controller.error && (
+          <section className="empty-state">
+            <h2>{t.noPlans}</h2>
+            <button className="btn btn-primary" onClick={() => void controller.refresh()}>
+              {t.retry}
+            </button>
+          </section>
+        )
       )}
-
-      {/* Prompt Override Modal */}
+      {versions && (
+        <Dialog title={t.planVersions} lang={lang} onClose={() => setVersions(null)} drawer>
+          {versions.map((version) => (
+            <article className="version-card" key={version.version}>
+              <p className="muted">{version.source} · {version.model ?? 'Local'} · {zh ? '策略版本' : 'Strategy version'} {version.strategyVersion ?? '—'}</p>
+              <h3>
+                v{version.version} · {version.action}
+              </h3>
+              <p className="muted">
+                {new Date(version.updatedAt).toLocaleString(zh ? 'zh-CN' : 'en-US', {
+                  timeZone: version.timezone,
+                })}
+              </p>
+              <ul>
+                {version.items.map((item) => (
+                  <li key={item.id}>
+                    {item.problem.questionFrontendId}. {item.problem.title}
+                  </li>
+                ))}
+              </ul>
+            </article>
+          ))}
+        </Dialog>
+      )}
       <PromptOverrideModal
-        isOpen={isOverrideOpen}
-        onClose={() => setIsOverrideOpen(false)}
-        onApplied={(updated) => onOverrideCommitted(updated)}
-        currentPlan={plan}
+        isOpen={override}
+        onClose={() => setOverride(false)}
+        currentPlan={plan ?? null}
         lang={lang}
+        onApplied={(newPlan) => {
+          controller.onOverrideCommitted(newPlan);
+          workspace.notifyMutation();
+        }}
       />
-
-      {/* Manual Practice Record Modal */}
-      {logModalProblem && (
-        <PracticeLogModal
-          problem={logModalProblem}
-          lang={lang}
-          onClose={() => {
-            setLogModalProblem(null);
-          }}
-          onRecordSaved={() => {
-            setLogModalProblem(null);
-            onPracticeLogged();
-          }}
-        />
-      )}
     </div>
   );
-};
+}
 
-const TodayPlanViewWithInternalController: React.FC<TodayPlanViewProps> = (props) => {
-  const internalController = useDailyPlan();
-  return <TodayPlanViewInner {...props} planController={internalController} />;
-};
-
-export const TodayPlanView: React.FC<TodayPlanViewProps> = (props) => {
-  if (props.planController) {
-    return <TodayPlanViewInner {...props} planController={props.planController} />;
-  }
-  return <TodayPlanViewWithInternalController {...props} />;
-};
+/** Standalone tests may supply no controller; the application always injects its single shared instance. */
+function TodayStandalone(props: TodayPlanViewProps) {
+  const controller = useDailyPlan();
+  return <TodayPlanViewInner {...props} planController={controller} />;
+}
+/** Render Today without remounting the application-level plan lifecycle. */
+export function TodayPlanView(props: TodayPlanViewProps) {
+  return props.planController ? (
+    <TodayPlanViewInner {...props} planController={props.planController} />
+  ) : (
+    <TodayStandalone {...props} />
+  );
+}

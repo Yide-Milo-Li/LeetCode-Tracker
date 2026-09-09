@@ -118,6 +118,9 @@ export interface PracticeRecord {
   practicedAt: string;
   timePrecision: TimePrecision;
   notes: string | null;
+  durationMinutes: number | null;
+  sourceTimezone: string | null;
+  revision: number;
   status: PracticeRecordStatus;
   createdAt: number;
   updatedAt: number;
@@ -130,6 +133,9 @@ export interface CreatePracticeRecordInput {
   practicedAt: string;
   timePrecision?: TimePrecision;
   notes?: string;
+  durationMinutes?: number | null;
+  operationId?: string;
+  sourceTimezone?: string | null;
 }
 
 export interface UpdatePracticeRecordInput {
@@ -137,6 +143,9 @@ export interface UpdatePracticeRecordInput {
   practicedAt?: string;
   timePrecision?: TimePrecision;
   notes?: string | null;
+  durationMinutes?: number | null;
+  sourceTimezone?: string | null;
+  expectedRevision?: number;
 }
 
 export interface PracticeQuery {
@@ -164,6 +173,7 @@ export interface ProgressSnapshot {
 }
 
 export interface UpdateProgressSnapshotInput {
+  sourceTimezone?: string | null;
   lastSubmittedAt?: string;
   timePrecision?: TimePrecision;
   lastResult?: string;
@@ -228,6 +238,7 @@ export interface ProgressPreviewItem {
 }
 
 export interface ProgressImportPreview {
+  sourceTimezone?: string | null;
   previewId: string;
   catalogRevision: number;
   practiceRevision: number;
@@ -475,24 +486,35 @@ const API_BASE =
     ? `${window.location.origin}/api/v1`
     : '/api/v1';
 
+/** HTTP failure with a stable code; network failures remain distinguishable and retryable. */
+export class ApiError extends Error {
+  public status: number;
+  public code: string;
+  /** Preserve HTTP metadata while remaining compatible with Node's native type stripping. */
+  constructor(status: number, code: string, message: string) { super(message); this.status = status; this.code = code; }
+}
+
+/** Request typed local API data without discarding server validation/conflict codes. */
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
-      'Content-Type': 'application/json',
+      ...(options.body === undefined ? {} : { 'Content-Type': 'application/json' }),
       ...options.headers,
     },
   });
 
   if (!res.ok) {
     let errorMsg = `HTTP ${res.status}: ${res.statusText}`;
+    let errorCode = 'HTTP_ERROR';
     try {
       const errJson = await res.json();
       if (errJson.message) errorMsg = errJson.message;
+      if (errJson.error) errorCode = errJson.error;
     } catch {
       // ignore json parse error
     }
-    throw new Error(errorMsg);
+    throw new ApiError(res.status, errorCode, errorMsg);
   }
 
   return res.json() as Promise<T>;
@@ -511,6 +533,8 @@ async function planningMutation(path: string, payload: Record<string, unknown>):
 }
 
 export const api = {
+  /** Read the persisted catalog import result, including individual line errors. */
+  getImportResult: (id: string) => request<ImportSummary>(`/imports/${encodeURIComponent(id)}`),
   // Catalog
   getCatalogStats(): Promise<CatalogStats> {
     return request<CatalogStats>('/catalog/stats');
@@ -565,6 +589,10 @@ export const api = {
   },
 
   // Manual Practice Records
+  getPracticeRecord(id: string): Promise<PracticeRecord> {
+    return request<PracticeRecord>(`/practice-records/${encodeURIComponent(id)}`);
+  },
+
   createPracticeRecord(input: CreatePracticeRecordInput): Promise<PracticeRecord> {
     return request<PracticeRecord>('/practice-records', {
       method: 'POST',
@@ -591,8 +619,8 @@ export const api = {
     });
   },
 
-  revokePracticeRecord(id: string): Promise<PracticeRecord> {
-    return request<PracticeRecord>(`/practice-records/${id}`, {
+  revokePracticeRecord(id: string, expectedRevision?: number): Promise<PracticeRecord> {
+    return request<PracticeRecord>(`/practice-records/${encodeURIComponent(id)}${expectedRevision === undefined ? '' : `?expectedRevision=${expectedRevision}`}`, {
       method: 'DELETE',
     });
   },
@@ -641,11 +669,12 @@ export const api = {
   previewProgressImport(
     candidates: ProgressCandidateInput[],
     resolvedOverrides?: Array<{ frontendId: string; confirmOverride: boolean }>,
-    batchYear?: number
+    batchYear?: number,
+    sourceTimezone?: string | null
   ): Promise<ProgressImportPreview> {
     return request<ProgressImportPreview>('/progress-imports/preview', {
       method: 'POST',
-      body: JSON.stringify({ candidates, resolvedOverrides, batchYear }),
+      body: JSON.stringify({ candidates, resolvedOverrides, batchYear, sourceTimezone }),
     });
   },
 
@@ -656,7 +685,7 @@ export const api = {
     });
   },
 
-  getProgressImportHistory(page = 1, limit = 20): Promise<{ total: number; items: any[] }> {
+  getProgressImportHistory(page = 1, limit = 20): Promise<{ total: number; items: Omit<ProgressImportSummary, 'errors'>[] }> {
     return request(`/progress-imports?page=${page}&limit=${limit}`);
   },
 

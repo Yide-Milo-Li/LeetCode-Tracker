@@ -13,6 +13,7 @@ import {
   calculateDashboardStats,
   filterAndPaginateActivities,
   getActivityItems,
+  getZonedDayInterval,
 } from '../packages/domain/src/index.ts';
 import type { CatalogProblem } from '../packages/contracts/src/sync.ts';
 import type { PracticeRecord, ProgressSnapshot } from '../packages/contracts/src/practice.ts';
@@ -40,6 +41,15 @@ function createMockProblem(
 describe('Dashboard Domain Statistics', () => {
   describe('resolveEventDate', () => {
     const now = Date.parse('2026-09-08T20:00:00Z');
+
+    it('keeps same-zone date-only records assigned on 23-hour and 25-hour DST days', () => {
+      // Civil-day boundaries use next local midnight rather than adding 24 hours.
+      for (const [day, hours] of [['2026-03-08', 23], ['2026-11-01', 25]] as const) {
+        const interval = getZonedDayInterval(day, 'America/Los_Angeles');
+        assert.equal(interval.end - interval.start + 1, hours * 3600000);
+        assert.deepEqual(resolveEventDate(day, 'date', 'America/Los_Angeles', 'America/Los_Angeles', Date.parse('2026-12-01T00:00:00Z')), { date: day, isPending: false });
+      }
+    });
 
     it('resolves valid datetime with confirmed user timezone', () => {
       // 2026-09-08T20:00:00Z is 2026-09-09 in Tokyo (UTC+9)
@@ -171,6 +181,9 @@ describe('Dashboard Domain Statistics', () => {
           practicedAt: '2026-09-08T09:00:00Z',
           timePrecision: 'datetime',
           notes: null,
+          durationMinutes: null,
+          sourceTimezone: null,
+          revision: 1,
           status: 'active',
           createdAt: fixedNow,
           updatedAt: fixedNow,
@@ -237,6 +250,9 @@ describe('Dashboard Domain Statistics', () => {
           practicedAt: '2026-09-07T10:00:00Z',
           timePrecision: 'datetime',
           notes: null,
+          durationMinutes: null,
+          sourceTimezone: null,
+          revision: 1,
           status: 'active',
           createdAt: fixedNow,
           updatedAt: fixedNow,
@@ -251,6 +267,9 @@ describe('Dashboard Domain Statistics', () => {
           practicedAt: '2026-09-08T10:00:00Z',
           timePrecision: 'datetime',
           notes: null,
+          durationMinutes: null,
+          sourceTimezone: null,
+          revision: 1,
           status: 'active',
           createdAt: fixedNow,
           updatedAt: fixedNow,
@@ -265,6 +284,9 @@ describe('Dashboard Domain Statistics', () => {
           practicedAt: '2026-09-06T10:00:00Z',
           timePrecision: 'datetime',
           notes: null,
+          durationMinutes: null,
+          sourceTimezone: null,
+          revision: 1,
           status: 'active',
           createdAt: fixedNow,
           updatedAt: fixedNow,
@@ -301,6 +323,9 @@ describe('Dashboard Domain Statistics', () => {
           practicedAt: '2026-09-08T10:00:00Z',
           timePrecision: 'datetime',
           notes: null,
+          durationMinutes: null,
+          sourceTimezone: null,
+          revision: 1,
           status: 'active',
           createdAt: fixedNow,
           updatedAt: fixedNow,
@@ -315,6 +340,9 @@ describe('Dashboard Domain Statistics', () => {
           practicedAt: '2026-09-08T11:00:00Z',
           timePrecision: 'datetime',
           notes: null,
+          durationMinutes: null,
+          sourceTimezone: null,
+          revision: 1,
           status: 'active',
           createdAt: fixedNow,
           updatedAt: fixedNow,
@@ -368,6 +396,9 @@ describe('Dashboard Domain Statistics', () => {
           practicedAt: '2026-09-08', // date precision without source timezone
           timePrecision: 'date',
           notes: null,
+          durationMinutes: null,
+          sourceTimezone: null,
+          revision: 1,
           status: 'active',
           createdAt: fixedNow,
           updatedAt: fixedNow,

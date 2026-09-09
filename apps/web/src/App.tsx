@@ -1,190 +1,396 @@
-/**
- * Main application component.
- * Manages view routing (Catalog vs Settings), global theme, and bilingual language state.
- */
-import React, { useEffect, useState } from 'react';
-import { BookOpen, Settings, Sun, Moon, Laptop, CheckCircle2, Sparkles, Calendar, Trophy } from 'lucide-react';
+/** Desktop application shell: three destinations, retained workspaces and one daily-plan controller. */
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  BookOpen,
+  CalendarDays,
+  ChartNoAxesCombined,
+  Settings,
+  Sun,
+  Moon,
+  Laptop,
+  Plus,
+  Upload,
+} from 'lucide-react';
 import { DashboardView } from './components/DashboardView.tsx';
 import { CatalogView } from './components/CatalogView.tsx';
 import { SettingsView } from './components/SettingsView.tsx';
+import { CatalogImportWorkspace } from './components/CatalogImportWorkspace.tsx';
 import { ProgressWorkbench } from './components/ProgressWorkbench.tsx';
+import { ActivityRecords } from './components/ActivityRecords.tsx';
 import { TodayPlanView } from './components/TodayPlanView.tsx';
 import { StrategiesView } from './components/StrategiesView.tsx';
+import { PracticeWorkspace } from './components/PracticeWorkspace.tsx';
+import { Feedback, PageHeader } from './components/ui.tsx';
 import { useDailyPlan } from './hooks/useDailyPlan.ts';
-import { api } from './api.ts';
-import { translations, type Language } from './i18n.ts';
+import { api, type PracticeRecord } from './api.ts';
+import type { Language } from './i18n.ts';
+import { WorkspaceContext, type PracticeOutcome, type PracticeRequest, type View } from './workspace.tsx';
 
-export const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'today' | 'strategies' | 'catalog' | 'practice' | 'settings'>('dashboard');
+const views: View[] = [
+  'today',
+  'schedule',
+  'problems',
+  'catalog-import',
+  'records',
+  'statistics',
+  'progress-import',
+  'settings',
+];
+/** Resolve only known local destinations; Today remains the default homepage. */
+function initialView(): View {
+  const value = location.hash.slice(1) as View;
+  return views.includes(value) ? value : 'today';
+}
+
+/** Preserve mounted workspaces for drafts/filters while sharing mutation invalidations and preferences. */
+export function App() {
+  const [view, setView] = useState<View>(initialView);
+  const [visited, setVisited] = useState<Set<View>>(() => new Set([initialView()]));
   const [lang, setLang] = useState<Language>('en');
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
-
-  const t = translations[lang];
-  const planController = useDailyPlan();
-
-  // Initial load of preferences from API
+  const [timezone, setTimezone] = useState<string | null>(null);
+  const [revision, setRevision] = useState(0);
+  const [error, setError] = useState('');
+  const [practiceQueue, setPracticeQueue] = useState<PracticeRequest[]>([]);
+  const practice = practiceQueue[0];
+  const [outcomes, setOutcomes] = useState<PracticeOutcome[]>([]);
+  /** Concurrent row saves retain the active draft and present subsequent details in order. */
+  const openPractice = useCallback((request: PracticeRequest) => setPracticeQueue((queue) => [...queue, request]), []);
+  const reportPracticeOutcome = useCallback((outcome: PracticeOutcome) => setOutcomes((items) => [...items, outcome]), []);
+  const plan = useDailyPlan();
+  const current = useRef(view);
+  const scrolls = useRef<Partial<Record<View, number>>>({});
+  const preferenceRevision = useRef(0);
+  const preferenceQueue = useRef(Promise.resolve());
+  const priorTimezone = useRef<string | null>(null);
+  /** Save outgoing scroll before moving; visited child views retain their unsaved input state. */
+  const navigate = useCallback((next: View) => {
+    if (next === current.current) return;
+    setPracticeQueue([]);
+    scrolls.current[current.current] = window.scrollY;
+    current.current = next;
+    setVisited((old) => new Set([...old, next]));
+    setView(next);
+    location.hash = next;
+  }, []);
   useEffect(() => {
-    api.getSettings()
-      .then((s) => {
-        if (s.language) setLang(s.language);
-        if (s.theme) setTheme(s.theme);
+    const changed = () => navigate(initialView());
+    window.addEventListener('hashchange', changed);
+    return () => window.removeEventListener('hashchange', changed);
+  }, [navigate]);
+  useLayoutEffect(() => {
+    window.scrollTo({ top: scrolls.current[view] ?? 0, behavior: 'instant' });
+  }, [view]);
+  useEffect(() => {
+    const version = preferenceRevision.current;
+    let active = true;
+    api
+      .getSettings()
+      .then((settings) => {
+        if (active && version === preferenceRevision.current) {
+          setLang(settings.language);
+          setTheme(settings.theme);
+          setTimezone(settings.timezone);
+        }
       })
       .catch((err) => {
-        console.warn('Could not load preferences from backend:', err);
+        if (active) setError(String(err.message));
       });
+    return () => {
+      active = false;
+    };
   }, []);
-
-  // Theme application to document.documentElement
   useEffect(() => {
-    const root = document.documentElement;
-    if (theme === 'dark') {
-      root.classList.add('dark');
-    } else if (theme === 'light') {
-      root.classList.remove('dark');
-    } else {
-      // System mode
-      const isSystemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      if (isSystemDark) {
-        root.classList.add('dark');
-      } else {
-        root.classList.remove('dark');
-      }
-    }
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const apply = () => {
+      const dark = theme === 'dark' || (theme === 'system' && media.matches);
+      document.documentElement.classList.toggle('dark', dark);
+      document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+    };
+    apply();
+    media.addEventListener('change', apply);
+    return () => media.removeEventListener('change', apply);
   }, [theme]);
-
-  // Handle language change with immediate persistence
-  async function handleLanguageChange(newLang: Language) {
-    setLang(newLang);
-    try {
-      await api.updateSettings({ language: newLang });
-    } catch (err) {
-      console.error('Failed to save language preference:', err);
+  useEffect(() => {
+    document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+  }, [lang]);
+  useEffect(() => {
+    if (priorTimezone.current !== timezone) {
+      priorTimezone.current = timezone;
+      setRevision((value) => value + 1);
     }
+    if (!timezone) return;
+    const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' });
+    let date = formatter.format(new Date());
+    /** Invalidate date-based projections on local midnight or when returning to a sleeping tab. */
+    const refreshDate = () => {
+      if (document.hidden) return;
+      const next = formatter.format(new Date());
+      if (next !== date) { date = next; setRevision((value) => value + 1); }
+    };
+    const timer = setInterval(refreshDate, 30000);
+    document.addEventListener('visibilitychange', refreshDate);
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', refreshDate); };
+  }, [timezone]);
+  /** Queue preference writes so a slow previous response cannot persist an older selection last. */
+  function persistPreference(value: { language?: Language; theme?: 'light' | 'dark' | 'system' }) {
+    preferenceRevision.current++;
+    setError('');
+    if (value.language) setLang(value.language);
+    if (value.theme) setTheme(value.theme);
+    preferenceQueue.current = preferenceQueue.current.then(async () => {
+      try {
+        await api.updateSettings(value);
+      } catch (err) {
+        setError(String((err as Error).message));
+      }
+    });
   }
-
-  // Handle theme change with immediate persistence
-  async function handleThemeChange(newTheme: 'light' | 'dark' | 'system') {
-    setTheme(newTheme);
-    try {
-      await api.updateSettings({ theme: newTheme });
-    } catch (err) {
-      console.error('Failed to save theme preference:', err);
-    }
-  }
-
+  /** Invalidate dependent data after durable mutations; the shared controller reconciles completion evidence. */
+  const notifyMutation = useCallback(
+    (record?: PracticeRecord) => {
+      setRevision((n) => n + 1);
+      void plan.onPracticeLogged(record);
+    },
+    [plan.onPracticeLogged],
+  );
+  const workspace = useMemo(
+    () => ({ revision, timezone, navigate, notifyMutation, openPractice, reportPracticeOutcome }),
+    [revision, timezone, navigate, notifyMutation, openPractice, reportPracticeOutcome],
+  );
+  const zh = lang === 'zh';
+  const progress = ['records', 'statistics', 'progress-import'].includes(view);
+  const primary =
+    view === 'schedule' ? 'today' : view === 'catalog-import' ? 'problems' : progress ? 'records' : view;
   return (
-    <div>
-      {/* Header bar */}
-      <header className="header-bar">
-        <div className="brand-section">
-          <span className="brand-icon">⚡</span>
-          <div>
-            <div className="brand-title">{t.appTitle}</div>
-            <div className="brand-subtitle">{t.appSubtitle}</div>
-          </div>
-        </div>
-
-        <div className="nav-controls">
-          {/* Main Navigation Tabs */}
-          <div className="nav-tabs">
-            <button
-              className={`nav-tab-btn ${activeTab === 'dashboard' ? 'active' : ''}`}
-              onClick={() => setActiveTab('dashboard')}
-            >
-              <Trophy size={16} />
-              {t.navDashboard}
-            </button>
-            <button
-              className={`nav-tab-btn ${activeTab === 'today' ? 'active' : ''}`}
-              onClick={() => setActiveTab('today')}
-            >
-              <Sparkles size={16} />
-              {t.navToday}
-            </button>
-            <button
-              className={`nav-tab-btn ${activeTab === 'strategies' ? 'active' : ''}`}
-              onClick={() => setActiveTab('strategies')}
-            >
-              <Calendar size={16} />
-              {t.navStrategies}
-            </button>
-            <button
-              className={`nav-tab-btn ${activeTab === 'catalog' ? 'active' : ''}`}
-              onClick={() => setActiveTab('catalog')}
-            >
-              <BookOpen size={16} />
-              {t.navCatalog}
-            </button>
-            <button
-              className={`nav-tab-btn ${activeTab === 'practice' ? 'active' : ''}`}
-              onClick={() => setActiveTab('practice')}
-            >
-              <CheckCircle2 size={16} />
-              {t.navPractice}
-            </button>
-            <button
-              className={`nav-tab-btn ${activeTab === 'settings' ? 'active' : ''}`}
-              onClick={() => setActiveTab('settings')}
-            >
-              <Settings size={16} />
-              {t.navSettings}
-            </button>
-          </div>
-
-          {/* Quick Theme Switcher */}
-          <button
-            className="btn btn-outline btn-sm"
-            onClick={() => {
-              const next = theme === 'light' ? 'dark' : theme === 'dark' ? 'system' : 'light';
-              handleThemeChange(next);
+    <WorkspaceContext.Provider value={workspace}>
+      <div className="app-shell">
+        <a
+          className="skip-link"
+          href="#main-content"
+          onClick={(event) => {
+            event.preventDefault();
+            document.getElementById('main-content')?.focus();
+          }}
+        >
+          {zh ? '跳到主要内容' : 'Skip to main content'}
+        </a>
+        <aside className="sidebar">
+          <a
+            className="app-brand"
+            href="#today"
+            onClick={(e) => {
+              e.preventDefault();
+              navigate('today');
             }}
-            title={t.themeLabel}
           >
-            {theme === 'light' ? <Sun size={14} /> : theme === 'dark' ? <Moon size={14} /> : <Laptop size={14} />}
-          </button>
-
-          {/* Quick Language Switcher */}
-          <button
-            className="btn btn-outline btn-sm"
-            onClick={() => handleLanguageChange(lang === 'en' ? 'zh' : 'en')}
-            title={t.langLabel}
-          >
-            {lang === 'en' ? '中' : 'EN'}
-          </button>
-        </div>
-      </header>
-
-      {/* Main Content Area */}
-      <main className="container">
-        {activeTab === 'dashboard' ? (
-          <DashboardView
+            <span className="brand-mark">
+              <BookOpen size={21} />
+            </span>
+            <span>
+              LeetCode<span>Tracker</span>
+            </span>
+          </a>
+          <p className="sidebar-caption">{zh ? '日积跬步' : 'ONE PROBLEM AT A TIME'}</p>
+          <nav aria-label={zh ? '主导航' : 'Main navigation'}>
+            {(
+              [
+                { id: 'today', icon: CalendarDays, label: zh ? '今日' : 'Today' },
+                { id: 'problems', icon: BookOpen, label: zh ? '题库' : 'Problems' },
+                { id: 'records', icon: ChartNoAxesCombined, label: zh ? '进展' : 'Progress' },
+              ] as const
+            ).map((item) => (
+              <button
+                key={item.id}
+                className={'nav-item ' + (primary === item.id ? 'active' : '')}
+                aria-current={primary === item.id ? 'page' : undefined}
+                onClick={() => navigate(item.id)}
+              >
+                <item.icon size={19} />
+                {item.label}
+              </button>
+            ))}
+          </nav>
+          <div className="sidebar-bottom">
+            <button
+              className={'nav-item ' + (view === 'settings' ? 'active' : '')}
+              aria-current={view === 'settings' ? 'page' : undefined}
+              onClick={() => navigate('settings')}
+            >
+              <Settings size={19} />
+              {zh ? '设置' : 'Settings'}
+            </button>
+            <div className="sidebar-tools">
+              <button
+                className="btn-icon"
+                aria-label={zh ? '切换主题' : 'Switch theme'}
+                onClick={() =>
+                  persistPreference({
+                    theme: theme === 'light' ? 'dark' : theme === 'dark' ? 'system' : 'light',
+                  })
+                }
+              >
+                {theme === 'light' ? (
+                  <Sun size={17} />
+                ) : theme === 'dark' ? (
+                  <Moon size={17} />
+                ) : (
+                  <Laptop size={17} />
+                )}
+              </button>
+              <button
+                className="text-link"
+                aria-label={zh ? '切换语言为英文' : 'Switch language to Chinese'}
+                onClick={() => persistPreference({ language: zh ? 'en' : 'zh' })}
+              >
+                {zh ? 'EN' : '中文'}
+              </button>
+              <small>{zh ? '本地工作空间' : 'Local workspace'}</small>
+            </div>
+          </div>
+        </aside>
+        <main id="main-content" className="main-content" tabIndex={-1}>
+          {outcomes.map((outcome, index) => (
+            <Feedback key={index} tone={outcome.error ? 'error' : 'success'}>
+              {outcome.error
+                ? `${zh ? '保存失败，已保留输入：' : 'Save failed. Your draft is retained: '}${outcome.error}`
+                : zh ? '练习更改已保存。' : 'Practice changes saved.'}
+              {outcome.recovery && <button className="text-link" onClick={() => {
+                openPractice(outcome.recovery!);
+                setOutcomes((items) => items.filter((_, i) => i !== index));
+              }}>{zh ? '恢复草稿' : 'Recover draft'}</button>}
+              <button className="text-link" onClick={() => setOutcomes((items) => items.filter((_, i) => i !== index))}>{zh ? '关闭提示' : 'Dismiss'}</button>
+            </Feedback>
+          ))}
+          {error && (
+            <Feedback>
+              {zh ? '偏好读取或保存失败：' : 'Could not load or save preferences: '}
+              {error}
+            </Feedback>
+          )}
+          {(view === 'records' || view === 'statistics') && (
+            <>
+              <PageHeader
+                title={zh ? '进展' : 'Progress'}
+                description={zh ? '记录每一步，看见积累。' : 'Keep a record. See how far you’ve come.'}
+                actions={
+                  <>
+                    <button className="btn btn-secondary" onClick={() => navigate('progress-import')}>
+                      <Upload size={16} />
+                      {zh ? '导入进度' : 'Import progress'}
+                    </button>
+                    <button className="btn btn-primary" onClick={() => openPractice({ mode: 'manual' })}>
+                      <Plus size={16} />
+                      {zh ? '手动记录' : 'Manual record'}
+                    </button>
+                  </>
+                }
+              />
+              <div className="page-tabs" role="tablist" aria-label={zh ? '进展视图' : 'Progress views'}>
+                {(['records', 'statistics'] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    role="tab"
+                    aria-selected={view === tab}
+                    aria-controls={'view-' + tab}
+                    id={'tab-' + tab}
+                    onClick={() => navigate(tab)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                        e.preventDefault();
+                        const next = tab === 'records' ? 'statistics' : 'records';
+                        navigate(next);
+                        setTimeout(() => document.getElementById('tab-' + next)?.focus(), 0);
+                      }
+                    }}
+                    tabIndex={view === tab ? 0 : -1}
+                  >
+                    {tab === 'records' ? (zh ? '记录' : 'Records') : zh ? '统计' : 'Statistics'}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+          {visited.has('today') && (
+            <div hidden={view !== 'today'} id="view-today">
+              <TodayPlanView
+                lang={lang}
+                planController={plan}
+                onNavigateToSettings={() => navigate('settings')}
+              />
+            </div>
+          )}
+          {visited.has('schedule') && (
+            <div hidden={view !== 'schedule'} id="view-schedule">
+              <PageHeader
+                title={zh ? '学习安排' : 'Study schedule'}
+                description={
+                  zh
+                    ? '星期安排决定每天的策略。调整今天只影响当前计划。'
+                    : 'Your weekly schedule selects each day’s strategy. Adjust today changes only the current plan.'
+                }
+                back={{ label: zh ? '返回今日' : 'Back to Today', run: () => navigate('today') }}
+              />
+              <StrategiesView lang={lang} />
+            </div>
+          )}
+          {visited.has('problems') && (
+            <div hidden={view !== 'problems'} id="view-problems">
+              <CatalogView lang={lang} onNavigateSettings={() => navigate('catalog-import')} />
+            </div>
+          )}
+          {visited.has('catalog-import') && (
+            <div hidden={view !== 'catalog-import'} id="view-catalog-import">
+              <CatalogImportWorkspace lang={lang} />
+            </div>
+          )}
+          {visited.has('records') && (
+            <div hidden={view !== 'records'} role="tabpanel" aria-labelledby="tab-records" id="view-records">
+              <ActivityRecords lang={lang} />
+            </div>
+          )}
+          {visited.has('statistics') && (
+            <div
+              hidden={view !== 'statistics'}
+              role="tabpanel"
+              aria-labelledby="tab-statistics"
+              id="view-statistics"
+            >
+              <DashboardView lang={lang} active={view === 'statistics'} />
+            </div>
+          )}
+          {visited.has('progress-import') && (
+            <div hidden={view !== 'progress-import'} id="view-progress-import">
+              <ProgressWorkbench lang={lang} />
+            </div>
+          )}
+          {visited.has('settings') && (
+            <div hidden={view !== 'settings'} id="view-settings">
+              <SettingsView
+                lang={lang}
+                onLanguageChange={(language) => persistPreference({ language })}
+                onThemeChange={(theme) => persistPreference({ theme })}
+                currentTheme={theme}
+                onTimezoneSaved={setTimezone}
+              />
+            </div>
+          )}
+        </main>
+        {practice && (
+          <PracticeWorkspace
+            key={
+              'record' in practice
+                ? practice.mode + practice.record.id
+                : practice.mode === 'evidence'
+                  ? practice.item.id
+                  : 'manual'
+            }
+            request={practice}
             lang={lang}
-            planController={planController}
-            onNavigateToToday={() => setActiveTab('today')}
-            onNavigateToSettings={() => setActiveTab('settings')}
-          />
-        ) : activeTab === 'today' ? (
-          <TodayPlanView
-            lang={lang}
-            planController={planController}
-            onNavigateToSettings={() => setActiveTab('settings')}
-            onNavigateToDashboard={() => setActiveTab('dashboard')}
-          />
-        ) : activeTab === 'strategies' ? (
-          <StrategiesView lang={lang} />
-        ) : activeTab === 'catalog' ? (
-          <CatalogView lang={lang} onNavigateSettings={() => setActiveTab('settings')} />
-        ) : activeTab === 'practice' ? (
-          <ProgressWorkbench lang={lang} />
-        ) : (
-          <SettingsView
-            lang={lang}
-            onLanguageChange={handleLanguageChange}
-            onThemeChange={handleThemeChange}
-            currentTheme={theme}
+            onClose={() => setPracticeQueue((queue) => queue.slice(1))}
           />
         )}
-      </main>
-    </div>
+      </div>
+    </WorkspaceContext.Provider>
   );
-};
+}

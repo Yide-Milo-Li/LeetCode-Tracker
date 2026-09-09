@@ -28,6 +28,9 @@ export const practiceRecordSchema = z.object({
   practicedAt: nonBlank(50),
   timePrecision: timePrecisionSchema,
   notes: z.string().max(2000).nullable(),
+  durationMinutes: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).nullable().default(null),
+  sourceTimezone: timeZoneSchema.nullable().default(null),
+  revision: z.number().int().positive().default(1),
   status: practiceRecordStatusSchema,
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
@@ -43,6 +46,8 @@ export const createPracticeRecordSchema = z.object({
   practicedAt: nonBlank(50),
   timePrecision: timePrecisionSchema.optional(),
   notes: z.string().max(2000).optional(),
+  durationMinutes: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).nullable().optional(),
+  operationId: nonBlank(100).optional(),
   sourceTimezone: timeZoneSchema.nullable().optional(),
 }).refine(v => isEventTime(v.practicedAt, v.timePrecision ?? (v.practicedAt.includes('T') ? 'datetime' : 'date')), 'Invalid event date, precision or UTC offset');
 
@@ -54,9 +59,11 @@ export const updatePracticeRecordSchema = z.object({
   practicedAt: nonBlank(50).optional(),
   timePrecision: timePrecisionSchema.optional(),
   notes: z.string().max(2000).nullable().optional(),
+  durationMinutes: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).nullable().optional(),
+  expectedRevision: z.number().int().positive().optional(),
   sourceTimezone: timeZoneSchema.nullable().optional(),
 }).refine(
-  data => data.completed !== undefined || data.practicedAt !== undefined || data.timePrecision !== undefined || data.notes !== undefined,
+  data => data.completed !== undefined || data.practicedAt !== undefined || data.timePrecision !== undefined || data.notes !== undefined || data.durationMinutes !== undefined || data.sourceTimezone !== undefined,
   { message: 'At least one field must be provided to update' }
 );
 

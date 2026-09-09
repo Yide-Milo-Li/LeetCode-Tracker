@@ -4,7 +4,7 @@ Status: accepted requirements; not an implementation claim.
 
 ## Local-first tracking
 
-Users supply a compatible local database and must have rights to its contents. The project distributes no problem dataset. Validate records, preserve known data after failed imports, and expose freshness and coverage. Missing history is unknown, not zero activity. Import and compatibility validation are planned.
+Users supply JSONL problem metadata and must have rights to its contents. The application creates and migrates its local database; the project distributes no dataset. Validate records, preserve known data after failed imports, and expose freshness and coverage. Missing history is unknown, not zero activity.
 
 ## Strategies and weekly assignments
 
@@ -18,6 +18,16 @@ Use positive integer question counts and difficulty percentages totaling 100, wi
 
 ## User interface
 
-Home contains data freshness, practice metrics, recommended problems, charts, and encouragement. Profile & Settings contains connections, the strategy library, weekday assignments, timezone, theme, and a persistent Chinese/English language switch. Translate navigation, forms, validation, charts, setup/rest states, and data controls. Preserve platform identifiers and original problem titles.
+The three primary destinations are Today (default), Problems and Progress. Settings stays at the sidebar bottom. Desktop windows at 1024, 1440 and 1920 pixels, English/Chinese, light/dark/system themes and keyboard access are supported. Mobile UI is outside scope.
 
-Documentation and code comments are English. Keep local-only operation distinct from the future hosted multi-user roadmap.
+- Today shows seven calendar days including today in the configured timezone, the activity streak, generated-plan progress and actionable problems. Study schedule is a child workspace; Adjust today affects only the current plan. Keep replacement, versions, shortages, rest/setup and local fallback visible.
+- An empty completion circle saves an actual-time manual record immediately. Only after persistence does it offer optional positive-integer duration and notes. Skip, close, Escape and backdrop dismissal preserve the record. Details update the same ID. Initial failure is unchecked; failed detail edits preserve both completion and input.
+- A checked circle opens exact completion evidence. Revoking one manual record retains audit and all other records/snapshots. Existing evidence rules determine the resulting completion state.
+- Progress defaults to Records, with Statistics as its only other tab. Top actions open Import progress and Manual record. Manual entry searches the local catalog first, supports historical and date-only practice, and uses the same record editor. Missing problems lead to catalog import.
+- Progress import has paste, candidate review, per-problem conflict resolution, explicit confirmation and result steps. Gemini organizes candidates only; server matching, semantic validation, deduplication and atomic commit remain authoritative. Current snapshots and their audit versions remain distinct from real submission history.
+- Problems preserves search, filters, pagination and metadata details, with contextual practice entry. Import problems is a separate JSONL workspace with upload/paste, preview, errors, results and paginated import history.
+- Settings exposes only language, theme and timezone. A browser timezone suggestion requires explicit saving. No connection or provider configuration controls are invented.
+
+Use warm neutral surfaces, sage emphasis, offline sans-serif fonts, readable 14–16 px body text and consistent CSS tokens. Provide localized labels, focus trapping/restoration and reduced-motion support. Loading must not fabricate progress or overwrite drafts. Details, filters and scroll survive ordinary workspace navigation.
+
+Documentation and code comments are English. Local verification is distinct from live-provider verification and publication. Hosted multi-user work is outside this refactor.
