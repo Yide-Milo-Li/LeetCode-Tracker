@@ -374,6 +374,100 @@ export interface OverridePreview {
   planVersion: number | null;
 }
 
+export interface DashboardOverview {
+  uniqueSolvedProblems: number;
+  solvedThisWeek: number;
+  currentStreak: number;
+  totalManualPractices: number;
+  totalSnapshotSubmissions: number;
+}
+
+export interface DashboardDailySummary {
+  status: 'ready' | 'rest' | 'setup' | 'failed' | 'generating';
+  strategyName: string | null;
+  completedCount: number;
+  targetCount: number;
+  shortage: number;
+  planId: string | null;
+  errorMessage: string | null;
+}
+
+export interface YearlyActivityDay {
+  date: string;
+  activeProblemCount: number;
+  solvedProblemCount: number;
+  manualCount: number;
+  snapshotCount: number;
+}
+
+export interface DailyTrendPoint {
+  date: string;
+  activeCount: number;
+  completedCount: number;
+}
+
+export interface DifficultyCount {
+  solved: number;
+  total: number;
+}
+
+export interface DifficultyDistribution {
+  Easy: DifficultyCount;
+  Medium: DifficultyCount;
+  Hard: DifficultyCount;
+}
+
+export interface TagDistribution {
+  tagSlug: string;
+  tagName: string;
+  solvedCount: number;
+}
+
+export interface RecentActivityItem {
+  id: string;
+  source: 'manual' | 'snapshot';
+  questionId: string;
+  questionFrontendId: string;
+  problemTitle: string;
+  difficulty: 'Easy' | 'Medium' | 'Hard';
+  action: string;
+  status: 'completed' | 'uncompleted' | 'accepted' | 'other';
+  timestamp: string;
+  timePrecision: 'datetime' | 'date';
+  sourceTimezone: string | null;
+  isDatePending: boolean;
+}
+
+export interface DashboardDataStatus {
+  catalogUpdatedAt: number | null;
+  practiceUpdatedAt: number | null;
+  userTimezone: string | null;
+  pendingDateCount: number;
+}
+
+export interface DashboardResponse {
+  overview: DashboardOverview;
+  todaySummary: DashboardDailySummary;
+  yearlyActivity: {
+    year: number;
+    days: YearlyActivityDay[];
+  };
+  trend30Days: DailyTrendPoint[];
+  difficultyDistribution: DifficultyDistribution;
+  topTags: TagDistribution[];
+  recentActivities: RecentActivityItem[];
+  dataStatus: DashboardDataStatus;
+  revision: { catalog: number; practice: number; planning: number; timezone: string | null };
+}
+
+export interface DashboardActivityListResponse {
+  items: RecentActivityItem[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
 const API_BASE =
   typeof window !== 'undefined' && window.location?.origin && window.location.origin !== 'null'
     ? `${window.location.origin}/api/v1`
@@ -643,5 +737,31 @@ export const api = {
 
   commitDailyPlanOverride(previewId: string, expectedVersion: number | null): Promise<DailyPlan> {
     return planningMutation('/daily-plan-overrides/commit', { previewId, expectedVersion });
+  },
+
+  // ==========================================
+  // Dashboard & Activity Insights
+  // ==========================================
+
+  getDashboard(year?: number): Promise<DashboardResponse> {
+    const query = year ? `?year=${encodeURIComponent(year)}` : '';
+    return request<DashboardResponse>(`/dashboard${query}`);
+  },
+
+  getDashboardActivities(query: {
+    page?: number;
+    limit?: number;
+    date?: string;
+    source?: 'manual' | 'snapshot' | 'all';
+    pendingDate?: 'true' | 'false' | 'all';
+  } = {}): Promise<DashboardActivityListResponse> {
+    const params = new URLSearchParams();
+    if (query.page) params.set('page', String(query.page));
+    if (query.limit) params.set('limit', String(query.limit));
+    if (query.date) params.set('date', query.date);
+    if (query.source && query.source !== 'all') params.set('source', query.source);
+    if (query.pendingDate && query.pendingDate !== 'all') params.set('pendingDate', query.pendingDate);
+    const qs = params.toString();
+    return request<DashboardActivityListResponse>(`/dashboard/activity${qs ? `?${qs}` : ''}`);
   },
 };

@@ -29,23 +29,40 @@ import {
 import { translations, type Language } from '../i18n.ts';
 import { PromptOverrideModal } from './PromptOverrideModal.tsx';
 import { PracticeLogModal } from './PracticeLogModal.tsx';
+import { useDailyPlan, type UseDailyPlanReturn } from '../hooks/useDailyPlan.ts';
 
 interface TodayPlanViewProps {
   lang: Language;
   onNavigateToSettings: () => void;
+  onNavigateToDashboard?: () => void;
+  planController?: UseDailyPlanReturn;
 }
 
 export const TodayPlanView: React.FC<TodayPlanViewProps> = ({
   lang,
   onNavigateToSettings,
+  onNavigateToDashboard,
+  planController,
 }) => {
   const t = translations[lang];
+  const internalController = useDailyPlan();
+  const controller = planController ?? internalController;
 
-  const [loading, setLoading] = useState(true);
-  const [ensureResult, setEnsureResult] = useState<EnsureResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [replacingItemId, setReplacingItemId] = useState<string | null>(null);
-  const [replacingBatch, setReplacingBatch] = useState(false);
+  const {
+    loading,
+    ensureResult,
+    error: controllerError,
+    replacingItemId,
+    replacingBatch,
+    replaceOne,
+    replaceAllUnfinished,
+    onOverrideCommitted,
+    onPracticeLogged,
+    refresh: loadDailyPlan,
+  } = controller;
+
+  const [localError, setLocalError] = useState<string | null>(null);
+  const error = controllerError || localError;
 
   // Modals
   const [isOverrideOpen, setIsOverrideOpen] = useState(false);
@@ -53,83 +70,21 @@ export const TodayPlanView: React.FC<TodayPlanViewProps> = ({
   const [showVersions, setShowVersions] = useState(false);
   const [versions, setVersions] = useState<DailyPlan[]>([]);
 
-  const changeRevision = useRef(0);
-  const refreshInFlight = useRef(false);
-  const loadDailyPlan = useCallback(async () => {
-    if (refreshInFlight.current) return;
-    refreshInFlight.current = true;
-    const revision = changeRevision.current;
-    // Loading is only the initial state: background checks must not unmount drafts.
-    setError(null);
-    try {
-      const result = await api.ensureDailyPlan();
-      if (revision === changeRevision.current) setEnsureResult(result);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load daily plan.');
-    } finally {
-      refreshInFlight.current = false;
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadDailyPlan();
-
-    // Re-check when window regains focus or visibility changes
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        loadDailyPlan();
-      }
-    };
-    window.addEventListener('visibilitychange', onVisibilityChange);
-
-    // Periodic check (every 30 seconds) to detect date rollover across midnight
-    const intervalId = setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        loadDailyPlan();
-      }
-    }, 30000);
-
-    return () => {
-      clearInterval(intervalId);
-      window.removeEventListener('visibilitychange', onVisibilityChange);
-    };
-  }, [loadDailyPlan]);
-
   async function handleReplaceOne(item: PlanItem) {
-    if (!ensureResult?.plan) return;
-    setReplacingItemId(item.id);
-    setError(null);
+    setLocalError(null);
     try {
-      const updated = await api.replacePlanItems(ensureResult.plan.id, {
-        mode: 'one',
-        itemId: item.id,
-        expectedVersion: ensureResult.plan.version,
-      });
-      changeRevision.current++;
-      setEnsureResult({ status: 'ready', plan: updated });
-    } catch (err: any) {
-      setError(err.message || 'Failed to replace item.');
-    } finally {
-      setReplacingItemId(null);
+      await replaceOne(item);
+    } catch (err: unknown) {
+      setLocalError(err instanceof Error ? err.message : 'Failed to replace item.');
     }
   }
 
   async function handleReplaceAllUnfinished() {
-    if (!ensureResult?.plan) return;
-    setReplacingBatch(true);
-    setError(null);
+    setLocalError(null);
     try {
-      const updated = await api.replacePlanItems(ensureResult.plan.id, {
-        mode: 'all_unfinished',
-        expectedVersion: ensureResult.plan.version,
-      });
-      changeRevision.current++;
-      setEnsureResult({ status: 'ready', plan: updated });
-    } catch (err: any) {
-      setError(err.message || 'Failed to replace unfinished items.');
-    } finally {
-      setReplacingBatch(false);
+      await replaceAllUnfinished();
+    } catch (err: unknown) {
+      setLocalError(err instanceof Error ? err.message : 'Failed to replace unfinished items.');
     }
   }
 
@@ -139,8 +94,8 @@ export const TodayPlanView: React.FC<TodayPlanViewProps> = ({
       const v = await api.getPlanVersions(ensureResult.plan.id);
       setVersions(v);
       setShowVersions(true);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load version history.');
+    } catch (err: unknown) {
+      setLocalError(err instanceof Error ? err.message : 'Failed to load version history.');
     }
   }
 
@@ -193,7 +148,7 @@ export const TodayPlanView: React.FC<TodayPlanViewProps> = ({
         <PromptOverrideModal
           isOpen={isOverrideOpen}
           onClose={() => setIsOverrideOpen(false)}
-          onApplied={(newPlan) => { changeRevision.current++; setEnsureResult({ status: 'ready', plan: newPlan }); }}
+          onApplied={(newPlan) => onOverrideCommitted(newPlan)}
           currentPlan={null}
           lang={lang}
         />
@@ -221,9 +176,19 @@ export const TodayPlanView: React.FC<TodayPlanViewProps> = ({
     <div className="today-view-container">
       {/* Header bar */}
       <div className="view-header">
-        <div>
-          <h2 className="view-title">{t.todayTitle}</h2>
-          <p className="view-subtitle">{t.todaySubtitle}</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          {onNavigateToDashboard && (
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={onNavigateToDashboard}
+            >
+              ← {t.navDashboard}
+            </button>
+          )}
+          <div>
+            <h2 className="view-title" style={{ margin: 0 }}>{t.todayTitle}</h2>
+            <p className="view-subtitle">{t.todaySubtitle}</p>
+          </div>
         </div>
 
         <div className="plan-meta-pills">
@@ -447,7 +412,7 @@ export const TodayPlanView: React.FC<TodayPlanViewProps> = ({
       <PromptOverrideModal
         isOpen={isOverrideOpen}
         onClose={() => setIsOverrideOpen(false)}
-        onApplied={(updated) => { changeRevision.current++; setEnsureResult({ status: 'ready', plan: updated }); }}
+        onApplied={(updated) => onOverrideCommitted(updated)}
         currentPlan={plan}
         lang={lang}
       />
@@ -459,11 +424,10 @@ export const TodayPlanView: React.FC<TodayPlanViewProps> = ({
           lang={lang}
           onClose={() => {
             setLogModalProblem(null);
-            loadDailyPlan();
           }}
           onRecordSaved={() => {
             setLogModalProblem(null);
-            loadDailyPlan();
+            onPracticeLogged();
           }}
         />
       )}

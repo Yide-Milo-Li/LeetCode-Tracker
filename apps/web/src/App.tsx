@@ -3,21 +3,24 @@
  * Manages view routing (Catalog vs Settings), global theme, and bilingual language state.
  */
 import React, { useEffect, useState } from 'react';
-import { BookOpen, Settings, Sun, Moon, Laptop, CheckCircle2, Sparkles, Calendar } from 'lucide-react';
+import { BookOpen, Settings, Sun, Moon, Laptop, CheckCircle2, Sparkles, Calendar, Trophy } from 'lucide-react';
+import { DashboardView } from './components/DashboardView.tsx';
 import { CatalogView } from './components/CatalogView.tsx';
 import { SettingsView } from './components/SettingsView.tsx';
 import { ProgressWorkbench } from './components/ProgressWorkbench.tsx';
 import { TodayPlanView } from './components/TodayPlanView.tsx';
 import { StrategiesView } from './components/StrategiesView.tsx';
+import { useDailyPlan } from './hooks/useDailyPlan.ts';
 import { api } from './api.ts';
 import { translations, type Language } from './i18n.ts';
 
 export const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'today' | 'strategies' | 'catalog' | 'practice' | 'settings'>('today');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'today' | 'strategies' | 'catalog' | 'practice' | 'settings'>('dashboard');
   const [lang, setLang] = useState<Language>('en');
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
 
   const t = translations[lang];
+  const planController = useDailyPlan();
 
   // Initial load of preferences from API
   useEffect(() => {
@@ -85,6 +88,13 @@ export const App: React.FC = () => {
           {/* Main Navigation Tabs */}
           <div className="nav-tabs">
             <button
+              className={`nav-tab-btn ${activeTab === 'dashboard' ? 'active' : ''}`}
+              onClick={() => setActiveTab('dashboard')}
+            >
+              <Trophy size={16} />
+              {t.navDashboard}
+            </button>
+            <button
               className={`nav-tab-btn ${activeTab === 'today' ? 'active' : ''}`}
               onClick={() => setActiveTab('today')}
             >
@@ -146,8 +156,20 @@ export const App: React.FC = () => {
 
       {/* Main Content Area */}
       <main className="container">
-        {activeTab === 'today' ? (
-          <TodayPlanView lang={lang} onNavigateToSettings={() => setActiveTab('settings')} />
+        {activeTab === 'dashboard' ? (
+          <DashboardView
+            lang={lang}
+            planController={planController}
+            onNavigateToToday={() => setActiveTab('today')}
+            onNavigateToSettings={() => setActiveTab('settings')}
+          />
+        ) : activeTab === 'today' ? (
+          <TodayPlanView
+            lang={lang}
+            planController={planController}
+            onNavigateToSettings={() => setActiveTab('settings')}
+            onNavigateToDashboard={() => setActiveTab('dashboard')}
+          />
         ) : activeTab === 'strategies' ? (
           <StrategiesView lang={lang} />
         ) : activeTab === 'catalog' ? (

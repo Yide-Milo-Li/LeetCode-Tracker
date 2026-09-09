@@ -1054,3 +1054,377 @@ html.dark .plan-item-card.completed {
 .override-modal details input, .override-modal details select { min-width: 0; max-width: 100%; }
 .override-modal table { width: 100%; table-layout: fixed; border-collapse: collapse; }
 .override-modal td, .override-modal th { padding: 0.4rem; text-align: left; overflow-wrap: anywhere; }
+
+/* ==========================================
+   Phase 5: Dashboard Overview & Activity History Drawer
+   ========================================== */
+
+.dashboard-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.dashboard-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+}
+
+.kpi-card {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.kpi-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.kpi-value {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-top: 0.5rem;
+  line-height: 1.1;
+}
+
+.kpi-unit {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+}
+
+/* Today Summary Banner on Dashboard */
+.today-summary-banner {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-left: 4px solid var(--primary);
+  border-radius: var(--radius);
+  padding: 1.25rem 1.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.today-summary-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.today-summary-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+/* Heatmap Grid */
+.heatmap-card {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 1.25rem 1.5rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.heatmap-scroll-area {
+  overflow-x: auto;
+  padding-bottom: 0.5rem;
+}
+
+.heatmap-grid {
+  display: flex;
+  gap: 3px;
+  min-width: max-content;
+}
+
+.heatmap-col {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.heatmap-cell {
+  width: 13px;
+  height: 13px;
+  border-radius: 2px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.1s ease, outline 0.1s ease;
+}
+
+.heatmap-cell:hover,
+.heatmap-cell:focus {
+  transform: scale(1.3);
+  outline: 2px solid var(--primary);
+  z-index: 2;
+}
+
+.heatmap-cell-0 {
+  background-color: var(--bg-card-muted);
+  border-color: var(--border-color);
+}
+
+.heatmap-cell-1 {
+  background-color: #86efac;
+}
+
+.heatmap-cell-2 {
+  background-color: #22c55e;
+}
+
+.heatmap-cell-3 {
+  background-color: #15803d;
+}
+
+html.dark .heatmap-cell-1 {
+  background-color: #065f46;
+}
+
+html.dark .heatmap-cell-2 {
+  background-color: #059669;
+}
+
+html.dark .heatmap-cell-3 {
+  background-color: #10b981;
+}
+
+.heatmap-cell.out-of-year {
+  opacity: 0.15;
+  pointer-events: none;
+}
+
+.heatmap-legend {
+  margin-top: 0.75rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.heatmap-legend-scale {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.heatmap-legend-box {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+}
+
+/* 30-Day Trend Chart Card */
+.trend-card {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 1.25rem 1.5rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.trend-chart-wrapper {
+  height: 260px;
+  width: 100%;
+  margin-top: 1rem;
+}
+
+/* Distributions Grid */
+.distributions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1.5rem;
+}
+
+.distribution-card {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 1.25rem 1.5rem;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.diff-track {
+  width: 100%;
+  height: 8px;
+  background-color: var(--bg-card-muted);
+  border-radius: 9999px;
+  overflow: hidden;
+  margin-top: 0.35rem;
+}
+
+.diff-fill {
+  height: 100%;
+  border-radius: 9999px;
+  transition: width 0.4s ease;
+}
+
+.top-tags-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.top-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.65rem;
+  background-color: var(--bg-card-muted);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-main);
+}
+
+.top-tag-count {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  background-color: var(--primary);
+  color: var(--primary-text);
+  padding: 0.1rem 0.4rem;
+  border-radius: 9999px;
+}
+
+/* Recent Activity List */
+.recent-activity-card {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 1.25rem 1.5rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.recent-activity-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem;
+  background-color: var(--bg-card-muted);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  gap: 0.75rem;
+  font-size: 0.8125rem;
+  margin-bottom: 0.5rem;
+}
+
+.recent-activity-item:last-child {
+  margin-bottom: 0;
+}
+
+/* Data Status Footer */
+.data-status-bar {
+  background-color: var(--bg-card-muted);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 1rem 1.25rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.data-status-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+/* Activity History Drawer */
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(2px);
+  z-index: 1000;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.drawer-content {
+  width: 100%;
+  max-width: 500px;
+  height: 100%;
+  background-color: var(--bg-card);
+  border-left: 1px solid var(--border-color);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+}
+
+.drawer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.drawer-filters {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border-color);
+  background-color: var(--bg-card-muted);
+}
+
+.drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.drawer-footer {
+  padding: 0.75rem 1.5rem;
+  border-top: 1px solid var(--border-color);
+  background-color: var(--bg-card-muted);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.drawer-item {
+  padding: 0.75rem 1rem;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}

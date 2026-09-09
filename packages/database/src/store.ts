@@ -27,6 +27,7 @@ import {
   updateSettingsInputSchema,
 } from '../../contracts/src/sync.ts';
 import { isEventTime } from '../../contracts/src/time.ts';
+import type { RevisionStamp } from '../../contracts/src/recommendations.ts';
 import {
   createPracticeRecordSchema,
   updatePracticeRecordSchema,
@@ -2197,4 +2198,148 @@ export class CatalogStore {
     };
   }
 
+  /**
+   * Get the current planning integer revision number from metadata.
+   */
+  public getPlanningRevision(): number {
+    const row = this.db.prepare("SELECT value FROM catalog_meta WHERE key = 'planning_revision'").get() as { value: string } | undefined;
+    return row ? parseInt(row.value, 10) : 0;
+  }
+
+  /**
+   * Fetch all raw data required for pure dashboard statistical aggregation.
+   * Read-only: does not modify state or hold transactions.
+   */
+  public getDashboardRawData(): {
+    problems: CatalogProblem[];
+    manualRecords: PracticeRecord[];
+    snapshots: ProgressSnapshot[];
+    catalogUpdatedAt: number | null;
+    practiceUpdatedAt: number | null;
+    userTimezone: string | null;
+    revision: RevisionStamp;
+  } {
+    // 1. Fetch all problems with tags
+    const problemRows = this.db.prepare(`
+      SELECT p.question_id, p.frontend_question_id, p.title, p.title_slug, p.url, p.difficulty, p.is_paid_only, p.source, p.updated_at
+      FROM problems p
+      ORDER BY cast(p.frontend_question_id as integer) ASC, p.frontend_question_id ASC
+    `).all() as Array<{
+      question_id: string;
+      frontend_question_id: string;
+      title: string;
+      title_slug: string;
+      url: string;
+      difficulty: 'Easy' | 'Medium' | 'Hard';
+      is_paid_only: number;
+      source: string;
+      updated_at: number;
+    }>;
+
+    const tagRows = this.db.prepare(`
+      SELECT pt.question_id, t.id, t.slug, t.name
+      FROM problem_tags pt
+      JOIN tags t ON pt.tag_slug = t.slug
+    `).all() as Array<{
+      question_id: string;
+      id: string;
+      slug: string;
+      name: string;
+    }>;
+
+    const tagsByQuestion = new Map<string, Array<TopicTag>>();
+    for (const tr of tagRows) {
+      let list = tagsByQuestion.get(tr.question_id);
+      if (!list) {
+        list = [];
+        tagsByQuestion.set(tr.question_id, list);
+      }
+      list.push({
+        id: tr.slug,
+        slug: tr.slug,
+        name: tr.name,
+      });
+    }
+
+    const problems: CatalogProblem[] = problemRows.map(row => ({
+      questionId: row.question_id,
+      questionFrontendId: row.frontend_question_id,
+      title: row.title,
+      titleSlug: row.title_slug,
+      url: row.url,
+      difficulty: row.difficulty,
+      isPaidOnly: row.is_paid_only === 1,
+      topicTags: tagsByQuestion.get(row.question_id) ?? [],
+      source: row.source,
+    }));
+
+    // 2. Fetch all active manual practice records
+    const manualRecords = (this.db.prepare(`
+      SELECT
+        id, question_id as questionId, completed, practiced_at as practicedAt,
+        time_precision as timePrecision, notes, status, created_at as createdAt,
+        updated_at as updatedAt, revoked_at as revokedAt
+      FROM practice_records
+      WHERE status = 'active'
+      ORDER BY practiced_at DESC
+    `).all() as unknown) as Array<PracticeRecord & { sourceTimezone: string | null }>;
+
+    const problemLookup = new Map<string, { title: string; frontendId: string; difficulty: 'Easy' | 'Medium' | 'Hard' }>(
+      problemRows.map(p => [p.question_id, { title: p.title, frontendId: p.frontend_question_id, difficulty: p.difficulty }])
+    );
+    for (const mr of manualRecords) {
+      const p = problemLookup.get(mr.questionId);
+      mr.problemTitle = p?.title ?? 'Unknown';
+      mr.questionFrontendId = p?.frontendId ?? mr.questionId;
+      mr.completed = Boolean(mr.completed);
+      (mr as any).sourceTimezone = null;
+    }
+
+    // 3. Fetch all active progress snapshots
+    const snapshotRows = (this.db.prepare(`
+      SELECT
+        ps.question_id as questionId, ps.last_submitted_at as lastSubmittedAt,
+        ps.time_precision as timePrecision, ps.last_result as lastResult,
+        ps.total_submissions as totalSubmissions, ps.has_accepted as hasAccepted,
+        ps.source, ps.version, ps.status, ps.updated_at as updatedAt,
+        ss.source_timezone as sourceTimezone
+      FROM progress_snapshots ps
+      LEFT JOIN snapshot_successes ss ON ps.question_id = ss.question_id AND ps.version = ss.version
+      WHERE ps.status = 'active'
+      ORDER BY ps.last_submitted_at DESC
+    `).all() as unknown) as Array<ProgressSnapshot & { sourceTimezone: string | null }>;
+
+    for (const sr of snapshotRows) {
+      const p = problemLookup.get(sr.questionId);
+      sr.problemTitle = p?.title ?? 'Unknown';
+      sr.questionFrontendId = p?.frontendId ?? sr.questionId;
+      sr.difficulty = p?.difficulty ?? 'Medium';
+      sr.hasAccepted = Boolean(sr.hasAccepted);
+    }
+
+    // 4. Metadata timestamps
+    const catalogMax = (this.db.prepare('SELECT max(updated_at) as max_time FROM problems').get() as { max_time: number | null })?.max_time ?? null;
+    const manualMax = (this.db.prepare('SELECT max(updated_at) as max_time FROM practice_records').get() as { max_time: number | null })?.max_time ?? null;
+    const snapshotMax = (this.db.prepare('SELECT max(updated_at) as max_time FROM progress_snapshots').get() as { max_time: number | null })?.max_time ?? null;
+    const practiceMax = Math.max(manualMax ?? 0, snapshotMax ?? 0) || null;
+
+    const settings = this.getSettings();
+
+    const revision: RevisionStamp = {
+      catalog: this.getCatalogRevision(),
+      practice: this.getPracticeRevision(),
+      planning: this.getPlanningRevision(),
+      timezone: settings.timezone,
+    };
+
+    return {
+      problems,
+      manualRecords,
+      snapshots: snapshotRows,
+      catalogUpdatedAt: catalogMax,
+      practiceUpdatedAt: practiceMax,
+      userTimezone: settings.timezone,
+      revision,
+    };
+  }
 }

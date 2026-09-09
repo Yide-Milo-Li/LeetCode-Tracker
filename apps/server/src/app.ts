@@ -39,6 +39,17 @@ import {
   overrideCommitSchema,
   PlanningError,
 } from '../../../packages/contracts/src/recommendations.ts';
+import {
+  dashboardQuerySchema,
+  dashboardActivityQuerySchema,
+  type DashboardDailySummary,
+} from '../../../packages/contracts/src/dashboard.ts';
+import {
+  calculateDashboardStats,
+  getActivityItems,
+  filterAndPaginateActivities,
+} from '../../../packages/domain/src/index.ts';
+import { isTimeZone, localDate } from '../../../packages/contracts/src/time.ts';
 import { GeminiAssistant, GeminiFormatError, type IGeminiAssistant } from './gemini.ts';
 import { PlanningService } from './planning-service.ts';
 
@@ -792,6 +803,132 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       if (err instanceof PlanningError) return reply.status(err.status).send({ error: err.code, message: err.message });
       return reply.status(500).send({ error: 'INTERNAL_ERROR', message: err instanceof Error ? err.message : String(err) });
     }
+  });
+
+  // ==========================================
+  // Dashboard & Activity Endpoints (/api/v1/dashboard)
+  // ==========================================
+
+  /**
+   * GET /api/v1/dashboard
+   * Returns cumulative KPIs, today's plan summary, yearly activity heatmap,
+   * 30-day trends, difficulty & tag distributions, recent activities, and data freshness status.
+   * Read-only: does not trigger plan generation or AI calls.
+   */
+  app.get('/api/v1/dashboard', async (request: FastifyRequest, reply: FastifyReply) => {
+    const parseRes = dashboardQuerySchema.safeParse(request.query);
+    if (!parseRes.success) {
+      return reply.status(400).send({
+        error: 'INVALID_QUERY',
+        message: parseRes.error.issues.map(i => i.message).join('; '),
+      });
+    }
+
+    const rawData = store.getDashboardRawData();
+    const userTimezone = rawData.userTimezone;
+    const now = Date.now();
+
+    // Determine target year from query or current calendar year in user timezone
+    const currentYear = (userTimezone && isTimeZone(userTimezone))
+      ? parseInt(localDate(now, userTimezone).slice(0, 4), 10)
+      : new Date(now).getUTCFullYear();
+    const targetYear = parseRes.data.year ?? currentYear;
+
+    // Build today summary strictly read-only without write mutations
+    let todaySummary: DashboardDailySummary;
+    if (!userTimezone || !isTimeZone(userTimezone)) {
+      todaySummary = {
+        status: 'setup',
+        strategyName: null,
+        completedCount: 0,
+        targetCount: 0,
+        shortage: 0,
+        planId: null,
+        errorMessage: null,
+      };
+    } else {
+      const todayDate = localDate(now, userTimezone);
+      const existingPlan = planningService.getPlans(todayDate)[0] ?? null;
+
+      if (existingPlan) {
+        const strategy = existingPlan.strategyId ? planningService.getStrategy(existingPlan.strategyId) : null;
+        const completedCount = existingPlan.items.filter(i => i.completed).length;
+        const targetCount = existingPlan.rules.dailyCount;
+        const shortage = Math.max(0, targetCount - existingPlan.items.length);
+        todaySummary = {
+          status: 'ready',
+          strategyName: strategy?.name ?? null,
+          completedCount,
+          targetCount,
+          shortage,
+          planId: existingPlan.id,
+          errorMessage: null,
+        };
+      } else {
+        const targetInstant = Date.parse(`${todayDate}T12:00:00Z`);
+        const weekday = new Date(targetInstant).getUTCDay();
+        const strategy = store.planning.strategyForWeekday(weekday);
+
+        if (!strategy) {
+          todaySummary = {
+            status: 'rest',
+            strategyName: null,
+            completedCount: 0,
+            targetCount: 0,
+            shortage: 0,
+            planId: null,
+            errorMessage: null,
+          };
+        } else {
+          todaySummary = {
+            status: 'generating',
+            strategyName: strategy.name,
+            completedCount: 0,
+            targetCount: strategy.rules.dailyCount,
+            shortage: 0,
+            planId: null,
+            errorMessage: null,
+          };
+        }
+      }
+    }
+
+    const dashboard = calculateDashboardStats({
+      ...rawData,
+      todaySummary,
+      targetYear,
+      now,
+    });
+    return reply.status(200).send(dashboard);
+  });
+
+  /**
+   * GET /api/v1/dashboard/activity
+   * Returns a paginated, filterable activity history list for the drawer.
+   * Supports filtering by source ('manual' | 'snapshot' | 'all'),
+   * pendingDate ('true' | 'false' | 'all'), and calendar date (YYYY-MM-DD).
+   */
+  app.get('/api/v1/dashboard/activity', async (request: FastifyRequest, reply: FastifyReply) => {
+    const parseRes = dashboardActivityQuerySchema.safeParse(request.query);
+    if (!parseRes.success) {
+      return reply.status(400).send({
+        error: 'INVALID_QUERY',
+        message: parseRes.error.issues.map(i => i.message).join('; '),
+      });
+    }
+
+    const rawData = store.getDashboardRawData();
+    const now = Date.now();
+    const allActivities = getActivityItems(
+      rawData.manualRecords,
+      rawData.snapshots,
+      rawData.problems,
+      rawData.userTimezone,
+      now
+    );
+
+    const result = filterAndPaginateActivities(allActivities, parseRes.data, rawData.userTimezone, now);
+    return reply.status(200).send(result);
   });
 
 

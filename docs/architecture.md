@@ -4,10 +4,11 @@ The repository baseline implements an offline-first, Bring-Your-Own-Data (BYOD) 
 
 ## Component structure
 
-- **`packages/contracts`**: Validated Zod schemas and normalization pipelines for JSON Lines parsing, preflight preview, import summaries, catalog filtering, manual practice records, progress snapshots, conflict evaluation, and settings.
-- **`packages/database`**: High-performance SQLite engine (`DatabaseSync`) managing schema migrations (v3/v4/v5 to v6), preflight validation, atomic multi-table writes, point-in-time backups via native Node SQLite backup, daily backup pruning, and offline restore.
-- **`apps/server`**: Local Fastify API bound to `127.0.0.1`. Exposes `/api/v1` endpoints for catalog, imports, practice records, progress snapshots, and Gemini format assistant (`models/gemini-3.8-flash`) with write serialization mutex and static SPA hosting.
-- **`apps/web`**: React/Vite single-page application providing catalog search/filtering, practice quick-log modal, progress import & AI assistant workbench, diff preview, conflict resolution, and bilingual controls.
+- **`packages/contracts`**: Validated Zod schemas and normalization pipelines for JSON Lines parsing, preflight preview, import summaries, catalog filtering, manual practice records, progress snapshots, conflict evaluation, planning lifecycle, and dashboard analytics.
+- **`packages/database`**: High-performance SQLite engine (`DatabaseSync`) managing schema migrations (v3/v4/v5/v6 to v7), preflight validation, atomic multi-table writes, point-in-time backups via native Node SQLite backup, daily backup pruning, planning store, dashboard query layer, and offline restore.
+- **`packages/domain`**: Pure algorithmic domain logic for deterministic quota calculation (Hamilton-Huntington largest remainder), review candidate selection, streak calculation, yearly heatmap matrix generation, and activity pagination.
+- **`apps/server`**: Local Fastify API bound to `127.0.0.1`. Exposes `/api/v1` endpoints for catalog, imports, practice records, progress snapshots, recommendation planning, read-only dashboard overview and activity stream, and Gemini format & planning assistant with write serialization mutex and static SPA hosting.
+- **`apps/web`**: React/Vite single-page application providing catalog search/filtering, practice quick-log modal, progress import & AI assistant workbench, today execution view, strategies view, overview dashboard with Recharts trend and yearly heatmap, activity history drawer, and bilingual controls.
 
 ## Ingestion pipeline
 

@@ -97,9 +97,8 @@ describe('Phase 4 Closure Gate Verification', () => {
 
     // 5. Create daily plan for today (or default to current date)
     const mockGemini: IGeminiAssistant = {
-      isAvailable: () => true,
       getStatus: () => ({ configured: true, model: 'mock-model', fallbackModels: [] }),
-      formatCopiedProgress: async () => ({ candidates: [], unparsedSnippets: [], model: 'mock-model' }),
+      formatProgressText: async () => ({ candidates: [], unparsedSnippets: [], model: 'mock-model' }),
       generatePlanContent: async () => ({
         encouragement: { en: 'Keep going!', zh: '加油！' },
         reasons: {
@@ -108,7 +107,7 @@ describe('Phase 4 Closure Gate Verification', () => {
         },
         model: 'mock-model',
       }),
-      parsePromptOverride: async () => ({
+      parseOverridePrompt: async () => ({
         patch: {},
         unresolved: [],
         model: 'mock-model',
@@ -202,11 +201,10 @@ describe('Phase 4 Closure Gate Verification', () => {
 
     // Failing Gemini assistant
     const failingGemini: IGeminiAssistant = {
-      isAvailable: () => true,
       getStatus: () => ({ configured: true, model: 'gemini-test', fallbackModels: [] }),
-      formatCopiedProgress: async () => { throw new Error('Network timeout 503'); },
+      formatProgressText: async () => { throw new Error('Network timeout 503'); },
       generatePlanContent: async () => { throw new Error('AI Service Overloaded 503'); },
-      parsePromptOverride: async () => { throw new Error('AI Service Overloaded 503'); },
+      parseOverridePrompt: async () => { throw new Error('AI Service Overloaded 503'); },
     };
 
     const service = new PlanningService(store, failingGemini);
