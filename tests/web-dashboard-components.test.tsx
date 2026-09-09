@@ -58,6 +58,7 @@ function createMockDashboardData(): DashboardResponse {
       strategyName: 'Core Algorithms',
       completedCount: 2,
       targetCount: 3,
+      generatedCount: 3,
       shortage: 0,
       planId: 'plan-2026-03-30',
       errorMessage: null,
@@ -296,6 +297,7 @@ it('renders DashboardView with cumulative KPIs, distributions, and freshness sta
 
 it('renders setup banner in DashboardView when planController reports setup required', async () => {
   const mockData = createMockDashboardData();
+  mockData.todaySummary.status = 'setup';
   mock.method(api, 'getDashboard', async () => mockData);
 
   const planController = createMockPlanController({
@@ -332,6 +334,7 @@ it('opens ActivityHistoryDrawer pre-filtered by date when clicking a heatmap cel
     page: 1,
     limit: 15,
     totalPages: 1,
+    revision: { catalog: 1, practice: 1, planning: 1, timezone: 'UTC' },
     items: [
       {
         id: 'rec-1',
@@ -390,6 +393,7 @@ it('ActivityHistoryDrawer handles filtering, pagination, and keyboard escape clo
     page: 1,
     limit: 15,
     totalPages: 2,
+    revision: { catalog: 1, practice: 1, planning: 1, timezone: 'UTC' },
     items: [
       {
         id: 'rec-1',
@@ -413,6 +417,7 @@ it('ActivityHistoryDrawer handles filtering, pagination, and keyboard escape clo
     page: 2,
     limit: 15,
     totalPages: 2,
+    revision: { catalog: 1, practice: 1, planning: 1, timezone: 'UTC' },
     items: [
       {
         id: 'rec-2',
@@ -487,6 +492,7 @@ it('ActivityHistoryDrawer clears dateFilter when initialDate transitions from da
     page: 1,
     limit: 20,
     totalPages: 0,
+    revision: { catalog: 1, practice: 1, planning: 1, timezone: 'UTC' },
     items: [],
   };
 
@@ -531,6 +537,7 @@ it('supports heatmap keyboard roving tabIndex and navigation (Arrow keys and Ent
     page: 1,
     limit: 20,
     totalPages: 0,
+    revision: { catalog: 1, practice: 1, planning: 1, timezone: 'UTC' },
     items: [],
   };
   let requestedDate: string | undefined;

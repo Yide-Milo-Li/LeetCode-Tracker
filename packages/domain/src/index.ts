@@ -126,10 +126,41 @@ export function select(pool: Candidate[], rules: Rules, retained: PlanItem[] = [
 }
 
 /**
- * Determine the local calendar date (YYYY-MM-DD) for an event, or flag it as pending confirmation.
+ * Convert a calendar date string (YYYY-MM-DD) and a valid IANA timezone
+ * into UTC epoch timestamps for the exact start (00:00:00.000) and end (23:59:59.999) of that day.
+ */
+export function getZonedDayInterval(dateStr: string, zone: string): { start: number; end: number } {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const approxUtc = Date.UTC(y, m - 1, d, 0, 0, 0);
+  const getOffset = (epoch: number) => {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: zone,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false,
+    }).formatToParts(epoch);
+    const map: Record<string, string> = {};
+    for (const p of parts) map[p.type] = p.value;
+    const hour = +map.hour % 24;
+    const localUtc = Date.UTC(+map.year, +map.month - 1, +map.day, hour, +map.minute, +map.second);
+    return localUtc - epoch;
+  };
+  const offset = getOffset(approxUtc);
+  const start = approxUtc - offset;
+  const refinedOffset = getOffset(start);
+  const exactStart = approxUtc - refinedOffset;
+  const exactEnd = exactStart + 86400000 - 1;
+  return { start: exactStart, end: exactEnd };
+}
+
+/**
+ * Resolves whether an activity timestamp can be assigned to a specific user calendar date.
  * Follows Phase 5 rules:
  * - Datetime precision requires confirmed user timezone and cannot be in the future.
- * - Date precision with valid source timezone uses the date if <= local date now.
+ * - Date precision requires both valid user timezone and source timezone.
+ *   If the 24-hour day in source timezone spans across different dates in user timezone
+ *   (e.g. Tokyo vs Los Angeles), it cannot be uniquely mapped without guessing clock time,
+ *   so it enters pending confirmation.
  * - Records without a valid determinable timezone enter pending confirmation instead of guessing.
  */
 export function resolveEventDate(
@@ -140,22 +171,33 @@ export function resolveEventDate(
   now: number
 ): { date: string | null; isPending: boolean } {
   if (!isEventTime(at, precision)) return { date: null, isPending: true };
+  if (!userZone || !isTimeZone(userZone)) return { date: null, isPending: true };
+
   if (precision === 'datetime') {
     const epoch = Date.parse(at);
     if (Number.isNaN(epoch) || epoch > now) return { date: null, isPending: true };
-    if (!userZone || !isTimeZone(userZone)) return { date: null, isPending: true };
     return { date: localDate(epoch, userZone), isPending: false };
   }
 
   // Date precision
-  if (sourceZone && isTimeZone(sourceZone)) {
-    if (at <= localDate(now, sourceZone)) {
-      return { date: at, isPending: false };
-    }
+  if (!sourceZone || !isTimeZone(sourceZone)) {
     return { date: null, isPending: true };
   }
 
-  // Date without verified source timezone cannot be mapped without guessing clock time
+  if (at > localDate(now, sourceZone)) {
+    return { date: null, isPending: true };
+  }
+
+  // Date-only records can only be uniquely mapped to user calendar date without guessing clock time
+  // if the entire 24-hour interval in sourceZone maps to the exact same calendar date in userZone.
+  const { start, end } = getZonedDayInterval(at, sourceZone);
+  const userDateAtStart = localDate(start, userZone);
+  const userDateAtEnd = localDate(end, userZone);
+
+  if (userDateAtStart === userDateAtEnd) {
+    return { date: userDateAtStart, isPending: false };
+  }
+
   return { date: null, isPending: true };
 }
 
@@ -365,6 +407,13 @@ export function calculateDashboardStats(input: DashboardStatsInput): DashboardRe
     if (seenSuccesses.has(key)) continue;
     seenSuccesses.add(key);
 
+    const s = snapshotLookup.get(succ.questionId);
+    const isRedundantWithLatest = s && s.lastResult === 'Accepted' && s.lastSubmittedAt === succ.eventTime;
+    if (isRedundantWithLatest) {
+      // Already accounted for by the active latest snapshot
+      continue;
+    }
+
     const resolved = resolveEventDate(succ.eventTime, succ.precision, succ.sourceTimezone, userTimezone, now);
     if (resolved.isPending || !resolved.date) {
       pendingDateCount++;
@@ -378,11 +427,8 @@ export function calculateDashboardStats(input: DashboardStatsInput): DashboardRe
       }
     }
 
-    const s = snapshotLookup.get(succ.questionId);
-    const isRedundantWithLatest = s && s.lastResult === 'Accepted' && s.lastSubmittedAt === succ.eventTime;
-    if (!isRedundantWithLatest) {
-      const sortKey = succ.precision === 'datetime' ? Date.parse(succ.eventTime) : (Date.parse(`${succ.eventTime}T00:00:00Z`) || 0);
-      allActivityItems.push({
+    const sortKey = succ.precision === 'datetime' ? Date.parse(succ.eventTime) : (Date.parse(`${succ.eventTime}T00:00:00Z`) || 0);
+    allActivityItems.push({
         id: `${succ.questionId}-success-${succ.version}`,
         source: 'snapshot',
         questionId: succ.questionId,
@@ -396,8 +442,7 @@ export function calculateDashboardStats(input: DashboardStatsInput): DashboardRe
         sourceTimezone: succ.sourceTimezone,
         isDatePending: resolved.isPending,
         sortKey: Number.isNaN(sortKey) ? 0 : sortKey,
-      });
-    }
+    });
   }
 
   // 4. Calculate streak and weekly solved
@@ -605,7 +650,8 @@ export function filterAndPaginateActivities(
   allActivities: RecentActivityItem[],
   query: DashboardActivityQuery,
   userZone: string | null,
-  now: number
+  now: number,
+  revision?: RevisionStamp
 ): DashboardActivityListResponse {
   let filtered = allActivities;
 
@@ -643,5 +689,6 @@ export function filterAndPaginateActivities(
     page,
     limit,
     totalPages,
+    revision: revision ?? { catalog: 0, practice: 0, planning: 0, timezone: null },
   };
 }

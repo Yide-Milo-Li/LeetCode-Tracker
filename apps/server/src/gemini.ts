@@ -119,7 +119,7 @@ export class GeminiAssistant implements IGeminiAssistant {
 
   constructor(options: GeminiAssistantOptions = {}) {
     this.apiKey = options.apiKey || process.env.GEMINI_API_KEY;
-    this.model = options.model || process.env.GEMINI_MODEL || 'models/gemini-3.8-flash';
+    this.model = options.model || process.env.GEMINI_MODEL || 'models/gemini-3.5-flash';
 
     if (options.fallbackModels) {
       this.fallbackModels = options.fallbackModels;
@@ -128,7 +128,7 @@ export class GeminiAssistant implements IGeminiAssistant {
         .map(s => s.trim())
         .filter(Boolean);
     } else {
-      this.fallbackModels = ['models/gemini-3.7-flash', 'models/gemini-3.6-flash'];
+      this.fallbackModels = ['models/gemini-3.5-flash-lite', 'models/gemini-3.6-flash', 'models/gemini-3.7-flash'];
     }
 
     this.maxRetriesPerModel = options.maxRetriesPerModel ?? 2;
@@ -584,11 +584,11 @@ Do not invent or hallucinate problems not in the input. If lines cannot be parse
 
     const systemInstruction = `You are a scheduling assistant. Your job is to parse a user's natural language request to adjust today's LeetCode daily study rules into a structured rule patch.
 Possible fields:
-- dailyCount: positive integer
-- difficulty: object with Easy, Medium, Hard percentages summing to 100
+- dailyCount: positive integer (total problem count desired)
+- difficulty: object with keys "Easy", "Medium", "Hard" (exact casing) representing integer percentage values summing to 100 (e.g. {"Easy": 0, "Medium": 0, "Hard": 100} or {"Easy": 50, "Medium": 50, "Hard": 0})
 - tags: array of tag slugs. Only use slugs from the provided known tag slugs list.
 - premium: boolean
-- reviewEnabled: boolean
+- reviewEnabled: boolean (false if user requests no review, zero review, or only new problems; true if user requests reviews)
 - reviewPercent: number between 1 and 100
 - preference: string description of soft preference
 - unresolved: array of strings describing any user request that cannot be verified with metadata (e.g. company tags, vague requests)
@@ -608,6 +608,7 @@ Return ONLY valid JSON conforming to the schema.`;
             Medium: { type: Type.NUMBER },
             Hard: { type: Type.NUMBER },
           },
+          required: ['Easy', 'Medium', 'Hard'],
         },
         tags: {
           type: Type.ARRAY,
@@ -673,10 +674,36 @@ Return ONLY valid JSON conforming to the schema.`;
         }
 
         if (parsed.difficulty && typeof parsed.difficulty === 'object') {
-          const d = parsed.difficulty as Record<string, number>;
-          const easy = typeof d.Easy === 'number' ? d.Easy : 0;
-          const med = typeof d.Medium === 'number' ? d.Medium : 0;
-          const hard = typeof d.Hard === 'number' ? d.Hard : 0;
+          const d = parsed.difficulty as Record<string, unknown>;
+          const hasEasy = typeof d.Easy === 'number' || typeof d.easy === 'number';
+          const hasMed = typeof d.Medium === 'number' || typeof d.medium === 'number';
+          const hasHard = typeof d.Hard === 'number' || typeof d.hard === 'number';
+
+          let easy = typeof d.Easy === 'number' ? d.Easy : (typeof d.easy === 'number' ? d.easy : 0);
+          let med = typeof d.Medium === 'number' ? d.Medium : (typeof d.medium === 'number' ? d.medium : 0);
+          let hard = typeof d.Hard === 'number' ? d.Hard : (typeof d.hard === 'number' ? d.hard : 0);
+
+          // If one difficulty key was omitted, infer remainder if sum < 100
+          if (!hasHard && hasEasy && hasMed && easy + med < 100) {
+            hard = 100 - (easy + med);
+          } else if (!hasMed && hasEasy && hasHard && easy + hard < 100) {
+            med = 100 - (easy + hard);
+          } else if (!hasEasy && hasMed && hasHard && med + hard < 100) {
+            easy = 100 - (med + hard);
+          }
+
+          // If represented as decimal fractions (e.g. 0, 0, 1.0 or 0.5, 0.5), scale to 100
+          if (Math.abs(easy + med + hard - 1) < 1e-4) {
+            easy = Math.round(easy * 100);
+            med = Math.round(med * 100);
+            hard = Math.round(hard * 100);
+          } else if (easy + med + hard === 1) {
+            // Exactly 1 problem of a single difficulty requested (e.g. Hard: 1)
+            if (hard === 1) hard = 100;
+            else if (med === 1) med = 100;
+            else if (easy === 1) easy = 100;
+          }
+
           if (Math.abs(easy + med + hard - 100) < 1e-4) {
             patch.difficulty = { Easy: easy, Medium: med, Hard: hard };
           } else {
@@ -699,7 +726,11 @@ Return ONLY valid JSON conforming to the schema.`;
         }
 
         if (typeof parsed.premium === 'boolean') patch.premium = parsed.premium;
-        if (typeof parsed.reviewEnabled === 'boolean') patch.reviewEnabled = parsed.reviewEnabled;
+        if (typeof parsed.reviewEnabled === 'boolean') {
+          patch.reviewEnabled = parsed.reviewEnabled;
+        } else if (/\b(no\s+review|zero\s+review|skip\s+review|without\s+review)\b/i.test(params.prompt) || /不复习|无需复习|不要复习/.test(params.prompt)) {
+          patch.reviewEnabled = false;
+        }
         if (typeof parsed.reviewPercent === 'number' && parsed.reviewPercent > 0 && parsed.reviewPercent <= 100) {
           patch.reviewPercent = parsed.reviewPercent;
         }

@@ -842,6 +842,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         strategyName: null,
         completedCount: 0,
         targetCount: 0,
+        generatedCount: 0,
         shortage: 0,
         planId: null,
         errorMessage: null,
@@ -853,13 +854,15 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       if (existingPlan) {
         const strategy = existingPlan.strategyId ? planningService.getStrategy(existingPlan.strategyId) : null;
         const completedCount = existingPlan.items.filter(i => i.completed).length;
+        const generatedCount = existingPlan.items.length;
         const targetCount = existingPlan.rules.dailyCount;
-        const shortage = Math.max(0, targetCount - existingPlan.items.length);
+        const shortage = Math.max(0, targetCount - generatedCount);
         todaySummary = {
           status: 'ready',
           strategyName: strategy?.name ?? null,
           completedCount,
           targetCount,
+          generatedCount,
           shortage,
           planId: existingPlan.id,
           errorMessage: null,
@@ -875,6 +878,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
             strategyName: null,
             completedCount: 0,
             targetCount: 0,
+            generatedCount: 0,
             shortage: 0,
             planId: null,
             errorMessage: null,
@@ -885,6 +889,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
             strategyName: strategy.name,
             completedCount: 0,
             targetCount: strategy.rules.dailyCount,
+            generatedCount: 0,
             shortage: 0,
             planId: null,
             errorMessage: null,
@@ -928,7 +933,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       rawData.snapshotSuccesses
     );
 
-    const result = filterAndPaginateActivities(allActivities, parseRes.data, rawData.userTimezone, now);
+    const result = filterAndPaginateActivities(allActivities, parseRes.data, rawData.userTimezone, now, rawData.revision);
     return reply.status(200).send(result);
   });
 

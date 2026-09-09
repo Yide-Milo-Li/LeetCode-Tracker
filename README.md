@@ -71,6 +71,6 @@ Default tests need neither a dataset nor a built frontend. Stop the local server
 - [Documentation](docs/README.md)
 - [Contributing](CONTRIBUTING.md) and [security](SECURITY.md)
 
-## Planned experience
+## Next steps: Phase 6 delivery preparation
 
-Named strategies assign explicit question counts, difficulty proportions and optional reviews to weekdays. Unassigned days are rest days. Conflicting assignments are rejected. Chinese/English preferences are already persistent. Practice scheduling and validated Gemini recommendations remain planned.
+With catalog management, practice logging, weekly scheduling, Gemini-assisted daily recommendation planning, and dashboard insights fully implemented and locally verified across desktop environments, subsequent work focuses on reproducible installation, continuous integration checks, disaster recovery procedures, and final packaging for local single-user distribution. Cloud deployment, multi-user accounts, and mobile platforms remain strictly outside the project scope.

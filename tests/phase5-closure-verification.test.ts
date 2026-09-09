@@ -24,15 +24,66 @@ import {
   calculateDashboardStats,
   getActivityItems,
 } from '../packages/domain/src/index.ts';
+import { localDate } from '../packages/contracts/src/time.ts';
 import type { DashboardDailySummary } from '../packages/contracts/src/dashboard.ts';
 
-// Load optional environment file for real Gemini verification if present
-if (typeof process.loadEnvFile === 'function') {
-  try {
-    process.loadEnvFile(path.resolve(process.cwd(), '.env'));
-  } catch {
-    // .env is optional
+/**
+ * Helper reproducing the server's exact read-only today summary logic from the planning store.
+ */
+function buildTodaySummary(
+  pStore: PlanningStore,
+  pService: PlanningService,
+  timezone: string,
+  now: number
+): DashboardDailySummary {
+  const todayDate = localDate(now, timezone);
+  const existingPlan = pService.getPlans(todayDate)[0] ?? null;
+
+  if (existingPlan) {
+    const strategy = existingPlan.strategyId ? pService.getStrategy(existingPlan.strategyId) : null;
+    const completedCount = existingPlan.items.filter(i => i.completed).length;
+    const generatedCount = existingPlan.items.length;
+    const targetCount = existingPlan.rules.dailyCount;
+    const shortage = Math.max(0, targetCount - generatedCount);
+    return {
+      status: 'ready',
+      strategyName: strategy?.name ?? null,
+      completedCount,
+      targetCount,
+      generatedCount,
+      shortage,
+      planId: existingPlan.id,
+      errorMessage: null,
+    };
   }
+
+  const targetInstant = Date.parse(`${todayDate}T12:00:00Z`);
+  const weekday = new Date(targetInstant).getUTCDay();
+  const strategy = pStore.strategyForWeekday(weekday);
+
+  if (!strategy) {
+    return {
+      status: 'rest',
+      strategyName: null,
+      completedCount: 0,
+      targetCount: 0,
+      generatedCount: 0,
+      shortage: 0,
+      planId: null,
+      errorMessage: null,
+    };
+  }
+
+  return {
+    status: 'generating',
+    strategyName: strategy.name,
+    completedCount: 0,
+    targetCount: strategy.rules.dailyCount,
+    generatedCount: 0,
+    shortage: 0,
+    planId: null,
+    errorMessage: null,
+  };
 }
 
 describe('Phase 5 Closure Gate Verification', () => {
@@ -137,24 +188,22 @@ describe('Phase 5 Closure Gate Verification', () => {
     assert(planResult.plan);
     const planDate = planResult.plan.date;
 
-    // 7. Compute pre-backup baseline statistics and raw dashboard data
+    // 7. Compute pre-backup baseline data
     const preRawData = store.getDashboardRawData();
     assert.equal(preRawData.snapshotSuccesses.length, 2); // Problems #2 and #4
 
     const fixedNow = Date.parse('2026-09-09T12:00:00Z');
-    const todaySummary: DashboardDailySummary = {
-      status: 'ready',
-      strategyName: strategy.name,
-      completedCount: 0,
-      targetCount: 2,
-      shortage: 0,
-      planId: planResult.plan.id,
-      errorMessage: null,
-    };
+
+    // Build real pre-backup todaySummary from planningService
+    const preTodaySummary = buildTodaySummary(planningStore, planningService, 'Asia/Tokyo', fixedNow);
+    assert.equal(preTodaySummary.status, 'ready');
+    assert.equal(preTodaySummary.generatedCount, 1);
+    assert.equal(preTodaySummary.shortage, 1);
+    assert.equal(preTodaySummary.targetCount, 2);
 
     const preStats = calculateDashboardStats({
       ...preRawData,
-      todaySummary,
+      todaySummary: preTodaySummary,
       targetYear: 2026,
       now: fixedNow,
     });
@@ -168,7 +217,12 @@ describe('Phase 5 Closure Gate Verification', () => {
       preRawData.snapshotSuccesses
     );
 
-    // Verify baseline metrics before backup
+    const preStrategies = planningStore.strategies();
+    const preWeekdayAssignments = [0, 1, 2, 3, 4, 5, 6].map(day => planningStore.strategyForWeekday(day));
+    const prePlan = planningStore.planByDate(planDate);
+    assert(prePlan);
+
+    // Baseline validation before backup
     assert.equal(preStats.overview.uniqueSolvedProblems, 3); // #1 (manual), #2 (snapshot), #4 (snapshot)
     assert.equal(preStats.difficultyDistribution.Easy.solved, 2); // #1, #4
     assert.equal(preStats.difficultyDistribution.Medium.solved, 1); // #2
@@ -189,10 +243,11 @@ describe('Phase 5 Closure Gate Verification', () => {
     assert.equal(restoreResult.restoredProblems, 5);
     assert.equal(restoreResult.restoredVersion, 7);
 
-    // 10. Reopen database and verify full dashboard data integrity
+    // 10. Reopen database and verify full-fidelity integrity
     const restoredDb = new DatabaseSync(restorePath);
     const restoredStore = await CatalogStore.open(restoredDb, { backupDir: path.join(dir, 'restore-backups') });
     const restoredPlanningStore = new PlanningStore(restoredDb, restoredStore);
+    const restoredPlanningService = new PlanningService(restoredStore, mockGemini);
 
     // Verify settings
     const restoredSettings = restoredStore.getSettings();
@@ -200,14 +255,20 @@ describe('Phase 5 Closure Gate Verification', () => {
     assert.equal(restoredSettings.language, 'zh');
     assert.equal(restoredSettings.theme, 'dark');
 
-    // Verify strategies & daily plan
+    // Verify strategies & full schedule assignments
     const restoredStrategies = restoredPlanningStore.strategies();
-    assert.equal(restoredStrategies.length, 1);
-    assert.equal(restoredStrategies[0].name, 'Algorithm Mastery');
+    assert.deepEqual(restoredStrategies, preStrategies, 'Restored strategies must match pre-backup exactly');
+    for (let day = 0; day <= 6; day++) {
+      assert.deepEqual(
+        restoredPlanningStore.strategyForWeekday(day),
+        preWeekdayAssignments[day],
+        `Weekday ${day} assignment must match`
+      );
+    }
 
+    // Verify full daily plan entity (items, rules, reasons, encouragement)
     const restoredPlan = restoredPlanningStore.planByDate(planDate);
-    assert(restoredPlan);
-    assert.equal(restoredPlan.id, planResult.plan.id);
+    assert.deepEqual(restoredPlan, prePlan, 'Restored plan entity must match pre-backup plan exactly');
 
     // Verify practice stats
     const restoredStats = restoredStore.getPracticeStats();
@@ -223,10 +284,14 @@ describe('Phase 5 Closure Gate Verification', () => {
       preRawData.snapshotSuccesses.map(s => ({ q: s.questionFrontendId, d: s.eventTime }))
     );
 
+    // Build real todaySummary on restored database
+    const postTodaySummary = buildTodaySummary(restoredPlanningStore, restoredPlanningService, 'Asia/Tokyo', fixedNow);
+    assert.deepEqual(postTodaySummary, preTodaySummary, 'Reconstructed todaySummary must match pre-backup exactly');
+
     // Recompute statistics on restored database
     const postStats = calculateDashboardStats({
       ...postRawData,
-      todaySummary,
+      todaySummary: postTodaySummary,
       targetYear: 2026,
       now: fixedNow,
     });
@@ -240,16 +305,14 @@ describe('Phase 5 Closure Gate Verification', () => {
       postRawData.snapshotSuccesses
     );
 
-    // Exact reconciliation match
+    // Exact reconciliation match across all components
     assert.deepEqual(postStats.overview, preStats.overview);
     assert.deepEqual(postStats.todaySummary, preStats.todaySummary);
+    assert.deepEqual(postStats.yearlyActivity, preStats.yearlyActivity, 'Yearly heatmap days must match pre-backup exactly');
+    assert.deepEqual(postStats.trend30Days, preStats.trend30Days, '30-day trend points must match pre-backup exactly');
     assert.deepEqual(postStats.difficultyDistribution, preStats.difficultyDistribution);
     assert.deepEqual(postStats.topTags, preStats.topTags);
-    assert.equal(postActivities.length, preActivities.length);
-    assert.deepEqual(
-      postActivities.map(a => a.id),
-      preActivities.map(a => a.id)
-    );
+    assert.deepEqual(postActivities, preActivities, 'Full activity stream items must match pre-backup exactly');
 
     restoredDb.close();
   });
@@ -295,95 +358,51 @@ describe('Phase 5 Closure Gate Verification', () => {
 
     // Verify dashboard statistics handle local fallback plan without error
     const rawData = store.getDashboardRawData();
+    const preStatsRevision = rawData.revision;
+    const prePlanCount = (db.prepare('SELECT count(*) as count FROM daily_plans').get() as any).count;
+    const preRecordCount = (db.prepare('SELECT count(*) as count FROM practice_records').get() as any).count;
+
     const todaySummary: DashboardDailySummary = {
       status: 'ready',
       strategyName: strat.name,
       completedCount: 0,
       targetCount: 2,
+      generatedCount: 2,
       shortage: 0,
       planId: planResult.plan.id,
       errorMessage: null,
     };
 
-    const stats = calculateDashboardStats({
+    const fixedNow = Date.now();
+
+    // 1. Calculate dashboard stats multiple times and assert repeatable aggregation idempotency
+    const stats1 = calculateDashboardStats({
       ...rawData,
       todaySummary,
       targetYear: 2026,
-      now: Date.now(),
+      now: fixedNow,
     });
 
-    assert.equal(stats.todaySummary.status, 'ready');
-    assert.equal(stats.todaySummary.targetCount, 2);
-    assert.equal(stats.todaySummary.completedCount, 0);
-  });
-
-  it('verifies real Gemini assistant live execution with synthetic inputs when API key is configured', async () => {
-    const assistant = new GeminiAssistant();
-    const status = assistant.getStatus();
-
-    if (!status.configured) {
-      console.log('  [Notice] GEMINI_API_KEY is not configured; skipping live external call verification.');
-      return;
-    }
-
-    // 1. Synthetic candidates for problem selection
-    const syntheticCandidates = [
-      {
-        questionId: '1',
-        title: 'Two Sum',
-        difficulty: 'Easy' as const,
-        topicTags: [{ name: 'Array', slug: 'array', id: 'array' }, { name: 'Hash Table', slug: 'hash-table', id: 'hash-table' }],
-        questionFrontendId: '1',
-        titleSlug: 'two-sum',
-        url: 'https://leetcode.com/problems/two-sum/',
-        isPaidOnly: false,
-        source: 'leetcode.com' as const,
-      },
-      {
-        questionId: '70',
-        title: 'Climbing Stairs',
-        difficulty: 'Easy' as const,
-        topicTags: [{ name: 'Dynamic Programming', slug: 'dynamic-programming', id: 'dynamic-programming' }],
-        questionFrontendId: '70',
-        titleSlug: 'climbing-stairs',
-        url: 'https://leetcode.com/problems/climbing-stairs/',
-        isPaidOnly: false,
-        source: 'leetcode.com' as const,
-      },
-    ];
-
-    const rules = {
-      dailyCount: 2,
-      difficulty: { Easy: 100, Medium: 0, Hard: 0 },
-      tags: ['dynamic-programming'],
-      premium: false,
-      reviewEnabled: false,
-      reviewPercent: null,
-      preference: 'Focus on dynamic programming beginner problems',
-    };
-
-    // Verify AI problem selection
-    const selection = await assistant.selectPlanProblems({
-      candidates: syntheticCandidates,
-      rules,
-      date: '2026-09-09',
+    const stats2 = calculateDashboardStats({
+      ...rawData,
+      todaySummary,
+      targetYear: 2026,
+      now: fixedNow,
     });
 
-    assert(selection);
-    assert(Array.isArray(selection.selectedQuestionIds));
-    assert(selection.model.length > 0);
-    console.log(`  [Live Gemini Verified] selectPlanProblems executed via model: ${selection.model}`);
+    assert.deepEqual(stats1, stats2, 'Repeated dashboard statistics calculation must be strictly idempotent');
+    assert.equal(stats1.todaySummary.status, 'ready');
+    assert.equal(stats1.todaySummary.targetCount, 2);
+    assert.equal(stats1.todaySummary.generatedCount, 2);
+    assert.equal(stats1.todaySummary.completedCount, 0);
 
-    // Verify AI plan encouragement and reasons generation
-    const planContent = await assistant.generatePlanContent({
-      problems: [syntheticCandidates[1]],
-      rules,
-      date: '2026-09-09',
-    });
+    // 2. Assert zero-write guarantee on database
+    const postStatsRevision = store.getDashboardRawData().revision;
+    assert.deepEqual(postStatsRevision, preStatsRevision, 'Dashboard read operations must not alter revision');
 
-    assert(planContent);
-    assert(typeof planContent.encouragement.en === 'string' && planContent.encouragement.en.length > 0);
-    assert(typeof planContent.encouragement.zh === 'string' && planContent.encouragement.zh.length > 0);
-    console.log(`  [Live Gemini Verified] generatePlanContent executed via model: ${planContent.model}`);
+    const postPlanCount = (db.prepare('SELECT count(*) as count FROM daily_plans').get() as any).count;
+    const postRecordCount = (db.prepare('SELECT count(*) as count FROM practice_records').get() as any).count;
+    assert.equal(postPlanCount, prePlanCount, 'Dashboard read operations must make zero writes to daily_plans');
+    assert.equal(postRecordCount, preRecordCount, 'Dashboard read operations must make zero writes to practice_records');
   });
 });

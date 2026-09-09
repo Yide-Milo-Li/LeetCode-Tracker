@@ -163,6 +163,7 @@ describe('Fastify Dashboard & Activity API Endpoints', () => {
       assert.equal(dataReady.todaySummary.strategyName, 'Weekday Grind');
       assert.equal(dataReady.todaySummary.planId, ensureData.plan.id);
       assert.equal(dataReady.todaySummary.targetCount, 3);
+      assert.equal(dataReady.todaySummary.generatedCount, 3);
     });
 
     it('validates query parameters and rejects invalid year', async () => {
@@ -241,6 +242,8 @@ describe('Fastify Dashboard & Activity API Endpoints', () => {
       assert.equal(dataAll.items.length, 4);
       assert.equal(dataAll.page, 1);
       assert.equal(dataAll.totalPages, 1);
+      assert.ok(dataAll.revision, 'Response must include revision');
+      assert.equal(typeof dataAll.revision.practice, 'number');
 
       // 2. Filter by source=manual
       const resManual = await app.inject({

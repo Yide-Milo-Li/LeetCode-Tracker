@@ -12,10 +12,11 @@ import {
   calculateStreak,
   calculateDashboardStats,
   filterAndPaginateActivities,
+  getActivityItems,
 } from '../packages/domain/src/index.ts';
 import type { CatalogProblem } from '../packages/contracts/src/sync.ts';
 import type { PracticeRecord, ProgressSnapshot } from '../packages/contracts/src/practice.ts';
-import type { DashboardDailySummary, RecentActivityItem } from '../packages/contracts/src/dashboard.ts';
+import type { DashboardDailySummary, RecentActivityItem, DashboardSnapshotSuccess } from '../packages/contracts/src/dashboard.ts';
 import type { RevisionStamp } from '../packages/contracts/src/recommendations.ts';
 
 function createMockProblem(
@@ -70,6 +71,23 @@ describe('Dashboard Domain Statistics', () => {
       const noSourceZone = resolveEventDate('2026-09-08', 'date', null, 'Asia/Shanghai', now);
       assert.equal(noSourceZone.isPending, true);
       assert.equal(noSourceZone.date, null);
+    });
+
+    it('flags date-only as pending when user timezone is unset or across differing timezones (e.g. Tokyo vs LA)', () => {
+      // Missing user timezone
+      const noUserZone = resolveEventDate('2026-09-08', 'date', 'Asia/Tokyo', null, now);
+      assert.equal(noUserZone.isPending, true);
+      assert.equal(noUserZone.date, null);
+
+      // Tokyo 24h spans two days in Los Angeles (UTC+9 vs UTC-7) -> cannot uniquely map without guessing clock time
+      const tokyoInLa = resolveEventDate('2026-09-08', 'date', 'Asia/Tokyo', 'America/Los_Angeles', now);
+      assert.equal(tokyoInLa.isPending, true);
+      assert.equal(tokyoInLa.date, null);
+
+      // Same offset (Shanghai and Singapore both UTC+8) -> uniquely maps to 2026-09-08
+      const shanghaiInSingapore = resolveEventDate('2026-09-08', 'date', 'Asia/Shanghai', 'Asia/Singapore', now);
+      assert.equal(shanghaiInSingapore.date, '2026-09-08');
+      assert.equal(shanghaiInSingapore.isPending, false);
     });
   });
 
@@ -133,6 +151,7 @@ describe('Dashboard Domain Statistics', () => {
       strategyName: 'Core Algorithm',
       completedCount: 1,
       targetCount: 2,
+      generatedCount: 2,
       shortage: 0,
       planId: 'plan-1',
       errorMessage: null,
@@ -517,6 +536,85 @@ describe('Dashboard Domain Statistics', () => {
       const page2 = filterAndPaginateActivities(mockActivities, { page: 2, limit: 2, source: 'all', pendingDate: 'all' }, 'UTC', Date.now());
       assert.equal(page2.items.length, 1);
       assert.equal(page2.items[0].id, '3');
+    });
+
+    it('attaches revision to paginated activity list response', () => {
+      const customRev: RevisionStamp = { catalog: 5, practice: 10, planning: 2, timezone: 'Asia/Tokyo' };
+      const res = filterAndPaginateActivities(mockActivities, { page: 1, limit: 10, source: 'all', pendingDate: 'all' }, 'UTC', Date.now(), customRev);
+      assert.deepEqual(res.revision, customRev);
+    });
+  });
+
+  describe('pendingDateCount and activity stream deduplication parity', () => {
+    it('ensures pendingDateCount in stats matches the count of pending items in activity stream without double-counting redundant snapshot successes', () => {
+      const now = Date.parse('2026-09-09T12:00:00Z');
+      const testProblems = [
+        createMockProblem('1', 'Easy', ['array']),
+      ];
+
+      // Snapshot with date-only from Tokyo, user in LA -> pending date
+      const snapshots: ProgressSnapshot[] = [
+        {
+          questionId: '1',
+          questionFrontendId: '1',
+          status: 'active',
+          lastResult: 'Accepted',
+          lastSubmittedAt: '2026-09-08',
+          totalSubmissions: 2,
+          hasAccepted: true,
+          timePrecision: 'date',
+          source: 'leetcode.com',
+          version: 1,
+          updatedAt: now,
+          problemTitle: 'Two Sum',
+          difficulty: 'Easy',
+        },
+      ];
+
+      // Redundant verified snapshot_successes event with same question and eventTime
+      const successes: DashboardSnapshotSuccess[] = [
+        {
+          questionId: '1',
+          questionFrontendId: '1',
+          problemTitle: 'Two Sum',
+          difficulty: 'Easy',
+          version: 1,
+          eventTime: '2026-09-08',
+          precision: 'date',
+          sourceTimezone: 'Asia/Tokyo',
+          recordedAt: now,
+        },
+      ];
+
+      const stats = calculateDashboardStats({
+        problems: testProblems,
+        manualRecords: [],
+        snapshots,
+        snapshotSuccesses: successes,
+        todaySummary: {
+          status: 'setup',
+          strategyName: null,
+          completedCount: 0,
+          targetCount: 0,
+          generatedCount: 0,
+          shortage: 0,
+          planId: null,
+          errorMessage: null,
+        },
+        userTimezone: 'America/Los_Angeles',
+        targetYear: 2026,
+        now,
+        catalogUpdatedAt: now,
+        practiceUpdatedAt: now,
+        revision: { catalog: 1, practice: 1, planning: 1, timezone: 'America/Los_Angeles' },
+      });
+
+      const activities = getActivityItems([], snapshots, testProblems, 'America/Los_Angeles', now, successes);
+
+      // Both Dashboard stats and activity stream should show exactly 1 pending date item, NOT 2!
+      assert.equal(stats.dataStatus.pendingDateCount, 1, 'pendingDateCount must be 1, not duplicated to 2');
+      assert.equal(activities.length, 1, 'Activity list must have exactly 1 item');
+      assert.equal(activities[0].isDatePending, true);
     });
   });
 });

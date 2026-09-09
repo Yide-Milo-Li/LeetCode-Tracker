@@ -41,6 +41,7 @@ export interface DashboardDailySummary {
   strategyName: string | null;
   completedCount: number;
   targetCount: number;
+  generatedCount: number;
   shortage: number;
   planId: string | null;
   errorMessage: string | null;
@@ -142,4 +143,5 @@ export interface DashboardActivityListResponse {
   page: number;
   limit: number;
   totalPages: number;
+  revision: RevisionStamp;
 }
