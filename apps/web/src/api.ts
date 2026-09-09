@@ -289,6 +289,91 @@ export interface GeminiFormatResponse {
   model: string;
 }
 
+export interface Bilingual {
+  en: string;
+  zh: string;
+}
+
+export interface Rules {
+  dailyCount: number;
+  difficulty: {
+    Easy: number;
+    Medium: number;
+    Hard: number;
+  };
+  tags: string[];
+  premium: boolean;
+  reviewEnabled: boolean;
+  reviewPercent: number | null;
+  preference: string;
+}
+
+export type RulePatch = Partial<Rules>;
+
+export interface StrategyInput {
+  name: string;
+  rules: Rules;
+  weekdays: number[];
+}
+
+export interface Strategy extends StrategyInput {
+  id: string;
+  version: number;
+  deleted: boolean;
+}
+
+export interface PlanItem {
+  id: string;
+  problem: CatalogProblem;
+  kind: 'new' | 'review';
+  addedAt: number;
+  reason: Bilingual;
+  evidenceIds: string[];
+  completed: boolean;
+}
+
+export interface DailyPlan {
+  id: string;
+  date: string;
+  timezone: string;
+  version: number;
+  strategyId: string | null;
+  strategyVersion: number | null;
+  rules: Rules;
+  items: PlanItem[];
+  source: 'gemini' | 'local';
+  model: string | null;
+  encouragement: Bilingual;
+  notices: Bilingual[];
+  catalogRevision: number;
+  practiceRevision: number;
+  planningRevision: number;
+  algorithmVersion: string;
+  createdAt: number;
+  updatedAt: number;
+  action: string;
+}
+
+export interface EnsureResult {
+  status: 'ready' | 'rest' | 'setup';
+  plan: DailyPlan | null;
+}
+
+export interface OverridePreview {
+  id: string;
+  date: string;
+  expiresAt: number;
+  base: Rules | null;
+  rules: RulePatch;
+  changed: string[];
+  issues: string[];
+  unresolved: string[];
+  candidateCount: number;
+  counts: { Easy: number; Medium: number; Hard: number };
+  revision: { catalog: number; practice: number; planning: number; timezone: string | null };
+  planVersion: number | null;
+}
+
 const API_BASE =
   typeof window !== 'undefined' && window.location?.origin && window.location.origin !== 'null'
     ? `${window.location.origin}/api/v1`
@@ -315,6 +400,18 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
 
   return res.json() as Promise<T>;
+}
+
+/** Retain uncertain operation identities until a response confirms their result. */
+const pendingOperations = new Map<string, string>();
+/** Repeated requests for the same plan/version represent retries of one user intent. */
+async function planningMutation(path: string, payload: Record<string, unknown>): Promise<DailyPlan> {
+  const key = JSON.stringify([path, payload]);
+  const operationId = pendingOperations.get(key) ?? crypto.randomUUID();
+  pendingOperations.set(key, operationId);
+  const result = await request<DailyPlan>(path, { method: 'POST', body: JSON.stringify({ ...payload, operationId }) });
+  pendingOperations.delete(key);
+  return result;
 }
 
 export const api = {
@@ -474,5 +571,77 @@ export const api = {
   // Practice & Solved Statistics
   getPracticeStats(): Promise<PracticeStats> {
     return request<PracticeStats>('/practice/stats');
+  },
+
+  // ==========================================
+  // Recommendations & Strategies
+  // ==========================================
+
+  async getStrategies(): Promise<Strategy[]> {
+    const res = await request<{ items: Strategy[] }>('/strategies');
+    return res.items;
+  },
+
+  createStrategy(input: StrategyInput): Promise<Strategy> {
+    return request<Strategy>('/strategies', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
+  updateStrategy(id: string, patch: { expectedVersion: number; name?: string; rules?: RulePatch; weekdays?: number[] }): Promise<Strategy> {
+    return request<Strategy>(`/strategies/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    });
+  },
+
+  deleteStrategy(id: string, expectedVersion: number): Promise<void> {
+    return request<void>(`/strategies/${id}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ expectedVersion }),
+    });
+  },
+
+  async getWeeklySchedule(): Promise<{ weekday: number; strategy: Strategy | null }[]> {
+    const res = await request<{ schedule: { weekday: number; strategy: Strategy | null }[] }>('/weekly-schedule');
+    return res.schedule;
+  },
+
+  // ==========================================
+  // Daily Plans
+  // ==========================================
+
+  async getPlans(date?: string): Promise<DailyPlan[]> {
+    const query = date ? `?date=${encodeURIComponent(date)}` : '';
+    const res = await request<{ items: DailyPlan[] }>(`/daily-plans${query}`);
+    return res.items;
+  },
+
+  async getPlanVersions(planId: string): Promise<DailyPlan[]> {
+    const res = await request<{ items: DailyPlan[] }>(`/daily-plans/${planId}/versions`);
+    return res.items;
+  },
+
+  ensureDailyPlan(options?: { date?: string; timezone?: string }): Promise<EnsureResult> {
+    return request<EnsureResult>('/daily-plans/ensure', {
+      method: 'POST',
+      body: JSON.stringify(options ?? {}),
+    });
+  },
+
+  replacePlanItems(planId: string, options: { mode: 'one' | 'all_unfinished'; itemId?: string; expectedVersion: number }): Promise<DailyPlan> {
+    return planningMutation(`/daily-plans/${planId}/replace`, options);
+  },
+
+  previewDailyPlanOverride(options: { prompt?: string; rules?: RulePatch; date?: string }): Promise<OverridePreview> {
+    return request<OverridePreview>('/daily-plan-overrides/preview', {
+      method: 'POST',
+      body: JSON.stringify(options),
+    });
+  },
+
+  commitDailyPlanOverride(previewId: string, expectedVersion: number | null): Promise<DailyPlan> {
+    return planningMutation('/daily-plan-overrides/commit', { previewId, expectedVersion });
   },
 };

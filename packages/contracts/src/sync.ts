@@ -3,6 +3,7 @@
  * Supports Bring-Your-Own-Data (BYOD) via JSON Lines (JSONL) with fault-tolerant parsing.
  */
 import { z } from 'zod';
+import { timeZoneSchema } from './time.ts';
 
 /**
  * Helper to validate non-empty string identifiers while rejecting blank or whitespace-only inputs.
@@ -273,7 +274,7 @@ export type UserSettings = z.infer<typeof userSettingsSchema>;
 export const updateSettingsInputSchema = z.object({
   language: z.enum(['en', 'zh']).optional(),
   theme: z.enum(['light', 'dark', 'system']).optional(),
-  timezone: z.string().max(100).nullable().optional(),
+  timezone: timeZoneSchema.nullable().optional(),
 }).refine(data => data.language !== undefined || data.theme !== undefined || data.timezone !== undefined, {
   message: 'At least one setting (language, theme, or timezone) must be provided',
 });

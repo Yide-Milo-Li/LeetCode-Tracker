@@ -24,7 +24,9 @@ import {
   type TopicTag,
   type UpdateSettingsInput,
   type UserSettings,
+  updateSettingsInputSchema,
 } from '../../contracts/src/sync.ts';
+import { isEventTime } from '../../contracts/src/time.ts';
 import {
   createPracticeRecordSchema,
   updatePracticeRecordSchema,
@@ -51,6 +53,8 @@ import {
   type ProgressConflictType,
 } from '../../contracts/src/practice.ts';
 import { BackupManager } from './backup.ts';
+import { createPlanningSchema } from './planning-schema.ts';
+import { PlanningStore } from './planning-store.ts';
 
 
 import { CURRENT_SCHEMA_VERSION, inspectCatalogSchema } from './schema.ts';
@@ -82,6 +86,7 @@ export interface CatalogStoreOptions {
  * Storage manager for managing local LeetCode problem catalog datasets.
  */
 export class CatalogStore {
+  public readonly planning: PlanningStore;
   private readonly db: DatabaseSync;
   private backupManager?: BackupManager;
   private writeQueue: Promise<void> = Promise.resolve();
@@ -98,6 +103,7 @@ export class CatalogStore {
     }
     this.db = db;
     this.initOrMigrateSchema();
+    this.planning = new PlanningStore(db, this);
   }
 
   /** Open production storage only after a consistent pre-migration backup succeeds. */
@@ -143,6 +149,7 @@ export class CatalogStore {
           this.migrateV5ToV6();
         }
       }
+      createPlanningSchema(this.db);
       inspectCatalogSchema(this.db);
       this.db.exec('COMMIT');
     } catch (error) {
@@ -1012,7 +1019,23 @@ export class CatalogStore {
   /**
    * Atomically update user preference settings.
    */
-  public updateSettings(input: UpdateSettingsInput): UserSettings {
+  public async updateSettings(input: UpdateSettingsInput): Promise<UserSettings> {
+    input = updateSettingsInputSchema.parse(input);
+    return this.protectedWrite(() => this.updateSettingsTransaction(input));
+  }
+
+  /** Serialize a protected write; the callback owns its short synchronous transaction. */
+  public protectedWrite<T>(write: () => T): Promise<T> {
+    const run = this.writeQueue.then(async () => {
+      if (this.backupManager) await this.backupManager.performPreImportBackup(this.db);
+      return write();
+    });
+    this.writeQueue = run.then(() => {}, () => {});
+    return run;
+  }
+
+  /** Update settings only while the shared write queue and backup protection are held. */
+  private updateSettingsTransaction(input: UpdateSettingsInput): UserSettings {
     const now = Date.now();
     const updateStmt = this.db.prepare(`
       INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
@@ -1029,6 +1052,7 @@ export class CatalogStore {
       }
       if (input.timezone !== undefined) {
         updateStmt.run('timezone', input.timezone ?? '', now);
+        this.db.prepare("UPDATE catalog_meta SET value=CAST(value AS INTEGER)+1 WHERE key='planning_revision'").run();
       }
       this.db.exec('COMMIT;');
     } catch (err) {
@@ -1037,6 +1061,14 @@ export class CatalogStore {
     }
 
     return this.getSettings();
+  }
+
+  /** Get the current practice integer revision number. */
+  /** Record one observed snapshot success; correction invalidates the previous source chain. */
+  private recordSnapshotSuccess(questionId: string, version: number, at: string, precision: TimePrecision, result: string, zone: string | null, correction: boolean, now: number): void {
+    if (correction) this.db.prepare('DELETE FROM snapshot_successes WHERE question_id=?').run(questionId);
+    this.db.prepare('UPDATE progress_snapshots SET source_timezone=? WHERE question_id=?').run(zone, questionId);
+    if (result === 'Accepted') this.db.prepare('INSERT OR REPLACE INTO snapshot_successes VALUES(?,?,?,?,?,?)').run(questionId, version, at, precision, zone, now);
   }
 
   /** Get the current practice integer revision number. */
@@ -1096,6 +1128,8 @@ export class CatalogStore {
           now
         );
 
+        this.db.prepare('UPDATE practice_records SET source_timezone=? WHERE id=?').run(validated.sourceTimezone ?? this.getSettings().timezone, id);
+
         this.incrementPracticeRevision();
         this.db.exec('COMMIT;');
       } catch (err) {
@@ -1134,6 +1168,7 @@ export class CatalogStore {
       const completed = validated.completed !== undefined ? (validated.completed ? 1 : 0) : (existing.completed ? 1 : 0);
       const practicedAt = validated.practicedAt ?? existing.practicedAt;
       const timePrecision = validated.timePrecision ?? existing.timePrecision;
+      if (!isEventTime(practicedAt, timePrecision)) throw new Error('Invalid event date, precision or UTC offset');
       const notes = validated.notes !== undefined ? validated.notes : existing.notes;
 
       this.db.exec('BEGIN IMMEDIATE;');
@@ -1147,6 +1182,7 @@ export class CatalogStore {
             updated_at = ?
           WHERE id = ? AND status = 'active'
         `).run(completed, practicedAt, timePrecision, notes, now, id);
+        if (validated.sourceTimezone !== undefined) this.db.prepare('UPDATE practice_records SET source_timezone=? WHERE id=?').run(validated.sourceTimezone, id);
 
         this.incrementPracticeRevision();
         this.db.exec('COMMIT;');
@@ -1456,6 +1492,7 @@ export class CatalogStore {
       const now = Date.now();
       const lastSubmittedAt = validated.lastSubmittedAt ?? existing.lastSubmittedAt;
       const timePrecision = validated.timePrecision ?? existing.timePrecision;
+      if (!isEventTime(lastSubmittedAt, timePrecision)) throw new Error('Invalid event date, precision or UTC offset');
       const lastResult = validated.lastResult ?? existing.lastResult;
       const totalSubmissions = validated.totalSubmissions !== undefined ? validated.totalSubmissions : existing.totalSubmissions;
       const newVersion = existing.version + 1;
@@ -1502,6 +1539,8 @@ export class CatalogStore {
           now,
           existing.questionId
         );
+
+        this.recordSnapshotSuccess(existing.questionId, newVersion, lastSubmittedAt, timePrecision, lastResult, validated.sourceTimezone ?? this.getSettings().timezone, true, now);
 
         this.incrementPracticeRevision();
         this.db.exec('COMMIT;');
@@ -1563,6 +1602,7 @@ export class CatalogStore {
             updated_at = ?
           WHERE question_id = ?
         `).run(newVersion, now, existing.questionId);
+        this.db.prepare('DELETE FROM snapshot_successes WHERE question_id=?').run(existing.questionId);
 
         this.incrementPracticeRevision();
         this.db.exec('COMMIT;');
@@ -1839,6 +1879,7 @@ export class CatalogStore {
 
     return {
       previewId: randomUUID(),
+      sourceTimezone: parsed.sourceTimezone ?? this.getSettings().timezone,
       catalogRevision: this.getCatalogRevision(),
       practiceRevision: this.getPracticeRevision(),
       createdAt: now,
@@ -1946,6 +1987,8 @@ export class CatalogStore {
               now
             );
 
+            this.recordSnapshotSuccess(item.questionId, 1, item.incomingSnapshot.lastSubmittedAt, item.incomingSnapshot.timePrecision, item.incomingSnapshot.lastResult, preview.sourceTimezone ?? null, true, now);
+
             insertHistoryStmt.run(
               randomUUID(),
               item.questionId,
@@ -1961,7 +2004,7 @@ export class CatalogStore {
           } else if (item.action === 'update' || item.action === 'conflict') {
             updated++;
             const existing = this.getProgressSnapshot(item.questionId);
-            const hasAccepted = (existing?.hasAccepted || item.incomingSnapshot.lastResult === 'Accepted') ? 1 : 0;
+            const hasAccepted = ((item.action !== 'conflict' && existing?.hasAccepted) || item.incomingSnapshot.lastResult === 'Accepted') ? 1 : 0;
             const newVersion = (existing?.version ?? 0) + 1;
 
             updateSnapStmt.run(
@@ -1973,6 +2016,8 @@ export class CatalogStore {
               now,
               item.questionId
             );
+
+            this.recordSnapshotSuccess(item.questionId, newVersion, item.incomingSnapshot.lastSubmittedAt, item.incomingSnapshot.timePrecision, item.incomingSnapshot.lastResult, preview.sourceTimezone ?? null, item.action === 'conflict', now);
 
             insertHistoryStmt.run(
               randomUUID(),

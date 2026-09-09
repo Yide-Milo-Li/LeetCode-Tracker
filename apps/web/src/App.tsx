@@ -3,15 +3,17 @@
  * Manages view routing (Catalog vs Settings), global theme, and bilingual language state.
  */
 import React, { useEffect, useState } from 'react';
-import { BookOpen, Settings, Sun, Moon, Laptop, CheckCircle2 } from 'lucide-react';
+import { BookOpen, Settings, Sun, Moon, Laptop, CheckCircle2, Sparkles, Calendar } from 'lucide-react';
 import { CatalogView } from './components/CatalogView.tsx';
 import { SettingsView } from './components/SettingsView.tsx';
 import { ProgressWorkbench } from './components/ProgressWorkbench.tsx';
+import { TodayPlanView } from './components/TodayPlanView.tsx';
+import { StrategiesView } from './components/StrategiesView.tsx';
 import { api } from './api.ts';
 import { translations, type Language } from './i18n.ts';
 
 export const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'catalog' | 'practice' | 'settings'>('catalog');
+  const [activeTab, setActiveTab] = useState<'today' | 'strategies' | 'catalog' | 'practice' | 'settings'>('today');
   const [lang, setLang] = useState<Language>('en');
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
 
@@ -83,6 +85,20 @@ export const App: React.FC = () => {
           {/* Main Navigation Tabs */}
           <div className="nav-tabs">
             <button
+              className={`nav-tab-btn ${activeTab === 'today' ? 'active' : ''}`}
+              onClick={() => setActiveTab('today')}
+            >
+              <Sparkles size={16} />
+              {t.navToday}
+            </button>
+            <button
+              className={`nav-tab-btn ${activeTab === 'strategies' ? 'active' : ''}`}
+              onClick={() => setActiveTab('strategies')}
+            >
+              <Calendar size={16} />
+              {t.navStrategies}
+            </button>
+            <button
               className={`nav-tab-btn ${activeTab === 'catalog' ? 'active' : ''}`}
               onClick={() => setActiveTab('catalog')}
             >
@@ -130,7 +146,11 @@ export const App: React.FC = () => {
 
       {/* Main Content Area */}
       <main className="container">
-        {activeTab === 'catalog' ? (
+        {activeTab === 'today' ? (
+          <TodayPlanView lang={lang} onNavigateToSettings={() => setActiveTab('settings')} />
+        ) : activeTab === 'strategies' ? (
+          <StrategiesView lang={lang} />
+        ) : activeTab === 'catalog' ? (
           <CatalogView lang={lang} onNavigateSettings={() => setActiveTab('settings')} />
         ) : activeTab === 'practice' ? (
           <ProgressWorkbench lang={lang} />

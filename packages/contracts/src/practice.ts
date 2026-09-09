@@ -3,6 +3,7 @@
  * progress page snapshots, preflight preview, and Gemini-assisted imports.
  */
 import { z } from 'zod';
+import { isEventTime, timeZoneSchema } from './time.ts';
 
 /** Helper to validate non-blank trimmed strings. */
 function nonBlank(max: number) {
@@ -42,7 +43,8 @@ export const createPracticeRecordSchema = z.object({
   practicedAt: nonBlank(50),
   timePrecision: timePrecisionSchema.optional(),
   notes: z.string().max(2000).optional(),
-});
+  sourceTimezone: timeZoneSchema.nullable().optional(),
+}).refine(v => isEventTime(v.practicedAt, v.timePrecision ?? (v.practicedAt.includes('T') ? 'datetime' : 'date')), 'Invalid event date, precision or UTC offset');
 
 export type CreatePracticeRecordInput = z.infer<typeof createPracticeRecordSchema>;
 
@@ -52,6 +54,7 @@ export const updatePracticeRecordSchema = z.object({
   practicedAt: nonBlank(50).optional(),
   timePrecision: timePrecisionSchema.optional(),
   notes: z.string().max(2000).nullable().optional(),
+  sourceTimezone: timeZoneSchema.nullable().optional(),
 }).refine(
   data => data.completed !== undefined || data.practicedAt !== undefined || data.timePrecision !== undefined || data.notes !== undefined,
   { message: 'At least one field must be provided to update' }
@@ -97,6 +100,7 @@ export const updateProgressSnapshotSchema = z.object({
   lastResult: nonBlank(100).optional(),
   totalSubmissions: z.number().int().nonnegative().optional(),
   reason: z.string().max(200).optional(),
+  sourceTimezone: timeZoneSchema.nullable().optional(),
 }).refine(
   data => data.lastSubmittedAt !== undefined || data.lastResult !== undefined || data.totalSubmissions !== undefined,
   { message: 'At least one field must be provided to update snapshot' }
@@ -178,6 +182,7 @@ export type ProgressPreviewItem = z.infer<typeof progressPreviewItemSchema>;
 
 /** Preflight progress import preview structure. */
 export const progressImportPreviewSchema = z.object({
+  sourceTimezone: timeZoneSchema.nullable().optional(),
   previewId: nonBlank(100),
   catalogRevision: z.number().int().nonnegative(),
   practiceRevision: z.number().int().nonnegative(),
@@ -209,6 +214,7 @@ export const progressImportPreviewRequestSchema = z.object({
     confirmOverride: z.boolean(),
   })).optional(),
   batchYear: z.number().int().min(1970).max(2100).optional(),
+  sourceTimezone: timeZoneSchema.nullable().optional(),
 });
 
 export type ProgressImportPreviewRequest = z.infer<typeof progressImportPreviewRequestSchema>;
@@ -291,6 +297,13 @@ export interface NormalizedDateResult {
  * @returns Normalized ISO date string, precision, and year presence flag.
  */
 export function normalizeProgressDate(raw: string, batchYear?: number): NormalizedDateResult {
+  const result = parseProgressDate(raw, batchYear);
+  if (!isEventTime(result.dateStr, result.precision)) throw new Error('Invalid calendar date or timestamp');
+  return result;
+}
+
+/** Parse supported pasted formats without assigning an implicit zone to clock times. */
+function parseProgressDate(raw: string, batchYear?: number): NormalizedDateResult {
   const trimmed = raw.trim();
   if (!trimmed) {
     throw new Error('Date string is empty');
@@ -306,6 +319,7 @@ export function normalizeProgressDate(raw: string, batchYear?: number): Normaliz
       throw new Error(`Invalid calendar date: ${trimmed}`);
     }
     if (hh !== undefined && mm !== undefined) {
+      if (!isEventTime(trimmed, 'datetime')) throw new Error('A valid timestamp with explicit UTC offset is required');
       const date = new Date(trimmed);
       if (Number.isNaN(date.getTime())) throw new Error(`Invalid datetime format: ${trimmed}`);
       return { dateStr: date.toISOString(), precision: 'datetime', hasYear: true };
@@ -321,9 +335,7 @@ export function normalizeProgressDate(raw: string, batchYear?: number): Normaliz
     if (!monthNum) throw new Error(`Unknown month: ${mon}`);
     const dayPadded = d.padStart(2, '0');
     if (hh !== undefined && mm !== undefined) {
-      const sec = ss ? ss.padStart(2, '0') : '00';
-      const iso = `${y}-${monthNum}-${dayPadded}T${hh.padStart(2, '0')}:${mm}:${sec}Z`;
-      return { dateStr: iso, precision: 'datetime', hasYear: true };
+      throw new Error('Clock times require an ISO timestamp with explicit UTC offset');
     }
     return { dateStr: `${y}-${monthNum}-${dayPadded}`, precision: 'date', hasYear: true };
   }

@@ -332,24 +332,24 @@ describe('PracticeStore & Progress Ingestion', () => {
     assert.equal(records.items[0].problemTitle, 'Two Sum (Renamed)');
   });
 
-  it('persists and updates timezone setting along with language and theme', () => {
+  it('persists and updates timezone setting along with language and theme', async () => {
     const { store } = createSeedStore();
 
     let settings = store.getSettings();
     assert.equal(settings.timezone, null);
 
-    store.updateSettings({ timezone: 'Asia/Shanghai' });
+    await store.updateSettings({ timezone: 'Asia/Shanghai' });
     settings = store.getSettings();
     assert.equal(settings.timezone, 'Asia/Shanghai');
 
-    store.updateSettings({ language: 'zh', theme: 'dark' });
+    await store.updateSettings({ language: 'zh', theme: 'dark' });
     settings = store.getSettings();
     assert.equal(settings.language, 'zh');
     assert.equal(settings.theme, 'dark');
     assert.equal(settings.timezone, 'Asia/Shanghai');
   });
 
-  it('successfully migrates v5 database to v6 schema', () => {
+  it('successfully migrates v5 database to v7 schema', () => {
     const db = new DatabaseSync(':memory:');
     // Setup v5 schema
     db.exec(`
@@ -399,11 +399,11 @@ describe('PracticeStore & Progress Ingestion', () => {
       INSERT INTO settings (key, value, updated_at) VALUES ('language', 'en', 1000), ('theme', 'system', 1000);
     `);
 
-    // Open with CatalogStore to trigger migration to v6
+    // Opening upgrades the historical fixture through every supported migration.
     const store = new CatalogStore(db, { skipBackup: true });
 
     assert.equal(inspectCatalogSchema(db), CURRENT_SCHEMA_VERSION);
-    assert.equal(CURRENT_SCHEMA_VERSION, 6);
+    assert.equal(CURRENT_SCHEMA_VERSION, 7);
     assert.equal(store.getPracticeRevision(), 0);
   });
 });

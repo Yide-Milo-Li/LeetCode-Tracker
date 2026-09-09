@@ -385,11 +385,11 @@ describe('CatalogStore & JSONL Ingestion', async () => {
     assert.equal(hist.items[0].duplicateCount, 0);
   });
 
-  it('updates and persists user settings', () => {
+  it('updates and persists user settings', async () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
 
-    const updated = store.updateSettings({ language: 'zh', theme: 'dark' });
+    const updated = await store.updateSettings({ language: 'zh', theme: 'dark' });
     assert.equal(updated.language, 'zh');
     assert.equal(updated.theme, 'dark');
     assert.ok(updated.updatedAt > 0);

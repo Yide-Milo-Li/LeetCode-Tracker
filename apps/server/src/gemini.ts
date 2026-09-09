@@ -4,13 +4,30 @@
  * using official @google/genai structured outputs.
  * Local-only, server-side execution: API key is never exposed to the client.
  */
+import { quotas } from '../../../packages/domain/src/index.ts';
 import { GoogleGenAI, Type } from '@google/genai';
 import type { ProgressCandidateInput } from '../../../packages/contracts/src/practice.ts';
+import type { Bilingual, Rules, RulePatch } from '../../../packages/contracts/src/recommendations.ts';
+import type { CatalogProblem } from '../../../packages/contracts/src/sync.ts';
 
 /** Result structure returned by Gemini formatting. */
 export interface GeminiFormatResult {
   candidates: ProgressCandidateInput[];
   unparsedSnippets: string[];
+  model: string;
+}
+
+/** Result structure for AI plan reasoning and encouragement. */
+export interface PlanContentResult {
+  reasons: Record<string, Bilingual>;
+  encouragement: Bilingual;
+  model: string;
+}
+
+/** Result structure for AI prompt override parsing. */
+export interface OverridePromptResult {
+  patch: RulePatch;
+  unresolved: string[];
   model: string;
 }
 
@@ -60,6 +77,23 @@ export interface GeminiAssistantOptions {
 /** Interface for pluggable format service to allow hermetic unit testing. */
 export interface IGeminiAssistant {
   formatProgressText(rawText: string, batchYear?: number): Promise<GeminiFormatResult>;
+  generatePlanContent?(params: {
+    problems: CatalogProblem[];
+    rules: Rules;
+    date: string;
+    deadline?: number;
+  }): Promise<PlanContentResult>;
+  parseOverridePrompt?(params: {
+    prompt: string;
+    baseRules: Rules | null;
+    knownTags: string[];
+  }): Promise<OverridePromptResult>;
+  selectPlanProblems?(params: {
+    candidates: CatalogProblem[];
+    rules: Rules;
+    date: string;
+    deadline?: number;
+  }): Promise<{ selectedQuestionIds: string[]; model: string }>;
   getStatus(): GeminiAssistantStatus;
 }
 
@@ -163,13 +197,17 @@ export class GeminiAssistant implements IGeminiAssistant {
   private async executeFormatWithFallback(rawText: string, batchYear?: number): Promise<GeminiFormatResult> {
     const modelsToTry = [this.model, ...this.fallbackModels];
     const attemptErrors: Array<{ model: string; attempt: number; error: Error }> = [];
+    const overallDeadline = Date.now() + this.timeoutMs;
 
     for (let modelIndex = 0; modelIndex < modelsToTry.length; modelIndex++) {
       const currentModel = modelsToTry[modelIndex];
 
       for (let attempt = 0; attempt <= this.maxRetriesPerModel; attempt++) {
+        const remainingMs = overallDeadline - Date.now();
+        if (remainingMs <= 200) break;
+        const attemptTimeout = Math.min(this.timeoutMs, remainingMs);
         try {
-          return await this.executeModelAttempt(currentModel, rawText, batchYear);
+          return await this.executeModelAttempt(currentModel, rawText, batchYear, attemptTimeout);
         } catch (err) {
           const error = err instanceof Error ? err : new Error(String(err));
           attemptErrors.push({ model: currentModel, attempt, error });
@@ -278,7 +316,8 @@ export class GeminiAssistant implements IGeminiAssistant {
   private async executeModelAttempt(
     model: string,
     rawText: string,
-    batchYear?: number
+    batchYear?: number,
+    timeoutMs: number = this.timeoutMs
   ): Promise<GeminiFormatResult> {
     const systemInstruction = `You are a structured data formatting assistant. Your ONLY job is to parse tabular LeetCode progress text into structured records.
 The user pasted text copied from their personal LeetCode Progress page, which typically contains:
@@ -329,7 +368,7 @@ Do not invent or hallucinate problems not in the input. If lines cannot be parse
     };
 
     const abortController = new AbortController();
-    const timeoutHandle = setTimeout(() => abortController.abort(), this.timeoutMs);
+    const timeoutHandle = setTimeout(() => abortController.abort(), timeoutMs);
 
     try {
       let response: { text?: string };
@@ -399,4 +438,474 @@ Do not invent or hallucinate problems not in the input. If lines cannot be parse
       throw err instanceof Error ? err : new Error(String(err));
     }
   }
+
+  /**
+   * Generate bilingual reasons and encouragement for daily plan items.
+   * Degrades gracefully to local deterministic output on error, timeout, or missing API key.
+   */
+  public async generatePlanContent(params: {
+    problems: CatalogProblem[];
+    rules: Rules;
+    date: string;
+    deadline?: number;
+  }): Promise<PlanContentResult> {
+    const problems = Array.isArray(params?.problems) ? params.problems : [];
+    if (!this.apiKey || !this.apiKey.trim() || problems.length === 0) {
+      return fallbackPlanContent(problems, params.rules);
+    }
+
+    const systemInstruction = `You are an encouraging AI coding coach. For each given LeetCode problem, generate an inspiring bilingual recommendation reason (in English and Chinese) explaining why this problem is valuable to solve today based on its topic and difficulty. Also generate an uplifting daily encouragement message in both English and Chinese. Keep each reason concise (1-2 sentences). Do not invent or hallucinate problem IDs.`;
+
+    const problemSummaries = params.problems.map(p => ({
+      questionId: p.questionId,
+      title: p.title,
+      difficulty: p.difficulty,
+      tags: p.topicTags.map(t => t.name),
+    }));
+
+    const prompt = `Date: ${params.date}\nUser study preference: ${params.rules.preference || 'None'}\n\nSelected problems:\n${JSON.stringify(problemSummaries, null, 2)}`;
+
+    const responseSchema = {
+      type: Type.OBJECT,
+      properties: {
+        reasons: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              questionId: { type: Type.STRING },
+              en: { type: Type.STRING },
+              zh: { type: Type.STRING },
+            },
+            required: ['questionId', 'en', 'zh'],
+          },
+        },
+        encouragement: {
+          type: Type.OBJECT,
+          properties: {
+            en: { type: Type.STRING },
+            zh: { type: Type.STRING },
+          },
+          required: ['en', 'zh'],
+        },
+      },
+      required: ['reasons', 'encouragement'],
+    };
+
+    const overallDeadline = Math.min(params.deadline ?? Infinity, Date.now() + this.timeoutMs);
+    const modelsToTry = [this.model, ...this.fallbackModels];
+    for (const currentModel of modelsToTry) {
+      const remainingMs = overallDeadline - Date.now();
+      if (remainingMs <= 200) break;
+      const attemptTimeout = Math.min(this.timeoutMs, remainingMs);
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const abortController = new AbortController();
+        timeoutHandle = setTimeout(() => abortController.abort(), attemptTimeout);
+        let response: { text?: string };
+
+        if (this.generateContentFn) {
+          response = await this.generateContentFn({
+            model: currentModel,
+            contents: prompt,
+            config: {
+              systemInstruction,
+              responseMimeType: 'application/json',
+              responseSchema,
+              abortSignal: abortController.signal,
+            },
+          });
+        } else {
+          const ai = new GoogleGenAI({ apiKey: this.apiKey });
+          response = await ai.models.generateContent({
+            model: currentModel,
+            contents: prompt,
+            config: {
+              systemInstruction,
+              responseMimeType: 'application/json',
+              responseSchema,
+              abortSignal: abortController.signal,
+            },
+          });
+        }
+
+        clearTimeout(timeoutHandle);
+        const parsed = JSON.parse(response.text?.trim() || '{}') as {
+          reasons?: Array<{ questionId: string; en: string; zh: string }>;
+          encouragement?: { en: string; zh: string };
+        };
+
+        const reasonsMap: Record<string, Bilingual> = {};
+        for (const item of parsed.reasons ?? []) {
+          if (item.questionId && item.en && item.zh) {
+            reasonsMap[item.questionId] = { en: item.en.trim(), zh: item.zh.trim() };
+          }
+        }
+
+        // Fill in fallback reasons for any problem missing from the AI response
+        const fallback = fallbackPlanContent(problems, params.rules);
+        for (const p of problems) {
+          if (!reasonsMap[p.questionId]) {
+            reasonsMap[p.questionId] = fallback.reasons[p.questionId];
+          }
+        }
+
+        const encouragement: Bilingual = (parsed.encouragement?.en && parsed.encouragement?.zh)
+          ? { en: parsed.encouragement.en.trim(), zh: parsed.encouragement.zh.trim() }
+          : fallback.encouragement;
+
+        return {
+          reasons: reasonsMap,
+          encouragement,
+          model: currentModel,
+        };
+      } catch {
+        // Model tier failed or timed out, attempt next fallback model
+      } finally {
+        clearTimeout(timeoutHandle);
+      }
+    }
+
+    return fallbackPlanContent(problems, params.rules);
+  }
+
+  /**
+   * Parse user prompt requesting temporary daily rule adjustments into a validated RulePatch.
+   * Degrades gracefully to local keyword parser on error, timeout, or missing API key.
+   */
+  public async parseOverridePrompt(params: {
+    prompt: string;
+    baseRules: Rules | null;
+    knownTags: string[];
+  }): Promise<OverridePromptResult> {
+    if (!this.apiKey || !this.apiKey.trim() || !params.prompt.trim()) {
+      return fallbackOverridePrompt(params.prompt, params.baseRules, params.knownTags);
+    }
+
+    const systemInstruction = `You are a scheduling assistant. Your job is to parse a user's natural language request to adjust today's LeetCode daily study rules into a structured rule patch.
+Possible fields:
+- dailyCount: positive integer
+- difficulty: object with Easy, Medium, Hard percentages summing to 100
+- tags: array of tag slugs. Only use slugs from the provided known tag slugs list.
+- premium: boolean
+- reviewEnabled: boolean
+- reviewPercent: number between 1 and 100
+- preference: string description of soft preference
+- unresolved: array of strings describing any user request that cannot be verified with metadata (e.g. company tags, vague requests)
+
+Return ONLY valid JSON conforming to the schema.`;
+
+    const promptContext = `User prompt: "${params.prompt}"\n\nCurrent base rules: ${JSON.stringify(params.baseRules)}\n\nValid tag slugs (sample): ${params.knownTags.slice(0, 100).join(', ')}`;
+
+    const responseSchema = {
+      type: Type.OBJECT,
+      properties: {
+        dailyCount: { type: Type.INTEGER },
+        difficulty: {
+          type: Type.OBJECT,
+          properties: {
+            Easy: { type: Type.NUMBER },
+            Medium: { type: Type.NUMBER },
+            Hard: { type: Type.NUMBER },
+          },
+        },
+        tags: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+        },
+        premium: { type: Type.BOOLEAN },
+        reviewEnabled: { type: Type.BOOLEAN },
+        reviewPercent: { type: Type.NUMBER },
+        preference: { type: Type.STRING },
+        unresolved: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+        },
+      },
+    };
+
+    const overallDeadline = Date.now() + this.timeoutMs;
+    const modelsToTry = [this.model, ...this.fallbackModels];
+    for (const currentModel of modelsToTry) {
+      const remainingMs = overallDeadline - Date.now();
+      if (remainingMs <= 200) break;
+      const attemptTimeout = Math.min(this.timeoutMs, remainingMs);
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const abortController = new AbortController();
+        timeoutHandle = setTimeout(() => abortController.abort(), attemptTimeout);
+        let response: { text?: string };
+
+        if (this.generateContentFn) {
+          response = await this.generateContentFn({
+            model: currentModel,
+            contents: promptContext,
+            config: {
+              systemInstruction,
+              responseMimeType: 'application/json',
+              responseSchema,
+              abortSignal: abortController.signal,
+            },
+          });
+        } else {
+          const ai = new GoogleGenAI({ apiKey: this.apiKey });
+          response = await ai.models.generateContent({
+            model: currentModel,
+            contents: promptContext,
+            config: {
+              systemInstruction,
+              responseMimeType: 'application/json',
+              responseSchema,
+              abortSignal: abortController.signal,
+            },
+          });
+        }
+
+        clearTimeout(timeoutHandle);
+        const parsed = JSON.parse(response.text?.trim() || '{}') as Record<string, unknown>;
+        const patch: RulePatch = {};
+        const unresolved: string[] = Array.isArray(parsed.unresolved)
+          ? parsed.unresolved.map(String)
+          : [];
+
+        if (typeof parsed.dailyCount === 'number' && parsed.dailyCount > 0) {
+          patch.dailyCount = Math.round(parsed.dailyCount);
+        }
+
+        if (parsed.difficulty && typeof parsed.difficulty === 'object') {
+          const d = parsed.difficulty as Record<string, number>;
+          const easy = typeof d.Easy === 'number' ? d.Easy : 0;
+          const med = typeof d.Medium === 'number' ? d.Medium : 0;
+          const hard = typeof d.Hard === 'number' ? d.Hard : 0;
+          if (Math.abs(easy + med + hard - 100) < 1e-4) {
+            patch.difficulty = { Easy: easy, Medium: med, Hard: hard };
+          } else {
+            unresolved.push('Difficulty percentages parsed from prompt did not total 100% and were ignored.');
+          }
+        }
+
+        if (Array.isArray(parsed.tags)) {
+          const knownSet = new Set(params.knownTags);
+          const validTags: string[] = [];
+          for (const t of parsed.tags) {
+            const slug = String(t).trim();
+            if (knownSet.has(slug)) {
+              validTags.push(slug);
+            } else {
+              unresolved.push(`Tag '${slug}' is not in the local catalog.`);
+            }
+          }
+          if (parsed.tags.length === 0 || validTags.length > 0) patch.tags = validTags;
+        }
+
+        if (typeof parsed.premium === 'boolean') patch.premium = parsed.premium;
+        if (typeof parsed.reviewEnabled === 'boolean') patch.reviewEnabled = parsed.reviewEnabled;
+        if (typeof parsed.reviewPercent === 'number' && parsed.reviewPercent > 0 && parsed.reviewPercent <= 100) {
+          patch.reviewPercent = parsed.reviewPercent;
+        }
+        if (typeof parsed.preference === 'string') patch.preference = parsed.preference;
+
+        return {
+          patch,
+          unresolved,
+          model: currentModel,
+        };
+      } catch {
+        // Model tier failed or timed out, attempt next fallback model
+      } finally {
+        clearTimeout(timeoutHandle);
+      }
+    }
+
+    return fallbackOverridePrompt(params.prompt, params.baseRules, params.knownTags);
+  }
+
+  /**
+   * AI-assisted problem selection based on soft qualitative study preferences.
+   * Ranks or selects candidates from a provided pool according to user's qualitative preferences.
+   * Falls back to empty list on any error, allowing caller to use deterministic ordering.
+   */
+  public async selectPlanProblems(params: {
+    candidates: CatalogProblem[];
+    rules: Rules;
+    date: string;
+    deadline?: number;
+  }): Promise<{ selectedQuestionIds: string[]; model: string }> {
+    if (!this.apiKey || !params.rules.preference?.trim() || params.candidates.length === 0) {
+      return { selectedQuestionIds: [], model: 'local' };
+    }
+
+    const limits = quotas(params.rules);
+    const strata = ['Easy', 'Medium', 'Hard'].flatMap(difficulty => ['new', 'review'].map(kind =>
+      params.candidates.filter(c => c.difficulty === difficulty && ((c as CatalogProblem & { kind?: string }).kind ?? 'new') === kind)
+    ));
+    // Reserve enough of every stratum for any locally feasible new/review split.
+    const reserved = strata.flatMap(group => group.slice(0, limits[group[0]?.difficulty] ?? 0));
+    if (reserved.length > 30) return { selectedQuestionIds: [], model: 'local' };
+    const bounded = [...reserved];
+    const used = new Set(bounded.map(c => c.questionId));
+    for (let index = 0; bounded.length < 30 && strata.some(group => index < group.length); index++) {
+      for (const group of strata) {
+        const candidate = group[index];
+        if (candidate && limits[candidate.difficulty] > 0 && !used.has(candidate.questionId) && bounded.length < 30) {
+          bounded.push(candidate); used.add(candidate.questionId);
+        }
+      }
+    }
+    const candidateSummary = bounded.map(c => ({
+      questionId: c.questionId,
+      title: c.title,
+      difficulty: c.difficulty,
+      tags: c.topicTags.map(t => t.name),
+    }));
+
+    const systemInstruction = `You are a LeetCode training assistant.
+Given a list of candidate problems and the user's qualitative study preference, select the question IDs that best match the preference.
+Preference: "${params.rules.preference}"
+Slots count desired: ${params.rules.dailyCount}
+
+Return JSON with an array of selectedQuestionIds (strings). Order them in priority order.`;
+
+    const promptContext = `Candidates:\n${JSON.stringify(candidateSummary, null, 2)}`;
+
+    const responseSchema = {
+      type: Type.OBJECT,
+      properties: {
+        selectedQuestionIds: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+        },
+      },
+      required: ['selectedQuestionIds'],
+    };
+
+    const overallDeadline = Math.min(params.deadline ?? Infinity, Date.now() + this.timeoutMs);
+    const modelsToTry = [this.model, ...this.fallbackModels];
+    for (const currentModel of modelsToTry) {
+      const remainingMs = overallDeadline - Date.now();
+      if (remainingMs <= 200) break;
+      const attemptTimeout = Math.min(this.timeoutMs, remainingMs);
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const abortController = new AbortController();
+        timeoutHandle = setTimeout(() => abortController.abort(), attemptTimeout);
+        let response: { text?: string };
+
+        if (this.generateContentFn) {
+          response = await this.generateContentFn({
+            model: currentModel,
+            contents: promptContext,
+            config: {
+              systemInstruction,
+              responseMimeType: 'application/json',
+              responseSchema,
+              abortSignal: abortController.signal,
+            },
+          });
+        } else {
+          const ai = new GoogleGenAI({ apiKey: this.apiKey });
+          response = await ai.models.generateContent({
+            model: currentModel,
+            contents: promptContext,
+            config: {
+              systemInstruction,
+              responseMimeType: 'application/json',
+              responseSchema,
+              abortSignal: abortController.signal,
+            },
+          });
+        }
+
+        clearTimeout(timeoutHandle);
+        const parsed = JSON.parse(response.text?.trim() || '{}') as { selectedQuestionIds?: string[] };
+        if (Array.isArray(parsed.selectedQuestionIds)) {
+          const validIds = new Set(candidateSummary.map(c => c.questionId));
+          const filtered = parsed.selectedQuestionIds.filter(id => validIds.has(String(id)));
+          return {
+            selectedQuestionIds: filtered,
+            model: currentModel,
+          };
+        }
+      } catch {
+        // Model tier failed or timed out, attempt next fallback model
+      } finally {
+        clearTimeout(timeoutHandle);
+      }
+    }
+
+    return { selectedQuestionIds: [], model: 'local' };
+  }
+}
+
+/** Fallback bilingual reason and encouragement generator when AI is disabled or unavailable. */
+export function fallbackPlanContent(problems: CatalogProblem[] = [], _rules: Rules): PlanContentResult {
+  const list = Array.isArray(problems) ? problems : [];
+  const reasons: Record<string, Bilingual> = {};
+  for (const p of list) {
+    const tagNames = p.topicTags.slice(0, 2).map(t => t.name).join(' / ');
+    const tagStr = tagNames ? ` (${tagNames})` : '';
+    reasons[p.questionId] = {
+      en: `Selected ${p.difficulty} problem${tagStr} to reinforce algorithmic problem-solving patterns.`,
+      zh: `精选${p.difficulty === 'Easy' ? '简单' : p.difficulty === 'Medium' ? '中等' : '困难'}难度题目${tagStr}，针对性巩固算法解题模式。`,
+    };
+  }
+  return {
+    reasons,
+    encouragement: {
+      en: 'Consistent daily practice turns small efforts into mastery. Let’s tackle today’s challenge!',
+      zh: '坚持每日训练，积硅步以至千里。开启今日刷题挑战吧！',
+    },
+    model: 'local',
+  };
+}
+
+/** Fallback parser for user prompt when AI is disabled or unavailable. */
+export function fallbackOverridePrompt(prompt: string, _baseRules: Rules | null, knownTags: string[]): OverridePromptResult {
+  const patch: RulePatch = {};
+  const unresolved: string[] = [];
+  const lower = prompt.toLowerCase();
+
+  const countMatch = lower.match(/(\d+)\s*(?:题|problems?|questions?|count)/i) ?? lower.match(/(?:做|加|选|刷)\s*(\d+)/i);
+  if (countMatch) {
+    const num = parseInt(countMatch[1], 10);
+    if (num > 0) patch.dailyCount = num;
+  }
+
+  if (lower.includes('全easy') || lower.includes('全部简单') || lower.includes('all easy')) {
+    patch.difficulty = { Easy: 100, Medium: 0, Hard: 0 };
+  } else if (lower.includes('全medium') || lower.includes('全部中等') || lower.includes('all medium')) {
+    patch.difficulty = { Easy: 0, Medium: 100, Hard: 0 };
+  } else if (lower.includes('全hard') || lower.includes('全部困难') || lower.includes('all hard')) {
+    patch.difficulty = { Easy: 0, Medium: 0, Hard: 100 };
+  } else if (lower.includes('不要hard') || lower.includes('不要困难') || lower.includes('no hard')) {
+    patch.difficulty = { Easy: 50, Medium: 50, Hard: 0 };
+  }
+
+  if (lower.includes('不要复习') || lower.includes('关复习') || lower.includes('no review') || lower.includes('without review')) {
+    patch.reviewEnabled = false;
+    patch.reviewPercent = null;
+  } else if (lower.includes('复习') || lower.includes('review')) {
+    const reviewPctMatch = lower.match(/(\d+)\s*%/);
+    if (reviewPctMatch) {
+      patch.reviewEnabled = true;
+      patch.reviewPercent = Math.min(100, Math.max(1, parseInt(reviewPctMatch[1], 10)));
+    }
+  }
+
+  const matchedTags: string[] = [];
+  for (const slug of knownTags) {
+    const cleanSlug = slug.toLowerCase().replace(/-/g, ' ');
+    if (lower.includes(slug) || lower.includes(cleanSlug)) {
+      matchedTags.push(slug);
+    }
+  }
+  if (matchedTags.length > 0) {
+    patch.tags = matchedTags;
+  }
+
+  if (lower.includes('高频') || lower.includes('top') || lower.includes('google') || lower.includes('amazon') || lower.includes('面试')) {
+    unresolved.push('Company and frequency tags cannot be verified against local metadata; treated as soft qualitative preferences.');
+  }
+
+  return { patch, unresolved, model: 'local' };
 }

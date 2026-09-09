@@ -25,14 +25,15 @@ export const PracticeLogModal: React.FC<PracticeLogModalProps> = ({
 
   // Precision & Timestamps
   const [precision, setPrecision] = useState<TimePrecision>('datetime');
-  // Default to now in local ISO string for input
+  // Default to now in local ISO string for input, keeping seconds
   const now = new Date();
   const defaultDatetime = new Date(now.getTime() - now.getTimezoneOffset() * 60000)
     .toISOString()
-    .slice(0, 16);
+    .slice(0, 19);
   const defaultDate = now.toISOString().slice(0, 10);
 
   const [practicedAtInput, setPracticedAtInput] = useState(defaultDatetime);
+  const [userModifiedTime, setUserModifiedTime] = useState(false);
   const [completed, setCompleted] = useState(true);
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
@@ -71,11 +72,16 @@ export const PracticeLogModal: React.FC<PracticeLogModalProps> = ({
     try {
       let isoTimestamp: string;
       if (precision === 'datetime') {
-        const parsedDate = new Date(practicedAtInput);
-        if (Number.isNaN(parsedDate.getTime())) {
-          throw new Error('Invalid datetime input');
+        if (!userModifiedTime) {
+          // If the user did not manually edit the timestamp, use current exact instant with seconds
+          isoTimestamp = new Date().toISOString();
+        } else {
+          const parsedDate = new Date(practicedAtInput);
+          if (Number.isNaN(parsedDate.getTime())) {
+            throw new Error('Invalid datetime input');
+          }
+          isoTimestamp = parsedDate.toISOString();
         }
-        isoTimestamp = parsedDate.toISOString();
       } else {
         isoTimestamp = practicedAtInput;
       }
@@ -182,7 +188,10 @@ export const PracticeLogModal: React.FC<PracticeLogModalProps> = ({
                   className={`btn btn-sm ${precision === 'datetime' ? 'btn-primary' : 'btn-outline'}`}
                   onClick={() => {
                     setPrecision('datetime');
-                    setPracticedAtInput(defaultDatetime);
+                    const n = new Date();
+                    const dt = new Date(n.getTime() - n.getTimezoneOffset() * 60000).toISOString().slice(0, 19);
+                    setPracticedAtInput(dt);
+                    setUserModifiedTime(false);
                   }}
                   style={{ padding: '0.2rem 0.5rem' }}
                 >
@@ -203,10 +212,14 @@ export const PracticeLogModal: React.FC<PracticeLogModalProps> = ({
             </div>
             <input
               type={precision === 'datetime' ? 'datetime-local' : 'date'}
+              step={precision === 'datetime' ? '1' : undefined}
               className="input-field"
               style={{ width: '100%' }}
               value={practicedAtInput}
-              onChange={(e) => setPracticedAtInput(e.target.value)}
+              onChange={(e) => {
+                setPracticedAtInput(e.target.value);
+                setUserModifiedTime(true);
+              }}
               required
             />
           </div>
