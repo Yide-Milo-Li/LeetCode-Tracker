@@ -1251,6 +1251,7 @@ html.dark .heatmap-cell-3 {
 
 .trend-chart-wrapper {
   height: 260px;
+  min-height: 260px;
   width: 100%;
   margin-top: 1rem;
 }
@@ -1427,4 +1428,63 @@ html.dark .heatmap-cell-3 {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+}
+
+/* Heatmap Floating Tooltip */
+.heatmap-tooltip {
+  position: fixed;
+  transform: translate(-50%, -100%);
+  background-color: var(--bg-card);
+  color: var(--text-main);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 0.4rem 0.65rem;
+  font-size: 0.75rem;
+  pointer-events: none;
+  z-index: 1100;
+  box-shadow: var(--shadow-md);
+  white-space: nowrap;
+}
+
+/* Timezone Auto-Detected Notice Banner */
+.timezone-detected-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1rem;
+  background-color: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  border-radius: var(--radius);
+  color: var(--primary);
+  font-size: 0.8125rem;
+}
+
+/* Dashboard View Layout */
+.dashboard-view-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.dashboard-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.dashboard-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dashboard-subtitle {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
 }

@@ -372,6 +372,84 @@ describe('Dashboard Domain Statistics', () => {
       assert.equal(stats.dataStatus.pendingDateCount, 1);
       assert.equal(stats.recentActivities[0].isDatePending, true);
     });
+
+    it('distinguishes latest non-accepted submission from historical snapshot success', () => {
+      // Problem 2 was Accepted on 2026-09-01 (historical success in snapshotSuccesses).
+      // On 2026-09-08, user submitted and got 'Wrong Answer' (latest submission in snapshots).
+      const snapshots: ProgressSnapshot[] = [
+        {
+          questionId: '2',
+          questionFrontendId: '2',
+          problemTitle: 'Problem 2',
+          difficulty: 'Medium',
+          lastSubmittedAt: '2026-09-08T10:00:00Z',
+          timePrecision: 'datetime',
+          lastResult: 'Wrong Answer',
+          totalSubmissions: 5,
+          hasAccepted: true, // Has historically accepted
+          source: 'leetcode_progress',
+          version: 2,
+          status: 'active',
+          updatedAt: fixedNow,
+        },
+      ];
+
+      const snapshotSuccesses = [
+        {
+          questionId: '2',
+          questionFrontendId: '2',
+          problemTitle: 'Problem 2',
+          difficulty: 'Medium' as const,
+          version: 1,
+          eventTime: '2026-09-01T08:00:00Z',
+          precision: 'datetime' as const,
+          sourceTimezone: 'UTC',
+          recordedAt: fixedNow,
+        },
+      ];
+
+      const stats = calculateDashboardStats({
+        problems,
+        manualRecords: [],
+        snapshots,
+        snapshotSuccesses,
+        todaySummary,
+        userTimezone: userZone,
+        targetYear: 2026,
+        now: fixedNow,
+        catalogUpdatedAt: fixedNow,
+        practiceUpdatedAt: fixedNow,
+        revision,
+      });
+
+      // Overall unique solved includes problem 2 because it hasAccepted
+      assert.equal(stats.overview.uniqueSolvedProblems, 1);
+
+      // On 2026-09-08 (today), the problem was active (Wrong Answer attempt), but NOT solved!
+      const day0908 = stats.yearlyActivity.days.find(d => d.date === '2026-09-08');
+      assert.ok(day0908);
+      assert.equal(day0908.activeProblemCount, 1);
+      assert.equal(day0908.solvedProblemCount, 0); // MUST be 0 on 09-08!
+
+      // On 2026-09-01 (historical success date), the problem was solved!
+      const day0901 = stats.yearlyActivity.days.find(d => d.date === '2026-09-01');
+      assert.ok(day0901);
+      assert.equal(day0901.activeProblemCount, 1);
+      assert.equal(day0901.solvedProblemCount, 1); // Solved on 09-01!
+
+      // Recent activities list has both distinct events: latest submission (Wrong Answer) and verified success (Accepted)
+      const q2Activities = stats.recentActivities.filter(a => a.questionId === '2');
+      assert.equal(q2Activities.length, 2);
+      const latestAttempt = q2Activities.find(a => a.timestamp === '2026-09-08T10:00:00Z');
+      assert.ok(latestAttempt);
+      assert.equal(latestAttempt.action, 'Wrong Answer');
+      assert.equal(latestAttempt.status, 'other');
+
+      const historicalSolve = q2Activities.find(a => a.timestamp === '2026-09-01T08:00:00Z');
+      assert.ok(historicalSolve);
+      assert.equal(historicalSolve.action, 'Accepted Submission');
+      assert.equal(historicalSolve.status, 'accepted');
+    });
   });
 
   describe('filterAndPaginateActivities', () => {

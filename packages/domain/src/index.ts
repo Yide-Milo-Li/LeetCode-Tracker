@@ -14,6 +14,7 @@ import type {
   RecentActivityItem,
   DashboardActivityListResponse,
   DashboardActivityQuery,
+  DashboardSnapshotSuccess,
 } from '../../contracts/src/dashboard.ts';
 
 export const ALGORITHM_VERSION = 'phase4-v1';
@@ -193,6 +194,7 @@ export interface DashboardStatsInput {
   problems: CatalogProblem[];
   manualRecords: PracticeRecord[];
   snapshots: ProgressSnapshot[];
+  snapshotSuccesses?: DashboardSnapshotSuccess[];
   todaySummary: DashboardDailySummary;
   userTimezone: string | null;
   targetYear: number;
@@ -211,6 +213,7 @@ export function calculateDashboardStats(input: DashboardStatsInput): DashboardRe
     problems,
     manualRecords,
     snapshots,
+    snapshotSuccesses = [],
     todaySummary,
     userTimezone,
     targetYear,
@@ -238,6 +241,9 @@ export function calculateDashboardStats(input: DashboardStatsInput): DashboardRe
     if (s.status === 'active' && (s.hasAccepted || s.lastResult === 'Accepted')) {
       uniqueSolvedProblemIds.add(s.questionId);
     }
+  }
+  for (const succ of snapshotSuccesses) {
+    uniqueSolvedProblemIds.add(succ.questionId);
   }
 
   // 3. Process activity events for date-based aggregations and history
@@ -309,13 +315,15 @@ export function calculateDashboardStats(input: DashboardStatsInput): DashboardRe
     });
   }
 
-  // 3b. Process active snapshots
+  // 3b. Process active snapshots (latest submission)
   let totalSnapshotSubmissions = 0;
+  const snapshotLookup = new Map<string, ProgressSnapshot>();
   for (const s of snapshots) {
     if (s.status !== 'active') continue;
+    snapshotLookup.set(s.questionId, s);
     totalSnapshotSubmissions += s.totalSubmissions;
     const resolved = resolveEventDate(s.lastSubmittedAt, s.timePrecision, (s as any).sourceTimezone ?? null, userTimezone, now);
-    const isAccepted = s.hasAccepted || s.lastResult === 'Accepted';
+    const isLatestAccepted = s.lastResult === 'Accepted';
 
     if (resolved.isPending || !resolved.date) {
       pendingDateCount++;
@@ -324,7 +332,7 @@ export function calculateDashboardStats(input: DashboardStatsInput): DashboardRe
       const entry = getDailyEntry(resolved.date);
       entry.activeProblemIds.add(s.questionId);
       entry.snapshotCount++;
-      if (isAccepted) {
+      if (isLatestAccepted) {
         entry.solvedProblemIds.add(s.questionId);
         if (mondayDate && todayDate && resolved.date >= mondayDate && resolved.date <= todayDate) {
           weeklySolvedProblemIds.add(s.questionId);
@@ -340,14 +348,56 @@ export function calculateDashboardStats(input: DashboardStatsInput): DashboardRe
       questionFrontendId: s.questionFrontendId,
       problemTitle: s.problemTitle,
       difficulty: s.difficulty,
-      action: isAccepted ? 'Accepted Submission' : (s.lastResult || 'Submission'),
-      status: isAccepted ? 'accepted' : 'other',
+      action: isLatestAccepted ? 'Accepted Submission' : (s.lastResult || 'Submission'),
+      status: isLatestAccepted ? 'accepted' : 'other',
       timestamp: s.lastSubmittedAt,
       timePrecision: s.timePrecision,
       sourceTimezone: (s as any).sourceTimezone ?? null,
       isDatePending: resolved.isPending,
       sortKey: Number.isNaN(sortKey) ? 0 : sortKey,
     });
+  }
+
+  // 3c. Process verified snapshot successes (historical accepts)
+  const seenSuccesses = new Set<string>();
+  for (const succ of snapshotSuccesses) {
+    const key = `${succ.questionId}:${succ.eventTime}`;
+    if (seenSuccesses.has(key)) continue;
+    seenSuccesses.add(key);
+
+    const resolved = resolveEventDate(succ.eventTime, succ.precision, succ.sourceTimezone, userTimezone, now);
+    if (resolved.isPending || !resolved.date) {
+      pendingDateCount++;
+    } else {
+      activeDates.add(resolved.date);
+      const entry = getDailyEntry(resolved.date);
+      entry.activeProblemIds.add(succ.questionId);
+      entry.solvedProblemIds.add(succ.questionId);
+      if (mondayDate && todayDate && resolved.date >= mondayDate && resolved.date <= todayDate) {
+        weeklySolvedProblemIds.add(succ.questionId);
+      }
+    }
+
+    const s = snapshotLookup.get(succ.questionId);
+    const isRedundantWithLatest = s && s.lastResult === 'Accepted' && s.lastSubmittedAt === succ.eventTime;
+    if (!isRedundantWithLatest) {
+      const sortKey = succ.precision === 'datetime' ? Date.parse(succ.eventTime) : (Date.parse(`${succ.eventTime}T00:00:00Z`) || 0);
+      allActivityItems.push({
+        id: `${succ.questionId}-success-${succ.version}`,
+        source: 'snapshot',
+        questionId: succ.questionId,
+        questionFrontendId: succ.questionFrontendId,
+        problemTitle: succ.problemTitle,
+        difficulty: succ.difficulty,
+        action: 'Accepted Submission',
+        status: 'accepted',
+        timestamp: succ.eventTime,
+        timePrecision: succ.precision,
+        sourceTimezone: succ.sourceTimezone,
+        isDatePending: resolved.isPending,
+        sortKey: Number.isNaN(sortKey) ? 0 : sortKey,
+      });
+    }
   }
 
   // 4. Calculate streak and weekly solved
@@ -460,7 +510,8 @@ export function getActivityItems(
   snapshots: ProgressSnapshot[],
   problems: CatalogProblem[],
   userTimezone: string | null,
-  now: number
+  now: number,
+  snapshotSuccesses: DashboardSnapshotSuccess[] = []
 ): RecentActivityItem[] {
   const problemMap = new Map<string, CatalogProblem>(problems.map(p => [p.questionId, p]));
   const items: (RecentActivityItem & { sortKey: number })[] = [];
@@ -489,10 +540,12 @@ export function getActivityItems(
     });
   }
 
+  const snapshotLookup = new Map<string, ProgressSnapshot>();
   for (const s of snapshots) {
     if (s.status !== 'active') continue;
+    snapshotLookup.set(s.questionId, s);
     const resolved = resolveEventDate(s.lastSubmittedAt, s.timePrecision, (s as any).sourceTimezone ?? null, userTimezone, now);
-    const isAccepted = s.hasAccepted || s.lastResult === 'Accepted';
+    const isLatestAccepted = s.lastResult === 'Accepted';
     const sortKey = s.timePrecision === 'datetime' ? Date.parse(s.lastSubmittedAt) : (Date.parse(`${s.lastSubmittedAt}T00:00:00Z`) || 0);
 
     items.push({
@@ -502,14 +555,43 @@ export function getActivityItems(
       questionFrontendId: s.questionFrontendId,
       problemTitle: s.problemTitle,
       difficulty: s.difficulty,
-      action: isAccepted ? 'Accepted Submission' : (s.lastResult || 'Submission'),
-      status: isAccepted ? 'accepted' : 'other',
+      action: isLatestAccepted ? 'Accepted Submission' : (s.lastResult || 'Submission'),
+      status: isLatestAccepted ? 'accepted' : 'other',
       timestamp: s.lastSubmittedAt,
       timePrecision: s.timePrecision,
       sourceTimezone: (s as any).sourceTimezone ?? null,
       isDatePending: resolved.isPending,
       sortKey: Number.isNaN(sortKey) ? 0 : sortKey,
     });
+  }
+
+  const seenSuccesses = new Set<string>();
+  for (const succ of snapshotSuccesses) {
+    const key = `${succ.questionId}:${succ.eventTime}`;
+    if (seenSuccesses.has(key)) continue;
+    seenSuccesses.add(key);
+
+    const s = snapshotLookup.get(succ.questionId);
+    const isRedundantWithLatest = s && s.lastResult === 'Accepted' && s.lastSubmittedAt === succ.eventTime;
+    if (!isRedundantWithLatest) {
+      const resolved = resolveEventDate(succ.eventTime, succ.precision, succ.sourceTimezone, userTimezone, now);
+      const sortKey = succ.precision === 'datetime' ? Date.parse(succ.eventTime) : (Date.parse(`${succ.eventTime}T00:00:00Z`) || 0);
+      items.push({
+        id: `${succ.questionId}-success-${succ.version}`,
+        source: 'snapshot',
+        questionId: succ.questionId,
+        questionFrontendId: succ.questionFrontendId,
+        problemTitle: succ.problemTitle,
+        difficulty: succ.difficulty,
+        action: 'Accepted Submission',
+        status: 'accepted',
+        timestamp: succ.eventTime,
+        timePrecision: succ.precision,
+        sourceTimezone: succ.sourceTimezone,
+        isDatePending: resolved.isPending,
+        sortKey: Number.isNaN(sortKey) ? 0 : sortKey,
+      });
+    }
   }
 
   items.sort((a, b) => b.sortKey - a.sortKey || b.timestamp.localeCompare(a.timestamp) || a.id.localeCompare(b.id));

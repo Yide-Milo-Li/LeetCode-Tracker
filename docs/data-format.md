@@ -64,23 +64,27 @@ Example line:
 
 ---
 
-## 3. SQLite schema (v6)
+## 3. SQLite schema (v7)
 
-The local SQLite catalog schema is defined in [store.ts](../packages/database/src/store.ts) (version 6):
+The local SQLite catalog schema is defined in [schema.ts](../packages/database/src/schema.ts) and [planning-schema.ts](../packages/database/src/planning-schema.ts) (version 7):
 
 - **`problems`**: Stores normalized problem records keyed by `question_id`, with unique index on `frontend_question_id`.
 - **`tags`**: Normalized taxonomy table keyed by `slug`.
 - **`problem_tags`**: Many-to-many relationship table with cascade deletion.
-- **`practice_records`**: Manual practice sessions with datetime/date precision, completed flag, notes, and soft-revocation audit fields (`status`, `revoked_at`, `revoked_reason`).
-- **`progress_snapshots`**: Single current progress snapshot per internal problem (`last_submitted_at`, `time_precision`, `last_result`, `total_submissions`, `has_accepted`, `version`).
+- **`practice_records`**: Manual practice sessions with datetime/date precision, completed flag, notes, optional `source_timezone`, and soft-revocation audit fields (`status`, `revoked_at`, `revoked_reason`).
+- **`progress_snapshots`**: Single current progress snapshot per internal problem (`last_submitted_at`, `time_precision`, `last_result`, `total_submissions`, `has_accepted`, `version`, optional `source_timezone`).
 - **`progress_snapshot_history`**: Versioned historical snapshots retained for audit trail on every update or revocation.
+- **`snapshot_successes`**: Append-only log of confirmed snapshot accepted events (`question_id`, `version`, `event_time`, `precision`, `source_timezone`, `recorded_at`) powering accurate historical solve counts.
 - **`progress_import_history`**: Audit log recording progress import timestamps, candidates processed, inserted/updated/unchanged/conflict/error counts.
 - **`progress_import_results`**: Durable serialized replay of progress import summaries.
+- **`strategies`**, **`strategy_versions`**, **`weekday_assignments`**: Adaptive recommendation strategies, version history, and day-of-week bindings.
+- **`daily_plans`**, **`daily_plan_versions`**, **`planning_operations`**: Daily generated problem sets, replacement histories, and operation replay fingerprints.
+- **`problem_review_state`**: Spaced repetition SM-2 review state tracking per problem.
 - **`import_results`**: Complete committed response, including line errors, keyed by import ID for durable retry replay.
 - **`import_history`**: Audit log recording ingestion timestamps, lines processed, inserted/updated/unchanged/duplicate counts, and error counts.
-- **`catalog_meta`**: Key-value metadata storing monotonic `catalog_revision`, `practice_revision`, and `last_imported_at`.
+- **`catalog_meta`**: Key-value metadata storing monotonic `catalog_revision`, `practice_revision`, `planning_revision`, `review_baseline`, and `last_imported_at`.
 - **`settings`**: User preferences table storing `language` ('en' | 'zh'), `theme` ('light' | 'dark' | 'system'), and `timezone` (string | null).
-- **`schema_version`**: Tracks applied database schema version.
+- **`schema_version`**: Tracks applied database schema version (currently v7).
 
 ---
 
@@ -88,6 +92,7 @@ The local SQLite catalog schema is defined in [store.ts](../packages/database/sr
 
 - **Completion Proof Rule**: A problem is considered solved if it has an active completed manual practice record OR a progress snapshot with `has_accepted = 1`.
 - **Snapshot Replacement Without Deltas**: Progress snapshot ingestion records the exact incoming snapshot values without computing synthetic submission deltas.
+- **Snapshot Successes vs Latest Attempt**: Cumulative accepted solves are counted from historical `snapshot_successes` events and manual practice completions. A problem's latest submission timestamp on `lastSubmittedAt` counts as a solve if and only if `lastResult === 'Accepted'`. Deduplication is performed by `(questionId, date)` in daily aggregations.
 - **Conflict Evaluation**:
   - `older_date`: Incoming submission timestamp is older than existing snapshot.
   - `decreased_submissions`: Incoming submission count is lower than existing snapshot.

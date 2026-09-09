@@ -1,6 +1,6 @@
 # Architecture
 
-The repository baseline implements an offline-first, Bring-Your-Own-Data (BYOD) practice workbench. It provides shared TypeScript contracts, transactional SQLite storage (schema v6), a local Fastify loopback API, a server-side Gemini structured format assistant, and a bilingual React web client.
+The repository baseline implements an offline-first, Bring-Your-Own-Data (BYOD) practice workbench. It provides shared TypeScript contracts, transactional SQLite storage (schema v7), a local Fastify loopback API, a server-side Gemini structured format assistant, and a bilingual React web client.
 
 ## Component structure
 

@@ -74,7 +74,7 @@ describe('Phase 4 Closure Gate Verification', () => {
         reviewPercent: null,
         preference: '',
       },
-      weekdays: [1, 2, 3], // Mon, Tue, Wed
+      weekdays: [0, 1, 2, 3, 4, 5, 6],
     });
     assert.equal(strategy.name, 'Weekday Grind');
 
@@ -155,7 +155,7 @@ describe('Phase 4 Closure Gate Verification', () => {
     const restoredStrategies = restoredPlanningStore.strategies();
     assert.equal(restoredStrategies.length, 1);
     assert.equal(restoredStrategies[0].name, 'Weekday Grind');
-    assert.deepEqual(restoredStrategies[0].weekdays, [1, 2, 3]);
+    assert.deepEqual(restoredStrategies[0].weekdays, [0, 1, 2, 3, 4, 5, 6]);
 
     // Verify daily plan
     const restoredPlan = restoredPlanningStore.planByDate(planDate);

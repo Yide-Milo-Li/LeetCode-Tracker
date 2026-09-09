@@ -289,6 +289,7 @@ export const translations = {
     practiceLastUpdated: 'Practice Data Updated',
     userTimezoneLabel: 'User Timezone',
     pendingDatesNotice: '{count} record(s) have unconfirmed dates and require explicit source timezones.',
+    timezoneAutoDetected: 'Automatically detected and set timezone to {tz}. You can change it anytime in Settings.',
     closeDrawer: 'Close',
   },
   zh: {
@@ -573,6 +574,7 @@ export const translations = {
     practiceLastUpdated: '练习数据更新时间',
     userTimezoneLabel: '用户时区',
     pendingDatesNotice: '有 {count} 条记录因未确认时区被列为“日期待确认”，未计入日期图表。',
+    timezoneAutoDetected: '已自动识别并将时区设置为 {tz}。你可随时在设置页中修改。',
     closeDrawer: '关闭',
   },
 };

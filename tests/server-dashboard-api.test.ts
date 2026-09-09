@@ -227,6 +227,7 @@ describe('Fastify Dashboard & Activity API Endpoints', () => {
         ],
       });
       await store.commitProgressImport(preview.previewId, preview);
+      db.prepare("UPDATE progress_snapshots SET source_timezone = NULL WHERE question_id = 'q4'").run();
       db.prepare("UPDATE snapshot_successes SET source_timezone = NULL WHERE question_id = 'q4'").run();
 
       // 1. Query all activities

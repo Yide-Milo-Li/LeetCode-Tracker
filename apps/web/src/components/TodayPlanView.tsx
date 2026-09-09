@@ -38,15 +38,14 @@ interface TodayPlanViewProps {
   planController?: UseDailyPlanReturn;
 }
 
-export const TodayPlanView: React.FC<TodayPlanViewProps> = ({
+const TodayPlanViewInner: React.FC<TodayPlanViewProps & { planController: UseDailyPlanReturn }> = ({
   lang,
   onNavigateToSettings,
   onNavigateToDashboard,
   planController,
 }) => {
   const t = translations[lang];
-  const internalController = useDailyPlan();
-  const controller = planController ?? internalController;
+  const controller = planController;
 
   const {
     loading,
@@ -433,4 +432,16 @@ export const TodayPlanView: React.FC<TodayPlanViewProps> = ({
       )}
     </div>
   );
+};
+
+const TodayPlanViewWithInternalController: React.FC<TodayPlanViewProps> = (props) => {
+  const internalController = useDailyPlan();
+  return <TodayPlanViewInner {...props} planController={internalController} />;
+};
+
+export const TodayPlanView: React.FC<TodayPlanViewProps> = (props) => {
+  if (props.planController) {
+    return <TodayPlanViewInner {...props} planController={props.planController} />;
+  }
+  return <TodayPlanViewWithInternalController {...props} />;
 };

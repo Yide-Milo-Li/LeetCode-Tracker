@@ -924,7 +924,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       rawData.snapshots,
       rawData.problems,
       rawData.userTimezone,
-      now
+      now,
+      rawData.snapshotSuccesses
     );
 
     const result = filterAndPaginateActivities(allActivities, parseRes.data, rawData.userTimezone, now);

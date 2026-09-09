@@ -479,3 +479,99 @@ it('ActivityHistoryDrawer handles filtering, pagination, and keyboard escape clo
   fireEvent.keyDown(window, { key: 'Escape' });
   assert.equal(closed, true, 'Escape key should trigger onClose');
 });
+
+it('ActivityHistoryDrawer clears dateFilter when initialDate transitions from date to null', async () => {
+  let queryParams: any = null;
+  const mockActivities: DashboardActivityListResponse = {
+    total: 0,
+    page: 1,
+    limit: 20,
+    totalPages: 0,
+    items: [],
+  };
+
+  mock.method(api, 'getDashboardActivities', async (query: any) => {
+    queryParams = query;
+    return mockActivities;
+  });
+
+  const { rerender } = render(
+    <ActivityHistoryDrawer
+      isOpen={true}
+      onClose={() => {}}
+      lang="en"
+      initialDate="2026-03-30"
+    />
+  );
+
+  await act(async () => {});
+  assert.equal(queryParams?.date, '2026-03-30', 'Should initialize with date filter');
+
+  // Rerender with initialDate set to null (simulating user clicking "View all activities" or parent reset)
+  await act(async () => {
+    rerender(
+      <ActivityHistoryDrawer
+        isOpen={true}
+        onClose={() => {}}
+        lang="en"
+        initialDate={null}
+      />
+    );
+  });
+
+  assert.equal(queryParams?.date, undefined, 'Date filter should be cleared when initialDate becomes null');
+});
+
+it('supports heatmap keyboard roving tabIndex and navigation (Arrow keys and Enter)', async () => {
+  const mockData = createMockDashboardData();
+  mock.method(api, 'getDashboard', async () => mockData);
+
+  const mockActivities: DashboardActivityListResponse = {
+    total: 0,
+    page: 1,
+    limit: 20,
+    totalPages: 0,
+    items: [],
+  };
+  let requestedDate: string | undefined;
+  mock.method(api, 'getDashboardActivities', async (query: { date?: string }) => {
+    requestedDate = query.date;
+    return mockActivities;
+  });
+
+  const planController = createMockPlanController();
+
+  await act(async () => {
+    render(
+      <DashboardView
+        lang="en"
+        planController={planController}
+        onNavigateToToday={() => {}}
+        onNavigateToSettings={() => {}}
+      />
+    );
+  });
+
+  // Verify roving tabIndex exists: one cell has tabIndex="0", others have tabIndex="-1"
+  const currentActiveCell = document.querySelector<HTMLButtonElement>('.heatmap-cell[tabindex="0"]');
+  assert.ok(currentActiveCell, 'A single cell in the heatmap must have tabIndex=0 for roving focus');
+  const initialDateStr = currentActiveCell.getAttribute('data-date');
+  assert.ok(initialDateStr, 'Active cell must have data-date attribute');
+
+  // Trigger ArrowDown to move to the next day in the same week
+  await act(async () => {
+    fireEvent.keyDown(currentActiveCell, { key: 'ArrowDown' });
+  });
+
+  const newlyFocusedCell = document.querySelector<HTMLButtonElement>('.heatmap-cell[tabindex="0"]');
+  assert.ok(newlyFocusedCell, 'Heatmap should retain a tabIndex=0 cell after ArrowDown');
+  const nextDateStr = newlyFocusedCell.getAttribute('data-date');
+  assert.notEqual(nextDateStr, initialDateStr, 'Focused cell date should change after ArrowDown');
+
+  // Press Enter on the focused cell to activate drawer for that date
+  await act(async () => {
+    fireEvent.keyDown(newlyFocusedCell, { key: 'Enter' });
+  });
+
+  assert.equal(requestedDate, nextDateStr, 'Enter key should open activity drawer for the keyboard-focused date');
+});

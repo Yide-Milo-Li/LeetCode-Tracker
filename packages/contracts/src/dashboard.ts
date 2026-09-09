@@ -5,6 +5,8 @@
 import { z } from 'zod';
 import type { RevisionStamp } from './recommendations.ts';
 
+import { isCalendarDate } from './time.ts';
+
 /** Query parameters for the main dashboard endpoint. */
 export const dashboardQuerySchema = z.object({
   year: z.coerce.number().int().min(1970).max(2100).optional(),
@@ -16,7 +18,7 @@ export type DashboardQuery = z.infer<typeof dashboardQuerySchema>;
 export const dashboardActivityQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  date: z.string().refine(isCalendarDate, 'Invalid calendar date').optional(),
   source: z.enum(['manual', 'snapshot', 'all']).default('all'),
   pendingDate: z.enum(['true', 'false', 'all']).default('all'),
 }).strict();
@@ -78,6 +80,19 @@ export interface TagDistribution {
   tagSlug: string;
   tagName: string;
   solvedCount: number;
+}
+
+/** Verified historical snapshot success event. */
+export interface DashboardSnapshotSuccess {
+  questionId: string;
+  questionFrontendId: string;
+  problemTitle: string;
+  difficulty: 'Easy' | 'Medium' | 'Hard';
+  version: number;
+  eventTime: string;
+  precision: 'datetime' | 'date';
+  sourceTimezone: string | null;
+  recordedAt: number;
 }
 
 /** Item representing a recent activity event. */

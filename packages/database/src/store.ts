@@ -28,6 +28,7 @@ import {
 } from '../../contracts/src/sync.ts';
 import { isEventTime } from '../../contracts/src/time.ts';
 import type { RevisionStamp } from '../../contracts/src/recommendations.ts';
+import type { DashboardSnapshotSuccess } from '../../contracts/src/dashboard.ts';
 import {
   createPracticeRecordSchema,
   updatePracticeRecordSchema,
@@ -2214,6 +2215,7 @@ export class CatalogStore {
     problems: CatalogProblem[];
     manualRecords: PracticeRecord[];
     snapshots: ProgressSnapshot[];
+    snapshotSuccesses: DashboardSnapshotSuccess[];
     catalogUpdatedAt: number | null;
     practiceUpdatedAt: number | null;
     userTimezone: string | null;
@@ -2273,11 +2275,12 @@ export class CatalogStore {
       source: row.source,
     }));
 
-    // 2. Fetch all active manual practice records
+    // 2. Fetch all active manual practice records with source_timezone
     const manualRecords = (this.db.prepare(`
       SELECT
         id, question_id as questionId, completed, practiced_at as practicedAt,
-        time_precision as timePrecision, notes, status, created_at as createdAt,
+        time_precision as timePrecision, source_timezone as sourceTimezone,
+        notes, status, created_at as createdAt,
         updated_at as updatedAt, revoked_at as revokedAt
       FROM practice_records
       WHERE status = 'active'
@@ -2292,19 +2295,17 @@ export class CatalogStore {
       mr.problemTitle = p?.title ?? 'Unknown';
       mr.questionFrontendId = p?.frontendId ?? mr.questionId;
       mr.completed = Boolean(mr.completed);
-      (mr as any).sourceTimezone = null;
     }
 
-    // 3. Fetch all active progress snapshots
+    // 3. Fetch all active progress snapshots with their own source_timezone
     const snapshotRows = (this.db.prepare(`
       SELECT
         ps.question_id as questionId, ps.last_submitted_at as lastSubmittedAt,
         ps.time_precision as timePrecision, ps.last_result as lastResult,
         ps.total_submissions as totalSubmissions, ps.has_accepted as hasAccepted,
         ps.source, ps.version, ps.status, ps.updated_at as updatedAt,
-        ss.source_timezone as sourceTimezone
+        ps.source_timezone as sourceTimezone
       FROM progress_snapshots ps
-      LEFT JOIN snapshot_successes ss ON ps.question_id = ss.question_id AND ps.version = ss.version
       WHERE ps.status = 'active'
       ORDER BY ps.last_submitted_at DESC
     `).all() as unknown) as Array<ProgressSnapshot & { sourceTimezone: string | null }>;
@@ -2317,7 +2318,40 @@ export class CatalogStore {
       sr.hasAccepted = Boolean(sr.hasAccepted);
     }
 
-    // 4. Metadata timestamps
+    // 4. Fetch all verified historical snapshot successes for active questions
+    const successRows = (this.db.prepare(`
+      SELECT
+        ss.question_id as questionId, ss.version, ss.event_time as eventTime,
+        ss.precision, ss.source_timezone as sourceTimezone, ss.recorded_at as recordedAt
+      FROM snapshot_successes ss
+      JOIN progress_snapshots ps ON ss.question_id = ps.question_id
+      WHERE ps.status = 'active' AND ps.has_accepted = 1
+      ORDER BY ss.event_time DESC
+    `).all() as unknown) as Array<{
+      questionId: string;
+      version: number;
+      eventTime: string;
+      precision: 'datetime' | 'date';
+      sourceTimezone: string | null;
+      recordedAt: number;
+    }>;
+
+    const snapshotSuccesses: DashboardSnapshotSuccess[] = successRows.map(row => {
+      const p = problemLookup.get(row.questionId);
+      return {
+        questionId: row.questionId,
+        questionFrontendId: p?.frontendId ?? row.questionId,
+        problemTitle: p?.title ?? 'Unknown',
+        difficulty: p?.difficulty ?? 'Medium',
+        version: row.version,
+        eventTime: row.eventTime,
+        precision: row.precision,
+        sourceTimezone: row.sourceTimezone,
+        recordedAt: row.recordedAt,
+      };
+    });
+
+    // 5. Metadata timestamps
     const catalogMax = (this.db.prepare('SELECT max(updated_at) as max_time FROM problems').get() as { max_time: number | null })?.max_time ?? null;
     const manualMax = (this.db.prepare('SELECT max(updated_at) as max_time FROM practice_records').get() as { max_time: number | null })?.max_time ?? null;
     const snapshotMax = (this.db.prepare('SELECT max(updated_at) as max_time FROM progress_snapshots').get() as { max_time: number | null })?.max_time ?? null;
@@ -2336,6 +2370,7 @@ export class CatalogStore {
       problems,
       manualRecords,
       snapshots: snapshotRows,
+      snapshotSuccesses,
       catalogUpdatedAt: catalogMax,
       practiceUpdatedAt: practiceMax,
       userTimezone: settings.timezone,

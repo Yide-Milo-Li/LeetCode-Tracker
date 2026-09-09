@@ -4,7 +4,7 @@
  * interactive yearly activity heatmap, 30-day activity trend chart,
  * difficulty & tag distributions, recent activities, and drawer triggers.
  */
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Trophy,
   Calendar,
@@ -12,15 +12,12 @@ import {
   CheckCircle2,
   FileText,
   Clock,
-  ExternalLink,
   ChevronRight,
   AlertTriangle,
   RefreshCw,
   Sparkles,
-  Coffee,
   Layers,
   ArrowRight,
-  ShieldAlert,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -60,39 +57,68 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [data, setData] = useState<DashboardResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
+  const [timezoneNotice, setTimezoneNotice] = useState<string | null>(null);
 
   // History Drawer state
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [drawerInitialDate, setDrawerInitialDate] = useState<string | null>(null);
 
-  // Active hover tooltip for heatmap cell
+  // Keyboard navigation & roving tabIndex for heatmap
+  const [focusedDate, setFocusedDate] = useState<string | null>(null);
+
+  // Active hover/focus tooltip for heatmap cell
   const [hoveredDay, setHoveredDay] = useState<{
     day: YearlyActivityDay;
     x: number;
     y: number;
   } | null>(null);
 
+  const dashboardSeqRef = useRef(0);
+
   const fetchDashboard = useCallback(async (year?: number) => {
+    const seq = ++dashboardSeqRef.current;
     setLoading(true);
     setError(null);
     try {
       const res = await api.getDashboard(year);
+      if (seq !== dashboardSeqRef.current) return;
       setData(res);
       if (res.yearlyActivity.year) {
         setSelectedYear(res.yearlyActivity.year);
       }
+
+      // Auto-detect browser timezone on first launch if timezone is null
+      if (res.dataStatus.userTimezone === null) {
+        try {
+          const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
+          if (detected) {
+            await api.updateSettings({ timezone: detected });
+            setTimezoneNotice(t.timezoneAutoDetected.replace('{tz}', detected));
+            const refreshed = await api.getDashboard(year);
+            if (seq === dashboardSeqRef.current) {
+              setData(refreshed);
+            }
+            planController.refresh();
+          }
+        } catch {
+          // Graceful fallback if detection or saving fails
+        }
+      }
     } catch (err: unknown) {
+      if (seq !== dashboardSeqRef.current) return;
       setError(err instanceof Error ? err.message : 'Failed to load dashboard data.');
     } finally {
-      setLoading(false);
+      if (seq === dashboardSeqRef.current) {
+        setLoading(false);
+      }
     }
-  }, []);
+  }, [planController, t.timezoneAutoDetected]);
 
   useEffect(() => {
     fetchDashboard(selectedYear);
   }, [selectedYear, fetchDashboard]);
 
-  // Year choices (current year and past 3 years)
+  // Year choices (current year and past 2 years)
   const currentCalYear = new Date().getFullYear();
   const availableYears = [currentCalYear, currentCalYear - 1, currentCalYear - 2];
 
@@ -107,20 +133,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return map;
   }, [data?.yearlyActivity.days]);
 
-  // Generate 53-week calendar matrix for selected year
+  // Generate ISO 8601 calendar matrix (Monday to Sunday) for selected year
   const calendarWeeks = useMemo(() => {
     const weeks: Array<Array<{ dateStr: string; inYear: boolean }>> = [];
     const jan1 = new Date(Date.UTC(selectedYear, 0, 1));
     const dec31 = new Date(Date.UTC(selectedYear, 11, 31));
 
-    // Start from Sunday of the week containing Jan 1
+    // ISO 8601: Monday = 1, Sunday = 0. Days since Monday: (day + 6) % 7
+    const jan1Day = jan1.getUTCDay();
+    const daysSinceMonday = (jan1Day + 6) % 7;
     const startDate = new Date(jan1);
-    startDate.setUTCDate(startDate.getUTCDate() - startDate.getUTCDay());
+    startDate.setUTCDate(startDate.getUTCDate() - daysSinceMonday);
 
     const current = new Date(startDate);
     let currentWeek: Array<{ dateStr: string; inYear: boolean }> = [];
 
-    while (current <= dec31 || current.getUTCDay() !== 0) {
+    while (current <= dec31 || currentWeek.length > 0) {
       const y = current.getUTCFullYear();
       const m = String(current.getUTCMonth() + 1).padStart(2, '0');
       const d = String(current.getUTCDate()).padStart(2, '0');
@@ -132,23 +160,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       if (currentWeek.length === 7) {
         weeks.push(currentWeek);
         currentWeek = [];
+        if (current > dec31) break;
       }
 
       current.setUTCDate(current.getUTCDate() + 1);
     }
 
-    if (currentWeek.length > 0) {
-      while (currentWeek.length < 7) {
-        const y = current.getUTCFullYear();
-        const m = String(current.getUTCMonth() + 1).padStart(2, '0');
-        const d = String(current.getUTCDate()).padStart(2, '0');
-        currentWeek.push({ dateStr: `${y}-${m}-${d}`, inYear: false });
-        current.setUTCDate(current.getUTCDate() + 1);
-      }
-      weeks.push(currentWeek);
-    }
-
     return weeks;
+  }, [selectedYear]);
+
+  // Default focused date for roving tabIndex
+  useEffect(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    if (today.startsWith(`${selectedYear}-`)) {
+      setFocusedDate(today);
+    } else {
+      setFocusedDate(`${selectedYear}-01-01`);
+    }
   }, [selectedYear]);
 
   const handleCellClick = (dateStr: string) => {
@@ -161,25 +189,68 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     setIsDrawerOpen(true);
   };
 
+  const handleCellKeyDown = (
+    e: React.KeyboardEvent,
+    dateStr: string,
+    wIdx: number,
+    dIdx: number
+  ) => {
+    let targetDateStr: string | null = null;
+    if (e.key === 'ArrowUp') {
+      if (dIdx > 0) {
+        targetDateStr = calendarWeeks[wIdx][dIdx - 1]?.dateStr;
+      }
+    } else if (e.key === 'ArrowDown') {
+      if (dIdx < 6) {
+        targetDateStr = calendarWeeks[wIdx][dIdx + 1]?.dateStr;
+      }
+    } else if (e.key === 'ArrowLeft') {
+      if (wIdx > 0) {
+        targetDateStr = calendarWeeks[wIdx - 1][dIdx]?.dateStr;
+      }
+    } else if (e.key === 'ArrowRight') {
+      if (wIdx < calendarWeeks.length - 1) {
+        targetDateStr = calendarWeeks[wIdx + 1][dIdx]?.dateStr;
+      }
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      handleCellClick(dateStr);
+      return;
+    }
+
+    if (targetDateStr) {
+      e.preventDefault();
+      setFocusedDate(targetDateStr);
+      const targetEl = document.querySelector<HTMLElement>(`[data-date="${targetDateStr}"]`);
+      targetEl?.focus();
+    }
+  };
+
   return (
-    <div className="space-y-6">
+    <div className="dashboard-view-container">
       {/* Header Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="dashboard-header-row">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+          <h1 className="dashboard-title">
             <Trophy className="w-7 h-7 text-indigo-600 dark:text-indigo-400" />
             {t.dashboardTitle}
           </h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+          <p className="dashboard-subtitle">
             {t.dashboardSubtitle}
           </p>
         </div>
 
         <div className="flex items-center gap-2">
           <button
-            onClick={() => fetchDashboard(selectedYear)}
+            onClick={async () => {
+              await Promise.all([
+                fetchDashboard(selectedYear),
+                planController.refresh(),
+              ]);
+            }}
             disabled={loading}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 transition-colors shadow-sm"
+            className="btn btn-secondary"
+            style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem' }}
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             {t.retry}
@@ -187,180 +258,192 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
+      {/* Auto-detected timezone notice */}
+      {timezoneNotice && (
+        <div className="timezone-detected-banner">
+          <Sparkles className="w-4 h-4 flex-shrink-0" />
+          <span>{timezoneNotice}</span>
+          <button
+            onClick={() => setTimezoneNotice(null)}
+            className="btn-icon"
+            style={{ marginLeft: 'auto', border: 'none', background: 'transparent' }}
+            aria-label="Dismiss notice"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {error && (
-        <div className="p-4 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-xl border border-red-200 dark:border-red-800 text-sm">
+        <div className="alert alert-error" style={{ fontSize: '0.875rem' }}>
           {error}
         </div>
       )}
 
       {/* KPI Cards Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
+      <div className="kpi-grid">
         {/* Unique Solved */}
-        <div className="p-4 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
-          <div className="flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+        <div className="kpi-card">
+          <div className="kpi-header">
             <Trophy className="w-4 h-4 text-emerald-500" />
             {t.kpiUniqueSolved}
           </div>
-          <div className="mt-2 text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">
+          <div className="kpi-value">
             {data ? data.overview.uniqueSolvedProblems : '—'}
           </div>
-          <div className="text-[11px] text-gray-400 mt-1">{t.problemsUnit}</div>
+          <div className="kpi-unit">{t.problemsUnit}</div>
         </div>
 
         {/* Solved This Week */}
-        <div className="p-4 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
-          <div className="flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+        <div className="kpi-card">
+          <div className="kpi-header">
             <Calendar className="w-4 h-4 text-indigo-500" />
             {t.kpiSolvedThisWeek}
           </div>
-          <div className="mt-2 text-2xl sm:text-3xl font-bold text-indigo-600 dark:text-indigo-400">
+          <div className="kpi-value" style={{ color: 'var(--primary)' }}>
             {data ? data.overview.solvedThisWeek : '—'}
           </div>
-          <div className="text-[11px] text-gray-400 mt-1">{t.problemsUnit}</div>
+          <div className="kpi-unit">{t.problemsUnit}</div>
         </div>
 
         {/* Current Streak */}
-        <div className="p-4 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
-          <div className="flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+        <div className="kpi-card">
+          <div className="kpi-header">
             <Flame className="w-4 h-4 text-amber-500" />
             {t.kpiStreak}
           </div>
-          <div className="mt-2 text-2xl sm:text-3xl font-bold text-amber-500">
+          <div className="kpi-value" style={{ color: 'var(--warning)' }}>
             {data ? data.overview.currentStreak : '—'}
           </div>
-          <div className="text-[11px] text-gray-400 mt-1">{t.daysUnit}</div>
+          <div className="kpi-unit">{t.daysUnit}</div>
         </div>
 
         {/* Total Manual Practices */}
-        <div className="p-4 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
-          <div className="flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+        <div className="kpi-card">
+          <div className="kpi-header">
             <FileText className="w-4 h-4 text-blue-500" />
             {t.kpiTotalManual}
           </div>
-          <div className="mt-2 text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">
+          <div className="kpi-value">
             {data ? data.overview.totalManualPractices : '—'}
           </div>
-          <div className="text-[11px] text-gray-400 mt-1">{t.sourceManual}</div>
+          <div className="kpi-unit">{t.sourceManual}</div>
         </div>
 
         {/* Total Snapshot Submissions */}
-        <div className="p-4 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm col-span-2 sm:col-span-1">
-          <div className="flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+        <div className="kpi-card">
+          <div className="kpi-header">
             <Layers className="w-4 h-4 text-purple-500" />
             {t.kpiTotalSnapshots}
           </div>
-          <div className="mt-2 text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">
+          <div className="kpi-value">
             {data ? data.overview.totalSnapshotSubmissions : '—'}
           </div>
-          <div className="text-[11px] text-gray-400 mt-1">{t.sourceSnapshot}</div>
+          <div className="kpi-unit">{t.sourceSnapshot}</div>
         </div>
       </div>
 
-      {/* Today's Task Summary Card */}
-      <div className="p-4 sm:p-5 bg-gradient-to-r from-indigo-50/60 to-purple-50/60 dark:from-indigo-950/20 dark:to-purple-950/20 rounded-xl border border-indigo-200/80 dark:border-indigo-800/50 shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-              <h2 className="text-base font-bold text-gray-900 dark:text-white">
-                {t.todaySummaryTitle}
-              </h2>
+      {/* Today's Task Summary Banner */}
+      <div className="today-summary-banner">
+        <div className="today-summary-info">
+          <div className="today-summary-title-row">
+            <Sparkles className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+            <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: 0 }}>
+              {t.todaySummaryTitle}
+            </h2>
 
-              {/* Status pill based on shared plan controller / fallback */}
-              {planController.loading ? (
-                <span className="text-[11px] px-2 py-0.5 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 animate-pulse">
-                  {t.todaySummaryGenerating}
-                </span>
-              ) : planController.ensureResult?.status === 'setup' ? (
-                <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-300 font-medium">
-                  {t.todaySummarySetup}
-                </span>
-              ) : planController.ensureResult?.status === 'rest' ? (
-                <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-300 font-medium">
-                  {t.todaySummaryRest}
-                </span>
-              ) : planController.error ? (
-                <span className="text-[11px] px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/60 text-red-800 dark:text-red-300 font-medium">
-                  {t.todaySummaryFailed}
-                </span>
-              ) : planController.plan ? (
-                <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 font-medium">
-                  {t.todaySummaryReady}
-                </span>
-              ) : null}
-            </div>
-
-            {/* Description or details */}
-            <p className="text-xs text-gray-600 dark:text-gray-300">
-              {planController.plan ? (
-                <>
-                  <span className="font-semibold text-indigo-600 dark:text-indigo-400">
-                    {data?.todaySummary.strategyName ?? 'Personalized Plan'}
-                  </span>
-                  {' • '}
-                  <span>
-                    {t.todaySummaryProgress
-                      .replace('{completed}', String(planController.plan.items.filter(i => i.completed).length))
-                      .replace('{target}', String(planController.plan.items.length))}
-                  </span>
-                  {data?.todaySummary.shortage && data.todaySummary.shortage > 0 ? (
-                    <span className="text-amber-600 dark:text-amber-400 ml-1">
-                      {t.todaySummaryShortage.replace('{shortage}', String(data.todaySummary.shortage))}
-                    </span>
-                  ) : null}
-                </>
-              ) : planController.ensureResult?.status === 'rest' ? (
-                t.restDayDesc
-              ) : planController.ensureResult?.status === 'setup' ? (
-                t.setupTimezoneDesc
-              ) : (
-                t.todaySubtitle
-              )}
-            </p>
+            {/* Status pill based on shared plan controller */}
+            {planController.loading ? (
+              <span className="badge badge-neutral" style={{ animation: 'pulse 1.5s infinite' }}>
+                {t.todaySummaryGenerating}
+              </span>
+            ) : planController.ensureResult?.status === 'setup' ? (
+              <span className="badge badge-warning">
+                {t.todaySummarySetup}
+              </span>
+            ) : planController.ensureResult?.status === 'rest' ? (
+              <span className="badge badge-neutral">
+                {t.todaySummaryRest}
+              </span>
+            ) : planController.error ? (
+              <span className="badge badge-danger">
+                {t.todaySummaryFailed}
+              </span>
+            ) : planController.plan ? (
+              <span className="badge badge-success">
+                {t.todaySummaryReady}
+              </span>
+            ) : null}
           </div>
 
-          <div className="flex items-center gap-2">
-            {planController.ensureResult?.status === 'setup' ? (
-              <button
-                onClick={onNavigateToSettings}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-amber-600 hover:bg-amber-700 text-white shadow-sm transition-colors"
-              >
-                {t.navSettings}
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
+          <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', margin: '0.25rem 0 0 0' }}>
+            {planController.plan ? (
+              <>
+                <strong style={{ color: 'var(--primary)' }}>
+                  {data?.todaySummary.strategyName ?? 'Personalized Plan'}
+                </strong>
+                {' • '}
+                <span>
+                  {t.todaySummaryProgress
+                    .replace('{completed}', String(planController.plan.items.filter(i => i.completed).length))
+                    .replace('{target}', String(planController.plan.items.length))}
+                </span>
+                {data?.todaySummary.shortage && data.todaySummary.shortage > 0 ? (
+                  <span style={{ color: 'var(--warning)', marginLeft: '0.5rem' }}>
+                    {t.todaySummaryShortage.replace('{shortage}', String(data.todaySummary.shortage))}
+                  </span>
+                ) : null}
+              </>
+            ) : planController.ensureResult?.status === 'rest' ? (
+              t.restDayDesc
+            ) : planController.ensureResult?.status === 'setup' ? (
+              t.setupTimezoneDesc
             ) : (
-              <button
-                onClick={onNavigateToToday}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition-colors"
-              >
-                {t.todaySummaryGoToToday}
-              </button>
+              t.todaySubtitle
             )}
-          </div>
+          </p>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          {planController.ensureResult?.status === 'setup' ? (
+            <button
+              onClick={onNavigateToSettings}
+              className="btn btn-primary"
+              style={{ fontSize: '0.75rem', padding: '0.4rem 0.8rem' }}
+            >
+              {t.navSettings}
+              <ArrowRight className="w-3.5 h-3.5" style={{ marginLeft: '0.25rem' }} />
+            </button>
+          ) : (
+            <button
+              onClick={onNavigateToToday}
+              className="btn btn-primary"
+              style={{ fontSize: '0.75rem', padding: '0.4rem 0.8rem' }}
+            >
+              {t.todaySummaryGoToToday}
+            </button>
+          )}
         </div>
       </div>
 
       {/* Yearly Activity Heatmap */}
-      <div className="p-4 sm:p-5 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
-        <div className="flex items-center justify-between gap-4 mb-4">
-          <div className="flex items-center gap-2">
+      <div className="heatmap-card">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <Calendar className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-            <h2 className="text-base font-bold text-gray-900 dark:text-white">
+            <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: 0 }}>
               {t.heatmapTitle}
             </h2>
           </div>
 
           {/* Year selector */}
-          <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-700/60 p-1 rounded-lg">
+          <div style={{ display: 'flex', gap: '0.25rem', background: 'var(--bg-card-muted)', padding: '0.25rem', borderRadius: 'var(--radius)' }}>
             {availableYears.map(year => (
               <button
                 key={year}
                 onClick={() => setSelectedYear(year)}
-                className={`text-xs px-2.5 py-1 rounded font-medium transition-colors ${
-                  selectedYear === year
-                    ? 'bg-white dark:bg-gray-800 text-indigo-600 dark:text-indigo-400 shadow-xs'
-                    : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
-                }`}
+                className={`btn ${selectedYear === year ? 'btn-primary' : 'btn-ghost'}`}
+                style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
               >
                 {year}
               </button>
@@ -368,90 +451,112 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        {/* Heatmap Grid (53 weeks x 7 days) */}
-        <div className="overflow-x-auto pb-2">
-          <div className="inline-block min-w-full">
-            <div className="flex gap-1">
-              {calendarWeeks.map((week, wIdx) => (
-                <div key={wIdx} className="flex flex-col gap-1">
-                  {week.map(({ dateStr, inYear }) => {
-                    const activity = activityMap.get(dateStr);
-                    const activeCount = activity ? activity.activeProblemCount : 0;
-                    const solvedCount = activity ? activity.solvedProblemCount : 0;
+        {/* Heatmap Grid (Weeks x 7 ISO days: Mon to Sun) */}
+        <div className="heatmap-scroll-area">
+          <div className="heatmap-grid" role="grid" aria-label={t.heatmapTitle}>
+            {calendarWeeks.map((week, wIdx) => (
+              <div key={wIdx} className="heatmap-col" role="row">
+                {week.map(({ dateStr, inYear }, dIdx) => {
+                  const activity = activityMap.get(dateStr);
+                  const activeCount = activity ? activity.activeProblemCount : 0;
+                  const solvedCount = activity ? activity.solvedProblemCount : 0;
 
-                    let colorClass = 'bg-gray-100 dark:bg-gray-800/80 border border-gray-200/50 dark:border-gray-700/50';
-                    if (inYear) {
-                      if (activeCount >= 3) {
-                        colorClass = 'bg-emerald-600 dark:bg-emerald-500 border border-emerald-700 dark:border-emerald-400';
-                      } else if (activeCount === 2) {
-                        colorClass = 'bg-emerald-400 dark:bg-emerald-600 border border-emerald-500 dark:border-emerald-500';
-                      } else if (activeCount === 1) {
-                        colorClass = 'bg-emerald-200 dark:bg-emerald-800/80 border border-emerald-300 dark:border-emerald-700';
-                      }
-                    } else {
-                      colorClass = 'opacity-20 bg-gray-100 dark:bg-gray-800';
+                  let levelClass = 'heatmap-cell-0';
+                  if (inYear) {
+                    if (activeCount >= 3) {
+                      levelClass = 'heatmap-cell-3';
+                    } else if (activeCount === 2) {
+                      levelClass = 'heatmap-cell-2';
+                    } else if (activeCount === 1) {
+                      levelClass = 'heatmap-cell-1';
                     }
+                  }
 
-                    const label = `${dateStr}: ${activeCount} active, ${solvedCount} solved`;
+                  const label = `${dateStr}: ${activeCount} active, ${solvedCount} solved`;
+                  const isCurrentFocused = inYear && (dateStr === focusedDate || (!focusedDate && wIdx === 0 && dIdx === 0));
 
-                    return (
-                      <button
-                        key={dateStr}
-                        type="button"
-                        onClick={() => handleCellClick(dateStr)}
-                        onMouseEnter={e => {
-                          if (activity && inYear) {
-                            const rect = e.currentTarget.getBoundingClientRect();
-                            setHoveredDay({
-                              day: activity,
-                              x: rect.left + rect.width / 2,
-                              y: rect.top - 8,
-                            });
-                          }
-                        }}
-                        onMouseLeave={() => setHoveredDay(null)}
-                        tabIndex={inYear ? 0 : -1}
-                        aria-label={label}
-                        className={`w-3 h-3 rounded-xs transition-transform hover:scale-125 focus:outline-none focus:ring-1 focus:ring-indigo-500 ${colorClass}`}
-                      />
-                    );
-                  })}
-                </div>
-              ))}
-            </div>
+                  return (
+                    <button
+                      key={dateStr}
+                      type="button"
+                      data-date={dateStr}
+                      onClick={() => handleCellClick(dateStr)}
+                      onKeyDown={e => handleCellKeyDown(e, dateStr, wIdx, dIdx)}
+                      onMouseEnter={e => {
+                        if (activity && inYear) {
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          setHoveredDay({
+                            day: activity,
+                            x: rect.left + rect.width / 2,
+                            y: rect.top - 8,
+                          });
+                        }
+                      }}
+                      onMouseLeave={() => setHoveredDay(null)}
+                      onFocus={e => {
+                        setFocusedDate(dateStr);
+                        if (activity && inYear) {
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          setHoveredDay({
+                            day: activity,
+                            x: rect.left + rect.width / 2,
+                            y: rect.top - 8,
+                          });
+                        }
+                      }}
+                      onBlur={() => setHoveredDay(null)}
+                      tabIndex={isCurrentFocused ? 0 : -1}
+                      aria-label={label}
+                      className={`heatmap-cell ${levelClass} ${!inYear ? 'out-of-year' : ''}`}
+                    />
+                  );
+                })}
+              </div>
+            ))}
           </div>
         </div>
 
+        {/* Heatmap Floating Tooltip */}
+        {hoveredDay && (
+          <div
+            className="heatmap-tooltip"
+            style={{ left: `${hoveredDay.x}px`, top: `${hoveredDay.y}px` }}
+          >
+            <div style={{ fontWeight: 600 }}>{hoveredDay.day.date}</div>
+            <div>
+              {hoveredDay.day.activeProblemCount} {t.trendActiveProblems}, {hoveredDay.day.solvedProblemCount} {t.trendSolvedProblems}
+            </div>
+          </div>
+        )}
+
         {/* Heatmap Legend */}
-        <div className="mt-3 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
-          <span className="text-[11px]">
+        <div className="heatmap-legend">
+          <span style={{ fontSize: '0.75rem' }}>
             {data?.yearlyActivity.days.length ?? 0} {t.daysUnit} with recorded activity
           </span>
-          <div className="flex items-center gap-1.5">
+          <div className="heatmap-legend-scale">
             <span>{t.heatmapLess}</span>
-            <span className="w-2.5 h-2.5 rounded-xs bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700" />
-            <span className="w-2.5 h-2.5 rounded-xs bg-emerald-200 dark:bg-emerald-800" />
-            <span className="w-2.5 h-2.5 rounded-xs bg-emerald-400 dark:bg-emerald-600" />
-            <span className="w-2.5 h-2.5 rounded-xs bg-emerald-600 dark:bg-emerald-500" />
+            <span className="heatmap-legend-box heatmap-cell-0" />
+            <span className="heatmap-legend-box heatmap-cell-1" />
+            <span className="heatmap-legend-box heatmap-cell-2" />
+            <span className="heatmap-legend-box heatmap-cell-3" />
             <span>{t.heatmapMore}</span>
           </div>
         </div>
       </div>
 
       {/* 30-Day Activity Trend Chart */}
-      <div className="p-4 sm:p-5 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
-        <div className="flex items-center justify-between gap-4 mb-4">
-          <div className="flex items-center gap-2">
-            <Clock className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-            <h2 className="text-base font-bold text-gray-900 dark:text-white">
-              {t.trend30DaysTitle}
-            </h2>
-          </div>
+      <div className="trend-card">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+          <Clock className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+          <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: 0 }}>
+            {t.trend30DaysTitle}
+          </h2>
         </div>
 
-        <div className="h-64 w-full">
+        <div className="trend-chart-wrapper">
           {data?.trend30Days && data.trend30Days.length > 0 ? (
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minHeight={260}>
               <AreaChart data={data.trend30Days} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="activeGrad" x1="0" y1="0" x2="0" y2="1">
@@ -476,12 +581,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   content={({ active, payload, label }) => {
                     if (active && payload && payload.length) {
                       return (
-                        <div className="p-2.5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg text-xs space-y-1">
-                          <div className="font-semibold text-gray-900 dark:text-white">{label}</div>
-                          <div className="text-indigo-600 dark:text-indigo-400">
+                        <div
+                          style={{
+                            padding: '0.5rem 0.75rem',
+                            backgroundColor: 'var(--bg-card)',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: 'var(--radius)',
+                            boxShadow: 'var(--shadow-md)',
+                            fontSize: '0.75rem',
+                          }}
+                        >
+                          <div style={{ fontWeight: 600, color: 'var(--text-main)' }}>{label}</div>
+                          <div style={{ color: 'var(--primary)', marginTop: '0.2rem' }}>
                             {t.trendActiveProblems}: {payload[0]?.value}
                           </div>
-                          <div className="text-emerald-600 dark:text-emerald-400">
+                          <div style={{ color: 'var(--success)' }}>
                             {t.trendSolvedProblems}: {payload[1]?.value}
                           </div>
                         </div>
@@ -511,7 +625,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </AreaChart>
             </ResponsiveContainer>
           ) : (
-            <div className="h-full flex items-center justify-center text-xs text-gray-400">
+            <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
               {t.noProblems}
             </div>
           )}
@@ -519,39 +633,39 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       </div>
 
       {/* Difficulty & Top Tags Distributions */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="distributions-grid">
         {/* Difficulty Distribution */}
-        <div className="p-4 sm:p-5 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm flex flex-col justify-between">
+        <div className="distribution-card">
           <div>
-            <h2 className="text-base font-bold text-gray-900 dark:text-white mb-4">
+            <h2 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1rem' }}>
               {t.difficultyDistTitle}
             </h2>
 
-            <div className="space-y-4">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
               {(['Easy', 'Medium', 'Hard'] as const).map(diff => {
                 const count = data?.difficultyDistribution[diff] ?? { solved: 0, total: 0 };
                 const pct = count.total > 0 ? Math.round((count.solved / count.total) * 100) : 0;
                 const badgeColor =
                   diff === 'Easy'
-                    ? 'bg-emerald-500'
+                    ? 'var(--success)'
                     : diff === 'Medium'
-                    ? 'bg-amber-500'
-                    : 'bg-rose-500';
+                    ? 'var(--warning)'
+                    : 'var(--danger)';
 
                 return (
-                  <div key={diff} className="space-y-1.5">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-semibold text-gray-700 dark:text-gray-300">
+                  <div key={diff}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: '0.25rem' }}>
+                      <span style={{ fontWeight: 600 }}>
                         {t[`stat${diff}` as keyof typeof t] || diff}
                       </span>
-                      <span className="text-gray-500 dark:text-gray-400">
-                        <strong className="text-gray-900 dark:text-white font-bold">{count.solved}</strong> / {count.total} ({pct}%)
+                      <span style={{ color: 'var(--text-muted)' }}>
+                        <strong style={{ color: 'var(--text-main)' }}>{count.solved}</strong> / {count.total} ({pct}%)
                       </span>
                     </div>
-                    <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
+                    <div className="diff-track">
                       <div
-                        className={`h-full ${badgeColor} transition-all duration-500 rounded-full`}
-                        style={{ width: `${pct}%` }}
+                        className="diff-fill"
+                        style={{ width: `${pct}%`, backgroundColor: badgeColor }}
                       />
                     </div>
                   </div>
@@ -562,28 +676,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
 
         {/* Top 10 Tags */}
-        <div className="p-4 sm:p-5 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm flex flex-col justify-between">
+        <div className="distribution-card">
           <div>
-            <h2 className="text-base font-bold text-gray-900 dark:text-white mb-4">
+            <h2 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1rem' }}>
               {t.topTagsTitle}
             </h2>
 
             {data?.topTags && data.topTags.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
+              <div className="top-tags-wrap">
                 {data.topTags.map(tag => (
-                  <div
-                    key={tag.tagSlug}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-800 text-xs text-indigo-700 dark:text-indigo-300"
-                  >
+                  <div key={tag.tagSlug} className="top-tag-chip">
                     <span>{tag.tagName}</span>
-                    <span className="px-1.5 py-0.5 rounded-full bg-indigo-200/80 dark:bg-indigo-800 font-bold text-[10px]">
-                      {tag.solvedCount}
-                    </span>
+                    <span className="top-tag-count">{tag.solvedCount}</span>
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="py-8 text-center text-xs text-gray-400">
+              <div style={{ padding: '2rem 0', textAlign: 'center', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                 {t.noProblems}
               </div>
             )}
@@ -592,63 +701,65 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       </div>
 
       {/* Recent Activities Section & History Drawer Trigger */}
-      <div className="p-4 sm:p-5 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
-        <div className="flex items-center justify-between gap-4 mb-4">
-          <div className="flex items-center gap-2">
+      <div className="recent-activity-card">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <Clock className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-            <h2 className="text-base font-bold text-gray-900 dark:text-white">
+            <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: 0 }}>
               {t.recentActivityTitle}
             </h2>
           </div>
 
           <button
             onClick={handleOpenDrawerAll}
-            className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline"
+            className="btn btn-ghost"
+            style={{ fontSize: '0.75rem', color: 'var(--primary)', padding: '0.25rem 0.5rem' }}
           >
             {t.viewFullHistory}
-            <ChevronRight className="w-4 h-4" />
+            <ChevronRight className="w-4 h-4" style={{ marginLeft: '0.2rem' }} />
           </button>
         </div>
 
-        <div className="space-y-2">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           {data?.recentActivities && data.recentActivities.length > 0 ? (
             data.recentActivities.slice(0, 10).map((item: RecentActivityItem) => {
               const isAccepted = item.status === 'completed' || item.status === 'accepted';
               return (
                 <div
                   key={`${item.source}-${item.id}`}
-                  className="p-3 bg-gray-50 dark:bg-gray-900/60 rounded-lg border border-gray-200/80 dark:border-gray-700/80 flex items-center justify-between gap-3 text-xs"
+                  className="recent-activity-item"
                 >
-                  <div className="flex items-center gap-2 min-w-0">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
                     {isAccepted ? (
-                      <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500" style={{ flexShrink: 0 }} />
                     ) : (
-                      <CheckCircle2 className="w-4 h-4 text-gray-300 dark:text-gray-600 flex-shrink-0" />
+                      <CheckCircle2 className="w-4 h-4 text-gray-300 dark:text-gray-600" style={{ flexShrink: 0 }} />
                     )}
-                    <span className="font-semibold text-gray-500 dark:text-gray-400">
+                    <span style={{ fontWeight: 600, color: 'var(--text-muted)' }}>
                       #{item.questionFrontendId}
                     </span>
-                    <span className="font-medium text-gray-900 dark:text-white truncate">
+                    <span style={{ fontWeight: 500, color: 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {item.problemTitle}
                     </span>
                     <span
-                      className={`text-[10px] px-1.5 py-0.5 rounded font-medium flex-shrink-0 ${
+                      className={`badge ${
                         item.difficulty === 'Easy'
-                          ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
+                          ? 'badge-success'
                           : item.difficulty === 'Medium'
-                          ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300'
-                          : 'bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300'
+                          ? 'badge-warning'
+                          : 'badge-danger'
                       }`}
+                      style={{ fontSize: '0.625rem', padding: '0.1rem 0.4rem', flexShrink: 0 }}
                     >
                       {item.difficulty}
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-3 flex-shrink-0 text-gray-500 dark:text-gray-400">
-                    <span className="font-mono text-[11px]">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexShrink: 0, color: 'var(--text-muted)' }}>
+                    <span style={{ fontFamily: 'monospace', fontSize: '0.6875rem' }}>
                       {item.timePrecision === 'datetime' ? item.timestamp.slice(0, 10) : item.timestamp}
                     </span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
+                    <span className="badge badge-neutral" style={{ fontSize: '0.625rem', padding: '0.1rem 0.4rem' }}>
                       {item.source === 'manual' ? t.sourceManual : t.sourceSnapshot}
                     </span>
                   </div>
@@ -656,7 +767,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               );
             })
           ) : (
-            <div className="py-6 text-center text-xs text-gray-400">
+            <div style={{ padding: '1.5rem 0', textAlign: 'center', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
               {t.noRecentActivity}
             </div>
           )}
@@ -665,9 +776,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       {/* Data Status & Freshness Footer */}
       {data?.dataStatus && (
-        <div className="p-4 bg-gray-50 dark:bg-gray-800/60 rounded-xl border border-gray-200 dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400 space-y-2">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <div className="flex items-center gap-4 flex-wrap">
+        <div className="data-status-bar">
+          <div className="data-status-row">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
               <span>
                 <strong>{t.catalogLastUpdated}:</strong>{' '}
                 {data.dataStatus.catalogUpdatedAt
@@ -688,7 +799,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
 
           {data.dataStatus.pendingDateCount > 0 && (
-            <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 p-2.5 rounded-lg border border-amber-200 dark:border-amber-800/60">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--warning)', padding: '0.4rem 0' }}>
               <AlertTriangle className="w-4 h-4 flex-shrink-0" />
               <span>
                 {t.pendingDatesNotice.replace('{count}', String(data.dataStatus.pendingDateCount))}

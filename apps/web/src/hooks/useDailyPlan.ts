@@ -50,9 +50,13 @@ export function useDailyPlan(): UseDailyPlanReturn {
 
   const changeRevision = useRef(0);
   const refreshInFlight = useRef(false);
+  const queuedRefresh = useRef(false);
 
   const refresh = useCallback(async () => {
-    if (refreshInFlight.current) return;
+    if (refreshInFlight.current) {
+      queuedRefresh.current = true;
+      return;
+    }
     refreshInFlight.current = true;
     const revision = changeRevision.current;
     setError(null);
@@ -66,6 +70,10 @@ export function useDailyPlan(): UseDailyPlanReturn {
     } finally {
       refreshInFlight.current = false;
       setLoading(false);
+      if (queuedRefresh.current) {
+        queuedRefresh.current = false;
+        refresh();
+      }
     }
   }, []);
 

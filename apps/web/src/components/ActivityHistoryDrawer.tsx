@@ -3,7 +3,7 @@
  * Displays a slide-over panel with paginated, filterable activity history
  * (by calendar date, source type, and pending date status) with full keyboard accessibility.
  */
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   X,
   Calendar,
@@ -48,31 +48,38 @@ export const ActivityHistoryDrawer: React.FC<ActivityHistoryDrawerProps> = ({
   const [data, setData] = useState<DashboardActivityListResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Sync initial date if passed from parent (e.g. clicked on a heatmap cell)
+  const seqRef = useRef(0);
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const previousActiveElement = useRef<HTMLElement | null>(null);
+
+  // Sync initial date if passed from parent (e.g. clicked on a heatmap cell or cleared)
   useEffect(() => {
-    if (initialDate) {
-      setDateFilter(initialDate);
-      setPage(1);
-    }
+    setDateFilter(initialDate || '');
+    setPage(1);
   }, [initialDate]);
 
   const fetchActivities = useCallback(async () => {
     if (!isOpen) return;
+    const seq = ++seqRef.current;
     setLoading(true);
     setError(null);
     try {
       const res = await api.getDashboardActivities({
         page,
-        limit: 15,
+        limit: 20,
         date: dateFilter || undefined,
         source: sourceFilter,
         pendingDate: pendingDateFilter,
       });
+      if (seq !== seqRef.current) return;
       setData(res);
     } catch (err: unknown) {
+      if (seq !== seqRef.current) return;
       setError(err instanceof Error ? err.message : 'Failed to load activity history.');
     } finally {
-      setLoading(false);
+      if (seq === seqRef.current) {
+        setLoading(false);
+      }
     }
   }, [isOpen, page, dateFilter, sourceFilter, pendingDateFilter]);
 
@@ -80,11 +87,48 @@ export const ActivityHistoryDrawer: React.FC<ActivityHistoryDrawerProps> = ({
     fetchActivities();
   }, [fetchActivities]);
 
-  // Keyboard accessibility: Close on Escape key
+  // Focus management: Store previous active element and trap focus
+  useEffect(() => {
+    if (isOpen) {
+      previousActiveElement.current = document.activeElement as HTMLElement | null;
+      setTimeout(() => {
+        const closeBtn = drawerRef.current?.querySelector('button[aria-label]') as HTMLElement | null;
+        closeBtn?.focus();
+      }, 0);
+    } else {
+      previousActiveElement.current?.focus();
+    }
+  }, [isOpen]);
+
+  // Keyboard accessibility: Close on Escape key and trap tab focus
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) {
+      if (!isOpen) return;
+
+      if (e.key === 'Escape') {
         onClose();
+        return;
+      }
+
+      if (e.key === 'Tab' && drawerRef.current) {
+        const focusable = drawerRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+
+        if (e.shiftKey) {
+          if (document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -109,6 +153,7 @@ export const ActivityHistoryDrawer: React.FC<ActivityHistoryDrawerProps> = ({
       aria-labelledby="drawer-title"
     >
       <div
+        ref={drawerRef}
         className="drawer-content"
         onClick={e => e.stopPropagation()}
       >
