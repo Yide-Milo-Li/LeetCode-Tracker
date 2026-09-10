@@ -5,10 +5,19 @@
  * Local-only, server-side execution: API key is never exposed to the client.
  */
 import { quotas } from '../../../packages/domain/src/index.ts';
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
 import type { ProgressCandidateInput } from '../../../packages/contracts/src/practice.ts';
 import type { Bilingual, Rules, RulePatch } from '../../../packages/contracts/src/recommendations.ts';
 import type { CatalogProblem } from '../../../packages/contracts/src/sync.ts';
+import {
+  progressFormatResponseSchema,
+  planContentResponseSchema,
+  overrideResponseSchema,
+  problemSelectionResponseSchema,
+} from './gemini-schemas.ts';
+import { fallbackPlanContent, fallbackOverridePrompt } from './gemini-fallbacks.ts';
+
+export { fallbackPlanContent, fallbackOverridePrompt };
 
 /** Result structure returned by Gemini formatting. */
 export interface GeminiFormatResult {
@@ -340,32 +349,7 @@ Do not invent or hallucinate problems not in the input. If lines cannot be parse
       ? `Batch year context: ${batchYear}\n\nParse the following progress text:\n${rawText}`
       : `Parse the following progress text:\n${rawText}`;
 
-    const responseSchema = {
-      type: Type.OBJECT,
-      properties: {
-        candidates: {
-          type: Type.ARRAY,
-          description: 'List of parsed progress candidate rows',
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              frontendId: { type: Type.STRING },
-              title: { type: Type.STRING },
-              lastSubmitted: { type: Type.STRING },
-              lastResult: { type: Type.STRING },
-              submissions: { type: Type.INTEGER },
-              rawSnippet: { type: Type.STRING },
-            },
-            required: ['frontendId', 'lastSubmitted', 'lastResult', 'submissions'],
-          },
-        },
-        unparsedSnippets: {
-          type: Type.ARRAY,
-          items: { type: Type.STRING },
-        },
-      },
-      required: ['candidates'],
-    };
+    const responseSchema = progressFormatResponseSchema;
 
     const abortController = new AbortController();
     const timeoutHandle = setTimeout(() => abortController.abort(), timeoutMs);
@@ -465,32 +449,7 @@ Do not invent or hallucinate problems not in the input. If lines cannot be parse
 
     const prompt = `Date: ${params.date}\nUser study preference: ${params.rules.preference || 'None'}\n\nSelected problems:\n${JSON.stringify(problemSummaries, null, 2)}`;
 
-    const responseSchema = {
-      type: Type.OBJECT,
-      properties: {
-        reasons: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              questionId: { type: Type.STRING },
-              en: { type: Type.STRING },
-              zh: { type: Type.STRING },
-            },
-            required: ['questionId', 'en', 'zh'],
-          },
-        },
-        encouragement: {
-          type: Type.OBJECT,
-          properties: {
-            en: { type: Type.STRING },
-            zh: { type: Type.STRING },
-          },
-          required: ['en', 'zh'],
-        },
-      },
-      required: ['reasons', 'encouragement'],
-    };
+    const responseSchema = planContentResponseSchema;
 
     const overallDeadline = Math.min(params.deadline ?? Infinity, Date.now() + this.timeoutMs);
     const modelsToTry = [this.model, ...this.fallbackModels];
@@ -597,33 +556,7 @@ Return ONLY valid JSON conforming to the schema.`;
 
     const promptContext = `User prompt: "${params.prompt}"\n\nCurrent base rules: ${JSON.stringify(params.baseRules)}\n\nValid tag slugs (sample): ${params.knownTags.slice(0, 100).join(', ')}`;
 
-    const responseSchema = {
-      type: Type.OBJECT,
-      properties: {
-        dailyCount: { type: Type.INTEGER },
-        difficulty: {
-          type: Type.OBJECT,
-          properties: {
-            Easy: { type: Type.NUMBER },
-            Medium: { type: Type.NUMBER },
-            Hard: { type: Type.NUMBER },
-          },
-          required: ['Easy', 'Medium', 'Hard'],
-        },
-        tags: {
-          type: Type.ARRAY,
-          items: { type: Type.STRING },
-        },
-        premium: { type: Type.BOOLEAN },
-        reviewEnabled: { type: Type.BOOLEAN },
-        reviewPercent: { type: Type.NUMBER },
-        preference: { type: Type.STRING },
-        unresolved: {
-          type: Type.ARRAY,
-          items: { type: Type.STRING },
-        },
-      },
-    };
+    const responseSchema = overrideResponseSchema;
 
     const overallDeadline = Date.now() + this.timeoutMs;
     const modelsToTry = [this.model, ...this.fallbackModels];
@@ -799,16 +732,7 @@ Return JSON with an array of selectedQuestionIds (strings). Order them in priori
 
     const promptContext = `Candidates:\n${JSON.stringify(candidateSummary, null, 2)}`;
 
-    const responseSchema = {
-      type: Type.OBJECT,
-      properties: {
-        selectedQuestionIds: {
-          type: Type.ARRAY,
-          items: { type: Type.STRING },
-        },
-      },
-      required: ['selectedQuestionIds'],
-    };
+    const responseSchema = problemSelectionResponseSchema;
 
     const overallDeadline = Math.min(params.deadline ?? Infinity, Date.now() + this.timeoutMs);
     const modelsToTry = [this.model, ...this.fallbackModels];
@@ -868,75 +792,3 @@ Return JSON with an array of selectedQuestionIds (strings). Order them in priori
   }
 }
 
-/** Fallback bilingual reason and encouragement generator when AI is disabled or unavailable. */
-export function fallbackPlanContent(problems: CatalogProblem[] = [], _rules: Rules): PlanContentResult {
-  const list = Array.isArray(problems) ? problems : [];
-  const reasons: Record<string, Bilingual> = {};
-  for (const p of list) {
-    const tagNames = p.topicTags.slice(0, 2).map(t => t.name).join(' / ');
-    const tagStr = tagNames ? ` (${tagNames})` : '';
-    reasons[p.questionId] = {
-      en: `Selected ${p.difficulty} problem${tagStr} to reinforce algorithmic problem-solving patterns.`,
-      zh: `精选${p.difficulty === 'Easy' ? '简单' : p.difficulty === 'Medium' ? '中等' : '困难'}难度题目${tagStr}，针对性巩固算法解题模式。`,
-    };
-  }
-  return {
-    reasons,
-    encouragement: {
-      en: 'Consistent daily practice turns small efforts into mastery. Let’s tackle today’s challenge!',
-      zh: '坚持每日训练，积硅步以至千里。开启今日刷题挑战吧！',
-    },
-    model: 'local',
-  };
-}
-
-/** Fallback parser for user prompt when AI is disabled or unavailable. */
-export function fallbackOverridePrompt(prompt: string, _baseRules: Rules | null, knownTags: string[]): OverridePromptResult {
-  const patch: RulePatch = {};
-  const unresolved: string[] = [];
-  const lower = prompt.toLowerCase();
-
-  const countMatch = lower.match(/(\d+)\s*(?:题|problems?|questions?|count)/i) ?? lower.match(/(?:做|加|选|刷)\s*(\d+)/i);
-  if (countMatch) {
-    const num = parseInt(countMatch[1], 10);
-    if (num > 0) patch.dailyCount = num;
-  }
-
-  if (lower.includes('全easy') || lower.includes('全部简单') || lower.includes('all easy')) {
-    patch.difficulty = { Easy: 100, Medium: 0, Hard: 0 };
-  } else if (lower.includes('全medium') || lower.includes('全部中等') || lower.includes('all medium')) {
-    patch.difficulty = { Easy: 0, Medium: 100, Hard: 0 };
-  } else if (lower.includes('全hard') || lower.includes('全部困难') || lower.includes('all hard')) {
-    patch.difficulty = { Easy: 0, Medium: 0, Hard: 100 };
-  } else if (lower.includes('不要hard') || lower.includes('不要困难') || lower.includes('no hard')) {
-    patch.difficulty = { Easy: 50, Medium: 50, Hard: 0 };
-  }
-
-  if (lower.includes('不要复习') || lower.includes('关复习') || lower.includes('no review') || lower.includes('without review')) {
-    patch.reviewEnabled = false;
-    patch.reviewPercent = null;
-  } else if (lower.includes('复习') || lower.includes('review')) {
-    const reviewPctMatch = lower.match(/(\d+)\s*%/);
-    if (reviewPctMatch) {
-      patch.reviewEnabled = true;
-      patch.reviewPercent = Math.min(100, Math.max(1, parseInt(reviewPctMatch[1], 10)));
-    }
-  }
-
-  const matchedTags: string[] = [];
-  for (const slug of knownTags) {
-    const cleanSlug = slug.toLowerCase().replace(/-/g, ' ');
-    if (lower.includes(slug) || lower.includes(cleanSlug)) {
-      matchedTags.push(slug);
-    }
-  }
-  if (matchedTags.length > 0) {
-    patch.tags = matchedTags;
-  }
-
-  if (lower.includes('高频') || lower.includes('top') || lower.includes('google') || lower.includes('amazon') || lower.includes('面试')) {
-    unresolved.push('Company and frequency tags cannot be verified against local metadata; treated as soft qualitative preferences.');
-  }
-
-  return { patch, unresolved, model: 'local' };
-}
