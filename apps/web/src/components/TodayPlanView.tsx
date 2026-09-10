@@ -1,119 +1,21 @@
 /** Today's execution surface: compact known activity, server-owned plan and reliable completion circles. */
 import React, { useEffect, useRef, useState } from 'react';
-import { Check, Circle, RefreshCw, ExternalLink, CalendarDays, MoreHorizontal } from 'lucide-react';
-import { api, type DailyPlan, type DashboardResponse, type PlanItem, type Strategy } from '../api.ts';
+import { RefreshCw, CalendarDays, MoreHorizontal } from 'lucide-react';
+import { api, type DailyPlan, type PlanItem, type Strategy } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
 import { PromptOverrideModal } from './PromptOverrideModal.tsx';
 import { useDailyPlan, type UseDailyPlanReturn } from '../hooks/useDailyPlan.ts';
 import { useWorkspace } from '../workspace.tsx';
 import { createPractice } from '../practice-service.ts';
 import { Dialog, Feedback, PageHeader } from './ui.tsx';
+import { TodayRecentOverview } from './TodayRecentOverview.tsx';
+import { TodayProblemRow } from './TodayProblemRow.tsx';
 
 interface TodayPlanViewProps {
   lang: Language;
   onNavigateToSettings: () => void;
   onNavigateToDashboard?: () => void;
   planController?: UseDailyPlanReturn;
-}
-
-/** Read the same deduplicated activity series used by Statistics; missing data is never inferred. */
-function RecentOverview({ lang }: { lang: Language }) {
-  const workspace = useWorkspace();
-  const [data, setData] = useState<DashboardResponse | null>(null);
-  const [error, setError] = useState('');
-  const [retry, setRetry] = useState(0);
-  useEffect(() => {
-    let active = true;
-    api
-      .getDashboard()
-      .then((value) => {
-        if (active) {
-          setData(value);
-          setError('');
-        }
-      })
-      .catch((err) => {
-        if (active) setError(String(err.message));
-      });
-    return () => {
-      active = false;
-    };
-  }, [workspace.revision, retry]);
-  const days = data?.dataStatus.userTimezone ? data.trend30Days.slice(-7) : [];
-  const max = Math.max(1, ...days.map((day) => day.completedCount));
-  return (
-    <section className="recent-overview" aria-label={lang === 'zh' ? '最近 7 天' : 'Last 7 days'}>
-      <div>
-        <span className="eyebrow">
-          {lang === 'zh' ? '最近 7 天 · 含今天' : 'LAST 7 DAYS · INCLUDING TODAY'}
-        </span>
-        <p>
-          {data && !data.dataStatus.userTimezone ? (
-            lang === 'zh' ? (
-              '请先确认时区'
-            ) : (
-              'Confirm your timezone first'
-            )
-          ) : data ? (
-            <>
-              <strong>{data.overview.currentStreak}</strong>{' '}
-              {lang === 'zh' ? '天连续有记录' : 'day activity streak'}
-            </>
-          ) : error ? (
-            lang === 'zh' ? (
-              '近期记录暂不可用'
-            ) : (
-              'Recent records unavailable'
-            )
-          ) : lang === 'zh' ? (
-            '正在读取近期记录…'
-          ) : (
-            'Loading recent records…'
-          )}
-        </p>
-      </div>
-      <div
-        className="mini-chart"
-        role="img"
-        aria-label={days.map((d) => d.date + ': ' + d.completedCount).join('; ') || (lang === 'zh' ? '每日记录尚不可用' : 'Daily activity not available yet')}
-      >
-        {days.map((day) => (
-          <div className="mini-day" key={day.date} title={day.date + ': ' + day.completedCount}>
-            <span className="mini-count">{day.completedCount}</span>
-            <div className="mini-bar-track">
-              <span style={{ height: Math.max(3, (day.completedCount / max) * 32) }} />
-            </div>
-            <small>{day.date.slice(5)}</small>
-          </div>
-        ))}
-      </div>
-      <div className="overview-note">
-        {data && (
-          <small>
-            {!data.dataStatus.userTimezone
-              ? lang === 'zh'
-                ? '设置时区后显示每日分布'
-                : 'Set a timezone to assign daily activity'
-              : days.every((d) => !d.activeCount)
-                ? lang === 'zh'
-                  ? '这 7 天暂无已知记录'
-                  : 'No known activity in these 7 days'
-                : lang === 'zh'
-                  ? '含计划外练习和有效导入记录'
-                  : 'Includes extra practice and valid imports'}
-          </small>
-        )}
-        <button className="text-link" onClick={() => workspace.navigate('statistics')}>
-          {lang === 'zh' ? '查看完整统计 →' : 'View full statistics →'}
-        </button>
-      </div>
-      {error && (
-        <Feedback retry={{ label: lang === 'zh' ? '重试' : 'Retry', run: () => setRetry((n) => n + 1) }}>
-          {error}
-        </Feedback>
-      )}
-    </section>
-  );
 }
 
 /** Keep plan refreshes independent of language/theme, and scope save state to a single task row. */
@@ -198,7 +100,7 @@ function TodayPlanViewInner({
           </button>
         }
       />
-      <RecentOverview lang={lang} />
+      <TodayRecentOverview lang={lang} />
       {(controller.error || localError) && (
         <Feedback
           retry={{
@@ -330,102 +232,17 @@ function TodayPlanViewInner({
           )}
           <div className="today-problems">
             {plan.items.map((item) => (
-              <article className={'today-problem ' + (item.completed ? 'completed' : '')} key={item.id}>
-                <button
-                  className="completion-circle"
-                  aria-label={
-                    (item.completed
-                      ? zh
-                        ? '查看完成记录：'
-                        : 'View completion records: '
-                      : zh
-                        ? '记录完成：'
-                        : 'Mark complete: ') + item.problem.title
-                  }
-                  aria-pressed={item.completed}
-                  aria-busy={saving.has(item.id)}
-                  disabled={
-                    saving.has(item.id) || controller.replacingBatch || controller.replacingItemId === item.id
-                  }
-                  onClick={() => void complete(item)}
-                >
-                  {saving.has(item.id) ? (
-                    <RefreshCw className="spin" size={19} />
-                  ) : item.completed ? (
-                    <Check size={20} />
-                  ) : (
-                    <Circle size={26} />
-                  )}
-                </button>
-                <div className="problem-content">
-                  <h3>
-                    <span className="problem-number">{item.problem.questionFrontendId}.</span>{' '}
-                    {item.problem.title}
-                  </h3>
-                  <div className="problem-meta">
-                    <span className={'difficulty ' + item.problem.difficulty.toLowerCase()}>
-                      {t[('stat' + item.problem.difficulty) as keyof typeof t]}
-                    </span>
-                    {item.kind === 'review' && <span className="tag-chip">{t.kindReview}</span>}
-                    {item.problem.isPaidOnly && <span className="tag-chip">{t.statPremium}</span>}
-                    {item.problem.topicTags.slice(0, 2).map((tag) => (
-                      <span className="tag-chip" key={tag.slug}>
-                        {tag.name}
-                      </span>
-                    ))}
-                    {item.problem.topicTags.length > 2 && (
-                      <details className="tag-overflow">
-                        <summary>
-                          +{item.problem.topicTags.length - 2} {zh ? '标签' : 'tags'}
-                        </summary>
-                        <div>
-                          {item.problem.topicTags.slice(2).map((tag) => (
-                            <span className="tag-chip" key={tag.slug}>
-                              {tag.name}
-                            </span>
-                          ))}
-                        </div>
-                      </details>
-                    )}
-                  </div>
-                  <p className="recommendation-reason">{item.reason[lang] || item.reason.en}</p>
-                  {rowErrors[item.id] && (
-                    <Feedback retry={{ label: t.retry, run: () => void complete(item) }}>
-                      {rowErrors[item.id]}
-                    </Feedback>
-                  )}
-                </div>
-                <div className="problem-actions">
-                  <a
-                    className="btn btn-secondary btn-sm"
-                    href={/^https?:\/\//i.test(item.problem.url) ? item.problem.url : undefined}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    {zh ? '打开题目' : 'Open problem'}
-                    <ExternalLink size={14} />
-                  </a>
-                  <button
-                    className="text-link"
-                    disabled={
-                      item.completed ||
-                      saving.has(item.id) ||
-                      controller.replacingBatch ||
-                      Boolean(controller.replacingItemId)
-                    }
-                    onClick={() => void controller.replaceOne(item)}
-                  >
-                    <RefreshCw size={14} className={controller.replacingItemId === item.id ? 'spin' : ''} />
-                    {t.replaceOne}
-                  </button>
-                  <button
-                    className="text-link"
-                    onClick={() => workspace.openPractice({ mode: 'manual', problem: item.problem })}
-                  >
-                    {zh ? '记录练习' : 'Record practice'}
-                  </button>
-                </div>
-              </article>
+              <TodayProblemRow
+                key={item.id}
+                item={item}
+                lang={lang}
+                isSaving={saving.has(item.id)}
+                rowError={rowErrors[item.id]}
+                replacingBatch={controller.replacingBatch}
+                replacingItemId={controller.replacingItemId}
+                onComplete={(target) => void complete(target)}
+                onReplaceOne={(target) => void controller.replaceOne(target)}
+              />
             ))}
           </div>
         </>

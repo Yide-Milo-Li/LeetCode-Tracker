@@ -9,125 +9,10 @@ import {
 } from '../api.ts';
 import type { Language } from '../i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
-import { Feedback, Field, PageHeader, Pagination, Dialog } from './ui.tsx';
+import { Feedback, Field, PageHeader } from './ui.tsx';
 import { SnapshotBrowser } from './SnapshotBrowser.tsx';
-
-/** Review a durable import result without describing imported observations as automatic synchronization. */
-function ImportResult({ result, lang }: { result: ProgressImportSummary; lang: Language }) {
-  const zh = lang === 'zh';
-  return (
-    <div>
-      <Feedback tone="success">
-        {zh ? '进度已导入' : 'Progress imported'} ·{' '}
-        {new Date(result.importedAt).toLocaleString(zh ? 'zh-CN' : 'en-US')}
-      </Feedback>
-      <div className="summary-counts">
-        <span>
-          {zh ? '新增' : 'Inserted'} <strong>{result.insertedCount}</strong>
-        </span>
-        <span>
-          {zh ? '更新' : 'Updated'} <strong>{result.updatedCount}</strong>
-        </span>
-        <span>
-          {zh ? '未变' : 'Unchanged'} <strong>{result.unchangedCount}</strong>
-        </span>
-        <span>
-          {zh ? '重复' : 'Duplicates'} <strong>{result.duplicateCount}</strong>
-        </span>
-        <span>
-          {zh ? '冲突' : 'Conflicts'} <strong>{result.conflictCount}</strong>
-        </span>
-        <span>
-          {zh ? '错误' : 'Errors'} <strong>{result.errorCount}</strong>
-        </span>
-      </div>
-      {result.errors?.length > 0 && (
-        <details open>
-          <summary>{zh ? '错误明细' : 'Error details'}</summary>
-          <ul>
-            {result.errors.map((error, i) => (
-              <li key={i}>
-                #{error.index + 1} {error.message}
-                {error.snippet && <pre>{error.snippet}</pre>}
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
-    </div>
-  );
-}
-
-/** Page through committed batches and fetch their persisted result when selected. */
-function ImportHistory({ lang }: { lang: Language }) {
-  const workspace = useWorkspace();
-  const zh = lang === 'zh';
-  const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [items, setItems] = useState<Omit<ProgressImportSummary, 'errors'>[]>([]);
-  const [result, setResult] = useState<ProgressImportSummary | null>(null);
-  const [error, setError] = useState('');
-  const [retry, setRetry] = useState(0);
-  useEffect(() => {
-    let active = true;
-    api
-      .getProgressImportHistory(page, 20)
-      .then((data) => {
-        if (active) {
-          setItems(data.items);
-          setTotal(data.total);
-          setError('');
-        }
-      })
-      .catch((err) => {
-        if (active) setError(String(err.message));
-      });
-    return () => {
-      active = false;
-    };
-  }, [page, workspace.revision, retry]);
-  return (
-    <section>
-      <h2>{zh ? '进度导入历史' : 'Progress import history'}</h2>
-      {error && (
-        <Feedback retry={{ label: zh ? '重试' : 'Retry', run: () => setRetry((n) => n + 1) }}>
-          {error}
-        </Feedback>
-      )}
-      {!items.length ? (
-        <p className="muted">{zh ? '暂无导入历史' : 'No import history yet'}</p>
-      ) : (
-        items.map((item) => (
-          <button
-            className="history-row"
-            key={item.id}
-            onClick={() => {
-              void api
-                .getProgressImportResult(item.id)
-                .then(setResult)
-                .catch((err) => setError(String(err.message)));
-            }}
-          >
-            <span>
-              {new Date(item.importedAt).toLocaleString(zh ? 'zh-CN' : 'en-US', {
-                timeZone: workspace.timezone ?? 'UTC',
-              })}
-            </span>
-            <span>
-              +{item.insertedCount} · ↻{item.updatedCount} · {item.errorCount} {zh ? '错误' : 'errors'}
-            </span>
-          </button>
-        ))
-      )}
-      <Pagination page={page} total={total} limit={20} lang={lang} onPage={setPage} />
-      {result && (
-        <Dialog title={zh ? '导入结果' : 'Import result'} lang={lang} onClose={() => setResult(null)}>
-          <ImportResult result={result} lang={lang} />
-        </Dialog>
-      )}
-    </section>
-  );
-}
+import { ImportResult, ImportHistory } from './ProgressImportHistory.tsx';
+import { ProgressPreviewSection } from './ProgressPreviewSection.tsx';
 
 /** Own the input generation and immutable commit intent; background refresh never edits the user's draft. */
 export function ProgressWorkbench({ lang }: { lang: Language }) {
@@ -480,145 +365,25 @@ export function ProgressWorkbench({ lang }: { lang: Language }) {
         </section>
       )}
       {(step === 2 || step === 3) && preview && (
-        <section className="import-stage">
-          <h2>{steps[step]}</h2>
-          <div className="summary-counts">
-            <span>
-              {zh ? '有效' : 'Valid'} <strong>{preview.validCount}</strong>
-            </span>
-            <span>
-              {zh ? '冲突' : 'Conflicts'} <strong>{preview.conflictCount}</strong>
-            </span>
-            <span>
-              {zh ? '错误' : 'Errors'} <strong>{preview.errorCount}</strong>
-            </span>
-            <span>
-              {zh ? '重复' : 'Duplicates'} <strong>{preview.duplicateCount}</strong>
-            </span>
-          </div>
-          <div className="preview-items">
-            {preview.items.map((item, index) => (
-              <article className={'preview-item ' + item.action} key={index}>
-                <div className="section-heading">
-                  <h3>
-                    #{item.frontendId} {item.problemTitle}
-                  </h3>
-                  <span className="badge">
-                    {
-                      {
-                        insert: zh ? '新增' : 'Insert',
-                        update: zh ? '更新' : 'Update',
-                        unchanged: zh ? '未变' : 'Unchanged',
-                        conflict: zh ? '冲突' : 'Conflict',
-                        duplicate: zh ? '重复' : 'Duplicate',
-                        error: zh ? '错误' : 'Error',
-                      }[item.action]
-                    }
-                  </span>
-                </div>
-                <div className="snapshot-diff">
-                  {item.currentSnapshot && (
-                    <div>
-                      <small>{zh ? '当前快照' : 'Current snapshot'}</small>
-                      <p>
-                        {item.currentSnapshot.lastSubmittedAt} · {item.currentSnapshot.lastResult} ·{' '}
-                        {item.currentSnapshot.totalSubmissions}
-                      </p>
-                    </div>
-                  )}
-                  <div>
-                    <small>{zh ? '导入值' : 'Incoming value'}</small>
-                    <p>
-                      {item.incomingSnapshot.lastSubmittedAt} · {item.incomingSnapshot.lastResult} ·{' '}
-                      {item.incomingSnapshot.totalSubmissions}
-                    </p>
-                  </div>
-                </div>
-                {(item.error || item.conflictReason) && (
-                  <p className="warning-text">{item.error || item.conflictReason}</p>
-                )}
-                {item.action === 'conflict' && !item.error && (
-                  <label className="checkbox-label">
-                    <input
-                      type="checkbox"
-                      disabled={step === 3 || frozen}
-                      checked={confirmed.has(item.frontendId)}
-                      onChange={(e) => {
-                        const checked = e.target.checked;
-                        setConfirmed((old) => {
-                          const next = new Set(old);
-                          checked ? next.add(item.frontendId) : next.delete(item.frontendId);
-                          return next;
-                        });
-                      }}
-                    />
-                    {zh
-                      ? '我已核对，允许覆盖此题快照'
-                      : 'I reviewed this problem and allow its snapshot to be replaced'}
-                  </label>
-                )}
-              </article>
-            ))}
-          </div>
-          {preview.errors.length > 0 && (
-            <details open>
-              <summary>{zh ? '校验错误' : 'Validation errors'}</summary>
-              <ul>
-                {preview.errors.map((item, i) => (
-                  <li key={i}>
-                    #{item.index + 1} {item.message}
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )}
-          <p className="coverage-note">
-            {zh
-              ? '未确认的冲突、重复和无效行将跳过。有效集合一次提交，累计次数按快照替换，不进行累加。'
-              : 'Unconfirmed conflicts, duplicates and invalid rows are skipped. The valid set commits together; cumulative counts replace snapshot values rather than adding to them.'}
-          </p>
-          <p>
-            {zh ? '本次选中可处理行数：' : 'Selected processable rows: '}
-            {eligible} · {zh ? '预览有效至 ' : 'Preview valid until '}
-            {new Date(preview.expiresAt).toLocaleTimeString(zh ? 'zh-CN' : 'en-US')}
-          </p>
-          <div className="form-actions">
-            <button
-              className="btn btn-secondary"
-              disabled={frozen}
-              onClick={() => {
-                if (step === 3) setStep(2);
-                else {
-                  invalidate();
-                  setStep(1);
-                }
-              }}
-            >
-              {zh ? '返回修改' : 'Back to edit'}
-            </button>
-            <button
-              className="btn btn-primary"
-              disabled={busy !== null || eligible === 0}
-              onClick={() => (step === 2 ? setStep(3) : void commit())}
-            >
-              {busy === 'commit'
-                ? zh
-                  ? '导入中…'
-                  : 'Importing…'
-                : step === 2
-                  ? zh
-                    ? '继续确认'
-                    : 'Continue to confirmation'
-                  : uncertain
-                    ? zh
-                      ? '重试本次导入'
-                      : 'Retry this import'
-                    : zh
-                      ? '确认导入'
-                      : 'Confirm import'}
-            </button>
-          </div>
-        </section>
+        <ProgressPreviewSection
+          step={step}
+          steps={steps}
+          preview={preview}
+          confirmed={confirmed}
+          setConfirmed={setConfirmed}
+          frozen={frozen}
+          busy={busy}
+          uncertain={uncertain}
+          lang={lang}
+          onBack={() => {
+            if (step === 3) setStep(2);
+            else {
+              invalidate();
+              setStep(1);
+            }
+          }}
+          onContinueOrCommit={() => (step === 2 ? setStep(3) : void commit())}
+        />
       )}
       {step === 4 && result && (
         <section className="import-stage">

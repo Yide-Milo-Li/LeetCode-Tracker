@@ -25,6 +25,8 @@ import { translations, type Language } from '../i18n.ts';
 import { Dialog } from './ui.tsx';
 import { useWorkspace } from '../workspace.tsx';
 import { allocate } from '../../../../packages/domain/src/index.ts';
+import { WeeklyScheduleGrid } from './WeeklyScheduleGrid.tsx';
+import { StrategyCard } from './StrategyCard.tsx';
 
 interface StrategiesViewProps {
   lang: Language;
@@ -253,42 +255,7 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang }) => {
       )}
 
       {/* Weekly Schedule Row */}
-      <div className="section-card u-margin-bottom-2rem">
-        <h3 className="section-title u-display-flex u-align-items-center u-gap-0-5rem u-margin-bottom-1rem">
-          <Calendar size={18} className="primary-icon" />
-          {t.weekdayScheduleTitle}
-        </h3>
-
-        <div className="weekly-schedule-grid">
-          {schedule.map(({ weekday, strategy }) => (
-            <div key={weekday} className={`day-schedule-card ${strategy ? 'has-strategy' : 'is-rest'}`}>
-              <div className="day-header">
-                <span className="day-name">{t.weekdays[weekday]}</span>
-                <span className="day-full-name">{t.weekdayFull[weekday]}</span>
-              </div>
-              <div className="day-body">
-                {strategy ? (
-                  <>
-                    <div className="day-strat-name">{strategy.name}</div>
-                    <div className="day-strat-meta">
-                      <span>
-                        {strategy.rules.dailyCount} {lang === 'zh' ? '题' : 'problems'}
-                      </span>
-                      <span>
-                        E:{Math.round(strategy.rules.difficulty.Easy)}% M:
-                        {Math.round(strategy.rules.difficulty.Medium)}% H:
-                        {Math.round(strategy.rules.difficulty.Hard)}%
-                      </span>
-                    </div>
-                  </>
-                ) : (
-                  <div className="day-rest-label">{t.noStrategyAssigned}</div>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
+      <WeeklyScheduleGrid schedule={schedule} lang={lang} />
 
       {/* Strategies List */}
       <div className="section-card">
@@ -312,106 +279,13 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang }) => {
         ) : (
           <div className="strategies-grid">
             {strategies.map((s) => (
-              <div key={s.id} className="strategy-card">
-                <div className="strategy-header">
-                  <div>
-                    <h4 className="strategy-name">{s.name}</h4>
-                    <span className="badge badge-secondary u-font-size-13px u-margin-top-0-25rem">
-                      v{s.version}
-                    </span>
-                  </div>
-                  <div className="strategy-actions">
-                    <button
-                      className="btn-icon"
-                      onClick={() => openEditModal(s)}
-                      aria-label={t.editStrategy}
-                      title={t.editStrategy}
-                    >
-                      <Edit2 size={16} />
-                    </button>
-                    <button
-                      className="btn-icon danger-icon"
-                      onClick={() => handleDelete(s)}
-                      aria-label={t.deleteStrategy}
-                      title={t.deleteStrategy}
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                </div>
-
-                <div className="strategy-details">
-                  <div className="strategy-detail-row">
-                    <span className="text-muted">{t.dailyCount}:</span>
-                    <strong>
-                      {s.rules.dailyCount} {lang === 'zh' ? '题' : 'problems'}
-                    </strong>
-                  </div>
-
-                  <div className="strategy-detail-row">
-                    <span className="text-muted">{t.difficultyDistribution}:</span>
-                    <div className="diff-pills-group">
-                      <span className="badge difficulty-easy">
-                        {t.statEasy}: {s.rules.difficulty.Easy}%
-                      </span>
-                      <span className="badge difficulty-medium">
-                        {t.statMedium}: {s.rules.difficulty.Medium}%
-                      </span>
-                      <span className="badge difficulty-hard">
-                        {t.statHard}: {s.rules.difficulty.Hard}%
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="strategy-detail-row">
-                    <span className="text-muted">{t.assignedDays}:</span>
-                    <div className="weekday-badges">
-                      {s.weekdays.length > 0 ? (
-                        s.weekdays.map((d) => (
-                          <span key={d} className="badge badge-primary">
-                            {t.weekdays[d]}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="text-muted">{lang === 'zh' ? '未分配' : 'Unassigned'}</span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="strategy-detail-row">
-                    <span className="text-muted">{t.enableReview}:</span>
-                    <span>
-                      {s.rules.reviewEnabled ? (
-                        <span className="badge badge-success">
-                          {lang === 'zh' ? '启用' : 'Enabled'} ({s.rules.reviewPercent}%)
-                        </span>
-                      ) : (
-                        <span className="badge badge-secondary">{lang === 'zh' ? '关闭' : 'Disabled'}</span>
-                      )}
-                    </span>
-                  </div>
-
-                  {s.rules.tags.length > 0 && (
-                    <div className="strategy-detail-row">
-                      <span className="text-muted">{t.allTags}:</span>
-                      <div className="tags-preview-list">
-                        {s.rules.tags.map((slug) => (
-                          <span key={slug} className="tag-chip">
-                            {slug}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {s.rules.preference && (
-                    <div className="strategy-detail-row">
-                      <span className="text-muted">{t.studyPreferences}:</span>
-                      <p className="pref-preview-text">"{s.rules.preference}"</p>
-                    </div>
-                  )}
-                </div>
-              </div>
+              <StrategyCard
+                key={s.id}
+                strategy={s}
+                lang={lang}
+                onEdit={openEditModal}
+                onDelete={handleDelete}
+              />
             ))}
           </div>
         )}
