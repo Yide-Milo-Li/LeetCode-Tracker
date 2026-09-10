@@ -101,6 +101,33 @@ describe('Domain Scheduling Algorithms', () => {
     assert.equal(matches(p3, premiumRules), true);
   });
 
+  it('preserves phase4-v1 selection for supplementary Unicode question IDs', () => {
+    const rules: Rules = {
+      dailyCount: 3,
+      difficulty: { Easy: 100, Medium: 0, Hard: 0 },
+      tags: [],
+      premium: false,
+      reviewEnabled: false,
+      reviewPercent: null,
+      preference: '',
+    };
+    const problems = Array.from({ length: 10 }, (_, index) => ({
+      ...createMockProblem(String(index)),
+      questionId: index === 3 ? 'custom-😀' : String(index),
+    }));
+    const pool = candidates(problems, [], rules, '2026-09-10', '2026-09-10', new Set());
+
+    // Captured from the pre-refactor algorithm: iterating UTF-16 code units would
+    // move this valid custom ID to last place and change the selected problems.
+    assert.equal(ALGORITHM_VERSION, 'phase4-v1');
+    assert.deepEqual(pool.map((problem) => problem.questionId), [
+      'custom-😀', '1', '0', '2', '5', '4', '7', '6', '9', '8',
+    ]);
+    assert.deepEqual(select(pool, rules).selected.map((problem) => problem.questionId), [
+      'custom-😀', '1', '0',
+    ]);
+  });
+
   it('validates evidence timing and source timezone strictly', () => {
     const addedAt = Date.parse('2026-09-08T10:00:00Z');
     const now = Date.parse('2026-09-08T12:00:00Z');

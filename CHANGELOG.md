@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Restored configured timezone formatting in progress import history, transaction-level practice replay conflict checks and existing Unicode candidate ordering after module decomposition.
 - Reorganized the desktop client into Today, Problems and Progress with contextual schedules/imports and preference-only Settings.
 - Added immediate completion circles, shared manual/history editors, exact-evidence revocation and optional practice duration.
 - Upgraded SQLite to v8 with atomic practice-operation replay, record revisions and nullable duration migration.

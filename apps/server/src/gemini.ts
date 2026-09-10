@@ -791,4 +791,3 @@ Return JSON with an array of selectedQuestionIds (strings). Order them in priori
     return { selectedQuestionIds: [], model: 'local' };
   }
 }
-

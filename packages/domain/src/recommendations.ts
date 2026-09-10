@@ -169,8 +169,10 @@ export function matches(problem: CatalogProblem, rules: Rules): boolean {
  */
 function rank(value: string): number {
   let hash = 2166136261;
-  for (let i = 0; i < value.length; i++) {
-    hash = Math.imul(hash ^ value.charCodeAt(i), 16777619);
+  // Preserve phase4-v1: consume only the first code unit of each Unicode code
+  // point. Processing surrogate pairs as two units changes existing rankings.
+  for (const char of value) {
+    hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
   }
   return hash >>> 0;
 }

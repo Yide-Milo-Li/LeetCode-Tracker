@@ -97,7 +97,11 @@ export function ImportHistory({ lang }: { lang: Language }) {
         items.map((item) => (
           <article className="history-card" key={item.id}>
             <div>
-              <h3>{new Date(item.importedAt).toLocaleString(zh ? 'zh-CN' : 'en-US')}</h3>
+              <h3>
+                {new Date(item.importedAt).toLocaleString(zh ? 'zh-CN' : 'en-US', {
+                  timeZone: workspace.timezone ?? 'UTC',
+                })}
+              </h3>
               <p className="muted">
                 {zh
                   ? `总计 ${item.totalCandidates} · 新增 ${item.insertedCount} · 更新 ${item.updatedCount}`

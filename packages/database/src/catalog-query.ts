@@ -193,7 +193,7 @@ export function getCatalogStatistics(db: DatabaseSync, catalogRevision: number):
   const statsRow = db
     .prepare(
       `
-    SELECT 
+    SELECT
       count(*) as total,
       count(case when difficulty = 'Easy' then 1 end) as easy,
       count(case when difficulty = 'Medium' then 1 end) as medium,

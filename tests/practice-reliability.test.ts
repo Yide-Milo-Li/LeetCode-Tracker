@@ -101,6 +101,53 @@ it('serializes duplicate intents, rejects changed payloads and preserves indepen
   }
 });
 
+it('rechecks matching and conflicting practice receipts committed during the backup window', async (t) => {
+  for (const changedPayload of [false, true]) {
+    const db = new DatabaseSync(':memory:');
+    try {
+      const store = new CatalogStore(db);
+      const otherWriter = new CatalogStore(db);
+      await seed(store);
+      const revision = store.getPracticeRevision();
+      const request = { ...input, operationId: 'backup-window', notes: 'original intent' };
+      const competingRequest = {
+        ...request,
+        notes: changedPayload ? 'different intent' : request.notes,
+      };
+      const backupManager = new BackupManager('unused-synthetic-backup');
+      // A separate store can commit after the initial replay check while backup yields.
+      // Mock the backup boundary itself so this fixture never writes files.
+      t.mock.method(backupManager, 'performPreImportBackup', async () => {
+        await otherWriter.createPracticeRecord(competingRequest);
+        return { latestPath: 'unused', dailyPath: 'unused' };
+      });
+      store.backupManager = backupManager;
+
+      if (changedPayload) {
+        await assert.rejects(store.createPracticeRecord(request), (error: unknown) =>
+          error instanceof PracticeConflictError && error.code === 'OPERATION_CONFLICT',
+        );
+      } else {
+        const replayed = await store.createPracticeRecord(request);
+        const committed = store.queryPracticeRecords().items[0];
+        assert.equal(replayed.id, committed.id);
+        assert.equal(replayed.notes, request.notes);
+      }
+
+      assert.equal(store.queryPracticeRecords().total, 1);
+      assert.equal(store.queryPracticeRecords().items[0].notes, competingRequest.notes);
+      assert.equal(store.getPracticeRevision(), revision + 1);
+      // Both replay and rejection must release the transaction for the next write.
+      store.backupManager = undefined;
+      await store.createPracticeRecord({ ...input, operationId: 'after-race' });
+      assert.equal(store.queryPracticeRecords().total, 2);
+      assert.equal(store.getPracticeRevision(), revision + 2);
+    } finally {
+      db.close();
+    }
+  }
+});
+
 it('rolls back a failed operation write together with its record, then safely retries', async () => {
   const db = new DatabaseSync(':memory:');
   try {

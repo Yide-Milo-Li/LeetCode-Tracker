@@ -229,7 +229,8 @@ export function queryPracticeRecords(
 }
 
 /**
- * Execute the database mutation for creating a practice record.
+ * Atomically create a practice or return a matching operation's existing record ID.
+ * Reject conflicting fingerprints even when another writer commits during backup.
  */
 export function insertPracticeRecordTransaction(
   db: DatabaseSync,
@@ -244,14 +245,18 @@ export function insertPracticeRecordTransaction(
 
   db.exec('BEGIN IMMEDIATE;');
   try {
-    // Recheck under write transaction to guarantee idempotency
-    const concurrentReplay = db
-      .prepare('SELECT record_id FROM practice_operations WHERE id=?')
-      .get(validated.operationId ?? '') as { record_id: string } | undefined;
+    // Backup yields before this transaction; recheck both identity and content
+    // under the write lock instead of trusting the earlier replay lookup.
+    const concurrentReplay = replayPracticeOperation(
+      db,
+      validated.operationId,
+      fingerprint,
+      (recordId) => getPracticeRecord(db, recordId)
+    );
 
     if (concurrentReplay) {
       db.exec('COMMIT;');
-      return concurrentReplay.record_id;
+      return concurrentReplay.id;
     }
 
     db.prepare(

@@ -17,8 +17,43 @@ const { SettingsView } = await import('../apps/web/src/components/SettingsView.t
 const { CatalogView } = await import('../apps/web/src/components/CatalogView.tsx');
 const { PracticeLogModal } = await import('../apps/web/src/components/PracticeLogModal.tsx');
 const { ProgressWorkbench } = await import('../apps/web/src/components/ProgressWorkbench.tsx');
+const { ImportHistory } = await import('../apps/web/src/components/ProgressImportHistory.tsx');
+const { WorkspaceContext } = await import('../apps/web/src/workspace.tsx');
 
 afterEach(() => { cleanup(); mock.restoreAll(); });
+
+it('renders progress import history in the configured timezone with a UTC fallback in both languages', async () => {
+  const importedAt = Date.parse('2026-09-10T03:00:00Z');
+  mock.method(api, 'getProgressImportHistory', async () => ({
+    total: 1,
+    items: [{
+      id: 'synthetic-history', importedAt, totalCandidates: 1, validCount: 1,
+      insertedCount: 1, updatedCount: 0, unchangedCount: 0, conflictCount: 0,
+      duplicateCount: 0, errorCount: 0,
+    }],
+  }));
+
+  // These zones place the same instant on different calendar dates. Testing both
+  // catches browser-local formatting without relying on the runner's timezone.
+  for (const lang of ['en', 'zh'] as const) {
+    for (const timezone of ['Asia/Tokyo', 'America/Los_Angeles', null]) {
+      await act(async () => {
+        render(
+          <WorkspaceContext.Provider value={{
+            revision: 0, timezone, navigate: () => {}, notifyMutation: () => {}, openPractice: () => {},
+          }}>
+            <ImportHistory lang={lang} />
+          </WorkspaceContext.Provider>,
+        );
+      });
+      const expected = new Date(importedAt).toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US', {
+        timeZone: timezone ?? 'UTC',
+      });
+      assert.ok(screen.getByRole('heading', { level: 3, name: expected }));
+      cleanup();
+    }
+  }
+});
 
 /** Let each test choose the response order without timers or a live service. */
 function deferred<T>() {

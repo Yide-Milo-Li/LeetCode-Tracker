@@ -1,6 +1,6 @@
 # Testing boundaries
 
-Run `npm test` for 182 offline synthetic tests: 142 storage/domain/API tests and 40 rendered React DOM tests. `npm run test:web` runs the 40 web component tests separately. `npm run check` includes TypeScript and TSX test files (`tsc --noEmit`). Tests use in-memory or temporary databases and never require private data, credentials, remote services, or `apps/web/dist`.
+Run `npm test` for 185 offline synthetic tests: 144 storage/domain/API tests and 41 rendered React DOM tests. `npm run test:web` runs the 41 web component tests separately. `npm run check` includes TypeScript and TSX test files (`tsc --noEmit`). Tests use in-memory or temporary databases and never require private data, credentials, remote services, or `apps/web/dist`.
 
 Coverage includes:
 
@@ -14,6 +14,7 @@ Coverage includes:
 - Planning and recommendation engine: deterministic quota distribution, weekday strategy scheduling, single/batch problem replacement, rest days, and validated rule overrides.
 - Dashboard domain statistics: unique solved problems, weekly solved count (Monday-based), yesterday-fallback streak calculations, yearly activity aggregation, 30-day activity trends, tag & difficulty distributions, pending-date deduplication, and zero-write resilience on read operations.
 - React DOM tests: preview races, clear during failure, frozen commit inputs, visible request errors, retry recovery, out-of-order catalog filters, daily plan controller synchronization, heatmap roving tabIndex keyboard navigation, and slide-over history drawer filtering/pagination/ESC close.
+- Refactor regressions: matching and conflicting practice receipts committed by a second store during a mocked backup window; baseline candidate selection for supplementary Unicode IDs; progress import history timestamps in both languages across configured timezones and the UTC fallback.
 
 ## Live Gemini API validation
 
