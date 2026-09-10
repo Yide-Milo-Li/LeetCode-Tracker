@@ -3,482 +3,54 @@
  * Provides typed methods for catalog browsing, JSONL problem import, manual practice records,
  * progress snapshot management, Gemini-assisted text formatting, and user preferences.
  */
+import type {
+  CatalogProblem,
+  CatalogQueryInput,
+  CatalogStats,
+  CreatePracticeRecordInput,
+  DailyPlan,
+  DashboardActivityListResponse,
+  DashboardResponse,
+  EnsureResult,
+  ImportHistoryItem,
+  ImportPreview,
+  ImportSummary,
+  OverridePreview,
+  PracticeQueryInput,
+  PracticeRecord,
+  PracticeStats,
+  ProgressCandidateInput,
+  ProgressImportPreview,
+  ProgressImportSummary,
+  ProgressSnapshot,
+  ProgressSnapshotHistory,
+  RulePatch,
+  Strategy,
+  StrategyInput,
+  TopicTag,
+  UpdatePracticeRecordInput,
+  UpdateProgressSnapshotInput,
+  UserSettings,
+} from '../../../packages/contracts/src/index.ts';
 
-export interface TopicTag {
-  id: string;
-  name: string;
-  slug: string;
-}
+// Re-export all contract types for full backward compatibility across web components
+export * from '../../../packages/contracts/src/index.ts';
 
-export interface CatalogProblem {
-  questionId: string;
-  questionFrontendId: string;
-  title: string;
-  titleSlug: string;
-  url: string;
-  difficulty: 'Easy' | 'Medium' | 'Hard';
-  isPaidOnly: boolean;
-  topicTags: TopicTag[];
-  source: string;
-}
+// For web client calls, query parameters are optional inputs before server schema defaults apply
+export type CatalogQuery = CatalogQueryInput;
+export type PracticeQuery = PracticeQueryInput;
 
-export interface CatalogStats {
-  totalProblems: number;
-  easy: number;
-  medium: number;
-  hard: number;
-  paidOnly: number;
-  totalTags: number;
-  lastImportedAt: number | null;
-  catalogRevision: number;
-}
-
-export interface CatalogQuery {
-  page?: number;
-  limit?: number;
-  difficulty?: 'Easy' | 'Medium' | 'Hard';
-  tag?: string;
-  premium?: 'true' | 'false' | 'all';
-  search?: string;
-}
-
-export interface UserSettings {
-  language: 'en' | 'zh';
-  theme: 'light' | 'dark' | 'system';
-  timezone: string | null;
-  updatedAt: number;
-}
-
-export interface ImportErrorLine {
-  line: number;
-  message: string;
-  snippet?: string;
-}
-
-export interface ImportPreviewItem {
-  frontendId: string;
-  title: string;
-  difficulty: 'Easy' | 'Medium' | 'Hard';
-  action: 'insert' | 'update' | 'unchanged';
-  tags: string[];
-  changes?: string[];
-}
-
-export interface ImportPreview {
-  previewId: string;
-  catalogRevision: number;
-  createdAt: number;
-  expiresAt: number;
-  totalLines: number;
-  validCount: number;
-  insertCount: number;
-  updateCount: number;
-  unchangedCount: number;
-  duplicateCount: number;
-  errorCount: number;
-  errors: ImportErrorLine[];
-  sampleItems: ImportPreviewItem[];
-}
-
-export interface ImportSummary {
-  id: string;
-  importedAt: number;
-  totalLines: number;
-  validCount: number;
-  insertedCount: number;
-  updatedCount: number;
-  unchangedCount: number;
-  duplicateCount: number;
-  errorCount: number;
-  errors: ImportErrorLine[];
-  errorsUnavailable?: boolean;
-}
-
-export interface ImportHistoryItem {
-  id: string;
-  importedAt: number;
-  totalLines: number;
-  validCount: number;
-  insertedCount: number;
-  updatedCount: number;
-  unchangedCount: number;
-  duplicateCount: number;
-  errorCount: number;
-}
-
-export type TimePrecision = 'datetime' | 'date';
-export type PracticeRecordStatus = 'active' | 'revoked';
-
-export interface PracticeRecord {
-  id: string;
-  questionId: string;
-  questionFrontendId: string;
-  problemTitle: string;
-  completed: boolean;
-  practicedAt: string;
-  timePrecision: TimePrecision;
-  notes: string | null;
-  durationMinutes: number | null;
-  sourceTimezone: string | null;
-  revision: number;
-  status: PracticeRecordStatus;
-  createdAt: number;
-  updatedAt: number;
-  revokedAt: number | null;
-}
-
-export interface CreatePracticeRecordInput {
-  questionFrontendId: string;
-  completed: boolean;
-  practicedAt: string;
-  timePrecision?: TimePrecision;
-  notes?: string;
-  durationMinutes?: number | null;
-  operationId?: string;
-  sourceTimezone?: string | null;
-}
-
-export interface UpdatePracticeRecordInput {
-  completed?: boolean;
-  practicedAt?: string;
-  timePrecision?: TimePrecision;
-  notes?: string | null;
-  durationMinutes?: number | null;
-  sourceTimezone?: string | null;
-  expectedRevision?: number;
-}
-
-export interface PracticeQuery {
-  page?: number;
-  limit?: number;
-  questionFrontendId?: string;
-  completed?: 'true' | 'false' | 'all';
-  status?: 'active' | 'revoked' | 'all';
-}
-
-export interface ProgressSnapshot {
-  questionId: string;
-  questionFrontendId: string;
-  problemTitle: string;
-  difficulty: 'Easy' | 'Medium' | 'Hard';
-  lastSubmittedAt: string;
-  timePrecision: TimePrecision;
-  lastResult: string;
-  totalSubmissions: number;
-  hasAccepted: boolean;
-  source: string;
-  version: number;
-  status: PracticeRecordStatus;
-  updatedAt: number;
-}
-
-export interface UpdateProgressSnapshotInput {
-  sourceTimezone?: string | null;
-  lastSubmittedAt?: string;
-  timePrecision?: TimePrecision;
-  lastResult?: string;
-  totalSubmissions?: number;
-  reason?: string;
-}
-
-export interface ProgressSnapshotHistory {
-  id: string;
-  questionId: string;
-  version: number;
-  lastSubmittedAt: string;
-  timePrecision: TimePrecision;
-  lastResult: string;
-  totalSubmissions: number;
-  source: string;
-  status: PracticeRecordStatus;
-  recordedAt: number;
-  importId: string | null;
-  reason: string;
-}
-
-export interface ProgressCandidateInput {
-  frontendId: string;
-  title?: string;
-  lastSubmitted: string;
-  lastResult: string;
-  submissions: number | string;
-  rawSnippet?: string;
-}
-
-export type ProgressConflictType =
-  | 'older_date'
-  | 'decreased_submissions'
-  | 'conflicting_result_same_date_count'
-  | 'ambiguous_time'
-  | 'intra_batch_contradiction'
-  | 'unmatched_problem';
-
-export interface ProgressPreviewItem {
-  frontendId: string;
-  questionId?: string;
-  problemTitle?: string;
-  difficulty?: 'Easy' | 'Medium' | 'Hard';
-  action: 'insert' | 'update' | 'unchanged' | 'conflict' | 'duplicate' | 'error';
-  currentSnapshot?: {
-    lastSubmittedAt: string;
-    timePrecision: TimePrecision;
-    lastResult: string;
-    totalSubmissions: number;
-  };
-  incomingSnapshot: {
-    lastSubmittedAt: string;
-    timePrecision: TimePrecision;
-    lastResult: string;
-    totalSubmissions: number;
-  };
-  conflictReason?: string;
-  conflictType?: ProgressConflictType;
-  error?: string;
-  allowedToCommit: boolean;
-}
-
-export interface ProgressImportPreview {
-  sourceTimezone?: string | null;
-  previewId: string;
-  catalogRevision: number;
-  practiceRevision: number;
-  createdAt: number;
-  expiresAt: number;
-  totalCandidates: number;
-  validCount: number;
-  insertCount: number;
-  updateCount: number;
-  unchangedCount: number;
-  conflictCount: number;
-  duplicateCount: number;
-  errorCount: number;
-  items: ProgressPreviewItem[];
-  errors: Array<{
-    index: number;
-    message: string;
-    snippet?: string;
-  }>;
-}
-
-export interface ProgressImportSummary {
-  id: string;
-  importedAt: number;
-  totalCandidates: number;
-  validCount: number;
-  insertedCount: number;
-  updatedCount: number;
-  unchangedCount: number;
-  conflictCount: number;
-  duplicateCount: number;
-  errorCount: number;
-  errors: Array<{
-    index: number;
-    message: string;
-    snippet?: string;
-  }>;
-}
-
-export interface PracticeStats {
-  uniqueSolvedProblems: number;
-  totalManualPractices: number;
-  completedManualPractices: number;
-  uncompletedManualPractices: number;
-  totalSnapshots: number;
-  acceptedSnapshots: number;
-  lastActivityAt: number | null;
-  practiceRevision: number;
-}
-
+/** Status reported by Gemini assistant configuration endpoint. */
 export interface GeminiStatus {
   configured: boolean;
   model: string;
 }
 
+/** Result structure returned by Gemini formatting API. */
 export interface GeminiFormatResponse {
   candidates: ProgressCandidateInput[];
   unparsedSnippets: string[];
   model: string;
-}
-
-export interface Bilingual {
-  en: string;
-  zh: string;
-}
-
-export interface Rules {
-  dailyCount: number;
-  difficulty: {
-    Easy: number;
-    Medium: number;
-    Hard: number;
-  };
-  tags: string[];
-  premium: boolean;
-  reviewEnabled: boolean;
-  reviewPercent: number | null;
-  preference: string;
-}
-
-export type RulePatch = Partial<Rules>;
-
-export interface StrategyInput {
-  name: string;
-  rules: Rules;
-  weekdays: number[];
-}
-
-export interface Strategy extends StrategyInput {
-  id: string;
-  version: number;
-  deleted: boolean;
-}
-
-export interface PlanItem {
-  id: string;
-  problem: CatalogProblem;
-  kind: 'new' | 'review';
-  addedAt: number;
-  reason: Bilingual;
-  evidenceIds: string[];
-  completed: boolean;
-}
-
-export interface DailyPlan {
-  id: string;
-  date: string;
-  timezone: string;
-  version: number;
-  strategyId: string | null;
-  strategyVersion: number | null;
-  rules: Rules;
-  items: PlanItem[];
-  source: 'gemini' | 'local';
-  model: string | null;
-  encouragement: Bilingual;
-  notices: Bilingual[];
-  catalogRevision: number;
-  practiceRevision: number;
-  planningRevision: number;
-  algorithmVersion: string;
-  createdAt: number;
-  updatedAt: number;
-  action: string;
-}
-
-export interface EnsureResult {
-  status: 'ready' | 'rest' | 'setup';
-  plan: DailyPlan | null;
-}
-
-export interface OverridePreview {
-  id: string;
-  date: string;
-  expiresAt: number;
-  base: Rules | null;
-  rules: RulePatch;
-  changed: string[];
-  issues: string[];
-  unresolved: string[];
-  candidateCount: number;
-  counts: { Easy: number; Medium: number; Hard: number };
-  revision: { catalog: number; practice: number; planning: number; timezone: string | null };
-  planVersion: number | null;
-}
-
-export interface DashboardOverview {
-  uniqueSolvedProblems: number;
-  solvedThisWeek: number;
-  currentStreak: number;
-  totalManualPractices: number;
-  totalSnapshotSubmissions: number;
-}
-
-export interface DashboardDailySummary {
-  status: 'ready' | 'rest' | 'setup' | 'failed' | 'generating';
-  strategyName: string | null;
-  completedCount: number;
-  targetCount: number;
-  generatedCount: number;
-  shortage: number;
-  planId: string | null;
-  errorMessage: string | null;
-}
-
-export interface YearlyActivityDay {
-  date: string;
-  activeProblemCount: number;
-  solvedProblemCount: number;
-  manualCount: number;
-  snapshotCount: number;
-}
-
-export interface DailyTrendPoint {
-  date: string;
-  activeCount: number;
-  completedCount: number;
-}
-
-export interface DifficultyCount {
-  solved: number;
-  total: number;
-}
-
-export interface DifficultyDistribution {
-  Easy: DifficultyCount;
-  Medium: DifficultyCount;
-  Hard: DifficultyCount;
-}
-
-export interface TagDistribution {
-  tagSlug: string;
-  tagName: string;
-  solvedCount: number;
-}
-
-export interface RecentActivityItem {
-  id: string;
-  source: 'manual' | 'snapshot';
-  questionId: string;
-  questionFrontendId: string;
-  problemTitle: string;
-  difficulty: 'Easy' | 'Medium' | 'Hard';
-  action: string;
-  status: 'completed' | 'uncompleted' | 'accepted' | 'other';
-  timestamp: string;
-  timePrecision: 'datetime' | 'date';
-  sourceTimezone: string | null;
-  isDatePending: boolean;
-}
-
-export interface DashboardDataStatus {
-  catalogUpdatedAt: number | null;
-  practiceUpdatedAt: number | null;
-  userTimezone: string | null;
-  pendingDateCount: number;
-}
-
-export interface DashboardResponse {
-  overview: DashboardOverview;
-  todaySummary: DashboardDailySummary;
-  yearlyActivity: {
-    year: number;
-    days: YearlyActivityDay[];
-  };
-  trend30Days: DailyTrendPoint[];
-  difficultyDistribution: DifficultyDistribution;
-  topTags: TagDistribution[];
-  recentActivities: RecentActivityItem[];
-  dataStatus: DashboardDataStatus;
-  revision: { catalog: number; practice: number; planning: number; timezone: string | null };
-}
-
-export interface DashboardActivityListResponse {
-  items: RecentActivityItem[];
-  total: number;
-  page: number;
-  limit: number;
-  totalPages: number;
-  revision: { catalog: number; practice: number; planning: number; timezone: string | null };
 }
 
 const API_BASE =
@@ -491,11 +63,15 @@ export class ApiError extends Error {
   public status: number;
   public code: string;
   /** Preserve HTTP metadata while remaining compatible with Node's native type stripping. */
-  constructor(status: number, code: string, message: string) { super(message); this.status = status; this.code = code; }
+  constructor(status: number, code: string, message: string) {
+    super(message);
+    this.status = status;
+    this.code = code;
+  }
 }
 
 /** Request typed local API data without discarding server validation/conflict codes. */
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
@@ -522,20 +98,27 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 /** Retain uncertain operation identities until a response confirms their result. */
 const pendingOperations = new Map<string, string>();
+
 /** Repeated requests for the same plan/version represent retries of one user intent. */
 async function planningMutation(path: string, payload: Record<string, unknown>): Promise<DailyPlan> {
   const key = JSON.stringify([path, payload]);
   const operationId = pendingOperations.get(key) ?? crypto.randomUUID();
   pendingOperations.set(key, operationId);
-  const result = await request<DailyPlan>(path, { method: 'POST', body: JSON.stringify({ ...payload, operationId }) });
+  const result = await request<DailyPlan>(path, {
+    method: 'POST',
+    body: JSON.stringify({ ...payload, operationId }),
+  });
   pendingOperations.delete(key);
   return result;
 }
 
-export const api = {
+// ==========================================
+// Catalog & Import API
+// ==========================================
+const catalogApi = {
   /** Read the persisted catalog import result, including individual line errors. */
   getImportResult: (id: string) => request<ImportSummary>(`/imports/${encodeURIComponent(id)}`),
-  // Catalog
+
   getCatalogStats(): Promise<CatalogStats> {
     return request<CatalogStats>('/catalog/stats');
   },
@@ -557,19 +140,6 @@ export const api = {
     return request<{ tags: TopicTag[] }>('/catalog/tags');
   },
 
-  // Settings
-  getSettings(): Promise<UserSettings> {
-    return request<UserSettings>('/settings');
-  },
-
-  updateSettings(settings: Partial<Pick<UserSettings, 'language' | 'theme' | 'timezone'>>): Promise<UserSettings> {
-    return request<UserSettings>('/settings', {
-      method: 'PATCH',
-      body: JSON.stringify(settings),
-    });
-  },
-
-  // Catalog JSONL Imports
   previewImport(content: string): Promise<ImportPreview> {
     return request<ImportPreview>('/imports/preview', {
       method: 'POST',
@@ -587,8 +157,28 @@ export const api = {
   getImportHistory(page = 1, limit = 20): Promise<{ total: number; items: ImportHistoryItem[] }> {
     return request<{ total: number; items: ImportHistoryItem[] }>(`/imports?page=${page}&limit=${limit}`);
   },
+};
 
-  // Manual Practice Records
+// ==========================================
+// Settings API
+// ==========================================
+const settingsApi = {
+  getSettings(): Promise<UserSettings> {
+    return request<UserSettings>('/settings');
+  },
+
+  updateSettings(settings: Partial<Pick<UserSettings, 'language' | 'theme' | 'timezone'>>): Promise<UserSettings> {
+    return request<UserSettings>('/settings', {
+      method: 'PATCH',
+      body: JSON.stringify(settings),
+    });
+  },
+};
+
+// ==========================================
+// Practice Records API
+// ==========================================
+const practiceApi = {
   getPracticeRecord(id: string): Promise<PracticeRecord> {
     return request<PracticeRecord>(`/practice-records/${encodeURIComponent(id)}`);
   },
@@ -620,12 +210,21 @@ export const api = {
   },
 
   revokePracticeRecord(id: string, expectedRevision?: number): Promise<PracticeRecord> {
-    return request<PracticeRecord>(`/practice-records/${encodeURIComponent(id)}${expectedRevision === undefined ? '' : `?expectedRevision=${expectedRevision}`}`, {
-      method: 'DELETE',
-    });
+    return request<PracticeRecord>(
+      `/practice-records/${encodeURIComponent(id)}${expectedRevision === undefined ? '' : `?expectedRevision=${expectedRevision}`}`,
+      { method: 'DELETE' }
+    );
   },
 
-  // Progress Snapshots
+  getPracticeStats(): Promise<PracticeStats> {
+    return request<PracticeStats>('/practice/stats');
+  },
+};
+
+// ==========================================
+// Progress Snapshots & Ingestion API
+// ==========================================
+const progressApi = {
   getProgressSnapshots(page = 1, limit = 50, status?: 'active' | 'revoked'): Promise<{ total: number; page: number; limit: number; items: ProgressSnapshot[] }> {
     const params = new URLSearchParams({ page: String(page), limit: String(limit) });
     if (status) params.set('status', status);
@@ -654,7 +253,6 @@ export const api = {
     return request<{ items: ProgressSnapshotHistory[] }>(`/progress-snapshots/${id}/history`);
   },
 
-  // Progress Import & Gemini Assistant
   getProgressImportStatus(): Promise<GeminiStatus> {
     return request<GeminiStatus>('/progress-imports/status');
   },
@@ -692,16 +290,12 @@ export const api = {
   getProgressImportResult(id: string): Promise<ProgressImportSummary> {
     return request<ProgressImportSummary>(`/progress-imports/${id}`);
   },
+};
 
-  // Practice & Solved Statistics
-  getPracticeStats(): Promise<PracticeStats> {
-    return request<PracticeStats>('/practice/stats');
-  },
-
-  // ==========================================
-  // Recommendations & Strategies
-  // ==========================================
-
+// ==========================================
+// Recommendation Planning & Strategies API
+// ==========================================
+const planningApi = {
   async getStrategies(): Promise<Strategy[]> {
     const res = await request<{ items: Strategy[] }>('/strategies');
     return res.items;
@@ -732,10 +326,6 @@ export const api = {
     const res = await request<{ schedule: { weekday: number; strategy: Strategy | null }[] }>('/weekly-schedule');
     return res.schedule;
   },
-
-  // ==========================================
-  // Daily Plans
-  // ==========================================
 
   async getPlans(date?: string): Promise<DailyPlan[]> {
     const query = date ? `?date=${encodeURIComponent(date)}` : '';
@@ -769,11 +359,12 @@ export const api = {
   commitDailyPlanOverride(previewId: string, expectedVersion: number | null): Promise<DailyPlan> {
     return planningMutation('/daily-plan-overrides/commit', { previewId, expectedVersion });
   },
+};
 
-  // ==========================================
-  // Dashboard & Activity Insights
-  // ==========================================
-
+// ==========================================
+// Dashboard & Activity API
+// ==========================================
+const dashboardApi = {
   getDashboard(year?: number): Promise<DashboardResponse> {
     const query = year ? `?year=${encodeURIComponent(year)}` : '';
     return request<DashboardResponse>(`/dashboard${query}`);
@@ -795,4 +386,14 @@ export const api = {
     const qs = params.toString();
     return request<DashboardActivityListResponse>(`/dashboard/activity${qs ? `?${qs}` : ''}`);
   },
+};
+
+/** Unified API client instance aggregating all endpoint domains. */
+export const api = {
+  ...catalogApi,
+  ...settingsApi,
+  ...practiceApi,
+  ...progressApi,
+  ...planningApi,
+  ...dashboardApi,
 };
