@@ -11,16 +11,48 @@ import {
   Plus,
   Upload,
 } from 'lucide-react';
-import { DashboardView } from './components/DashboardView.tsx';
 import { CatalogView } from './components/CatalogView.tsx';
-import { SettingsView } from './components/SettingsView.tsx';
-import { CatalogImportWorkspace } from './components/CatalogImportWorkspace.tsx';
-import { ProgressWorkbench } from './components/ProgressWorkbench.tsx';
 import { ActivityRecords } from './components/ActivityRecords.tsx';
 import { TodayPlanView } from './components/TodayPlanView.tsx';
-import { StrategiesView } from './components/StrategiesView.tsx';
 import { PracticeWorkspace } from './components/PracticeWorkspace.tsx';
 import { Feedback, PageHeader } from './components/ui.tsx';
+
+/** Lazy-load heavy contextual workspaces and charting views to optimize desktop bundle size. */
+const DashboardView = React.lazy(() =>
+  import('./components/DashboardView.tsx').then((m) => ({ default: m.DashboardView })),
+);
+const CatalogImportWorkspace = React.lazy(() =>
+  import('./components/CatalogImportWorkspace.tsx').then((m) => ({ default: m.CatalogImportWorkspace })),
+);
+const ProgressWorkbench = React.lazy(() =>
+  import('./components/ProgressWorkbench.tsx').then((m) => ({ default: m.ProgressWorkbench })),
+);
+const StrategiesView = React.lazy(() =>
+  import('./components/StrategiesView.tsx').then((m) => ({ default: m.StrategiesView })),
+);
+const SettingsView = React.lazy(() =>
+  import('./components/SettingsView.tsx').then((m) => ({ default: m.SettingsView })),
+);
+
+/** Accessible lightweight placeholder while lazy-loading secondary workspaces. */
+function WorkspaceFallback({ label }: { label: string }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: '240px',
+        color: 'var(--text-muted)',
+        fontSize: '0.9375rem',
+      }}
+    >
+      <span>{label}</span>
+    </div>
+  );
+}
 import { useDailyPlan } from './hooks/useDailyPlan.ts';
 import { api, type PracticeRecord } from './api.ts';
 import type { Language } from './i18n.ts';
@@ -311,70 +343,72 @@ export function App() {
               </div>
             </>
           )}
-          {visited.has('today') && (
-            <div hidden={view !== 'today'} id="view-today">
-              <TodayPlanView
-                lang={lang}
-                planController={plan}
-                onNavigateToSettings={() => navigate('settings')}
-              />
-            </div>
-          )}
-          {visited.has('schedule') && (
-            <div hidden={view !== 'schedule'} id="view-schedule">
-              <PageHeader
-                title={zh ? '学习安排' : 'Study schedule'}
-                description={
-                  zh
-                    ? '星期安排决定每天的策略。调整今天只影响当前计划。'
-                    : 'Your weekly schedule selects each day’s strategy. Adjust today changes only the current plan.'
-                }
-                back={{ label: zh ? '返回今日' : 'Back to Today', run: () => navigate('today') }}
-              />
-              <StrategiesView lang={lang} />
-            </div>
-          )}
-          {visited.has('problems') && (
-            <div hidden={view !== 'problems'} id="view-problems">
-              <CatalogView lang={lang} onNavigateSettings={() => navigate('catalog-import')} />
-            </div>
-          )}
-          {visited.has('catalog-import') && (
-            <div hidden={view !== 'catalog-import'} id="view-catalog-import">
-              <CatalogImportWorkspace lang={lang} />
-            </div>
-          )}
-          {visited.has('records') && (
-            <div hidden={view !== 'records'} role="tabpanel" aria-labelledby="tab-records" id="view-records">
-              <ActivityRecords lang={lang} />
-            </div>
-          )}
-          {visited.has('statistics') && (
-            <div
-              hidden={view !== 'statistics'}
-              role="tabpanel"
-              aria-labelledby="tab-statistics"
-              id="view-statistics"
-            >
-              <DashboardView lang={lang} active={view === 'statistics'} />
-            </div>
-          )}
-          {visited.has('progress-import') && (
-            <div hidden={view !== 'progress-import'} id="view-progress-import">
-              <ProgressWorkbench lang={lang} />
-            </div>
-          )}
-          {visited.has('settings') && (
-            <div hidden={view !== 'settings'} id="view-settings">
-              <SettingsView
-                lang={lang}
-                onLanguageChange={(language) => persistPreference({ language })}
-                onThemeChange={(theme) => persistPreference({ theme })}
-                currentTheme={theme}
-                onTimezoneSaved={setTimezone}
-              />
-            </div>
-          )}
+          <React.Suspense fallback={<WorkspaceFallback label={zh ? '加载中…' : 'Loading…'} />}>
+            {visited.has('today') && (
+              <div hidden={view !== 'today'} id="view-today">
+                <TodayPlanView
+                  lang={lang}
+                  planController={plan}
+                  onNavigateToSettings={() => navigate('settings')}
+                />
+              </div>
+            )}
+            {visited.has('schedule') && (
+              <div hidden={view !== 'schedule'} id="view-schedule">
+                <PageHeader
+                  title={zh ? '学习安排' : 'Study schedule'}
+                  description={
+                    zh
+                      ? '星期安排决定每天的策略。调整今天只影响当前计划。'
+                      : 'Your weekly schedule selects each day’s strategy. Adjust today changes only the current plan.'
+                  }
+                  back={{ label: zh ? '返回今日' : 'Back to Today', run: () => navigate('today') }}
+                />
+                <StrategiesView lang={lang} />
+              </div>
+            )}
+            {visited.has('problems') && (
+              <div hidden={view !== 'problems'} id="view-problems">
+                <CatalogView lang={lang} onNavigateSettings={() => navigate('catalog-import')} />
+              </div>
+            )}
+            {visited.has('catalog-import') && (
+              <div hidden={view !== 'catalog-import'} id="view-catalog-import">
+                <CatalogImportWorkspace lang={lang} />
+              </div>
+            )}
+            {visited.has('records') && (
+              <div hidden={view !== 'records'} role="tabpanel" aria-labelledby="tab-records" id="view-records">
+                <ActivityRecords lang={lang} />
+              </div>
+            )}
+            {visited.has('statistics') && (
+              <div
+                hidden={view !== 'statistics'}
+                role="tabpanel"
+                aria-labelledby="tab-statistics"
+                id="view-statistics"
+              >
+                <DashboardView lang={lang} active={view === 'statistics'} />
+              </div>
+            )}
+            {visited.has('progress-import') && (
+              <div hidden={view !== 'progress-import'} id="view-progress-import">
+                <ProgressWorkbench lang={lang} />
+              </div>
+            )}
+            {visited.has('settings') && (
+              <div hidden={view !== 'settings'} id="view-settings">
+                <SettingsView
+                  lang={lang}
+                  onLanguageChange={(language) => persistPreference({ language })}
+                  onThemeChange={(theme) => persistPreference({ theme })}
+                  currentTheme={theme}
+                  onTimezoneSaved={setTimezone}
+                />
+              </div>
+            )}
+          </React.Suspense>
         </main>
         {practice && (
           <PracticeWorkspace

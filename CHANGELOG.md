@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Configured automated GitHub Actions CI pipeline on Node.js 24 verifying type checks, full test suites, build, documentation links, and git whitespace.
+- Implemented dynamic code-splitting with React.lazy and desktop-themed Suspense boundaries for contextual workspaces, reducing main bundle size to 389 kB and eliminating Vite chunk size warnings.
 - Restored configured timezone formatting in progress import history, transaction-level practice replay conflict checks and existing Unicode candidate ordering after module decomposition.
 - Reorganized the desktop client into Today, Problems and Progress with contextual schedules/imports and preference-only Settings.
 - Added immediate completion circles, shared manual/history editors, exact-evidence revocation and optional practice duration.

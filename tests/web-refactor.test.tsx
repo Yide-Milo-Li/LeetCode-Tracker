@@ -603,10 +603,14 @@ it('navigation and preference switches retain drafts and do not regenerate the d
   await act(async () => {
     fireEvent.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'Progress' }));
   });
-  fireEvent.click(screen.getByRole('button', { name: 'Import progress' }));
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Import progress' }));
+  });
   fireEvent.change(screen.getByLabelText('Progress content'), { target: { value: 'Unsubmitted draft' } });
   fireEvent.click(screen.getByRole('button', { name: /Back to progress/ }));
-  fireEvent.click(screen.getByRole('button', { name: 'Import progress' }));
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Import progress' }));
+  });
   assert.equal((screen.getByLabelText('Progress content') as HTMLTextAreaElement).value, 'Unsubmitted draft');
   await act(async () => {
     fireEvent.click(screen.getByRole('button', { name: 'Switch theme' }));
