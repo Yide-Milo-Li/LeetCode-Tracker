@@ -11,6 +11,7 @@ import type {
   DashboardResponse,
   DashboardDailySummary,
   YearlyActivityDay,
+  YearlyProblemSummary,
   DailyTrendPoint,
   RecentActivityItem,
   DashboardActivityListResponse,
@@ -161,6 +162,11 @@ interface DailyTrackingEntry {
   solvedProblemIds: Set<string>;
   manualCount: number;
   snapshotCount: number;
+  easyCount: number;
+  mediumCount: number;
+  hardCount: number;
+  totalMinutes: number;
+  problemSummaries: Map<string, YearlyProblemSummary>;
 }
 
 /**
@@ -231,6 +237,11 @@ export function calculateDashboardStats(input: DashboardStatsInput): DashboardRe
         solvedProblemIds: new Set(),
         manualCount: 0,
         snapshotCount: 0,
+        easyCount: 0,
+        mediumCount: 0,
+        hardCount: 0,
+        totalMinutes: 0,
+        problemSummaries: new Map(),
       };
       dailyMap.set(date, entry);
     }
@@ -255,6 +266,18 @@ export function calculateDashboardStats(input: DashboardStatsInput): DashboardRe
       const entry = getDailyEntry(resolved.date);
       entry.activeProblemIds.add(r.questionId);
       entry.manualCount++;
+      if (difficulty === 'Easy') entry.easyCount++;
+      else if (difficulty === 'Medium') entry.mediumCount++;
+      else if (difficulty === 'Hard') entry.hardCount++;
+      if (r.durationMinutes && r.durationMinutes > 0) {
+        entry.totalMinutes += r.durationMinutes;
+      }
+      entry.problemSummaries.set(r.questionId, {
+        frontendId: r.questionFrontendId,
+        title: r.problemTitle,
+        difficulty,
+        status: r.completed ? 'completed' : 'uncompleted',
+      });
       if (r.completed) {
         entry.solvedProblemIds.add(r.questionId);
         if (mondayDate && todayDate && resolved.date >= mondayDate && resolved.date <= todayDate) {
@@ -304,6 +327,18 @@ export function calculateDashboardStats(input: DashboardStatsInput): DashboardRe
       const entry = getDailyEntry(resolved.date);
       entry.activeProblemIds.add(s.questionId);
       entry.snapshotCount++;
+      const sDiff = (s.difficulty as Difficulty) || 'Medium';
+      if (!entry.problemSummaries.has(s.questionId)) {
+        if (sDiff === 'Easy') entry.easyCount++;
+        else if (sDiff === 'Medium') entry.mediumCount++;
+        else if (sDiff === 'Hard') entry.hardCount++;
+      }
+      entry.problemSummaries.set(s.questionId, {
+        frontendId: s.questionFrontendId,
+        title: s.problemTitle,
+        difficulty: sDiff,
+        status: isLatestAccepted ? 'accepted' : 'other',
+      });
       if (isLatestAccepted) {
         entry.solvedProblemIds.add(s.questionId);
         if (mondayDate && todayDate && resolved.date >= mondayDate && resolved.date <= todayDate) {
@@ -363,6 +398,18 @@ export function calculateDashboardStats(input: DashboardStatsInput): DashboardRe
       const entry = getDailyEntry(resolved.date);
       entry.activeProblemIds.add(succ.questionId);
       entry.solvedProblemIds.add(succ.questionId);
+      const succDiff = (succ.difficulty as Difficulty) || 'Medium';
+      if (!entry.problemSummaries.has(succ.questionId)) {
+        if (succDiff === 'Easy') entry.easyCount++;
+        else if (succDiff === 'Medium') entry.mediumCount++;
+        else if (succDiff === 'Hard') entry.hardCount++;
+      }
+      entry.problemSummaries.set(succ.questionId, {
+        frontendId: succ.questionFrontendId,
+        title: succ.problemTitle,
+        difficulty: succDiff,
+        status: 'accepted',
+      });
       if (mondayDate && todayDate && resolved.date >= mondayDate && resolved.date <= todayDate) {
         weeklySolvedProblemIds.add(succ.questionId);
       }
@@ -419,6 +466,11 @@ export function calculateDashboardStats(input: DashboardStatsInput): DashboardRe
         solvedProblemCount: entry.solvedProblemIds.size,
         manualCount: entry.manualCount,
         snapshotCount: entry.snapshotCount,
+        easyCount: entry.easyCount,
+        mediumCount: entry.mediumCount,
+        hardCount: entry.hardCount,
+        totalMinutes: entry.totalMinutes,
+        problemSummaries: Array.from(entry.problemSummaries.values()).slice(0, 10),
       });
     }
   }

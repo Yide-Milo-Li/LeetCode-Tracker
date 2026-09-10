@@ -2197,3 +2197,388 @@ html.dark .heatmap-cell-3 {
 .u-width-90px {
   width: 90px;
 }
+
+/* ==========================================================================
+   Phase 9: Desktop Animations, Micro-interactions & Polish
+   ========================================================================== */
+
+/* Keyframe animations */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes dialog-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes drawer-enter {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes checkmark-draw {
+  from {
+    stroke-dashoffset: 32;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes bounce-pop {
+  0% {
+    transform: scale(0.85);
+  }
+  50% {
+    transform: scale(1.15);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Micro-interaction: Checkmark and Completion Circle */
+.completion-circle {
+  transition: transform var(--fast) ease-out, border-color var(--fast) ease;
+}
+
+.completion-circle:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.today-problem.completed .completion-circle {
+  animation: bounce-pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.checkmark-icon {
+  stroke-dasharray: 32;
+  stroke-dashoffset: 32;
+  animation: checkmark-draw 0.32s cubic-bezier(0.65, 0, 0.45, 1) forwards;
+}
+
+/* Goal Completion Celebration Banner */
+.goal-completion-banner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+  margin-bottom: 24px;
+  background: linear-gradient(135deg, rgba(66, 99, 75, 0.12), rgba(170, 196, 155, 0.18));
+  border: 1px solid rgba(66, 99, 75, 0.3);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 4px 16px rgba(66, 99, 75, 0.08);
+  animation: dialog-enter var(--enter) ease-out;
+}
+
+html.dark .goal-completion-banner {
+  background: linear-gradient(135deg, rgba(170, 196, 155, 0.15), rgba(66, 99, 75, 0.25));
+  border-color: rgba(170, 196, 155, 0.35);
+}
+
+.goal-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: var(--on-primary);
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.goal-text h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  font-weight: 650;
+  color: var(--text-main);
+}
+
+.goal-text p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* Empty State Icons */
+.empty-state-icon {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.empty-state-icon .text-indigo {
+  color: var(--primary);
+}
+
+/* Keyboard Shortcut Cheat Sheet */
+.shortcut-help-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.shortcut-caption {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.shortcut-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.shortcut-category-title {
+  font-size: 13px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin: 0;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 4px;
+}
+
+.shortcut-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.shortcut-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 0;
+  font-size: 14px;
+}
+
+.shortcut-desc {
+  color: var(--text-main);
+}
+
+.shortcut-kbd {
+  display: inline-block;
+  padding: 3px 7px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text-main);
+  background: var(--muted-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.1);
+}
+
+/* Rich Heatmap Tooltip */
+.rich-tooltip {
+  min-width: 180px;
+  max-width: 260px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+  font-size: 12px;
+  pointer-events: none;
+  z-index: 50;
+}
+
+.tooltip-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 700;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.tooltip-duration {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.tooltip-counts {
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.tooltip-counts .text-emerald {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.tooltip-diff-breakdown {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.tooltip-diff-breakdown .difficulty {
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.tooltip-problems-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 6px 0;
+  border-top: 1px dashed var(--border-color);
+  padding-top: 6px;
+}
+
+.tooltip-problem-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 0;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.diff-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.diff-dot.easy {
+  background: var(--easy);
+}
+
+.diff-dot.medium {
+  background: var(--medium);
+}
+
+.diff-dot.hard {
+  background: var(--hard);
+}
+
+.tooltip-problem-item .prob-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tooltip-more {
+  font-size: 10px;
+  color: var(--text-muted);
+  padding-top: 2px;
+}
+
+.tooltip-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-style: italic;
+  border-top: 1px solid var(--border-color);
+  padding-top: 4px;
+}
+
+/* Day Notes & Reflection Card in Activity History Drawer */
+.day-notes-card {
+  background: var(--muted-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 20px;
+}
+
+.day-notes-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.day-notes-header h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.day-notes-header .badge {
+  font-size: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+
+.day-notes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.day-note-item {
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.day-note-title {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.day-note-approach {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.approach-tag {
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.day-note-content {
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+/* Reduced Motion Accessibility Mode */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .checkmark-icon {
+    stroke-dashoffset: 0 !important;
+  }
+}

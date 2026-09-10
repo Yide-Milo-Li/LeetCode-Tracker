@@ -28,6 +28,47 @@ export function ActivityRecords({
   const [retry, setRetry] = useState(0);
   const [snapshot, setSnapshot] = useState<RecentActivityItem | null>(null);
   const [opening, setOpening] = useState<string | null>(null);
+  const [dayNotes, setDayNotes] = useState<Array<{ id: string; title: string; notes: string }>>([]);
+
+  useEffect(() => {
+    if (!date) {
+      setDayNotes([]);
+      return;
+    }
+    let active = true;
+    api
+      .getPracticeRecords({ page: 1, limit: 100 })
+      .then((res) => {
+        if (!active) return;
+        const matching = res.items.filter((r) => {
+          const recDate =
+            r.timePrecision === 'date'
+              ? r.practicedAt
+              : workspace.timezone
+                ? new Intl.DateTimeFormat('en-CA', {
+                    timeZone: workspace.timezone,
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                  }).format(new Date(r.practicedAt))
+                : r.practicedAt.slice(0, 10);
+          return recDate === date && Boolean(r.notes?.trim());
+        });
+        setDayNotes(
+          matching.map((r) => ({
+            id: r.id,
+            title: `#${r.questionFrontendId} ${r.problemTitle}`,
+            notes: r.notes || '',
+          })),
+        );
+      })
+      .catch(() => {
+        if (active) setDayNotes([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [date, workspace.timezone, workspace.revision]);
   useEffect(() => {
     setDate(initialDate ?? '');
     setPage(1);
@@ -131,6 +172,22 @@ export function ActivityRecords({
         <Feedback retry={{ label: zh ? '重试' : 'Retry', run: () => setRetry((n) => n + 1) }}>
           {error}
         </Feedback>
+      )}
+      {date && dayNotes.length > 0 && (
+        <div className="day-notes-card">
+          <div className="day-notes-header">
+            <h4>{zh ? `📅 ${date} 做题复盘笔记` : `📅 ${date} Practice Notes & Reflection`}</h4>
+            <span className="badge">{dayNotes.length} {zh ? '条笔记' : 'notes'}</span>
+          </div>
+          <div className="day-notes-list">
+            {dayNotes.map((note) => (
+              <div key={note.id} className="day-note-item">
+                <div className="day-note-title">{note.title}</div>
+                {note.notes && <p className="day-note-content">{note.notes}</p>}
+              </div>
+            ))}
+          </div>
+        </div>
       )}
       <div className="table-container" aria-busy={loading}>
         <table className="data-table activity-table">

@@ -17,7 +17,7 @@ The desktop refactor is implemented. The current verification uses synthetic cat
 
 ## Current checks
 
-The acceptance follow-up integration suite passes 182 tests: 142 storage/domain/API and 40 React DOM tests. Type checking, frontend build, documentation link checks and `git diff --check` are required alongside the suite. The original pre-refactor baseline had 156 passing tests (134 + 22); the first Phase 6 handoff had 175 (142 + 33). These remain separate historical checkpoints.
+The integration suite passes 191 tests: 144 storage/domain/API and 47 React DOM tests (including 6 automated keyboard workflow and shortcut guard tests). Type checking, frontend build, documentation link checks and `git diff --check` are required alongside the suite. The original pre-refactor baseline had 156 passing tests (134 + 22); Phase 6 reached 182; Phase 9 desktop polish raises the suite to 191 tests with zero failures.
 
 The desktop harness in [verify-refactor-browser.ts](../scripts/verify-refactor-browser.ts) uses actual React, Fastify and SQLite on a random loopback port with a separate Chrome profile. It checks eight destinations at 1024/1440/1920 pixels in English/Chinese and light/dark themes. It validates persisted preferences after a full document reload and stores screenshots, interactions and network evidence under ignored `.local/evidence/phase6/browser/`. See [testing boundaries](../tests/README.md).
 

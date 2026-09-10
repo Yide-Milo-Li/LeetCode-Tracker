@@ -58,7 +58,7 @@ export function TodayProblemRow({
         {isSaving ? (
           <RefreshCw className="spin" size={19} />
         ) : item.completed ? (
-          <Check size={20} />
+          <Check size={20} className="checkmark-icon" />
         ) : (
           <Circle size={26} />
         )}

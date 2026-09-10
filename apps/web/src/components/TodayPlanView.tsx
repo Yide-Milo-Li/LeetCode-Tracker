@@ -1,6 +1,6 @@
 /** Today's execution surface: compact known activity, server-owned plan and reliable completion circles. */
 import React, { useEffect, useRef, useState } from 'react';
-import { RefreshCw, CalendarDays, MoreHorizontal } from 'lucide-react';
+import { RefreshCw, CalendarDays, MoreHorizontal, Coffee, Globe, Sparkles } from 'lucide-react';
 import { api, type DailyPlan, type PlanItem, type Strategy } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
 import { PromptOverrideModal } from './PromptOverrideModal.tsx';
@@ -125,6 +125,9 @@ function TodayPlanViewInner({
         </div>
       ) : controller.ensureResult?.status === 'setup' ? (
         <section className="empty-state">
+          <div className="empty-state-icon">
+            <Globe size={40} className="text-indigo" />
+          </div>
           <h2>{t.setupTimezoneTitle}</h2>
           <p>{t.setupTimezoneDesc}</p>
           <button className="btn btn-primary" onClick={onNavigateToSettings}>
@@ -133,6 +136,9 @@ function TodayPlanViewInner({
         </section>
       ) : controller.ensureResult?.status === 'rest' ? (
         <section className="empty-state">
+          <div className="empty-state-icon">
+            <Coffee size={40} className="text-muted" />
+          </div>
           <h2>
             {strategies?.length === 0 ? (zh ? '还没有学习安排' : 'No study schedule yet') : t.restDayTitle}
           </h2>
@@ -154,6 +160,21 @@ function TodayPlanViewInner({
         </section>
       ) : plan ? (
         <>
+          {completed === plan.items.length && plan.items.length > 0 && (
+            <div className="goal-completion-banner" role="status">
+              <div className="goal-badge">
+                <Sparkles size={24} />
+              </div>
+              <div className="goal-text">
+                <h3>{zh ? '太棒了！今日计划已全部达成 🎉' : 'Outstanding! All goals completed for today 🎉'}</h3>
+                <p>
+                  {zh
+                    ? '日积跬步，终至千里。今天的坚持又为你积累了一次飞跃。'
+                    : 'One problem at a time. Today’s persistence brings tomorrow’s mastery.'}
+                </p>
+              </div>
+            </div>
+          )}
           <section className="today-plan-summary">
             <div className="section-heading">
               <div>

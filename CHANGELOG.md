@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-- Configured automated GitHub Actions CI pipeline on Node.js 24 verifying type checks, full test suites, build, documentation links, and git whitespace.
+- Added power-user keyboard workflow (`1`/`2`/`3` navigation, `/` catalog search focus, `n` manual practice logging, `?` shortcuts cheat sheet) with strict input, overlay, and IME composition guards.
+- Polished desktop micro-interactions including checkmark SVG draw and spring bounce completion animations, 100% daily goal celebration banner, and smooth modal/drawer transitions with full `prefers-reduced-motion` support.
+- Enhanced dashboard heatmap with rich hover tooltips detailing problem numbers, difficulty breakdown, and time spent, linked to review notes in the activity drawer.
 - Implemented dynamic code-splitting with React.lazy and desktop-themed Suspense boundaries for contextual workspaces, reducing main bundle size to 389 kB and eliminating Vite chunk size warnings.
 - Restored configured timezone formatting in progress import history, transaction-level practice replay conflict checks and existing Unicode candidate ordering after module decomposition.
 - Reorganized the desktop client into Today, Problems and Progress with contextual schedules/imports and preference-only Settings.

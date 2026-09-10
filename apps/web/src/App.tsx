@@ -10,11 +10,14 @@ import {
   Laptop,
   Plus,
   Upload,
+  Keyboard,
 } from 'lucide-react';
 import { CatalogView } from './components/CatalogView.tsx';
 import { ActivityRecords } from './components/ActivityRecords.tsx';
 import { TodayPlanView } from './components/TodayPlanView.tsx';
 import { PracticeWorkspace } from './components/PracticeWorkspace.tsx';
+import { ShortcutHelpModal } from './components/ShortcutHelpModal.tsx';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.ts';
 import { Feedback, PageHeader } from './components/ui.tsx';
 
 /** Lazy-load heavy contextual workspaces and charting views to optimize desktop bundle size. */
@@ -105,6 +108,26 @@ export function App() {
     setView(next);
     location.hash = next;
   }, []);
+
+  const [showShortcutHelp, setShowShortcutHelp] = useState(false);
+
+  const focusSearch = useCallback(() => {
+    navigate('problems');
+    setTimeout(() => {
+      const searchInput = document.getElementById('catalog-search-input') as HTMLInputElement | null;
+      searchInput?.focus();
+      searchInput?.select();
+    }, 50);
+  }, [navigate]);
+
+  useKeyboardShortcuts({
+    onNavigateToday: () => navigate('today'),
+    onNavigateProblems: () => navigate('problems'),
+    onNavigateRecords: () => navigate('records'),
+    onOpenManualPractice: () => openPractice({ mode: 'manual' }),
+    onFocusSearch: focusSearch,
+    onToggleHelp: () => setShowShortcutHelp((open) => !open),
+  });
   useEffect(() => {
     const changed = () => navigate(initialView());
     window.addEventListener('hashchange', changed);
@@ -271,6 +294,14 @@ export function App() {
                 )}
               </button>
               <button
+                className="btn-icon"
+                aria-label={zh ? '快捷键速查 (?)' : 'Keyboard shortcuts (?)'}
+                title={zh ? '快捷键速查 (?)' : 'Keyboard shortcuts (?)'}
+                onClick={() => setShowShortcutHelp(true)}
+              >
+                <Keyboard size={17} />
+              </button>
+              <button
                 className="text-link"
                 aria-label={zh ? '切换语言为英文' : 'Switch language to Chinese'}
                 onClick={() => persistPreference({ language: zh ? 'en' : 'zh' })}
@@ -423,6 +454,9 @@ export function App() {
             lang={lang}
             onClose={() => setPracticeQueue((queue) => queue.slice(1))}
           />
+        )}
+        {showShortcutHelp && (
+          <ShortcutHelpModal lang={lang} onClose={() => setShowShortcutHelp(false)} />
         )}
       </div>
     </WorkspaceContext.Provider>

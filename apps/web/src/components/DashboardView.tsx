@@ -357,12 +357,45 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
         {/* Heatmap Floating Tooltip */}
         {hoveredDay && (
-          <div className="heatmap-tooltip" style={{ left: `${hoveredDay.x}px`, top: `${hoveredDay.y}px` }}>
-            <div className="u-font-weight-600">{hoveredDay.day.date}</div>
-            <div>
-              {hoveredDay.day.activeProblemCount} {t.trendActiveProblems}, {hoveredDay.day.solvedProblemCount}{' '}
-              {t.trendSolvedProblems}
+          <div className="heatmap-tooltip rich-tooltip" style={{ left: `${hoveredDay.x}px`, top: `${hoveredDay.y}px` }}>
+            <div className="tooltip-header">
+              <span className="tooltip-date">{hoveredDay.day.date}</span>
+              {Boolean(hoveredDay.day.totalMinutes) && (
+                <span className="tooltip-duration">⏱️ {hoveredDay.day.totalMinutes} {lang === 'zh' ? '分钟' : 'min'}</span>
+              )}
             </div>
+            <div className="tooltip-counts">
+              <span>{hoveredDay.day.activeProblemCount} {t.trendActiveProblems}</span>
+              <span> · </span>
+              <span className="text-emerald">{hoveredDay.day.solvedProblemCount} {t.trendSolvedProblems}</span>
+            </div>
+            {Boolean(hoveredDay.day.easyCount || hoveredDay.day.mediumCount || hoveredDay.day.hardCount) && (
+              <div className="tooltip-diff-breakdown">
+                {Boolean(hoveredDay.day.easyCount) && (
+                  <span className="difficulty easy">E: {hoveredDay.day.easyCount}</span>
+                )}
+                {Boolean(hoveredDay.day.mediumCount) && (
+                  <span className="difficulty medium">M: {hoveredDay.day.mediumCount}</span>
+                )}
+                {Boolean(hoveredDay.day.hardCount) && (
+                  <span className="difficulty hard">H: {hoveredDay.day.hardCount}</span>
+                )}
+              </div>
+            )}
+            {hoveredDay.day.problemSummaries && hoveredDay.day.problemSummaries.length > 0 && (
+              <ul className="tooltip-problems-list">
+                {hoveredDay.day.problemSummaries.slice(0, 3).map((prob) => (
+                  <li key={prob.frontendId} className="tooltip-problem-item">
+                    <span className={`diff-dot ${prob.difficulty.toLowerCase()}`} />
+                    <span className="prob-title">#{prob.frontendId} {prob.title}</span>
+                  </li>
+                ))}
+                {hoveredDay.day.problemSummaries.length > 3 && (
+                  <li className="tooltip-more">+{hoveredDay.day.problemSummaries.length - 3} {lang === 'zh' ? '更多' : 'more'}</li>
+                )}
+              </ul>
+            )}
+            <div className="tooltip-hint">{lang === 'zh' ? '点击展开当日复盘与详情' : 'Click to drill down into records'}</div>
           </div>
         )}
 

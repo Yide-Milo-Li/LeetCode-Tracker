@@ -52,6 +52,7 @@ export function CatalogView({
   const [retry, setRetry] = useState(0);
   const [selected, setSelected] = useState<CatalogProblem | null>(null);
   const [recording, setRecording] = useState(false);
+
   const detailBody = useRef<HTMLDivElement>(null);
   const recordTrigger = useRef<HTMLButtonElement>(null);
   const wasRecording = useRef(false);
@@ -194,6 +195,7 @@ export function CatalogView({
       <div className="filter-toolbar">
         <Field label={zh ? '搜索题目' : 'Search problems'}>
           <input
+            id="catalog-search-input"
             type="search"
             value={search}
             placeholder={t.searchPlaceholder}

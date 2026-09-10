@@ -47,6 +47,14 @@ export interface DashboardDailySummary {
   errorMessage: string | null;
 }
 
+/** Single problem summary for rich tooltips and previews. */
+export interface YearlyProblemSummary {
+  frontendId: string;
+  title: string;
+  difficulty: 'Easy' | 'Medium' | 'Hard';
+  status: 'completed' | 'accepted' | 'uncompleted' | 'other';
+}
+
 /** Single calendar day statistics for yearly contribution heatmap. */
 export interface YearlyActivityDay {
   date: string; // YYYY-MM-DD
@@ -54,6 +62,11 @@ export interface YearlyActivityDay {
   solvedProblemCount: number; // Distinct problems with success event on this day
   manualCount: number;
   snapshotCount: number;
+  easyCount?: number;
+  mediumCount?: number;
+  hardCount?: number;
+  totalMinutes?: number;
+  problemSummaries?: YearlyProblemSummary[];
 }
 
 /** Single day point in 30-day trend chart. */
