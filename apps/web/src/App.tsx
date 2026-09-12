@@ -11,6 +11,9 @@ import {
   Plus,
   Upload,
   Keyboard,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Languages,
 } from 'lucide-react';
 import { CatalogView } from './components/CatalogView.tsx';
 import { ActivityRecords } from './components/ActivityRecords.tsx';
@@ -18,7 +21,7 @@ import { TodayPlanView } from './components/TodayPlanView.tsx';
 import { PracticeWorkspace } from './components/PracticeWorkspace.tsx';
 import { ShortcutHelpModal } from './components/ShortcutHelpModal.tsx';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.ts';
-import { Feedback, PageHeader } from './components/ui.tsx';
+import { Feedback, PageHeader, Tooltip } from './components/ui.tsx';
 
 /** Lazy-load heavy contextual workspaces and charting views to optimize desktop bundle size. */
 const DashboardView = React.lazy(() =>
@@ -107,6 +110,24 @@ export function App() {
     setVisited((old) => new Set([...old, next]));
     setView(next);
     location.hash = next;
+  }, []);
+
+  const [sidebarExpanded, setSidebarExpanded] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('leetcode_tracker_sidebar_expanded') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarExpanded((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('leetcode_tracker_sidebar_expanded', String(next));
+      } catch {}
+      return next;
+    });
   }, []);
 
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
@@ -230,23 +251,40 @@ export function App() {
         >
           {zh ? '跳到主要内容' : 'Skip to main content'}
         </a>
-        <aside className="sidebar">
-          <a
-            className="app-brand"
-            href="#today"
-            onClick={(e) => {
-              e.preventDefault();
-              navigate('today');
-            }}
-          >
-            <span className="brand-mark">
-              <BookOpen size={21} />
-            </span>
-            <span>
-              LeetCode<span>Tracker</span>
-            </span>
-          </a>
-          <p className="sidebar-caption">{zh ? '日积跬步' : 'ONE PROBLEM AT A TIME'}</p>
+        <aside className={'sidebar ' + (sidebarExpanded ? 'expanded' : 'collapsed')}>
+          <div className="sidebar-header">
+            <a
+              className="app-brand"
+              href="#today"
+              aria-label="LeetCode Tracker"
+              onClick={(e) => {
+                e.preventDefault();
+                navigate('today');
+              }}
+            >
+              <span className="brand-mark">
+                <BookOpen size={21} />
+              </span>
+              {sidebarExpanded && (
+                <span className="brand-title">
+                  LeetCode<span>Tracker</span>
+                </span>
+              )}
+            </a>
+            <Tooltip
+              text={sidebarExpanded ? (zh ? '折叠侧边栏' : 'Collapse sidebar') : (zh ? '展开侧边栏' : 'Expand sidebar')}
+              position={sidebarExpanded ? 'bottom' : 'right'}
+            >
+              <button
+                className="btn-icon sidebar-toggle"
+                aria-label={sidebarExpanded ? (zh ? '折叠侧边栏' : 'Collapse sidebar') : (zh ? '展开侧边栏' : 'Expand sidebar')}
+                onClick={toggleSidebar}
+              >
+                {sidebarExpanded ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
+              </button>
+            </Tooltip>
+          </div>
+          {sidebarExpanded && <p className="sidebar-caption">{zh ? '日积跬步' : 'ONE PROBLEM AT A TIME'}</p>}
           <nav aria-label={zh ? '主导航' : 'Main navigation'}>
             {(
               [
@@ -254,61 +292,102 @@ export function App() {
                 { id: 'problems', icon: BookOpen, label: zh ? '题库' : 'Problems' },
                 { id: 'records', icon: ChartNoAxesCombined, label: zh ? '进展' : 'Progress' },
               ] as const
-            ).map((item) => (
-              <button
-                key={item.id}
-                className={'nav-item ' + (primary === item.id ? 'active' : '')}
-                aria-current={primary === item.id ? 'page' : undefined}
-                onClick={() => navigate(item.id)}
-              >
-                <item.icon size={19} />
-                {item.label}
-              </button>
-            ))}
+            ).map((item) => {
+              const navBtn = (
+                <button
+                  key={item.id}
+                  className={'nav-item ' + (primary === item.id ? 'active' : '')}
+                  aria-label={item.label}
+                  aria-current={primary === item.id ? 'page' : undefined}
+                  onClick={() => navigate(item.id)}
+                >
+                  <item.icon size={19} />
+                  <span className="nav-label">{item.label}</span>
+                </button>
+              );
+              return !sidebarExpanded ? (
+                <Tooltip key={item.id} text={item.label} position="right">
+                  {navBtn}
+                </Tooltip>
+              ) : (
+                navBtn
+              );
+            })}
           </nav>
           <div className="sidebar-bottom">
-            <button
-              className={'nav-item ' + (view === 'settings' ? 'active' : '')}
-              aria-current={view === 'settings' ? 'page' : undefined}
-              onClick={() => navigate('settings')}
-            >
-              <Settings size={19} />
-              {zh ? '设置' : 'Settings'}
-            </button>
+            {!sidebarExpanded ? (
+              <Tooltip text={zh ? '设置' : 'Settings'} position="right">
+                <button
+                  className={'nav-item ' + (view === 'settings' ? 'active' : '')}
+                  aria-label={zh ? '设置' : 'Settings'}
+                  aria-current={view === 'settings' ? 'page' : undefined}
+                  onClick={() => navigate('settings')}
+                >
+                  <Settings size={19} />
+                  <span className="nav-label">{zh ? '设置' : 'Settings'}</span>
+                </button>
+              </Tooltip>
+            ) : (
+              <button
+                className={'nav-item ' + (view === 'settings' ? 'active' : '')}
+                aria-label={zh ? '设置' : 'Settings'}
+                aria-current={view === 'settings' ? 'page' : undefined}
+                onClick={() => navigate('settings')}
+              >
+                <Settings size={19} />
+                <span className="nav-label">{zh ? '设置' : 'Settings'}</span>
+              </button>
+            )}
             <div className="sidebar-tools">
-              <button
-                className="btn-icon"
-                aria-label={zh ? '切换主题' : 'Switch theme'}
-                onClick={() =>
-                  persistPreference({
-                    theme: theme === 'light' ? 'dark' : theme === 'dark' ? 'system' : 'light',
-                  })
+              <Tooltip
+                text={
+                  theme === 'light'
+                    ? (zh ? '切换主题 (当前: 明亮)' : 'Switch theme (current: Light)')
+                    : theme === 'dark'
+                      ? (zh ? '切换主题 (当前: 暗色)' : 'Switch theme (current: Dark)')
+                      : (zh ? '切换主题 (当前: 跟随系统)' : 'Switch theme (current: System)')
                 }
+                position={sidebarExpanded ? 'top' : 'right'}
               >
-                {theme === 'light' ? (
-                  <Sun size={17} />
-                ) : theme === 'dark' ? (
-                  <Moon size={17} />
-                ) : (
-                  <Laptop size={17} />
-                )}
-              </button>
-              <button
-                className="btn-icon"
-                aria-label={zh ? '快捷键速查 (?)' : 'Keyboard shortcuts (?)'}
-                title={zh ? '快捷键速查 (?)' : 'Keyboard shortcuts (?)'}
-                onClick={() => setShowShortcutHelp(true)}
+                <button
+                  className="btn-icon"
+                  aria-label={zh ? '切换主题' : 'Switch theme'}
+                  onClick={() =>
+                    persistPreference({
+                      theme: theme === 'light' ? 'dark' : theme === 'dark' ? 'system' : 'light',
+                    })
+                  }
+                >
+                  {theme === 'light' ? (
+                    <Sun size={17} />
+                  ) : theme === 'dark' ? (
+                    <Moon size={17} />
+                  ) : (
+                    <Laptop size={17} />
+                  )}
+                </button>
+              </Tooltip>
+              <Tooltip text={zh ? '快捷键速查 (?)' : 'Keyboard shortcuts (?)'} position={sidebarExpanded ? 'top' : 'right'}>
+                <button
+                  className="btn-icon"
+                  aria-label={zh ? '快捷键速查 (?)' : 'Keyboard shortcuts (?)'}
+                  onClick={() => setShowShortcutHelp(true)}
+                >
+                  <Keyboard size={17} />
+                </button>
+              </Tooltip>
+              <Tooltip
+                text={zh ? '切换语言为英文' : 'Switch language to Chinese'}
+                position={sidebarExpanded ? 'top' : 'right'}
               >
-                <Keyboard size={17} />
-              </button>
-              <button
-                className="text-link"
-                aria-label={zh ? '切换语言为英文' : 'Switch language to Chinese'}
-                onClick={() => persistPreference({ language: zh ? 'en' : 'zh' })}
-              >
-                {zh ? 'EN' : '中文'}
-              </button>
-              <small>{zh ? '本地工作空间' : 'Local workspace'}</small>
+                <button
+                  className="btn-icon"
+                  aria-label={zh ? '切换语言为英文' : 'Switch language to Chinese'}
+                  onClick={() => persistPreference({ language: zh ? 'en' : 'zh' })}
+                >
+                  <Languages size={17} />
+                </button>
+              </Tooltip>
             </div>
           </div>
         </aside>

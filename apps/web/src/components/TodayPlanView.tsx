@@ -1,10 +1,10 @@
-/** Today's execution surface: compact known activity, server-owned plan and reliable completion circles. */
 import React, { useEffect, useRef, useState } from 'react';
-import { RefreshCw, CalendarDays, MoreHorizontal, Coffee, Globe, Sparkles } from 'lucide-react';
+import { RefreshCw, CalendarDays, MoreHorizontal, Coffee, Globe, Sparkles, CheckCircle2 } from 'lucide-react';
 import { api, type DailyPlan, type PlanItem, type Strategy } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
 import { PromptOverrideModal } from './PromptOverrideModal.tsx';
 import { useDailyPlan, type UseDailyPlanReturn } from '../hooks/useDailyPlan.ts';
+import { useEncouragement } from '../hooks/useEncouragement.ts';
 import { useWorkspace } from '../workspace.tsx';
 import { createPractice } from '../practice-service.ts';
 import { Dialog, Feedback, PageHeader } from './ui.tsx';
@@ -27,6 +27,7 @@ function TodayPlanViewInner({
   const zh = lang === 'zh';
   const t = translations[lang];
   const workspace = useWorkspace();
+  const quote = useEncouragement({ timeZone: workspace.timezone, lang });
   const [override, setOverride] = useState(false);
   const [versions, setVersions] = useState<DailyPlan[] | null>(null);
   const [localError, setLocalError] = useState('');
@@ -92,7 +93,7 @@ function TodayPlanViewInner({
     <div className="today-view">
       <PageHeader
         title={zh ? '今日' : 'Today'}
-        description={zh ? '让每一次练习，成为一点进步。' : 'A little practice. A little progress.'}
+        description={quote.text}
         actions={
           <button className="btn btn-secondary" onClick={() => workspace.navigate('schedule')}>
             <CalendarDays size={16} />
@@ -161,18 +162,9 @@ function TodayPlanViewInner({
       ) : plan ? (
         <>
           {completed === plan.items.length && plan.items.length > 0 && (
-            <div className="goal-completion-banner" role="status">
-              <div className="goal-badge">
-                <Sparkles size={24} />
-              </div>
-              <div className="goal-text">
-                <h3>{zh ? '太棒了！今日计划已全部达成 🎉' : 'Outstanding! All goals completed for today 🎉'}</h3>
-                <p>
-                  {zh
-                    ? '日积跬步，终至千里。今天的坚持又为你积累了一次飞跃。'
-                    : 'One problem at a time. Today’s persistence brings tomorrow’s mastery.'}
-                </p>
-              </div>
+            <div className="goal-completion-badge" role="status">
+              <CheckCircle2 size={18} className="goal-badge-icon" />
+              <span>{zh ? '太棒了！今日计划已全部达成 🎉' : 'Outstanding! All goals completed for today 🎉'}</span>
             </div>
           )}
           <section className="today-plan-summary">
@@ -206,7 +198,9 @@ function TodayPlanViewInner({
               aria-label={zh ? '今日完成进度' : 'Today completion progress'}
             />
             <div className="section-heading">
-              <p className="muted">{plan.encouragement[lang] || plan.encouragement.en}</p>
+              {plan.encouragement && (
+                <p className="muted">{plan.encouragement[lang] || plan.encouragement.en}</p>
+              )}
               <div className="action-row">
                 <button className="btn btn-secondary btn-sm" onClick={() => setOverride(true)}>
                   {zh ? '调整今天' : 'Adjust today'}

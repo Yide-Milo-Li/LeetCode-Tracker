@@ -91,8 +91,8 @@ export function PracticeWorkspace({
       title={
         request.mode === 'enrich'
           ? zh
-            ? '已记录完成，补充本次练习'
-            : 'Completion recorded. Add practice details'
+            ? '补充练习'
+            : 'Add practice details'
           : request.mode === 'manual'
             ? zh
               ? '手动记录'
@@ -105,8 +105,8 @@ export function PracticeWorkspace({
       {request.mode === 'enrich' && (
         <Feedback tone="success">
           {zh
-            ? '完成记录已保存。跳过或关闭窗口不会撤销。'
-            : 'Your completion is saved. Skipping or closing keeps it.'}
+            ? '完成已记录并保存。详情可跳过。'
+            : 'Completion recorded and saved. Details can be skipped.'}
         </Feedback>
       )}
       {request.mode === 'manual' ? (

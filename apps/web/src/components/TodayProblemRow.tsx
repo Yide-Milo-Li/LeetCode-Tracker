@@ -3,11 +3,11 @@
  * Renders reliable completion circle, topic tags with overflow dropdown, and contextual action links.
  */
 import React from 'react';
-import { Check, Circle, RefreshCw, ExternalLink } from 'lucide-react';
+import { Check, Circle, RefreshCw, ExternalLink, Plus } from 'lucide-react';
 import type { PlanItem } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
-import { Feedback } from './ui.tsx';
+import { Feedback, InfoPopover, Tooltip } from './ui.tsx';
 
 export interface TodayProblemRowProps {
   item: PlanItem;
@@ -36,6 +36,8 @@ export function TodayProblemRow({
   const zh = lang === 'zh';
   const t = translations[lang];
   const workspace = useWorkspace();
+
+  const reasonText = item.reason[lang] || item.reason.en;
 
   return (
     <article className={'today-problem ' + (item.completed ? 'completed' : '')}>
@@ -93,8 +95,14 @@ export function TodayProblemRow({
               </div>
             </details>
           )}
+          {reasonText && (
+            <InfoPopover
+              title={zh ? '推荐理由' : 'Why recommended'}
+              label={zh ? '推荐理由' : 'Why recommended'}
+              content={<p className="recommendation-popover-text">{reasonText}</p>}
+            />
+          )}
         </div>
-        <p className="recommendation-reason">{item.reason[lang] || item.reason.en}</p>
         {rowError && (
           <Feedback retry={{ label: t.retry, run: () => onComplete(item) }}>
             {rowError}
@@ -103,29 +111,36 @@ export function TodayProblemRow({
       </div>
 
       <div className="problem-actions">
-        <a
-          className="btn btn-secondary btn-sm"
-          href={/^https?:\/\//i.test(item.problem.url) ? item.problem.url : undefined}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          {zh ? '打开题目' : 'Open problem'}
-          <ExternalLink size={14} />
-        </a>
-        <button
-          className="text-link"
-          disabled={item.completed || isSaving || replacingBatch || Boolean(replacingItemId)}
-          onClick={() => onReplaceOne(item)}
-        >
-          <RefreshCw size={14} className={replacingItemId === item.id ? 'spin' : ''} />
-          {t.replaceOne}
-        </button>
-        <button
-          className="text-link"
-          onClick={() => workspace.openPractice({ mode: 'manual', problem: item.problem })}
-        >
-          {zh ? '记录练习' : 'Record practice'}
-        </button>
+        <Tooltip text={zh ? '打开题目' : 'Open problem'} position="top">
+          <a
+            className="btn-icon"
+            aria-label={zh ? '打开题目' : 'Open problem'}
+            href={/^https?:\/\//i.test(item.problem.url) ? item.problem.url : undefined}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <ExternalLink size={17} />
+          </a>
+        </Tooltip>
+        <Tooltip text={t.replaceOne} position="top">
+          <button
+            className="btn-icon"
+            aria-label={t.replaceOne}
+            disabled={item.completed || isSaving || replacingBatch || Boolean(replacingItemId)}
+            onClick={() => onReplaceOne(item)}
+          >
+            <RefreshCw size={17} className={replacingItemId === item.id ? 'spin' : ''} />
+          </button>
+        </Tooltip>
+        <Tooltip text={zh ? '记录练习' : 'Record practice'} position="top">
+          <button
+            className="btn-icon"
+            aria-label={zh ? '记录练习' : 'Record practice'}
+            onClick={() => workspace.openPractice({ mode: 'manual', problem: item.problem })}
+          >
+            <Plus size={18} />
+          </button>
+        </Tooltip>
       </div>
     </article>
   );

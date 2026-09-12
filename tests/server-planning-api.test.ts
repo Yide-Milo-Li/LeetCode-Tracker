@@ -354,7 +354,7 @@ describe('Recommendation & Planning API Endpoints', () => {
   it('previews prompt overrides, flags completed quota issues, and commits overrides', async () => {
     const { app, store } = await createTestApp();
 
-    // Assign strategy to Thursday (2026-09-10 = weekday 4)
+    // Assign strategy to Thursday (2026-09-17 = weekday 4)
     await app.inject({
       method: 'POST',
       url: '/api/v1/strategies',
@@ -377,7 +377,7 @@ describe('Recommendation & Planning API Endpoints', () => {
     let res = await app.inject({
       method: 'POST',
       url: '/api/v1/daily-plans/ensure',
-      payload: { date: '2026-09-10' },
+      payload: { date: '2026-09-17' },
     });
     const plan = res.json().plan;
 
@@ -400,7 +400,7 @@ describe('Recommendation & Planning API Endpoints', () => {
       method: 'POST',
       url: '/api/v1/daily-plan-overrides/preview',
       payload: {
-        date: '2026-09-10',
+        date: '2026-09-17',
         prompt: 'all hard 3 problems',
       },
     });
@@ -429,7 +429,7 @@ describe('Recommendation & Planning API Endpoints', () => {
       method: 'POST',
       url: '/api/v1/daily-plan-overrides/preview',
       payload: {
-        date: '2026-09-10',
+        date: '2026-09-17',
         rules: validPatch,
       },
     });

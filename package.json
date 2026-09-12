@@ -25,7 +25,7 @@
     "verify:desktop": "node --import tsx scripts/verify-refactor-browser.ts",
     "restore": "node scripts/restore-backup.ts",
     "docs:check": "node scripts/check-docs.ts",
-    "test:web": "node --import tsx --test tests/web-refactor.test.tsx tests/web-components.test.tsx tests/web-planning-components.test.tsx tests/web-dashboard-components.test.tsx tests/web-shortcuts.test.tsx"
+    "test:web": "node --max-old-space-size=4096 --import tsx --test tests/web-refactor.test.tsx tests/web-components.test.tsx tests/web-planning-components.test.tsx tests/web-dashboard-components.test.tsx tests/web-shortcuts.test.tsx tests/encouragement.test.ts tests/web-desktop-ui.test.tsx"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.2",

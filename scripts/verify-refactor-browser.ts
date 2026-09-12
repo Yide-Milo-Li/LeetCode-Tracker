@@ -281,12 +281,20 @@ try {
   const visible = "e => e.getClientRects().length && !e.closest('[hidden], [inert]')";
   /** Click real visible controls by text without invoking application internals. */
   const click = async (label: string, selector = 'button') => {
-    const point = await evaluate(
-      `(() => { const e = [...document.querySelectorAll(${JSON.stringify(selector)})].filter(${visible}).find(e => e.textContent.trim() === ${JSON.stringify(label)} || e.getAttribute('aria-label') === ${JSON.stringify(label)}); if (!e || e.disabled) throw new Error('Missing or disabled control: ' + ${JSON.stringify(label)}); e.scrollIntoView({block:'center'}); const r=e.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`,
-    );
-    await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 });
-    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
-    await delay(100);
+    for (let attempt = 0; attempt < 30; attempt++) {
+      try {
+        const point = await evaluate(
+          `(() => { const e = [...document.querySelectorAll(${JSON.stringify(selector)})].filter(${visible}).find(e => e.textContent.trim() === ${JSON.stringify(label)} || e.getAttribute('aria-label') === ${JSON.stringify(label)}); if (!e || e.disabled) throw new Error('Missing or disabled control: ' + ${JSON.stringify(label)}); e.scrollIntoView({block:'center'}); const r=e.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`,
+        );
+        await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 });
+        await send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
+        await delay(100);
+        return;
+      } catch (err) {
+        if (attempt === 29) throw err;
+        await delay(60);
+      }
+    }
   };
   /** Native value setters trigger the same React change handlers as browser editing. */
   const fill = async (selector: string, value: string) => {
@@ -623,7 +631,7 @@ try {
   await until("!document.querySelector('[role=dialog]')");
   const beforeReplace = store.planning.plans()[0];
   await evaluate(
-    "[...document.querySelectorAll('.today-problem:not(.completed) .text-link')].find(e=>e.textContent.trim()==='Replace').click()",
+    "[...document.querySelectorAll('.today-problem:not(.completed) button')].find(e=>e.getAttribute('aria-label')==='Replace'||e.textContent.trim()==='Replace').click()",
   );
   await until("!document.querySelector('.today-problem .spin')");
   await delay(200);
@@ -898,7 +906,7 @@ try {
   await until("document.querySelector('.empty-state')?.innerText.includes('Import your own JSONL')");
   await screenshot('problems-empty-catalog');
   await evaluate("document.querySelector('.empty-state button').click()");
-  await until("!document.getElementById('view-catalog-import').hidden");
+  await until("Boolean(document.getElementById('view-catalog-import') && !document.getElementById('view-catalog-import').hidden)");
   fault = null;
   await reload('statistics');
   await evaluate('window.scrollTo(0,650)');
