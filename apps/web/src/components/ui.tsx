@@ -6,6 +6,7 @@
  */
 import React, {
   useEffect,
+  useLayoutEffect,
   useId,
   useRef,
   useState,
@@ -14,7 +15,7 @@ import React, {
   type ComponentType,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { X, AlertCircle, Info } from 'lucide-react';
+import { X, AlertCircle, Info, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { Language } from '../i18n.ts';
 
 /**
@@ -41,7 +42,7 @@ export function PageHeader({
       <header className="page-header">
         <div>
           <h1>{title}</h1>
-          {description && <p className="page-description">{description}</p>}
+          {description && <p key={description} className="page-description">{description}</p>}
         </div>
         <div className="action-row">{actions}</div>
       </header>
@@ -127,19 +128,58 @@ export function Pagination({
             ))}
           </select>
         )}
-        <button className="btn btn-secondary btn-sm" disabled={page <= 1} onClick={() => onPage(page - 1)}>
-          {lang === 'zh' ? '上一页' : 'Previous'}
-        </button>
-        <button
-          className="btn btn-secondary btn-sm"
-          disabled={page >= pages}
-          onClick={() => onPage(page + 1)}
-        >
-          {lang === 'zh' ? '下一页' : 'Next'}
-        </button>
+        <IconButton icon={ChevronLeft} label={lang === 'zh' ? '上一页' : 'Previous'} disabled={page <= 1} onClick={() => onPage(page - 1)} />
+        <IconButton icon={ChevronRight} label={lang === 'zh' ? '下一页' : 'Next'} disabled={page >= pages} onClick={() => onPage(page + 1)} />
       </div>
     </div>
   );
+}
+
+type FloatingSide = 'top' | 'right' | 'bottom' | 'left';
+
+/** Measure only open floating content; flip and clamp it within desktop viewport edges. */
+function useFloatingPosition(
+  open: boolean,
+  anchor: React.RefObject<HTMLElement | null>,
+  floating: React.RefObject<HTMLDivElement | null>,
+  side: FloatingSide,
+) {
+  const [position, setPosition] = useState({ left: 8, top: 8 });
+  useLayoutEffect(() => {
+    if (!open) return;
+    const update = () => {
+      if (!anchor.current || !floating.current) return;
+      const a = anchor.current.getBoundingClientRect();
+      const f = floating.current.getBoundingClientRect();
+      const width = document.documentElement.clientWidth || window.innerWidth;
+      const height = document.documentElement.clientHeight || window.innerHeight;
+      const gap = 8;
+      let left = a.left + (a.width - f.width) / 2;
+      let top = a.bottom + gap;
+      if (side === 'right' || side === 'left') {
+        left = side === 'right' ? a.right + gap : a.left - f.width - gap;
+        if (left + f.width > width - gap) left = a.left - f.width - gap;
+        if (left < gap) left = a.right + gap;
+        top = a.top + (a.height - f.height) / 2;
+      } else {
+        top = side === 'top' ? a.top - f.height - gap : a.bottom + gap;
+        if (top < gap) top = a.bottom + gap;
+        if (top + f.height > height - gap) top = a.top - f.height - gap;
+      }
+      setPosition({
+        left: Math.max(gap, Math.min(left, width - f.width - gap)),
+        top: Math.max(gap, Math.min(top, height - f.height - gap)),
+      });
+    };
+    update();
+    window.addEventListener('resize', update);
+    document.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      document.removeEventListener('scroll', update, true);
+    };
+  }, [open, side, anchor, floating]);
+  return position;
 }
 
 /**
@@ -165,41 +205,47 @@ export function Tooltip({
 }) {
   const tooltipContent = content ?? text;
   const placement = side ?? position;
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const bubbleRef = useRef<HTMLDivElement>(null);
   const id = useId();
   const [open, setOpen] = useState(false);
+  const coordinates = useFloatingPosition(open && !disabled, anchorRef, bubbleRef, placement);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || disabled) return;
+    const dismiss = () => setOpen(false);
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
-        setOpen(false);
+        dismiss();
       }
     };
     window.addEventListener('keydown', handleKey, true);
-    return () => window.removeEventListener('keydown', handleKey, true);
-  }, [open]);
-
-  if (disabled || !tooltipContent) {
-    return children;
-  }
+    window.addEventListener('hashchange', dismiss);
+    return () => {
+      window.removeEventListener('keydown', handleKey, true);
+      window.removeEventListener('hashchange', dismiss);
+    };
+  }, [open, disabled]);
 
   return (
     <div
+      ref={anchorRef}
       className="tooltip-wrapper"
-      onMouseEnter={() => setOpen(true)}
+      onMouseEnter={() => !disabled && setOpen(true)}
       onMouseLeave={() => setOpen(false)}
-      onFocusCapture={() => setOpen(true)}
+      onFocusCapture={() => !disabled && setOpen(true)}
       onBlurCapture={() => setOpen(false)}
     >
       {React.cloneElement(children as React.ReactElement<{ 'aria-describedby'?: string }>, {
-        'aria-describedby': open ? id : undefined,
+        'aria-describedby': open && !disabled ? id : undefined,
       })}
-      {open && (
-        <div id={id} role="tooltip" className={`tooltip-bubble tooltip-${placement}`}>
+      {open && !disabled && tooltipContent && createPortal(
+        <div ref={bubbleRef} id={id} role="tooltip" className="tooltip-bubble" style={coordinates}>
           <span>{tooltipContent}</span>
           {shortcut && <kbd className="tooltip-shortcut">{shortcut}</kbd>}
-        </div>
+        </div>,
+        anchorRef.current?.closest('[data-overlay-host]') ?? document.body,
       )}
     </div>
   );
@@ -231,9 +277,11 @@ export function InfoPopover({
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const coordinates = useFloatingPosition(open, triggerRef, popoverRef, side);
 
   useEffect(() => {
     if (!open) return;
+    const dismiss = () => setOpen(false);
     const handleDown = (e: MouseEvent) => {
       if (
         popoverRef.current &&
@@ -251,11 +299,13 @@ export function InfoPopover({
         triggerRef.current?.focus();
       }
     };
+    window.addEventListener('hashchange', dismiss);
     document.addEventListener('mousedown', handleDown);
-    document.addEventListener('keydown', handleKey);
+    window.addEventListener('keydown', handleKey, true);
     return () => {
+      window.removeEventListener('hashchange', dismiss);
       document.removeEventListener('mousedown', handleDown);
-      document.removeEventListener('keydown', handleKey);
+      window.removeEventListener('keydown', handleKey, true);
     };
   }, [open]);
 
@@ -266,7 +316,6 @@ export function InfoPopover({
         type="button"
         className="btn-icon info-trigger"
         aria-label={popoverLabel}
-        aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={open ? id : undefined}
         onClick={(e) => {
@@ -274,19 +323,21 @@ export function InfoPopover({
           setOpen((v) => !v);
         }}
       >
-        <Info size={16} aria-hidden="true" />
+        <Info size={18} aria-hidden="true" />
       </button>
-      {open && (
+      {open && createPortal(
         <div
           id={id}
           ref={popoverRef}
           role="region"
           aria-label={popoverLabel}
-          className={`info-popover-card info-popover-${side}`}
+          className="info-popover-card"
+          style={coordinates}
           tabIndex={-1}
         >
           <div className="info-popover-content">{popoverContent}</div>
-        </div>
+        </div>,
+        triggerRef.current?.closest('[data-overlay-host]') ?? document.body,
       )}
     </div>
   );
@@ -328,16 +379,15 @@ export function IconButton({
     </button>
   );
 
-  if (!showTooltip || disabled) {
-    return button;
-  }
-
   return (
-    <Tooltip content={label} shortcut={shortcut} side={tooltipSide}>
+    <Tooltip content={label} shortcut={shortcut} side={tooltipSide} disabled={!showTooltip || disabled}>
       {button}
     </Tooltip>
   );
 }
+
+/** Editors route late responses to recovery as soon as an exit starts, before visual unmount. */
+export const DialogClosingContext = React.createContext<React.RefObject<boolean>>({ current: false });
 
 /**
  * Trap focus, inert the background, animate smoothly, and restore the trigger.
@@ -351,6 +401,7 @@ export function Dialog({
   lang,
   drawer = false,
   wide = false,
+  closeDisabled = false,
 }: {
   title: string;
   children: ReactNode;
@@ -359,6 +410,8 @@ export function Dialog({
   lang: Language;
   drawer?: boolean;
   wide?: boolean;
+  /** A pending transaction may require this dialog to stay open until it settles. */
+  closeDisabled?: boolean;
 }) {
   const titleId = useId();
   const panel = useRef<HTMLDivElement>(null);
@@ -366,44 +419,32 @@ export function Dialog({
   const closingRef = useRef(false);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+  const closeDisabledRef = useRef(closeDisabled);
+  closeDisabledRef.current = closeDisabled;
+
+  const exitTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const closedRef = useRef(false);
+
+  /** Finish once; route changes may supersede an in-flight exit animation. */
+  const finishClose = useCallback(() => {
+    clearTimeout(exitTimer.current);
+    if (closedRef.current) return;
+    closedRef.current = true;
+    closingRef.current = true;
+    closeRef.current();
+  }, []);
 
   const requestClose = useCallback(() => {
-    if (closingRef.current) return;
+    if (closingRef.current || closeDisabledRef.current) return;
     closingRef.current = true;
-    const prefersReducedMotion =
-      typeof window !== 'undefined' &&
-      window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
-
-    const isTestEnv =
-      (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') ||
-      Boolean((globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT) ||
-      (typeof navigator !== 'undefined' && /jsdom/i.test(navigator.userAgent));
-
-    // Immediate close in test environments or when reduced motion is preferred
-    if (prefersReducedMotion || isTestEnv) {
-      closeRef.current();
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) {
+      finishClose();
       return;
     }
-
+    // Keep background inert and focus trapped until the host actually unmounts.
     setIsClosing(true);
-    if (typeof document !== 'undefined' && host.current) {
-      const otherOverlays = Array.from(document.querySelectorAll('[data-overlay-host]')).filter(
-        (o) => o !== host.current,
-      );
-      if (otherOverlays.length === 0) {
-        const siblings = Array.from(document.body.children).filter(
-          (n) => n !== host.current,
-        ) as HTMLElement[];
-        siblings.forEach((n) => {
-          n.inert = false;
-        });
-        document.body.style.overflow = '';
-      }
-    }
-    setTimeout(() => {
-      closeRef.current();
-    }, 160);
-  }, []);
+    exitTimer.current = setTimeout(finishClose, 160);
+  }, [finishClose]);
 
   const host = useRef<HTMLDivElement | null>(null);
   if (!host.current) {
@@ -478,12 +519,13 @@ export function Dialog({
     // A browser history change must immediately unmount without delay
     const openedHash = window.location.hash;
     const locationChanged = () => {
-      if (window.location.hash !== openedHash) closeRef.current();
+      if (window.location.hash !== openedHash) finishClose();
     };
     window.addEventListener('hashchange', locationChanged);
 
     return () => {
       clearTimeout(focusTimer);
+      clearTimeout(exitTimer.current);
       document.removeEventListener('keydown', keydown);
       window.removeEventListener('hashchange', locationChanged);
       siblings.forEach((n, i) => {
@@ -493,37 +535,40 @@ export function Dialog({
       node.remove();
       if (trigger?.isConnected && !trigger.closest('[hidden]')) trigger.focus();
     };
-  }, [requestClose]);
+  }, [requestClose, finishClose]);
 
   return createPortal(
-    <div
-      className={`overlay-backdrop ${drawer ? 'is-drawer' : ''} ${isClosing ? 'is-closing' : ''}`}
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) requestClose();
-      }}
-    >
+    <DialogClosingContext.Provider value={closingRef}>
       <div
-        ref={panel}
-        className={`overlay-panel ${wide ? 'wide-panel' : ''} ${isClosing ? 'is-closing' : ''}`}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        tabIndex={-1}
+        className={`overlay-backdrop ${drawer ? 'is-drawer' : ''} ${isClosing ? 'is-closing' : ''}`}
+        onMouseDown={(e) => {
+          if (e.target === e.currentTarget) requestClose();
+        }}
       >
-        <header className="overlay-header">
-          <h2 id={titleId}>{title}</h2>
-          <button
-            className="btn-icon"
-            aria-label={lang === 'zh' ? '关闭' : 'Close'}
-            onClick={requestClose}
-          >
-            <X size={20} />
-          </button>
-        </header>
-        <div className="overlay-body">{children}</div>
-        {footer && <footer className="overlay-footer">{footer}</footer>}
+        <div
+          ref={panel}
+          className={`overlay-panel ${wide ? 'wide-panel' : ''} ${isClosing ? 'is-closing' : ''}`}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          tabIndex={-1}
+        >
+          <header className="overlay-header">
+            <h2 id={titleId}>{title}</h2>
+            <button
+              className="btn-icon"
+              aria-label={lang === 'zh' ? '关闭' : 'Close'}
+              onClick={requestClose}
+              disabled={closeDisabled}
+            >
+              <X size={20} />
+            </button>
+          </header>
+          <div className="overlay-body">{children}</div>
+          {footer && <footer className="overlay-footer">{footer}</footer>}
+        </div>
       </div>
-    </div>,
+    </DialogClosingContext.Provider>,
     host.current,
   );
 }

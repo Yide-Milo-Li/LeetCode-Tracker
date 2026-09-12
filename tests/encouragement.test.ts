@@ -194,4 +194,19 @@ describe('Encouragement Period Calculation & Rotation Logic', () => {
     assert.equal(q1.zh, q2.zh);
     assert.equal(q1.en, q2.en);
   });
+
+  it('keeps the prior calendar night across skipped and repeated DST hours', () => {
+    const zone = 'America/Los_Angeles';
+    for (const [before, after, morning] of [
+      ['2026-03-08T09:59:00Z', '2026-03-08T10:01:00Z', '2026-03-08T13:00:00Z'],
+      ['2026-11-01T08:59:00Z', '2026-11-01T09:01:00Z', '2026-11-01T14:00:00Z'],
+    ]) {
+      const night = getEncouragement(new Date(before), zone);
+      assert.equal(night.period, 'night');
+      assert.equal(getEncouragement(new Date(after), zone).id, night.id);
+      const next = getEncouragement(new Date(morning), zone);
+      assert.equal(next.period, 'morning');
+      assert.notEqual(next.id, night.id);
+    }
+  });
 });

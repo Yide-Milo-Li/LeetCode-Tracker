@@ -7,7 +7,7 @@ import { useDailyPlan, type UseDailyPlanReturn } from '../hooks/useDailyPlan.ts'
 import { useEncouragement } from '../hooks/useEncouragement.ts';
 import { useWorkspace } from '../workspace.tsx';
 import { createPractice } from '../practice-service.ts';
-import { Dialog, Feedback, PageHeader } from './ui.tsx';
+import { Dialog, Feedback, PageHeader, InfoPopover } from './ui.tsx';
 import { TodayRecentOverview } from './TodayRecentOverview.tsx';
 import { TodayProblemRow } from './TodayProblemRow.tsx';
 
@@ -33,6 +33,20 @@ function TodayPlanViewInner({
   const [localError, setLocalError] = useState('');
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<Set<string>>(new Set());
+  const [recentCompletions, setRecentCompletions] = useState<Set<string>>(new Set());
+  const completionTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  useEffect(() => {
+    const clearFeedback = () => {
+      completionTimers.current.forEach(clearTimeout);
+      completionTimers.current.clear();
+      setRecentCompletions(new Set());
+    };
+    window.addEventListener('hashchange', clearFeedback);
+    return () => {
+      window.removeEventListener('hashchange', clearFeedback);
+      completionTimers.current.forEach(clearTimeout);
+    };
+  }, []);
   const locks = useRef(new Set<string>());
   const [strategies, setStrategies] = useState<Strategy[] | null>(null);
   const [strategyRetry, setStrategyRetry] = useState(0);
@@ -71,6 +85,12 @@ function TodayPlanViewInner({
         practicedAt: new Date().toISOString(),
         timePrecision: 'datetime',
       });
+      setRecentCompletions((ids) => new Set([...ids, item.id]));
+      const timer = setTimeout(() => {
+        setRecentCompletions((ids) => { const next = new Set(ids); next.delete(item.id); return next; });
+        completionTimers.current.delete(timer);
+      }, 240);
+      completionTimers.current.add(timer);
       workspace.notifyMutation(record);
       workspace.openPractice({ mode: 'enrich', record });
     } catch (err) {
@@ -164,25 +184,31 @@ function TodayPlanViewInner({
           {completed === plan.items.length && plan.items.length > 0 && (
             <div className="goal-completion-badge" role="status">
               <CheckCircle2 size={18} className="goal-badge-icon" />
-              <span>{zh ? '太棒了！今日计划已全部达成 🎉' : 'Outstanding! All goals completed for today 🎉'}</span>
+              <span>{zh ? '今日计划已完成' : 'Today’s plan complete'}</span>
             </div>
           )}
           <section className="today-plan-summary">
             <div className="section-heading">
               <div>
                 <span className="eyebrow">
-                  {plan.date} · {plan.timezone}
+                  {plan.date}
                 </span>
-                <h2>{zh ? '今日计划' : 'Today’s plan'}</h2>
                 <p className="muted">
                   {strategy?.name ?? (zh ? '临时计划' : 'Temporary plan')}
-                  {plan.strategyVersion ? ' · v' + plan.strategyVersion : ''} ·{' '}
+                  {' · '}
                   {plan.source === 'local'
                     ? zh
                       ? '本地推荐'
                       : 'Local recommendations'
                     : zh ? 'Gemini 推荐' : 'Gemini recommendations'}
                 </p>
+                <InfoPopover label={zh ? '计划详情' : 'Plan details'} content={
+                  <dl className="detail-grid">
+                    <dt>{zh ? '时区' : 'Timezone'}</dt><dd>{plan.timezone}</dd>
+                    <dt>{zh ? '计划版本' : 'Plan version'}</dt><dd>v{plan.version}</dd>
+                    <dt>{zh ? '策略版本' : 'Strategy version'}</dt><dd>{plan.strategyVersion ?? '—'}</dd>
+                  </dl>
+                } />
               </div>
               <div className="plan-completion">
                 <strong>
@@ -198,9 +224,6 @@ function TodayPlanViewInner({
               aria-label={zh ? '今日完成进度' : 'Today completion progress'}
             />
             <div className="section-heading">
-              {plan.encouragement && (
-                <p className="muted">{plan.encouragement[lang] || plan.encouragement.en}</p>
-              )}
               <div className="action-row">
                 <button className="btn btn-secondary btn-sm" onClick={() => setOverride(true)}>
                   {zh ? '调整今天' : 'Adjust today'}
@@ -252,6 +275,7 @@ function TodayPlanViewInner({
                 item={item}
                 lang={lang}
                 isSaving={saving.has(item.id)}
+                justCompleted={recentCompletions.has(item.id)}
                 rowError={rowErrors[item.id]}
                 replacingBatch={controller.replacingBatch}
                 replacingItemId={controller.replacingItemId}

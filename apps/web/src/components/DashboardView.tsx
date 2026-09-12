@@ -34,7 +34,7 @@ import type { UseDailyPlanReturn } from '../hooks/useDailyPlan.ts';
 import { translations, type Language } from '../i18n.ts';
 import { ActivityHistoryDrawer } from './ActivityHistoryDrawer.tsx';
 import { useWorkspace } from '../workspace.tsx';
-import { Feedback } from './ui.tsx';
+import { IconButton, Feedback } from './ui.tsx';
 import { DashboardKpiGrid } from './DashboardKpiGrid.tsx';
 import { DashboardDistributions } from './DashboardDistributions.tsx';
 import { RecentActivitySection } from './RecentActivitySection.tsx';
@@ -231,28 +231,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   return (
     <div className="dashboard-view-container">
-      {/* Header Bar */}
-      <div className="dashboard-header-row">
-        <div>
-          <h1 className="dashboard-title">
-            <Trophy className="w-7 h-7 text-indigo-600 dark:text-indigo-400" />
-            {lang === 'zh' ? '统计' : 'Statistics'}
-          </h1>
-          <p className="dashboard-subtitle">{t.dashboardSubtitle}</p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={async () => {
-              await fetchDashboard(selectedYear);
-            }}
-            disabled={loading}
-            className="btn btn-secondary u-font-size-13px u-padding-0-35rem-0-75rem"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            {lang === 'zh' ? '刷新' : 'Refresh'}
-          </button>
-        </div>
+      <div className="dashboard-header-row dashboard-toolbar">
+        <IconButton icon={RefreshCw} label={lang === 'zh' ? '刷新' : 'Refresh'}
+          disabled={loading} onClick={() => void fetchDashboard(selectedYear)} />
       </div>
 
       {/* KPI Cards Grid */}

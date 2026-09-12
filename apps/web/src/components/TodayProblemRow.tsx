@@ -13,6 +13,8 @@ export interface TodayProblemRowProps {
   item: PlanItem;
   lang: Language;
   isSaving: boolean;
+  /** Transient success feedback, never inferred from persisted completion alone. */
+  justCompleted?: boolean;
   rowError?: string;
   replacingBatch: boolean;
   replacingItemId: string | null;
@@ -27,6 +29,7 @@ export function TodayProblemRow({
   item,
   lang,
   isSaving,
+  justCompleted = false,
   rowError,
   replacingBatch,
   replacingItemId,
@@ -40,7 +43,7 @@ export function TodayProblemRow({
   const reasonText = item.reason[lang] || item.reason.en;
 
   return (
-    <article className={'today-problem ' + (item.completed ? 'completed' : '')}>
+    <article className={'today-problem ' + (item.completed ? 'completed' : '') + (justCompleted && item.completed ? ' just-completed' : '')}>
       <button
         className="completion-circle"
         aria-label={
@@ -119,7 +122,7 @@ export function TodayProblemRow({
             target="_blank"
             rel="noopener noreferrer"
           >
-            <ExternalLink size={17} />
+            <ExternalLink size={18} />
           </a>
         </Tooltip>
         <Tooltip text={t.replaceOne} position="top">
@@ -129,7 +132,7 @@ export function TodayProblemRow({
             disabled={item.completed || isSaving || replacingBatch || Boolean(replacingItemId)}
             onClick={() => onReplaceOne(item)}
           >
-            <RefreshCw size={17} className={replacingItemId === item.id ? 'spin' : ''} />
+            <RefreshCw size={18} className={replacingItemId === item.id ? 'spin' : ''} />
           </button>
         </Tooltip>
         <Tooltip text={zh ? '记录练习' : 'Record practice'} position="top">

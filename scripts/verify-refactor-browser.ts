@@ -281,6 +281,8 @@ try {
   const visible = "e => e.getClientRects().length && !e.closest('[hidden], [inert]')";
   /** Click real visible controls by text without invoking application internals. */
   const click = async (label: string, selector = 'button') => {
+    // Hit-test the settled control, not coordinates from a moving entrance frame.
+    await until("document.getAnimations().every(a=>a.playState!=='running'||!['dialog-enter','drawer-enter'].includes(a.animationName))");
     for (let attempt = 0; attempt < 30; attempt++) {
       try {
         const point = await evaluate(
@@ -289,6 +291,9 @@ try {
         await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 });
         await send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
         await delay(100);
+        if (await evaluate("Boolean(document.querySelector('.overlay-backdrop.is-closing'))")) {
+          await until("!document.querySelector('.overlay-backdrop.is-closing')");
+        }
         return;
       } catch (err) {
         if (attempt === 29) throw err;
@@ -331,6 +336,30 @@ try {
   await reload();
   await until("document.querySelectorAll('.completion-circle').length === 3");
   assert.equal(await evaluate("document.querySelectorAll('nav .nav-item').length"), 3);
+  // Phase 10 regression: exercise actual CSS and browser event timing using isolated fixture data.
+  const initialRecords = new Set(store.queryPracticeRecords({ limit: 100 }).items.map((record) => record.id));
+  await evaluate("document.querySelector('.completion-circle[aria-pressed=false]').click()");
+  await until("document.querySelector('[role=dialog]')");
+  const motion = await evaluate("(() => {const panel=document.querySelector('[role=dialog]');const css=getComputedStyle(panel);return {name:css.animationName,duration:css.animationDuration,background:getComputedStyle(document.querySelector('.overlay-backdrop')).animationName};})()");
+  assert.equal(motion.name, 'dialog-enter');
+  assert.equal(motion.duration, '0.22s');
+  assert.equal(motion.background, 'fade-in');
+  const race = await evaluate("(async () => {document.querySelector('[aria-label=Close]').click();await new Promise(r=>setTimeout(r,15));const inert=document.getElementById('root').inert;const exit=getComputedStyle(document.querySelector('[role=dialog]')).animationName;location.hash='problems';await new Promise(r=>setTimeout(r,30));document.dispatchEvent(new KeyboardEvent('keydown',{key:'n',bubbles:true}));await new Promise(r=>setTimeout(r,200));return {inert,exit,title:document.querySelector('[role=dialog] h2')?.textContent};})()");
+  assert.equal(race.inert, true, 'The exiting dialog must retain its background lock');
+  assert.equal(race.exit, 'dialog-exit');
+  assert.equal(race.title, 'Manual record', 'Old exit must not close a new dialog after navigation');
+  await click('Close');
+  await reload('today');
+  await navigate('problems');
+  await evaluate("location.hash='today'");
+  await until("!document.getElementById('view-today').hidden");
+  assert.equal(await evaluate("document.getAnimations().filter(a=>a.effect?.target?.closest('.today-problem.completed')).length"), 0, 'Persisted completion must not replay');
+  for (const record of store.queryPracticeRecords({ limit: 100 }).items) {
+    if (!initialRecords.has(record.id)) await store.revokePracticeRecord(record.id);
+  }
+  await reload();
+  report.motion.push({ enter: motion, navigationExit: race });
+  report.flows.push('Real overlay enter/exit styles exist; inert lasts through exit; navigation cancels old callbacks; completed rows do not replay on return.');
   const before = store.getPracticeRevision();
   await evaluate(
     "document.querySelector('.completion-circle').focus(); document.querySelector('.completion-circle').click()",
@@ -560,9 +589,10 @@ try {
   const pagePreview = store.previewProgressImport({ candidates: fixtures.slice(10, 34).map((item) => ({ frontendId: item.id, lastSubmitted: '2026-08-10', lastResult: 'Accepted', submissions: 1000001 })), sourceTimezone: 'America/Los_Angeles' });
   await store.commitProgressImport(pagePreview.previewId, pagePreview, []);
   await reload('progress-import');
+  await click('Browse current snapshots', 'summary');
   await until("document.querySelectorAll('.snapshot-browser tbody tr').length === 20");
   const firstSnapshot = await evaluate("document.querySelector('.snapshot-browser tbody tr').innerText");
-  await evaluate("document.querySelector('.snapshot-browser .pagination button:last-child').click()");
+  await evaluate("document.querySelector('.snapshot-browser .pagination button[aria-label=Next]').click()");
   await until("document.querySelector('.snapshot-browser tbody tr')?.innerText !== " + JSON.stringify(firstSnapshot));
   await screenshot('snapshot-pagination-large-counts');
   report.flows.push('Current snapshots paginate through 25 active synthetic observations with large cumulative counts.');
@@ -662,9 +692,9 @@ try {
   await fill('select', 'Easy');
   await until("document.querySelectorAll('#view-problems .data-table tbody tr').length && [...document.querySelectorAll('#view-problems .data-table tbody tr')].every(e=>e.innerText.includes('Easy'))");
   await fill('select', '');
-  await until("document.querySelector('#view-problems .pagination button:last-child') && !document.querySelector('#view-problems .pagination button:last-child').disabled");
+  await until("document.querySelector('#view-problems .pagination button[aria-label=Next]') && !document.querySelector('#view-problems .pagination button[aria-label=Next]').disabled");
   const firstProblem = await evaluate("document.querySelector('.problem-title-button').textContent");
-  await evaluate("document.querySelector('#view-problems .pagination button:last-child').click()");
+  await evaluate("document.querySelector('#view-problems .pagination button[aria-label=Next]').click()");
   await until("document.querySelector('.problem-title-button')?.textContent !== " + JSON.stringify(firstProblem));
   await screenshot('problems-page-two');
   await evaluate("document.querySelector('.problem-title-button').click()");
@@ -702,15 +732,37 @@ try {
         ]) {
           await navigate(view);
           await evaluate('window.scrollTo(0,0)');
-          const geometry = await evaluate(
-            `({ width: innerWidth, scrollWidth: document.documentElement.scrollWidth, dialogs: document.querySelectorAll('[role=dialog]').length, title: document.querySelector('#view-${view} h1')?.textContent || document.querySelector('main h1')?.textContent })`,
-          );
-          assert.ok(
-            geometry.scrollWidth <= (await evaluate('document.documentElement.clientWidth')) + 1,
-            'Page overflow: ' + [width, language, theme, view].join('-'),
-          );
-          report.layouts.push({ width, height, language, theme, view, geometry });
-          await screenshot([view, width, language, theme].join('-'));
+          for (const expanded of [false, true]) {
+            const desired = expanded ? 'expanded' : 'collapsed';
+            if (!await evaluate(`document.querySelector('.sidebar').classList.contains('${desired}')`)) {
+              await click(language === 'zh' ? (expanded ? '展开侧边栏' : '折叠侧边栏') : (expanded ? 'Expand sidebar' : 'Collapse sidebar'));
+            }
+            const geometry = await evaluate(
+              `({ width: innerWidth, scrollWidth: document.documentElement.scrollWidth, sidebarWidth: document.querySelector('.sidebar').getBoundingClientRect().width, dialogs: document.querySelectorAll('[role=dialog]').length, title: document.querySelector('#view-${view} h1')?.textContent || document.querySelector('main h1')?.textContent })`,
+            );
+            assert.equal(geometry.sidebarWidth, expanded ? 216 : 64);
+            assert.ok(geometry.scrollWidth <= (await evaluate('document.documentElement.clientWidth')) + 1,
+              'Page overflow: ' + [width, language, theme, view, desired].join('-'));
+            // Layout rectangles can differ from integer CSS pixels by floating-point rounding.
+            const smallTargets = await evaluate("[...document.querySelectorAll('.btn-icon')].filter(e=>e.getClientRects().length&&!e.closest('[hidden],details:not([open])')).map(e=>({name:e.getAttribute('aria-label'),w:e.getBoundingClientRect().width,h:e.getBoundingClientRect().height})).filter(r=>r.w<37.99||r.h<37.99)");
+            assert.deepEqual(smallTargets, [], 'Icon target minimum: ' + JSON.stringify(smallTargets));
+            if (!expanded) {
+              await evaluate("document.querySelector('nav button').focus()");
+              await until("document.querySelector('[role=tooltip]')");
+              const tooltip = await evaluate("(() => {const e=document.querySelector('[role=tooltip]'),r=e.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,insideSidebar:!!e.closest('.sidebar'),width:innerWidth,height:innerHeight};})()");
+              assert.equal(tooltip.insideSidebar, false);
+              assert.ok(tooltip.left>=0 && tooltip.right<=tooltip.width && tooltip.top>=0 && tooltip.bottom<=tooltip.height);
+              await send('Input.dispatchKeyEvent', { type:'keyDown', key:'Escape', code:'Escape', windowsVirtualKeyCode:27 });
+              await until("!document.querySelector('[role=tooltip]')");
+            }
+            if (view === 'today') {
+              assert.equal(await evaluate("document.querySelectorAll('.today-view .page-description').length"), 1);
+              assert.equal(await evaluate("Boolean(document.querySelector('.sidebar-caption'))"), false);
+            }
+            report.layouts.push({ width, height, language, theme, view, expanded, geometry });
+            await screenshot([view, width, language, theme, desired].join('-'));
+          }
+          await click(language === 'zh' ? '折叠侧边栏' : 'Collapse sidebar');
           /** Inspect the active modal, including its real focus and horizontal bounds at every desktop combination. */
           const inspectOverlay = async (name: string) => {
             await until("document.querySelector('[role=dialog]')");
@@ -763,6 +815,7 @@ try {
             await click(language === 'zh' ? '查看完整记录' : 'View full history');
             await inspectOverlay('history-drawer');
           } else if (view === 'progress-import') {
+            await click(language === 'zh' ? '浏览当前快照' : 'Browse current snapshots', 'summary');
             await evaluate("document.querySelector('.snapshot-browser .text-link').focus(); document.querySelector('.snapshot-browser .text-link').click()");
             await inspectOverlay('snapshot-drawer');
           }
@@ -963,6 +1016,7 @@ try {
   assert.equal(await evaluate("document.documentElement.lang === 'zh-CN' && document.documentElement.classList.contains('dark')"), true);
   await click('切换语言为英文');
   await click('Adjust today');
+  assert.equal(await evaluate("getComputedStyle(document.querySelector('[role=dialog]')).animationName"), 'drawer-enter');
   report.motion.push(await evaluate("document.getAnimations().map(a=>({name:a.animationName, state:a.playState, duration:a.effect.getTiming().duration}))"));
   await delay(350);
   assert.equal(await evaluate("document.getAnimations().filter(a=>a.playState==='running' && a.effect?.target?.closest('[role=dialog]')).length"), 0);

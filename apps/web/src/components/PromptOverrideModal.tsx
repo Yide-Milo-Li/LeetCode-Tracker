@@ -117,11 +117,10 @@ export const PromptOverrideModal: React.FC<PromptOverrideModalProps> = ({
 
   return (
     <Dialog
+      closeDisabled={committing}
       title={lang === 'zh' ? '调整今天' : 'Adjust today'}
       lang={lang}
-      onClose={() => {
-        if (!committing) onClose();
-      }}
+      onClose={onClose}
       drawer
     >
       <div className="override-modal">

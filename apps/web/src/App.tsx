@@ -120,6 +120,20 @@ export function App() {
     }
   });
 
+  // Commit layout once; a cancellable translation preserves continuity without animating width.
+  const previousSidebar = useRef(sidebarExpanded);
+  useLayoutEffect(() => {
+    const wasExpanded = previousSidebar.current;
+    previousSidebar.current = sidebarExpanded;
+    if (wasExpanded === sidebarExpanded || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    const content = document.getElementById('main-content');
+    const animation = content?.animate?.(
+      [{ transform: `translateX(${wasExpanded ? 152 : -152}px)` }, { transform: 'translateX(0)' }],
+      { duration: 180, easing: 'cubic-bezier(0.2, 0, 0, 1)' },
+    );
+    return () => animation?.cancel();
+  }, [sidebarExpanded]);
+
   const toggleSidebar = useCallback(() => {
     setSidebarExpanded((prev) => {
       const next = !prev;
@@ -277,6 +291,7 @@ export function App() {
             >
               <button
                 className="btn-icon sidebar-toggle"
+                aria-expanded={sidebarExpanded}
                 aria-label={sidebarExpanded ? (zh ? '折叠侧边栏' : 'Collapse sidebar') : (zh ? '展开侧边栏' : 'Expand sidebar')}
                 onClick={toggleSidebar}
               >
@@ -284,7 +299,6 @@ export function App() {
               </button>
             </Tooltip>
           </div>
-          {sidebarExpanded && <p className="sidebar-caption">{zh ? '日积跬步' : 'ONE PROBLEM AT A TIME'}</p>}
           <nav aria-label={zh ? '主导航' : 'Main navigation'}>
             {(
               [
@@ -301,12 +315,12 @@ export function App() {
                   aria-current={primary === item.id ? 'page' : undefined}
                   onClick={() => navigate(item.id)}
                 >
-                  <item.icon size={19} />
+                  <item.icon size={20} />
                   <span className="nav-label">{item.label}</span>
                 </button>
               );
               return !sidebarExpanded ? (
-                <Tooltip key={item.id} text={item.label} position="right">
+                <Tooltip key={item.id} text={item.label} shortcut={item.id === 'today' ? '1' : item.id === 'problems' ? '2' : '3'} position="right">
                   {navBtn}
                 </Tooltip>
               ) : (
@@ -323,7 +337,7 @@ export function App() {
                   aria-current={view === 'settings' ? 'page' : undefined}
                   onClick={() => navigate('settings')}
                 >
-                  <Settings size={19} />
+                  <Settings size={20} />
                   <span className="nav-label">{zh ? '设置' : 'Settings'}</span>
                 </button>
               </Tooltip>
@@ -334,7 +348,7 @@ export function App() {
                 aria-current={view === 'settings' ? 'page' : undefined}
                 onClick={() => navigate('settings')}
               >
-                <Settings size={19} />
+                <Settings size={20} />
                 <span className="nav-label">{zh ? '设置' : 'Settings'}</span>
               </button>
             )}
@@ -414,7 +428,6 @@ export function App() {
             <>
               <PageHeader
                 title={zh ? '进展' : 'Progress'}
-                description={zh ? '记录每一步，看见积累。' : 'Keep a record. See how far you’ve come.'}
                 actions={
                   <>
                     <button className="btn btn-secondary" onClick={() => navigate('progress-import')}>

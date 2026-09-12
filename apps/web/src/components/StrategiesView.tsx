@@ -239,7 +239,6 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang }) => {
       <div className="view-header">
         <div>
           <h2 className="view-title">{t.strategiesTitle}</h2>
-          <p className="view-subtitle">{t.strategiesSubtitle}</p>
         </div>
         <button className="btn btn-primary" onClick={openCreateModal}>
           <Plus size={16} />
@@ -258,11 +257,8 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang }) => {
       <WeeklyScheduleGrid schedule={schedule} lang={lang} />
 
       {/* Strategies List */}
-      <div className="section-card">
-        <h3 className="section-title u-margin-bottom-1-25rem u-display-flex u-align-items-center u-gap-0-5rem">
-          <Layers size={18} className="primary-icon" />
-          {t.strategiesTitle} ({strategies.length})
-        </h3>
+      <div className="strategy-library">
+
 
         {strategies.length === 0 ? (
           <div className="empty-state u-padding-2rem">
@@ -294,11 +290,10 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang }) => {
       {/* Strategy Editor Modal */}
       {modalOpen && (
         <Dialog
+          closeDisabled={saving}
           title={editingStrategy ? t.editStrategy : t.newStrategy}
           lang={lang}
-          onClose={() => {
-            if (!saving) setModalOpen(false);
-          }}
+          onClose={() => setModalOpen(false)}
           drawer
         >
           <div className="modal-body">

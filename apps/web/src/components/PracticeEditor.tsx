@@ -11,7 +11,7 @@ import {
 import type { Language } from '../i18n.ts';
 import { useWorkspace, type PracticeDraft } from '../workspace.tsx';
 import { createPractice, getPracticeIntent, fromZonedInput, zonedInput } from '../practice-service.ts';
-import { Feedback, Field } from './ui.tsx';
+import { Feedback, Field, DialogClosingContext } from './ui.tsx';
 
 /**
  * Validate and extract optional duration in minutes.
@@ -86,6 +86,7 @@ export function PracticeEditor({
 }: PracticeEditorProps) {
   const zh = lang === 'zh';
   const workspace = useWorkspace();
+  const closing = React.useContext(DialogClosingContext);
   const recovered = useRef(record ? undefined : getPracticeIntent('manual')).current;
   const [selected, setSelected] = useState(
     recovered && problem?.questionFrontendId !== recovered.questionFrontendId ? undefined : problem,
@@ -197,10 +198,10 @@ export function PracticeEditor({
             notes: metadata.notes ?? undefined,
           });
       workspace.notifyMutation(saved);
-      if (mounted.current) onSaved(saved);
+      if (mounted.current && !closing.current) onSaved(saved);
       else workspace.reportPracticeOutcome?.({});
     } catch (err) {
-      if (mounted.current) {
+      if (mounted.current && !closing.current) {
         setError(err instanceof Error ? err.message : String(err));
         setUncertain(!record && Boolean(getPracticeIntent('manual')));
       } else {
@@ -218,7 +219,7 @@ export function PracticeEditor({
       }
     } finally {
       lock.current = false;
-      if (mounted.current) setSaving(false);
+      if (mounted.current && !closing.current) setSaving(false);
     }
   }
 

@@ -14,7 +14,7 @@ import {
 import { api, ApiError, type ImportHistoryItem, type ImportPreview, type ImportSummary } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
-import { PageHeader, Feedback } from './ui.tsx';
+import { PageHeader, Feedback, InfoPopover } from './ui.tsx';
 import { CatalogPreviewSummary } from './CatalogPreviewSummary.tsx';
 import { CatalogImportHistory } from './CatalogImportHistory.tsx';
 
@@ -217,23 +217,14 @@ export function CatalogImportWorkspace({ lang }: { lang: Language }) {
     <div>
       <PageHeader
         title={lang === 'zh' ? '导入题库' : 'Import problems'}
-        description={
-          lang === 'zh'
-            ? '添加你自行提供的 JSONL 题目数据。导入后即可搜索与记录练习。'
-            : 'Add your own JSONL problem catalog, then search and record practices.'
-        }
         back={{
           label: lang === 'zh' ? '返回题库' : 'Back to problems',
           run: () => workspace.navigate('problems'),
         }}
       />
       {/* User-owned JSONL ingestion remains separate from progress imports. */}
-      <div className="card">
-        <h2 className="card-title">
-          <UploadCloud size={20} className="u-color-primary" />
-          {t.workbenchTitle}
-        </h2>
-        <p className="card-desc">{t.workbenchDesc}</p>
+      <div className="import-stage">
+        <InfoPopover label={lang === 'zh' ? 'JSONL 格式说明' : 'JSONL format help'} content={<p>{t.workbenchDesc}</p>} />
 
         {alertMsg && (
           <div role="alert" className={`alert alert-${alertMsg.type}`}>

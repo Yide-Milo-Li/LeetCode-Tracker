@@ -215,7 +215,7 @@ textarea::placeholder {
   display: flex;
   flex-direction: column;
   z-index: 10;
-  transition: width var(--sidebar-motion), padding var(--sidebar-motion);
+
   overflow-x: hidden;
 }
 .sidebar.expanded {
@@ -341,7 +341,7 @@ textarea::placeholder {
   max-width: 1568px;
   min-height: 100vh;
   outline: none;
-  transition: margin-left var(--sidebar-motion);
+
 }
 .sidebar.expanded ~ .main-content {
   margin-left: 216px;
@@ -681,10 +681,10 @@ textarea::placeholder {
   align-items: center;
   padding: 32px;
   background: #17201566;
-  animation: fade-in var(--overlay-enter) ease-out;
+  animation: fade-in var(--overlay-enter);
 }
 .overlay-backdrop.is-closing {
-  animation: fade-out var(--overlay-exit) ease-in forwards;
+  animation: fade-out var(--overlay-exit) forwards;
 }
 .overlay-panel {
   display: flex;
@@ -696,10 +696,10 @@ textarea::placeholder {
   box-shadow: var(--shadow-md);
   border: 1px solid var(--border-color);
   border-radius: 16px;
-  animation: dialog-enter var(--overlay-enter) cubic-bezier(0.16, 1, 0.3, 1);
+  animation: dialog-enter var(--overlay-enter);
 }
 .overlay-panel.is-closing {
-  animation: dialog-exit var(--overlay-exit) cubic-bezier(0.4, 0, 1, 1) forwards;
+  animation: dialog-exit var(--overlay-exit) forwards;
 }
 .overlay-panel.wide-panel {
   width: 760px;
@@ -735,10 +735,10 @@ textarea::placeholder {
   height: 100vh;
   max-height: 100vh;
   border-radius: 0;
-  animation: drawer-enter var(--overlay-enter) cubic-bezier(0.16, 1, 0.3, 1);
+  animation: drawer-enter var(--overlay-enter);
 }
 .is-drawer .overlay-panel.is-closing {
-  animation: drawer-exit var(--overlay-exit) cubic-bezier(0.4, 0, 1, 1) forwards;
+  animation: drawer-exit var(--overlay-exit) forwards;
 }
 .is-drawer .wide-panel {
   width: 860px;
@@ -753,7 +753,7 @@ textarea::placeholder {
   display: inline-flex;
 }
 .tooltip-bubble {
-  position: absolute;
+  position: fixed;
   z-index: 1000;
   padding: 5px 9px;
   font-size: 12px;
@@ -763,7 +763,9 @@ textarea::placeholder {
   background: #1e221b;
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-  white-space: nowrap;
+  white-space: normal;
+  max-width: min(320px, calc(100vw - 16px));
+  overflow-wrap: anywhere;
   pointer-events: none;
   animation: fade-in 100ms ease-out;
 }
@@ -771,26 +773,6 @@ html.dark .tooltip-bubble {
   background: #2b3027;
   color: #f1f2e9;
   border: 1px solid var(--border-color);
-}
-.tooltip-right {
-  left: calc(100% + 8px);
-  top: 50%;
-  transform: translateY(-50%);
-}
-.tooltip-top {
-  bottom: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
-}
-.tooltip-bottom {
-  top: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
-}
-.tooltip-left {
-  right: calc(100% + 8px);
-  top: 50%;
-  transform: translateY(-50%);
 }
 .tooltip-shortcut {
   margin-left: 6px;
@@ -808,10 +790,10 @@ html.dark .tooltip-bubble {
   vertical-align: middle;
 }
 .info-trigger {
-  width: 26px;
-  height: 26px;
-  min-width: 26px;
-  min-height: 26px;
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  min-height: 38px;
   border-radius: 50%;
   color: var(--text-muted);
 }
@@ -820,10 +802,12 @@ html.dark .tooltip-bubble {
   background: var(--selected);
 }
 .info-popover-card {
-  position: absolute;
+  position: fixed;
   z-index: 500;
   width: 280px;
-  max-width: 90vw;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow: auto;
   padding: 12px 14px;
   background: var(--surface);
   border: 1px solid var(--border-color);
@@ -834,19 +818,6 @@ html.dark .tooltip-bubble {
   color: var(--text-main);
   animation: fade-in 120ms ease-out;
   outline: none;
-}
-.info-popover-bottom {
-  top: calc(100% + 6px);
-  left: 0;
-}
-.info-popover-top {
-  bottom: calc(100% + 6px);
-  left: 0;
-}
-.info-popover-right {
-  left: calc(100% + 6px);
-  top: 50%;
-  transform: translateY(-50%);
 }
 .info-popover-content p {
   margin: 0;
@@ -1042,7 +1013,6 @@ progress::-webkit-progress-bar {
 progress::-webkit-progress-value {
   background: var(--primary);
   border-radius: 4px;
-  transition: width var(--enter);
 }
 progress::-moz-progress-bar {
   background: var(--primary);
@@ -1150,7 +1120,7 @@ progress::-moz-progress-bar {
 }
 .problem-actions {
   display: grid;
-  grid-template-columns: auto auto;
+  grid-template-columns: repeat(3, 38px);
   justify-items: end;
   align-content: start;
   gap: 8px 16px;
@@ -1914,7 +1884,6 @@ html.dark .heatmap-cell-3 {
 .diff-fill {
   height: 100%;
   border-radius: 5px;
-  transition: width var(--enter);
 }
 .top-tags-wrap {
   display: flex;
@@ -2021,7 +1990,7 @@ html.dark .heatmap-cell-3 {
     padding-inline: 8px;
   }
   .sidebar.expanded {
-    width: 184px;
+    width: 216px;
     padding-inline: 12px;
   }
   .main-content {
@@ -2029,7 +1998,7 @@ html.dark .heatmap-cell-3 {
     padding: 32px 28px 48px;
   }
   .sidebar.expanded ~ .main-content {
-    margin-left: 184px;
+    margin-left: 216px;
   }
   .sidebar-tools {
     gap: 8px;
@@ -2471,59 +2440,17 @@ html.dark .heatmap-cell-3 {
   transition: transform var(--btn-motion);
 }
 
-.today-problem.completed .completion-circle {
+.today-problem.just-completed .completion-circle {
   animation: pop-in 180ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 .checkmark-icon {
   stroke-dasharray: 32;
-  stroke-dashoffset: 32;
-  animation: checkmark-draw 0.32s cubic-bezier(0.65, 0, 0.45, 1) forwards;
+  stroke-dashoffset: 0;
 }
 
-/* Goal Completion Celebration Banner */
-.goal-completion-banner {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 16px 20px;
-  margin-bottom: 24px;
-  background: linear-gradient(135deg, rgba(66, 99, 75, 0.12), rgba(170, 196, 155, 0.18));
-  border: 1px solid rgba(66, 99, 75, 0.3);
-  border-radius: var(--radius-lg);
-  box-shadow: 0 4px 16px rgba(66, 99, 75, 0.08);
-  animation: dialog-enter var(--enter) ease-out;
-}
-
-html.dark .goal-completion-banner {
-  background: linear-gradient(135deg, rgba(170, 196, 155, 0.15), rgba(66, 99, 75, 0.25));
-  border-color: rgba(170, 196, 155, 0.35);
-}
-
-.goal-badge {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  background: var(--primary);
-  color: var(--on-primary);
-  flex-shrink: 0;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-}
-
-.goal-text h3 {
-  margin: 0 0 4px;
-  font-size: 16px;
-  font-weight: 650;
-  color: var(--text-main);
-}
-
-.goal-text p {
-  margin: 0;
-  font-size: 13px;
-  color: var(--text-muted);
+.today-problem.just-completed .checkmark-icon {
+  animation: checkmark-draw 0.2s cubic-bezier(0.65, 0, 0.45, 1) forwards;
 }
 
 /* Empty State Icons */
@@ -2780,3 +2707,16 @@ html.dark .goal-completion-banner {
     stroke-dashoffset: 0 !important;
   }
 }
+
+/* Phase 10 uses one content hierarchy; supporting metadata stays on demand. */
+.sidebar.expanded .nav-label, .sidebar.expanded .brand-title {
+  animation: fade-in 180ms ease-out;
+}
+.today-view .page-description { animation: fade-in 120ms ease-out; }
+.dashboard-toolbar { justify-content: flex-end; margin-bottom: 12px; }
+.dashboard-view-container { border: 0; padding: 0; background: transparent; box-shadow: none; }
+.today-plan-summary .section-heading:first-child > div:first-child { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.today-plan-summary .section-heading:first-child > div:first-child p { margin: 0; }
+.today-plan-summary .section-heading:last-child { justify-content: flex-end; }
+.preference-row > div:first-child { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.preference-row > div:first-child > p { flex-basis: 100%; }

@@ -2,6 +2,7 @@
  * Strategy card component for displaying individual recommendation strategy rules and actions.
  */
 import React from 'react';
+import { IconButton } from './ui.tsx';
 import { Edit2, Trash2 } from 'lucide-react';
 import type { Strategy } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
@@ -34,21 +35,9 @@ export const StrategyCard: React.FC<StrategyCardProps> = ({
           </span>
         </div>
         <div className="strategy-actions">
-          <button
-            className="btn-icon"
-            onClick={() => onEdit(s)}
-            aria-label={t.editStrategy}
-            title={t.editStrategy}
-          >
-            <Edit2 size={16} />
-          </button>
-          <button
-            className="btn-icon danger-icon"
-            onClick={() => onDelete(s)}
-            aria-label={t.deleteStrategy}
-            title={t.deleteStrategy}
-          >
-            <Trash2 size={16} />
+          <IconButton icon={Edit2} label={t.editStrategy} onClick={() => onEdit(s)} />
+          <button className="btn btn-secondary btn-sm danger-icon" onClick={() => onDelete(s)}>
+            <Trash2 size={18} aria-hidden="true" />{lang === 'zh' ? '删除' : 'Delete'}
           </button>
         </div>
       </div>

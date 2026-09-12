@@ -2,7 +2,6 @@
  * Catalog import history log table and detail modal viewer.
  */
 import React from 'react';
-import { History } from 'lucide-react';
 import type { ImportHistoryItem, ImportSummary } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
 import { Dialog, Feedback, Pagination } from './ui.tsx';
@@ -40,12 +39,9 @@ export const CatalogImportHistory: React.FC<CatalogImportHistoryProps> = ({
   const t = translations[lang];
 
   return (
-    <div className="card">
-      <h2 className="card-title">
-        <History size={20} className="u-color-primary" />
-        {t.historyTitle}
-      </h2>
-      <p className="card-desc">{t.historyDesc}</p>
+    <>
+      <details className="workspace-details">
+        <summary>{t.historyTitle}</summary>
 
       {history.length === 0 ? (
         <p className="u-color-text-muted u-font-size-0-875rem">{t.noHistory}</p>
@@ -96,6 +92,7 @@ export const CatalogImportHistory: React.FC<CatalogImportHistoryProps> = ({
       )}
       <Pagination lang={lang} page={historyPage} total={historyTotal} limit={20} onPage={onPageChange} />
 
+      </details>
       {result && (
         <Dialog
           title={lang === 'zh' ? '题库导入结果' : 'Catalog import result'}
@@ -135,6 +132,6 @@ export const CatalogImportHistory: React.FC<CatalogImportHistoryProps> = ({
           ))}
         </Dialog>
       )}
-    </div>
+    </>
   );
 };

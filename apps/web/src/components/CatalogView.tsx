@@ -1,4 +1,5 @@
 /** Local catalog discovery, filtering, metadata details and contextual manual recording. */
+import { RotateCcw, Plus, ExternalLink } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   api,
@@ -10,7 +11,7 @@ import {
 } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
-import { Dialog, Feedback, Field, PageHeader, Pagination } from './ui.tsx';
+import { Dialog, Feedback, Field, PageHeader, Pagination, IconButton, Tooltip } from './ui.tsx';
 import { PracticeEditor, PracticeHistory } from './PracticeWorkspace.tsx';
 
 /** Render only HTTP(S) links from user-provided catalog metadata. */
@@ -127,9 +128,6 @@ export function CatalogView({
     <div className="catalog-view">
       <PageHeader
         title={zh ? '题库' : 'Problems'}
-        description={
-          zh ? '从你的本地题库，找到下一道值得练习的题。' : 'Find your next problem in your local collection.'
-        }
         actions={
           <button className="btn btn-primary" onClick={onNavigateSettings}>
             {zh ? '导入题库' : 'Import problems'}
@@ -250,9 +248,7 @@ export function CatalogView({
             <option value="true">{t.premiumOnly}</option>
           </select>
         </Field>
-        <button className="btn btn-secondary" onClick={reset}>
-          {zh ? '重置' : 'Reset'}
-        </button>
+        <IconButton icon={RotateCcw} label={zh ? '重置' : 'Reset'} onClick={reset} />
       </div>
       {loading && <p role="status">{t.loadingCatalog}</p>}
       {!loading && !error && !overviewError && stats?.totalProblems === 0 ? (
@@ -315,21 +311,18 @@ export function CatalogView({
                   </td>
                   <td>
                     <div className="action-row">
-                      <button
-                        className="text-link"
-                        onClick={() => workspace.openPractice({ mode: 'manual', problem })}
-                      >
-                        {t.logPractice}
-                      </button>
+                      <IconButton icon={Plus} label={t.logPractice}
+                        onClick={() => workspace.openPractice({ mode: 'manual', problem })} />
                       {safeUrl(problem.url) && (
-                        <a
-                          className="text-link"
+                        <Tooltip text={t.openLink} side="top"><a
+                          className="btn-icon"
+                          aria-label={t.openLink}
                           href={safeUrl(problem.url)}
                           target="_blank"
                           rel="noopener noreferrer"
                         >
-                          {t.openLink}
-                        </a>
+                          <ExternalLink size={18} aria-hidden="true" />
+                        </a></Tooltip>
                       )}
                     </div>
                   </td>

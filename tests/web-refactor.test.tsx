@@ -307,7 +307,9 @@ it('a detail failure after closing offers the original draft without losing comp
   fireEvent.change(screen.getByLabelText('Notes (optional)'), { target: { value: 'Keep this late draft.' } });
   fireEvent.click(screen.getByRole('button', { name: 'Save details' }));
   fireEvent.keyDown(document, { key: 'Escape' });
+  // A response during the 160ms exit is already a closed-editor outcome.
   await act(async () => { pending.reject(new Error('Late save failed')); });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 180)); });
   assert.equal(records.length, 1);
   assert.equal(records[0].completed, true);
   assert.match(screen.getByRole('alert').textContent!, /Late save failed/);
@@ -339,6 +341,7 @@ it('parallel completions queue optional details instead of replacing an open dra
   fireEvent.click(screen.getByRole('button', { name: 'Skip' }));
   assert.match(screen.getByRole('dialog').textContent!, /Second synthetic problem/);
   fireEvent.keyDown(document, { key: 'Escape' });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 180)); });
   assert.equal(screen.queryByRole('dialog'), null);
 });
 
@@ -415,6 +418,7 @@ it('saves completion before optional details, blocks double clicks and preserves
   assert.equal(writes.mock.callCount(), 1);
   assert.equal(circle.getAttribute('aria-pressed'), 'false');
   assert.ok(circle.hasAttribute('disabled'));
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 180)); });
   assert.equal(screen.queryByRole('dialog'), null);
   const input = writes.mock.calls[0].arguments[0] as CreatePracticeRecordInput;
   assert.ok(Date.parse(input.practicedAt) >= started);
@@ -433,6 +437,7 @@ it('saves completion before optional details, blocks double clicks and preserves
   await act(async () => {
     fireEvent.keyDown(document, { key: 'Escape' });
   });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 180)); });
   assert.equal(screen.queryByRole('dialog'), null);
   assert.equal(records.length, 1);
   assert.equal(document.activeElement, circle);
@@ -454,6 +459,7 @@ it('retries an uncertain create using the original operation and event time with
     fireEvent.click(circle);
   });
   assert.equal(circle.getAttribute('aria-pressed'), 'false');
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 180)); });
   assert.equal(screen.queryByRole('dialog'), null);
   await act(async () => {
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
@@ -479,6 +485,7 @@ it('keeps durable completion and exact revoke evidence when the background plan 
   await act(async () => {
     fireEvent.click(screen.getByRole('button', { name: 'Skip' }));
   });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 180)); });
   await act(async () => {
     fireEvent.click(circle);
   });

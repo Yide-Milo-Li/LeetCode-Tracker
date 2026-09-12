@@ -125,6 +125,7 @@ it('opens manual practice modal on key "n" and closes on Escape', async () => {
     document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   });
 
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 180)); });
   assert.equal(screen.queryByRole('dialog'), null);
 });
 
@@ -147,6 +148,7 @@ it('opens keyboard shortcut help modal on key "?"', async () => {
     document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   });
 
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 180)); });
   assert.equal(screen.queryByRole('dialog'), null);
 });
 
@@ -190,6 +192,7 @@ it('strictly suppresses shortcuts when typing in inputs or textareas', async () 
   // Location must NOT have changed from empty
   assert.equal(window.location.hash, '');
   // No modal opened
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 180)); });
   assert.equal(screen.queryByRole('dialog'), null);
 
   input.remove();

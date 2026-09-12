@@ -1,11 +1,12 @@
 /**
  * Practice record card with audit revocation flow and manual completion details.
  */
+import { Pencil, FilePenLine } from 'lucide-react';
 import React, { useState } from 'react';
 import { api, type PracticeRecord } from '../api.ts';
 import type { Language } from '../i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
-import { Feedback } from './ui.tsx';
+import { Feedback, IconButton } from './ui.tsx';
 
 /**
  * Format practice record timestamp respecting date-only vs datetime precision.
@@ -100,12 +101,8 @@ export function PracticeRecordCard({
       {error && <Feedback>{error}</Feedback>}
       {record.status === 'active' && (
         <div className="action-row">
-          <button className="btn btn-secondary" onClick={() => edit(false)}>
-            {zh ? '补充详情' : 'Edit details'}
-          </button>
-          <button className="btn btn-secondary" onClick={() => edit(true)}>
-            {zh ? '更正记录' : 'Correct record'}
-          </button>
+          <IconButton icon={Pencil} label={zh ? '补充详情' : 'Edit details'} onClick={() => edit(false)} />
+          <IconButton icon={FilePenLine} label={zh ? '更正记录' : 'Correct record'} onClick={() => edit(true)} />
           <button className="btn btn-danger" onClick={() => setConfirming(true)}>
             {zh ? '撤销此记录' : 'Revoke this record'}
           </button>

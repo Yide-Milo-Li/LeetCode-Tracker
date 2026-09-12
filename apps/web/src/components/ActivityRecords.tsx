@@ -1,9 +1,10 @@
 /** Filterable activity records shared by Progress and the statistics drilldown. */
+import { RotateCcw } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { api, type DashboardActivityListResponse, type RecentActivityItem } from '../api.ts';
 import type { Language } from '../i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
-import { Feedback, Field, Pagination } from './ui.tsx';
+import { Feedback, IconButton, Field, Pagination } from './ui.tsx';
 import { practiceTime } from './PracticeWorkspace.tsx';
 import { SnapshotDetails } from './SnapshotBrowser.tsx';
 
@@ -151,17 +152,14 @@ export function ActivityRecords({
             <option value="false">{zh ? '日期已确认' : 'Date confirmed'}</option>
           </select>
         </Field>
-        <button
-          className="btn btn-secondary"
+        <IconButton icon={RotateCcw} label={zh ? '重置筛选' : 'Reset filters'}
           onClick={() => {
             setDate('');
             setSource('all');
             setPending('all');
             setPage(1);
           }}
-        >
-          {zh ? '重置筛选' : 'Reset filters'}
-        </button>
+        />
       </div>
       <p className="coverage-note">
         {zh

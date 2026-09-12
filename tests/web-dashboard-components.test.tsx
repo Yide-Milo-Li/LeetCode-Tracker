@@ -458,6 +458,7 @@ it('ActivityHistoryDrawer handles filtering, pagination, and keyboard escape clo
 
   // Keyboard Escape key closes the drawer
   fireEvent.keyDown(document, { key: 'Escape' });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 180)); });
   assert.equal(closed, true, 'Escape key should trigger onClose');
 });
 

@@ -2,7 +2,9 @@
 
 ## Three places to work
 
-Today is the homepage. Problems is the local catalog. Progress contains Records and Statistics, with Records selected by default. Settings remains at the sidebar bottom.
+Today is the homepage. Problems is the local catalog. Progress contains Records and Statistics, with Records selected by default. Settings remains at the sidebar bottom. The sidebar starts as a 64px icon rail; use Expand sidebar for 216px labelled navigation. This browser remembers the choice. Hover or focus icons for their names; Escape dismisses a tooltip. Row actions, reset, refresh and pagination use labelled icons, while saves and destructive actions retain text.
+
+Today shows one locally selected encouragement below its heading. The library contains 240 paired English/Chinese lines, with 60 for each period: morning (06:00–11:00), daytime (11:00–17:00), evening (17:00–22:00), and night (22:00–06:00). Selection follows the saved timezone, or the browser timezone until configured. Night keeps the same line across midnight; changing language translates the same line. No extra AI request is made. Plan details exposes timezone and version metadata.
 
 | Action | Where to find it |
 | --- | --- |
@@ -41,7 +43,7 @@ Historical records use the same evidence rules as all other practice; they do no
 
 **Import progress** accepts pasted progress text. Gemini supplies editable candidates, while the local server matches problems and validates meaning and time. Review differences, confirm each eligible conflict separately, then confirm the batch. Unmatched, contradictory or ambiguous records cannot be authorized into valid data merely by checking a box. Incoming snapshot totals replace stored totals rather than accumulating synthetic submissions.
 
-The current snapshot browser remains below the import flow. Snapshot details expose correction, explicit revocation and version audit. These are user-imported observations, not automatic platform synchronization or a real submission history.
+The current snapshot browser and both import histories are collapsed by default below their import flows. Expand the labelled disclosure to browse them. Snapshot details expose correction, explicit revocation and version audit. These are user-imported observations, not automatic platform synchronization or a real submission history.
 
 ## Reading statistics and preferences
 
@@ -52,3 +54,7 @@ Full metrics, the yearly heatmap, thirty-day series, difficulty/tag distribution
 Language and theme changes preserve the current workspace. System theme follows OS changes. Saving a timezone changes date interpretation without rewriting the original practice time. Navigation retains in-session filters, drafts and scroll; it is not a cross-device synchronization or permanent draft-backup feature.
 
 Date-based projections refresh when the saved timezone changes, at the next visible local-day check, or when returning to the tab. Hidden Statistics keeps its selected year while suspending its chart renderer. Browser history navigation closes overlays belonging to the outgoing workspace.
+
+## Motion and keyboard feedback
+
+Dialog and drawer entry takes 220ms and exit 160ms. The exiting overlay retains its focus and background lock until removal; navigation immediately cancels its pending dismissal. Responses arriving after an editor starts closing still expose recovery for failed drafts. Reduced motion removes these transitions. Completion feedback runs only for a newly saved completion, without replaying when returning to Today.

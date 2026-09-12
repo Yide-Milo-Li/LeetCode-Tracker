@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { api } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
-import { PageHeader, Feedback, Field } from './ui.tsx';
+import { PageHeader, Feedback, Field, InfoPopover } from './ui.tsx';
 
 interface SettingsViewProps {
   lang: Language;
@@ -65,14 +65,10 @@ export function SettingsView({
     <div className="settings-view">
       <PageHeader
         title={zh ? '设置' : 'Settings'}
-        description={zh ? '让工作空间适合你的习惯。' : 'Make this workspace feel like yours.'}
       />
       <section className="preference-row">
         <div>
           <h2>{t.langLabel}</h2>
-          <p className="muted">
-            {zh ? '界面语言立即生效。' : 'Your interface language updates immediately.'}
-          </p>
         </div>
         <div className="segmented-control" aria-label={t.langLabel}>
           <button aria-pressed={lang === 'zh'} onClick={() => onLanguageChange('zh')}>
@@ -86,11 +82,7 @@ export function SettingsView({
       <section className="preference-row">
         <div>
           <h2>{t.themeLabel}</h2>
-          <p className="muted">
-            {zh
-              ? '跟随系统会响应桌面外观的变化。'
-              : 'System mode follows changes to your desktop appearance.'}
-          </p>
+          <InfoPopover label={zh ? '主题说明' : 'Theme help'} content={<p>{zh ? '跟随系统会响应桌面外观的变化。' : 'System mode follows your desktop appearance.'}</p>} />
         </div>
         <div className="segmented-control" aria-label={t.themeLabel}>
           {(['light', 'dark', 'system'] as const).map((theme) => (

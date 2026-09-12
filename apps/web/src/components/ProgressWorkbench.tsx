@@ -148,9 +148,6 @@ export function ProgressWorkbench({ lang }: { lang: Language }) {
     <div className="import-workspace">
       <PageHeader
         title={zh ? '导入进度' : 'Import progress'}
-        description={
-          zh ? '把已有练习成果带进来，核对后保存。' : 'Bring in your practice progress, review it, then save.'
-        }
         back={{ label: zh ? '返回进展' : 'Back to progress', run: () => workspace.navigate('records') }}
       />
       <ol className="workflow-steps">
@@ -417,7 +414,7 @@ export function ProgressWorkbench({ lang }: { lang: Language }) {
           </div>
         </section>
       )}
-      <details className="workspace-details" open>
+      <details className="workspace-details">
         <summary>{zh ? '浏览当前快照' : 'Browse current snapshots'}</summary>
         <SnapshotBrowser lang={lang} />
       </details>

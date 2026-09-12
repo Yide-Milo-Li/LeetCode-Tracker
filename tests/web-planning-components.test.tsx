@@ -268,7 +268,9 @@ it('renders active daily plan and triggers single problem item replacement', asy
   });
 
   // Check encouragement quote and items
-  assert.ok(screen.getByText(/Great job! Keep pushing your DP skills today./));
+  assert.equal(screen.queryByText(/Great job! Keep pushing your DP skills today./), null);
+  assert.equal(document.querySelectorAll('.today-view .page-description').length, 1);
+  assert.ok(document.querySelector('.today-view .page-description')?.textContent);
   assert.ok(screen.getByRole('heading', { name: /70\. Climbing Stairs/ }));
   assert.ok(screen.getByRole('heading', { name: /198\. House Robber/ }));
   const progress = screen.getByRole('progressbar') as HTMLProgressElement;

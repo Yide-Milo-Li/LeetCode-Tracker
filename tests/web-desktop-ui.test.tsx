@@ -23,21 +23,23 @@ Object.assign(globalThis, {
 
 Object.defineProperty(globalThis, 'navigator', { configurable: true, value: dom.window.navigator });
 Object.defineProperty(window, 'scrollTo', { value: () => {} });
+let reducedMotion = false;
 Object.defineProperty(window, 'matchMedia', {
   value: () => ({
-    matches: false,
+    get matches() { return reducedMotion; },
     addEventListener: () => {},
     removeEventListener: () => {},
   }),
 });
 
 const React = await import('react');
-const { render, fireEvent, screen, act, cleanup } = await import('@testing-library/react');
+const { render, renderHook, fireEvent, screen, act, cleanup } = await import('@testing-library/react');
 const { App } = await import('../apps/web/src/App.tsx');
-const { Tooltip, InfoPopover } = await import('../apps/web/src/components/ui.tsx');
+const { Tooltip, InfoPopover, Dialog } = await import('../apps/web/src/components/ui.tsx');
 const { TodayPlanView } = await import('../apps/web/src/components/TodayPlanView.tsx');
 const { TodayProblemRow } = await import('../apps/web/src/components/TodayProblemRow.tsx');
 const { api } = await import('../apps/web/src/api.ts');
+const { useEncouragement } = await import('../apps/web/src/hooks/useEncouragement.ts');
 
 describe('Minimal Desktop UI - Phase 10', () => {
   beforeEach(() => {
@@ -102,6 +104,87 @@ describe('Minimal Desktop UI - Phase 10', () => {
   afterEach(() => {
     cleanup();
     mock.reset();
+    reducedMotion = false;
+  });
+
+  it('closes immediately with reduced motion and refuses dismissal while a transaction is pending', () => {
+    reducedMotion = true;
+    let closes = 0;
+    const result = render(<Dialog title="Pending" lang="en" closeDisabled onClose={() => closes++}>Pending save</Dialog>);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    assert.equal(closes, 0);
+    result.rerender(<Dialog title="Pending" lang="en" onClose={() => closes++}>Saved</Dialog>);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    assert.equal(closes, 1);
+  });
+
+  it('lets navigation dispose a dialog even while ordinary dismissal is disabled', () => {
+    let closes = 0;
+    render(<Dialog title="Pending transaction" lang="en" closeDisabled onClose={() => closes++}>Saving</Dialog>);
+    act(() => {
+      window.history.replaceState(null, '', '#settings');
+      window.dispatchEvent(new window.HashChangeEvent('hashchange'));
+    });
+    assert.equal(closes, 1);
+    window.history.replaceState(null, '', '/');
+  });
+
+  it('refreshes encouragement at a visible minute boundary, on return, and on timezone change', (context) => {
+    context.mock.timers.enable({ apis: ['Date'], now: new Date('2026-09-12T10:59:00Z').getTime() });
+    let checkMinute: (() => void) | undefined;
+    context.mock.method(globalThis, 'setInterval', (callback: () => void, delay: number) => {
+      assert.equal(delay, 60000);
+      checkMinute = callback;
+      return 0;
+    });
+    const result = renderHook(({ zone, lang }) => useEncouragement({ timeZone: zone, lang }), {
+      initialProps: { zone: 'UTC', lang: 'en' as 'en' | 'zh' },
+    });
+    const morning = result.result.current.quote;
+    result.rerender({ zone: 'UTC', lang: 'zh' });
+    assert.equal(result.result.current.quote.id, morning.id);
+    assert.equal(result.result.current.text, morning.zh);
+    context.mock.timers.setTime(new Date('2026-09-12T11:00:00Z').getTime());
+    act(() => checkMinute!());
+    assert.equal(result.result.current.quote.period, 'afternoon');
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+    context.mock.timers.setTime(new Date('2026-09-12T17:00:00Z').getTime());
+    act(() => checkMinute!());
+    assert.equal(result.result.current.quote.period, 'afternoon');
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+    act(() => document.dispatchEvent(new window.Event('visibilitychange')));
+    assert.equal(result.result.current.quote.period, 'evening');
+    result.rerender({ zone: 'Asia/Shanghai', lang: 'en' });
+    assert.equal(result.result.current.quote.period, 'night');
+    result.unmount();
+  });
+
+  it('keeps the background inert throughout exit and calls close only once', async () => {
+    let closes = 0;
+    const result = render(<Dialog title="Exit lifecycle" lang="en" onClose={() => closes++}>Details</Dialog>);
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    assert.equal(closes, 0, 'Normal motion must exercise the production delay even in JSDOM');
+    assert.equal(result.container.inert, true, 'The visible exiting dialog still owns the background');
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 180)); });
+    assert.equal(closes, 1);
+  });
+
+  it('cancels an old exit callback when navigation immediately closes its dialog', async () => {
+    let closes = 0;
+    const result = render(<Dialog title="Old dialog" lang="en" onClose={() => closes++}>Draft</Dialog>);
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    act(() => {
+      window.history.replaceState(null, '', '#problems');
+      window.dispatchEvent(new window.HashChangeEvent('hashchange'));
+    });
+    assert.equal(closes, 1);
+    result.unmount();
+    render(<Dialog title="New dialog" lang="en" onClose={() => closes++}>New draft</Dialog>);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 180)); });
+    assert.equal(closes, 1, 'An unmounted dialog must never invoke a stale close callback');
+    assert.ok(screen.getByRole('dialog', { name: 'New dialog' }));
+    window.history.replaceState(null, '', '/');
   });
 
   it('renders collapsed sidebar by default and toggles expand/collapse state with localStorage persistence', async () => {
@@ -149,6 +232,11 @@ describe('Minimal Desktop UI - Phase 10', () => {
 
     const button = screen.getByRole('button', { name: 'Target button' });
     assert.equal(screen.queryByRole('tooltip'), null);
+    act(() => button.focus());
+    assert.ok(screen.getByRole('tooltip'));
+    assert.equal(button.getAttribute('aria-describedby'), screen.getByRole('tooltip').id);
+    act(() => button.blur());
+    assert.equal(screen.queryByRole('tooltip'), null);
 
     // Trigger hover
     act(() => {
@@ -177,6 +265,9 @@ describe('Minimal Desktop UI - Phase 10', () => {
 
     const trigger = screen.getByRole('button', { name: 'Why recommended' });
     assert.equal(screen.queryByRole('region'), null);
+    act(() => fireEvent.click(trigger));
+    act(() => fireEvent.mouseDown(screen.getByTestId('outside')));
+    assert.equal(screen.queryByRole('region'), null);
 
     // Click to open
     act(() => {
@@ -191,6 +282,9 @@ describe('Minimal Desktop UI - Phase 10', () => {
       fireEvent.keyDown(document, { key: 'Escape' });
     });
     assert.equal(screen.queryByRole('region'), null);
+    act(() => fireEvent.click(trigger));
+    act(() => window.dispatchEvent(new window.HashChangeEvent('hashchange')));
+    assert.equal(screen.queryByRole('region'), null, 'Retained hidden views must not leave portals on another page');
   });
 
   it('TodayPlanView header displays time-aware encouragement quote', async () => {
