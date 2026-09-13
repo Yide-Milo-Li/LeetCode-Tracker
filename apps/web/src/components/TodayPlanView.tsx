@@ -212,7 +212,7 @@ function TodayPlanViewInner({
                     ? zh
                       ? '本地推荐'
                       : 'Local recommendations'
-                    : zh ? 'Gemini 推荐' : 'Gemini recommendations'}
+                    : `${({ gemini: 'Gemini', openai: 'OpenAI', deepseek: 'DeepSeek' })[plan.source]} ${zh ? '推荐' : 'recommendations'}`}
                 </p>
                 <InfoPopover label={zh ? '计划详情' : 'Plan details'} content={
                   <dl className="detail-grid">

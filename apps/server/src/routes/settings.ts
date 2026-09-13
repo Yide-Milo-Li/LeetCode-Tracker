@@ -3,6 +3,9 @@
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { updateSettingsInputSchema } from '../../../../packages/contracts/src/sync.ts';
+import { z } from 'zod';
+import { resolveAssistantSettings } from '../llm/settings.ts';
+import { LLMAssistant } from '../llm/assistant.ts';
 import type { RouteContext } from './types.ts';
 
 /**
@@ -32,27 +35,66 @@ export function registerSettingsRoutes(app: FastifyInstance, context: RouteConte
 
     const updated = await writeLock.run(() => store.updateSettings(parseRes.data));
     if (
+      parseRes.data.llmProvider !== undefined ||
       parseRes.data.geminiApiKey !== undefined ||
       parseRes.data.geminiModel !== undefined ||
-      parseRes.data.geminiFallbackModels !== undefined
+      parseRes.data.geminiFallbackModels !== undefined ||
+      parseRes.data.openaiApiKey !== undefined ||
+      parseRes.data.openaiModel !== undefined ||
+      parseRes.data.openaiBaseUrl !== undefined ||
+      parseRes.data.openaiFallbackModels !== undefined ||
+      parseRes.data.deepseekApiKey !== undefined ||
+      parseRes.data.deepseekModel !== undefined ||
+      parseRes.data.deepseekBaseUrl !== undefined ||
+      parseRes.data.deepseekFallbackModels !== undefined
     ) {
-      gemini.updateConfig?.({
-        apiKey: updated.geminiApiKey,
-        model: updated.geminiModel,
-        fallbackModels: updated.geminiFallbackModels,
-      });
+      // Reconstruct resolved options so clearing a field cannot retain an old adapter value.
+      const options = resolveAssistantSettings(store);
+      const resolved = new LLMAssistant(options);
+      const active = options.providers?.[options.provider ?? 'gemini'];
+      gemini.updateConfig?.({ ...active, provider: options.provider, providers: resolved.getProviderConfigs() });
     }
     return reply.status(200).send(updated);
   });
 
-  /** POST /api/v1/settings/test-gemini: Test Gemini API connectivity and credentials */
+  /** POST /api/v1/settings/test-llm: Test connection for any supported LLM provider */
+  app.post('/api/v1/settings/test-llm', async (request: FastifyRequest, reply: FastifyReply) => {
+    const parsed = z.object({
+      provider: z.enum(['gemini', 'openai', 'deepseek']).optional(),
+      apiKey: z.string().max(256).optional(),
+      model: z.string().trim().min(1).max(100).optional(),
+      baseUrl: z.string().trim().max(256).refine(value => {
+        if (!value) return true;
+        try { return ['http:', 'https:'].includes(new URL(value).protocol); } catch { return false; }
+      }).optional(),
+    }).safeParse(request.body ?? {});
+    if (!parsed.success) return reply.status(400).send({ error: 'INVALID_SETTINGS', message: 'Invalid provider connection parameters' });
+    const { provider, apiKey, model, baseUrl } = parsed.data;
+
+    if (gemini.testConnection) {
+      const res = await gemini.testConnection({ provider, apiKey, model, baseUrl });
+      if (!res.ok) {
+        return reply.status(400).send({
+          error: 'TEST_CONNECTION_FAILED',
+          message: res.message || `${provider || 'LLM'} connection test failed`,
+          model: res.model,
+          provider: res.provider,
+        });
+      }
+      return reply.status(200).send({ ok: true, model: res.model, provider: res.provider });
+    }
+
+    return reply.status(200).send({ ok: true, model: gemini.getStatus().model, provider: gemini.getStatus().provider });
+  });
+
+  /** POST /api/v1/settings/test-gemini: Legacy endpoint testing Gemini connectivity */
   app.post('/api/v1/settings/test-gemini', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = request.body && typeof request.body === 'object' ? (request.body as Record<string, unknown>) : {};
     const apiKey = typeof body.apiKey === 'string' ? body.apiKey : undefined;
     const model = typeof body.model === 'string' ? body.model : undefined;
 
     if (gemini.testConnection) {
-      const res = await gemini.testConnection({ apiKey, model });
+      const res = await gemini.testConnection({ provider: 'gemini', apiKey, model });
       if (!res.ok) {
         return reply.status(400).send({
           error: 'TEST_CONNECTION_FAILED',

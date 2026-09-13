@@ -235,6 +235,7 @@ export class PlanningService {
     const {pool,focusTagNames:weakTagNames}=context;
 
     let selectionModel = 'local';
+    let selectionProvider = this.gemini.getStatus().provider ?? 'gemini';
     let orderedPool = pool;
     if (strategy.rules.preference?.trim() && this.gemini.selectPlanProblems) {
       try {
@@ -246,7 +247,7 @@ export class PlanningService {
         });
         if (aiPick.selectedQuestionIds.length > 0) {
           orderedPool = reorderCandidates(pool,aiPick.selectedQuestionIds,strategy.rules);
-          if(orderedPool!==pool)selectionModel=aiPick.model;
+          if (orderedPool !== pool) { selectionModel = aiPick.model; selectionProvider = aiPick.provider ?? selectionProvider; }
         }
       } catch {
         // AI problem ranking failed, fall back to deterministic pool order
@@ -267,6 +268,7 @@ export class PlanningService {
     }
 
     let aiContent = fallbackPlanContent(selection.selected, rulesForAI);
+    const contentProvider = this.gemini.getStatus().provider ?? 'gemini';
     if (this.gemini.generatePlanContent) {
       try {
         aiContent = await this.gemini.generatePlanContent({
@@ -281,6 +283,7 @@ export class PlanningService {
     }
 
     const generationModel = aiContent.model !== 'local' ? aiContent.model : selectionModel;
+    const generationProvider = aiContent.model !== 'local' ? aiContent.provider ?? contentProvider : selectionProvider;
     const items: PlanItem[] = selection.selected.map(p => ({
       id: randomUUID(),
       problem: p,
@@ -313,7 +316,7 @@ export class PlanningService {
       strategyVersion: strategy.version,
       rules: strategy.rules,
       items,
-      source: generationModel === 'local' ? 'local' : 'gemini',
+      source: generationModel === 'local' ? 'local' : generationProvider,
       model: generationModel === 'local' ? null : generationModel,
       encouragement: aiContent.encouragement,
       notices: [...selection.notices,...context.notices],
@@ -699,6 +702,7 @@ export class PlanningService {
     const {pool}=context;
 
     let selectionModel = 'local';
+    let selectionProvider = this.gemini.getStatus().provider ?? 'gemini';
     let orderedPool = pool;
     if (effectiveRules.preference?.trim() && this.gemini.selectPlanProblems) {
       try {
@@ -710,7 +714,7 @@ export class PlanningService {
         });
         if (aiPick.selectedQuestionIds.length > 0) {
           orderedPool = reorderCandidates(pool,aiPick.selectedQuestionIds,effectiveRules);
-          if(orderedPool!==pool)selectionModel=aiPick.model;
+          if (orderedPool !== pool) { selectionModel = aiPick.model; selectionProvider = aiPick.provider ?? selectionProvider; }
         }
       } catch {
         // Fallback to pool order
@@ -720,6 +724,7 @@ export class PlanningService {
     const selection = select(orderedPool, effectiveRules, retainedItems);
 
     let aiContent = fallbackPlanContent(selection.selected, effectiveRules);
+    const contentProvider = this.gemini.getStatus().provider ?? 'gemini';
     if (this.gemini.generatePlanContent) {
       try {
         aiContent = await this.gemini.generatePlanContent({
@@ -734,6 +739,7 @@ export class PlanningService {
     }
 
     const generationModel = aiContent.model !== 'local' ? aiContent.model : selectionModel;
+    const generationProvider = aiContent.model !== 'local' ? aiContent.provider ?? contentProvider : selectionProvider;
     const newItems: PlanItem[] = selection.selected.map(p => ({
       id: randomUUID(),
       problem: p,
@@ -757,7 +763,7 @@ export class PlanningService {
         ...basePlan,
         version: basePlan.version + 1,
         algorithmVersion: ALGORITHM_VERSION,
-        source: generationModel === 'local' ? 'local' : 'gemini',
+        source: generationModel === 'local' ? 'local' : generationProvider,
         model: generationModel === 'local' ? null : generationModel,
         catalogRevision: preview.revision.catalog,
         practiceRevision: preview.revision.practice,
@@ -779,7 +785,7 @@ export class PlanningService {
         strategyVersion: null,
         rules: effectiveRules,
         items: combinedItems,
-        source: generationModel === 'local' ? 'local' : 'gemini',
+        source: generationModel === 'local' ? 'local' : generationProvider,
         model: generationModel === 'local' ? null : generationModel,
         encouragement: aiContent.encouragement,
         notices: [...selection.notices,...context.notices],

@@ -1,10 +1,10 @@
 # LeetCode Tracker
 
-A local-first practice tracker with weekly schedule strategies, a bilingual interface, and Gemini-assisted recommendation planning.
+A local-first practice tracker with weekly schedule strategies, a bilingual interface, and optional multi-provider AI recommendation planning.
 
 ## Data requirement (Bring-Your-Own-Data)
 
-This project includes no problem dataset and performs no platform collection or automatic progress synchronization. Optional Gemini assistance uses a server-side external provider when configured. Users provide their own problem datasets using **JSON Lines (`.jsonl`)** text or files.
+This project includes no problem dataset and performs no platform collection or automatic progress synchronization. Optional AI assistance uses the selected server-side Gemini, OpenAI or DeepSeek provider when configured. Users provide their own problem datasets using **JSON Lines (`.jsonl`)** text or files.
 
 You can easily generate problem datasets (such as Blind 75, NeetCode 150, or custom topic lists) by prompting modern AI models (ChatGPT, Gemini, Claude). See the [data format guide](docs/data-format.md) for standard prompt templates, JSONL formatting rules, and SQLite storage specifications.
 
@@ -19,7 +19,7 @@ The repository implements an offline-first catalog, daily practice planner, and 
 - **Progress records and statistics**: Search-first manual entry, date/source filters, exact correction/revocation, separate snapshot audits, five-step progress import, cumulative metrics, yearly heatmap, 30-day trend and source-coverage details.
 - **Shared daily plan controller**: Application-level `useDailyPlan` hook synchronizes plan generation, status, and replacements across views without duplicate requests.
 - **Daily planning engine**: Versioned strategies and weekday assignments, completion evidence, review scheduling, single/batch replacement, and confirmed temporary rule overrides.
-- **Gemini assistance**: Bounded candidate ranking and bilingual explanations with deterministic fallback; unresolved requirements require correction. Model calls share a 60-second recommendation budget.
+- **AI assistance**: Bounded candidate ranking and bilingual explanations with deterministic fallback; unresolved requirements require correction. Model calls share a 60-second recommendation budget. See [AI provider configuration](docs/llm-providers.md) for independent credentials, fallback behavior and verification limits.
 - **Bring-Your-Own-Data (BYOD) Ingestion**: Upload or paste JSON Lines data with preflight change preview, line error breakdown, and atomic SQLite commits.
 - **Local Storage Engine**: Transactional SQLite storage (schema v8) with automatic migration, identity conflict rejection, omitted field preservation, and point-in-time backups.
 - **Local Fastify API**: `/api/v1` routes listening strictly on loopback (`127.0.0.1`) with origin validation, write serialization, and read-only dashboard endpoints.

@@ -30,3 +30,7 @@ The workbench invalidates pending file reads and preview responses on input chan
 ## Topic analysis and adaptive projections
 
 The planning store builds a request-local indexed evidence context. Insights use fixed review states; adaptive states remain separate and never overwrite the fixed cache. Generation, replacement and overrides share the candidate builder, constrain model reordering locally and persist minimal explanation facts. Read-only insights do not write revisions or call Gemini. See [topic practice insights](topic-practice-insights.md) for thresholds and compatibility.
+
+## Multi-provider AI boundary
+
+The server's `llm/assistant.ts` dispatches to isolated Gemini, OpenAI and DeepSeek adapters. Startup and settings writes share configuration resolution. Planning results carry provider provenance; progress import failures preserve typed HTTP errors. Gemini module paths remain compatibility exports. See [AI provider configuration](llm-providers.md) for credentials, reset behavior and fallback boundaries.

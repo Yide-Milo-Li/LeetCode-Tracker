@@ -9,6 +9,7 @@ import fastifyStatic from '@fastify/static';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { CatalogStore } from '../../../packages/database/src/store.ts';
+import { resolveAssistantSettings } from './llm/settings.ts';
 import { GeminiAssistant, type IGeminiAssistant } from './gemini.ts';
 import { PlanningService } from './planning-service.ts';
 import { AsyncLock } from './async-lock.ts';
@@ -34,14 +35,7 @@ export interface AppOptions {
  */
 export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const { store } = options;
-  const storedSettings = store.getSettings();
-  const gemini = options.geminiAssistant ?? new GeminiAssistant({
-    apiKey: storedSettings.geminiApiKey || undefined,
-    model: storedSettings.geminiModel || undefined,
-    fallbackModels: storedSettings.geminiFallbackModels && storedSettings.geminiFallbackModels.length > 0
-      ? storedSettings.geminiFallbackModels
-      : undefined,
-  });
+  const gemini = options.geminiAssistant ?? new GeminiAssistant(resolveAssistantSettings(store));
   const writeLock = new AsyncLock();
   const planningService = new PlanningService(store, gemini);
 

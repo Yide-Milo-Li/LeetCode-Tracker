@@ -35,6 +35,8 @@ import type {
   TopicTag,
   UpdatePracticeRecordInput,
   UpdateProgressSnapshotInput,
+  UpdateSettingsInput,
+  LLMProvider,
   UserSettings,
 } from '../../../packages/contracts/src/index.ts';
 
@@ -173,11 +175,23 @@ const settingsApi = {
   },
 
   updateSettings(
-    settings: Partial<Pick<UserSettings, 'language' | 'theme' | 'timezone' | 'geminiApiKey' | 'geminiModel' | 'geminiFallbackModels'>>
+    settings: UpdateSettingsInput
   ): Promise<UserSettings> {
     return request<UserSettings>('/settings', {
       method: 'PATCH',
       body: JSON.stringify(settings),
+    });
+  },
+
+  testLlmConnection(params?: {
+    provider?: LLMProvider;
+    apiKey?: string;
+    model?: string;
+    baseUrl?: string;
+  }): Promise<{ ok: boolean; model: string; message?: string; provider?: LLMProvider }> {
+    return request<{ ok: boolean; model: string; message?: string; provider?: LLMProvider }>('/settings/test-llm', {
+      method: 'POST',
+      body: JSON.stringify(params ?? {}),
     });
   },
 

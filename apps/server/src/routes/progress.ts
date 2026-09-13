@@ -8,7 +8,7 @@ import {
   progressImportPreviewRequestSchema,
   updateProgressSnapshotSchema,
 } from '../../../../packages/contracts/src/practice.ts';
-import { GeminiFormatError } from '../gemini.ts';
+import { LLMError } from '../gemini.ts';
 import type { RouteContext } from './types.ts';
 
 /**
@@ -118,7 +118,7 @@ export function registerProgressRoutes(app: FastifyInstance, context: RouteConte
       const formatted = await gemini.formatProgressText(parseRes.data.rawText, parseRes.data.batchYear);
       return reply.status(200).send(formatted);
     } catch (err) {
-      if (err instanceof GeminiFormatError) {
+      if (err instanceof LLMError) {
         return reply.status(err.status).send({ error: err.code, message: err.message });
       }
       return reply.status(500).send({

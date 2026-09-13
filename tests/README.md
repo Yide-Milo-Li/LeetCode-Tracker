@@ -1,6 +1,6 @@
 # Testing boundaries
 
-Run `npm test` for 185 offline synthetic tests: 144 storage/domain/API tests and 41 rendered React DOM tests. `npm run test:web` runs the 41 web component tests separately. `npm run check` includes TypeScript and TSX test files (`tsc --noEmit`). Tests use in-memory or temporary databases and never require private data, credentials, remote services, or `apps/web/dist`.
+Run `npm test` for 287 offline synthetic tests: 200 storage/domain/API tests and 87 rendered React DOM tests. `npm run test:web` runs the 87 web component tests separately. `npm run check` includes TypeScript and TSX test files (`tsc --noEmit`). Tests use in-memory or temporary databases and never require private data, credentials, remote services, or `apps/web/dist`.
 
 Coverage includes:
 
@@ -70,3 +70,7 @@ A previous phase reported a clean public-file installation check; it was not rep
 ## Phase 16 offline evidence
 
 The default suite explicitly includes sample-gated topic analytics, fixed/adaptive scheduling, shared planning paths, read-only API reports, persistent explanation/replay and independent React controls. `npm run verify:phase16` runs isolated synthetic desktop Chrome; `npm run benchmark:phase16` measures 4,046 synthetic problems with 10k/50k records and five warmups plus thirty samples. The legacy `verify:desktop` script currently stops at a historical three-navigation-item assertion after the Notes destination was added; this does not constitute a passing legacy browser run. New Phase 16 coverage is reported separately. See [behavior and boundaries](../docs/topic-practice-insights.md).
+
+## Multi-provider AI audit
+
+`server-settings-llm.test.ts` and `llm-audit.test.ts` verify independent settings, real-assistant hot reload, blank key isolation, JSON request contracts, typed failures, fallback chains, empty-chain restart persistence, deadline enforcement and provider provenance. Desktop component coverage includes drafts, remasking and explicit empty chains. See [provider configuration](../docs/llm-providers.md) for limitations. Run `node --import tsx scripts/verify-phase17-browser.ts` after building for isolated synthetic Chrome settings acceptance.

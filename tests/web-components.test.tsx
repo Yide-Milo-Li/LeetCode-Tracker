@@ -22,6 +22,34 @@ const { WorkspaceContext } = await import('../apps/web/src/workspace.tsx');
 
 afterEach(() => { cleanup(); mock.restoreAll(); });
 
+it('keeps provider drafts independent, remasks switched keys and saves empty fallback chains', async () => {
+  const initial = { language: 'en' as const, theme: 'light' as const, timezone: 'UTC', updatedAt: 1,
+    llmProvider: 'gemini' as const, geminiApiKey: 'synthetic-g', openaiApiKey: 'synthetic-o', deepseekApiKey: 'synthetic-d',
+    geminiFallbackModels: [], openaiFallbackModels: [], deepseekFallbackModels: [] };
+  mock.method(api, 'getSettings', async () => initial);
+  const writes = mock.method(api, 'updateSettings', async (payload: any) => ({ ...initial, ...payload }));
+  const probes = mock.method(api, 'testLlmConnection', async () => ({ ok: true, model: 'synthetic' }));
+  await act(async () => { render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} />); });
+  fireEvent.click(screen.getByRole('button', { name: 'Show key' }));
+  fireEvent.click(screen.getByRole('button', { name: 'OpenAI' }));
+  const key = screen.getByLabelText('API Key (OpenAI)') as HTMLInputElement;
+  assert.equal(key.type, 'password');
+  assert.equal(key.value, 'synthetic-o');
+  fireEvent.change(key, { target: { value: 'synthetic-draft' } });
+  fireEvent.click(screen.getByRole('button', { name: 'DeepSeek' }));
+  assert.equal((screen.getByLabelText('API Key (DeepSeek)') as HTMLInputElement).value, 'synthetic-d');
+  fireEvent.click(screen.getByRole('button', { name: 'OpenAI' }));
+  assert.equal((screen.getByLabelText('API Key (OpenAI)') as HTMLInputElement).value, 'synthetic-draft');
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Test Connection' })); });
+  assert.equal(probes.mock.calls[0].arguments[0]?.provider, 'openai');
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save AI settings' })); });
+  const payload = writes.mock.calls[0].arguments[0];
+  assert.equal(payload.geminiApiKey, 'synthetic-g');
+  assert.equal(payload.deepseekApiKey, 'synthetic-d');
+  assert.equal(payload.openaiApiKey, 'synthetic-draft');
+  assert.deepEqual(payload.openaiFallbackModels, []);
+});
+
 it('renders progress import history in the configured timezone with a UTC fallback in both languages', async () => {
   const importedAt = Date.parse('2026-09-10T03:00:00Z');
   mock.method(api, 'getProgressImportHistory', async () => ({

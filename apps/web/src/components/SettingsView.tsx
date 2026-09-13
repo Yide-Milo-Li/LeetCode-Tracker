@@ -14,15 +14,28 @@ interface SettingsViewProps {
   onTimezoneSaved?: (zone: string | null) => void;
 }
 
-const PRESET_MODELS = [
-  'models/gemini-3.8-flash',
-  'models/gemini-3.7-flash',
-  'models/gemini-3.6-flash',
-  'models/gemini-3.5-flash',
-  'models/gemini-3.5-flash-lite',
-  'models/gemini-2.5-flash',
-  'models/gemini-2.5-pro',
-];
+export type ProviderType = 'gemini' | 'openai' | 'deepseek';
+
+export const PROVIDER_PRESET_MODELS: Record<ProviderType, string[]> = {
+  gemini: [
+    'models/gemini-3.8-flash',
+    'models/gemini-3.7-flash',
+    'models/gemini-3.6-flash',
+    'models/gemini-3.5-flash',
+    'models/gemini-3.5-flash-lite',
+    'models/gemini-2.5-flash',
+    'models/gemini-2.5-pro',
+  ],
+  openai: [
+    'gpt-4o-mini',
+    'gpt-4o',
+    'o3-mini',
+  ],
+  deepseek: [
+    'deepseek-chat',
+    'deepseek-reasoner',
+  ],
+};
 
 /** Keep the timezone and AI drafts intact on background refresh; only explicit save changes preferences. */
 export function SettingsView({
@@ -43,15 +56,35 @@ export function SettingsView({
   const [saving, setSaving] = useState(false);
   const dirty = useRef(false);
 
-  // Gemini AI configuration state
-  const [apiKey, setApiKey] = useState('');
-  const [showApiKey, setShowApiKey] = useState(false);
-  const [primaryModel, setPrimaryModel] = useState('models/gemini-3.8-flash');
-  const [isCustomPrimary, setIsCustomPrimary] = useState(false);
-  const [fallbackModels, setFallbackModels] = useState<string[]>([
+  // Multi-provider AI configuration state
+  const [aiLoaded, setAiLoaded] = useState(false);
+  const [provider, setProvider] = useState<ProviderType>('gemini');
+
+  // Gemini state
+  const [geminiApiKey, setGeminiApiKey] = useState('');
+  const [geminiPrimaryModel, setGeminiPrimaryModel] = useState('models/gemini-3.8-flash');
+  const [geminiIsCustomPrimary, setGeminiIsCustomPrimary] = useState(false);
+  const [geminiFallbackModels, setGeminiFallbackModels] = useState<string[]>([
     'models/gemini-3.7-flash',
     'models/gemini-3.6-flash',
   ]);
+
+  // OpenAI state
+  const [openaiApiKey, setOpenaiApiKey] = useState('');
+  const [openaiPrimaryModel, setOpenaiPrimaryModel] = useState('gpt-4o-mini');
+  const [openaiIsCustomPrimary, setOpenaiIsCustomPrimary] = useState(false);
+  const [openaiBaseUrl, setOpenaiBaseUrl] = useState('');
+  const [openaiFallbackModels, setOpenaiFallbackModels] = useState<string[]>(['gpt-4o']);
+
+  // DeepSeek state
+  const [deepseekApiKey, setDeepseekApiKey] = useState('');
+  const [deepseekPrimaryModel, setDeepseekPrimaryModel] = useState('deepseek-chat');
+  const [deepseekIsCustomPrimary, setDeepseekIsCustomPrimary] = useState(false);
+  const [deepseekBaseUrl, setDeepseekBaseUrl] = useState('');
+  const [deepseekFallbackModels, setDeepseekFallbackModels] = useState<string[]>(['deepseek-reasoner']);
+
+  // Shared AI form & action state
+  const [showApiKey, setShowApiKey] = useState(false);
   const [copied, setCopied] = useState(false);
   const [savingAi, setSavingAi] = useState(false);
   const [aiSaved, setAiSaved] = useState(false);
@@ -59,6 +92,48 @@ export function SettingsView({
   const [testingAi, setTestingAi] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; model?: string; message?: string } | null>(null);
   const dirtyAi = useRef(false);
+
+  // Active provider helpers
+  const currentApiKey = provider === 'gemini' ? geminiApiKey : provider === 'openai' ? openaiApiKey : deepseekApiKey;
+  /** Update only the currently displayed provider draft. */
+  const setCurrentApiKey = (val: string) => {
+    if (provider === 'gemini') setGeminiApiKey(val);
+    else if (provider === 'openai') setOpenaiApiKey(val);
+    else setDeepseekApiKey(val);
+  };
+
+  const currentPrimaryModel = provider === 'gemini' ? geminiPrimaryModel : provider === 'openai' ? openaiPrimaryModel : deepseekPrimaryModel;
+  const setCurrentPrimaryModel = (val: string) => {
+    if (provider === 'gemini') setGeminiPrimaryModel(val);
+    else if (provider === 'openai') setOpenaiPrimaryModel(val);
+    else setDeepseekPrimaryModel(val);
+  };
+
+  const currentIsCustomPrimary = provider === 'gemini' ? geminiIsCustomPrimary : provider === 'openai' ? openaiIsCustomPrimary : deepseekIsCustomPrimary;
+  const setCurrentIsCustomPrimary = (val: boolean) => {
+    if (provider === 'gemini') setGeminiIsCustomPrimary(val);
+    else if (provider === 'openai') setOpenaiIsCustomPrimary(val);
+    else setDeepseekIsCustomPrimary(val);
+  };
+
+  const currentBaseUrl = provider === 'openai' ? openaiBaseUrl : provider === 'deepseek' ? deepseekBaseUrl : '';
+  const setCurrentBaseUrl = (val: string) => {
+    if (provider === 'openai') setOpenaiBaseUrl(val);
+    else if (provider === 'deepseek') setDeepseekBaseUrl(val);
+  };
+
+  const currentFallbackModels = provider === 'gemini' ? geminiFallbackModels : provider === 'openai' ? openaiFallbackModels : deepseekFallbackModels;
+  const setCurrentFallbackModels = (updater: string[] | ((prev: string[]) => string[])) => {
+    if (provider === 'gemini') {
+      setGeminiFallbackModels(typeof updater === 'function' ? updater(geminiFallbackModels) : updater);
+    } else if (provider === 'openai') {
+      setOpenaiFallbackModels(typeof updater === 'function' ? updater(openaiFallbackModels) : updater);
+    } else {
+      setDeepseekFallbackModels(typeof updater === 'function' ? updater(deepseekFallbackModels) : updater);
+    }
+  };
+
+  const currentPresetModels = PROVIDER_PRESET_MODELS[provider];
 
   // Bundle export / import state
   const [importingBundle, setImportingBundle] = useState(false);
@@ -72,18 +147,52 @@ export function SettingsView({
     api
       .getSettings()
       .then((settings) => {
+        if (active) setAiLoaded(true);
         if (active) {
           if (!dirty.current) setZone(settings.timezone ?? '');
           if (!dirtyAi.current) {
-            setApiKey(settings.geminiApiKey ?? '');
-            const effectivePrimary = settings.geminiModel ?? primaryModel;
+            if (settings.llmProvider) {
+              setProvider(settings.llmProvider);
+            }
+
+            // Gemini
+            if (settings.geminiApiKey !== undefined) setGeminiApiKey(settings.geminiApiKey ?? '');
+            const effGemini = settings.geminiModel ?? 'models/gemini-3.8-flash';
             if (settings.geminiModel) {
-              setPrimaryModel(settings.geminiModel);
-              setIsCustomPrimary(!PRESET_MODELS.includes(settings.geminiModel));
+              setGeminiPrimaryModel(settings.geminiModel);
+              setGeminiIsCustomPrimary(!PROVIDER_PRESET_MODELS.gemini.includes(settings.geminiModel));
             }
             if (settings.geminiFallbackModels) {
-              setFallbackModels(
-                [...new Set(settings.geminiFallbackModels)].filter((m) => m !== effectivePrimary)
+              setGeminiFallbackModels(
+                [...new Set(settings.geminiFallbackModels)].filter((m) => m !== effGemini)
+              );
+            }
+
+            // OpenAI
+            if (settings.openaiApiKey !== undefined) setOpenaiApiKey(settings.openaiApiKey ?? '');
+            const effOpenai = settings.openaiModel ?? 'gpt-4o-mini';
+            if (settings.openaiModel) {
+              setOpenaiPrimaryModel(settings.openaiModel);
+              setOpenaiIsCustomPrimary(!PROVIDER_PRESET_MODELS.openai.includes(settings.openaiModel));
+            }
+            if (settings.openaiBaseUrl !== undefined) setOpenaiBaseUrl(settings.openaiBaseUrl ?? '');
+            if (settings.openaiFallbackModels) {
+              setOpenaiFallbackModels(
+                [...new Set(settings.openaiFallbackModels)].filter((m) => m !== effOpenai)
+              );
+            }
+
+            // DeepSeek
+            if (settings.deepseekApiKey !== undefined) setDeepseekApiKey(settings.deepseekApiKey ?? '');
+            const effDeepseek = settings.deepseekModel ?? 'deepseek-chat';
+            if (settings.deepseekModel) {
+              setDeepseekPrimaryModel(settings.deepseekModel);
+              setDeepseekIsCustomPrimary(!PROVIDER_PRESET_MODELS.deepseek.includes(settings.deepseekModel));
+            }
+            if (settings.deepseekBaseUrl !== undefined) setDeepseekBaseUrl(settings.deepseekBaseUrl ?? '');
+            if (settings.deepseekFallbackModels) {
+              setDeepseekFallbackModels(
+                [...new Set(settings.deepseekFallbackModels)].filter((m) => m !== effDeepseek)
               );
             }
           }
@@ -118,9 +227,9 @@ export function SettingsView({
 
   /** Copy API key to clipboard with visual confirmation. */
   async function handleCopyApiKey() {
-    if (!apiKey) return;
+    if (!currentApiKey) return;
     try {
-      await navigator.clipboard.writeText(apiKey);
+      await navigator.clipboard.writeText(currentApiKey);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -134,7 +243,7 @@ export function SettingsView({
       const text = await navigator.clipboard.readText();
       if (text) {
         dirtyAi.current = true;
-        setApiKey(text.trim());
+        setCurrentApiKey(text.trim());
         setAiSaved(false);
         setTestResult(null);
       }
@@ -143,24 +252,44 @@ export function SettingsView({
     }
   }
 
-  /** Save Gemini API key and model hierarchy to local SQLite settings. */
+  /** Save multi-provider AI keys and models to local SQLite settings. */
   async function saveAiConfig(event: React.FormEvent) {
     event.preventDefault();
+    if (!aiLoaded || savingAi || testingAi) return;
     setSavingAi(true);
     setAiError('');
     setAiSaved(false);
-    const trimmedPrimary = primaryModel.trim();
-    const sanitizedFallbacks = [...new Set(fallbackModels.map((m) => m.trim()).filter(Boolean))].filter(
-      (m) => !trimmedPrimary || m !== trimmedPrimary
-    );
+
+    /** Remove empty or duplicate entries before persisting each provider chain. */
+    const sanitizeFb = (list: string[], primary: string) => {
+      const trimmed = primary.trim();
+      return [...new Set(list.map((m) => m.trim()).filter(Boolean))].filter(
+        (m) => !trimmed || m !== trimmed
+      );
+    };
+
+    const cleanGeminiFb = sanitizeFb(geminiFallbackModels, geminiPrimaryModel);
+    const cleanOpenaiFb = sanitizeFb(openaiFallbackModels, openaiPrimaryModel);
+    const cleanDeepseekFb = sanitizeFb(deepseekFallbackModels, deepseekPrimaryModel);
 
     try {
       await api.updateSettings({
-        geminiApiKey: apiKey.trim() || null,
-        geminiModel: trimmedPrimary || null,
-        geminiFallbackModels: sanitizedFallbacks.length > 0 ? sanitizedFallbacks : null,
+        llmProvider: provider,
+        geminiApiKey: geminiApiKey.trim() || null,
+        geminiModel: geminiPrimaryModel.trim() || null,
+        geminiFallbackModels: cleanGeminiFb,
+        openaiApiKey: openaiApiKey.trim() || null,
+        openaiModel: openaiPrimaryModel.trim() || null,
+        openaiBaseUrl: openaiBaseUrl.trim() || null,
+        openaiFallbackModels: cleanOpenaiFb,
+        deepseekApiKey: deepseekApiKey.trim() || null,
+        deepseekModel: deepseekPrimaryModel.trim() || null,
+        deepseekBaseUrl: deepseekBaseUrl.trim() || null,
+        deepseekFallbackModels: cleanDeepseekFb,
       });
-      setFallbackModels(sanitizedFallbacks);
+      setGeminiFallbackModels(cleanGeminiFb);
+      setOpenaiFallbackModels(cleanOpenaiFb);
+      setDeepseekFallbackModels(cleanDeepseekFb);
       workspace.notifyMutation();
       setAiSaved(true);
       dirtyAi.current = false;
@@ -173,15 +302,22 @@ export function SettingsView({
 
   /** Send a test ping to verify configured or drafted key and model connectivity. */
   async function handleTestConnection() {
-    if (!apiKey.trim()) return;
+    if (!currentApiKey.trim()) return;
     setTestingAi(true);
     setTestResult(null);
     setAiError('');
     try {
-      const res = await api.testGeminiConnection({
-        apiKey: apiKey.trim(),
-        model: primaryModel.trim() || undefined,
-      });
+      const res = provider === 'gemini'
+        ? await api.testGeminiConnection({
+            apiKey: currentApiKey.trim(),
+            model: currentPrimaryModel.trim() || undefined,
+          })
+        : await api.testLlmConnection({
+            provider,
+            apiKey: currentApiKey.trim(),
+            model: currentPrimaryModel.trim() || undefined,
+            baseUrl: currentBaseUrl.trim() || undefined,
+          });
       setTestResult({ ok: true, model: res.model });
     } catch (err) {
       setTestResult({
@@ -338,7 +474,7 @@ export function SettingsView({
         </form>
       </section>
 
-      {/* Gemini AI Configuration row */}
+      {/* Multi-provider AI Assistant Configuration row */}
       <section className="preference-row">
         <div>
           <h2>{t.geminiSettingsTitle}</h2>
@@ -349,13 +485,18 @@ export function SettingsView({
               <div>
                 <p>
                   {zh
-                    ? 'API 密钥及模型配置保存在本地 SQLite 数据库中，仅在生成计划与导入分析时向 Google Gemini 发送请求。'
+                    ? 'API 密钥及模型配置保存在本地 SQLite 数据库中，仅在生成计划与导入分析时向所选 AI 服务商发送请求。'
                     : 'API keys and model choices are saved locally in your SQLite database, used only for planning and progress formatting.'}
                 </p>
                 <p>
                   {zh
+                    ? '各提供商（Gemini、OpenAI、DeepSeek）的配置独立持久化，切换提供商不会清除其他提供商已保存的密钥。'
+                    : 'Configurations for Gemini, OpenAI, and DeepSeek are stored independently. Switching providers preserves existing keys.'}
+                </p>
+                <p>
+                  {zh
                     ? '密钥默认以圆点掩码保护，点击眼睛图标随时切换查看明文。'
-                    : 'API key is masked with dots by default. Click the eye icon to toggle visibility.'}
+                    : 'API keys are masked with dots by default. Click the eye icon to toggle visibility.'}
                 </p>
               </div>
             }
@@ -363,19 +504,75 @@ export function SettingsView({
         </div>
 
         <form className="ai-settings-form" onSubmit={saveAiConfig}>
-          {/* API Key field with eye toggle */}
-          <Field label={t.apiKeyLabel}>
-            <div className="input-with-action">
-              <input
-                type={showApiKey ? 'text' : 'password'}
-                value={apiKey}
-                onChange={(e) => {
+          <fieldset className="ai-settings-form" disabled={!aiLoaded || savingAi || testingAi} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+          {/* AI Provider Segmented Control */}
+          <div className="form-field">
+            <span>{t.aiProviderLabel}</span>
+            <div className="segmented-control" aria-label={t.aiProviderLabel}>
+              <button
+                type="button"
+                aria-pressed={provider === 'gemini'}
+                onClick={() => {
                   dirtyAi.current = true;
-                  setApiKey(e.target.value);
+                  setProvider('gemini');
+                  setShowApiKey(false);
+                  setCopied(false);
                   setAiSaved(false);
                   setTestResult(null);
                 }}
-                placeholder={t.apiKeyPlaceholder}
+              >
+                {t.providerGemini}
+              </button>
+              <button
+                type="button"
+                aria-pressed={provider === 'openai'}
+                onClick={() => {
+                  dirtyAi.current = true;
+                  setProvider('openai');
+                  setShowApiKey(false);
+                  setCopied(false);
+                  setAiSaved(false);
+                  setTestResult(null);
+                }}
+              >
+                {t.providerOpenAI}
+              </button>
+              <button
+                type="button"
+                aria-pressed={provider === 'deepseek'}
+                onClick={() => {
+                  dirtyAi.current = true;
+                  setProvider('deepseek');
+                  setShowApiKey(false);
+                  setCopied(false);
+                  setAiSaved(false);
+                  setTestResult(null);
+                }}
+              >
+                {t.providerDeepSeek}
+              </button>
+            </div>
+          </div>
+
+          {/* API Key field with eye toggle */}
+          <Field label={`${t.apiKeyLabel} (${provider === 'gemini' ? 'Gemini' : provider === 'openai' ? 'OpenAI' : 'DeepSeek'})`}>
+            <div className="input-with-action">
+              <input
+                type={showApiKey ? 'text' : 'password'}
+                value={currentApiKey}
+                onChange={(e) => {
+                  dirtyAi.current = true;
+                  setCurrentApiKey(e.target.value);
+                  setAiSaved(false);
+                  setTestResult(null);
+                }}
+                placeholder={
+                  provider === 'gemini'
+                    ? t.apiKeyPlaceholder
+                    : provider === 'openai'
+                    ? (zh ? '输入或粘贴您的 OpenAI API 密钥...' : 'Enter or paste your OpenAI API key...')
+                    : (zh ? '输入或粘贴您的 DeepSeek API 密钥...' : 'Enter or paste your DeepSeek API key...')
+                }
                 autoComplete="off"
                 spellCheck={false}
               />
@@ -397,7 +594,7 @@ export function SettingsView({
               type="button"
               className="btn btn-secondary btn-sm"
               onClick={handleCopyApiKey}
-              disabled={!apiKey}
+              disabled={!currentApiKey}
               title={t.copyApiKey}
             >
               {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
@@ -412,13 +609,13 @@ export function SettingsView({
               <ClipboardPaste size={14} aria-hidden="true" />
               <span>{t.pasteApiKey}</span>
             </button>
-            {apiKey && (
+            {currentApiKey && (
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
                 onClick={() => {
                   dirtyAi.current = true;
-                  setApiKey('');
+                  setCurrentApiKey('');
                   setAiSaved(false);
                   setTestResult(null);
                 }}
@@ -429,55 +626,80 @@ export function SettingsView({
             )}
           </div>
 
+          {/* Base URL field for OpenAI and DeepSeek */}
+          {provider !== 'gemini' && (
+            <Field label={t.baseUrlLabel}>
+              <input
+                type="text"
+                value={currentBaseUrl}
+                onChange={(e) => {
+                  dirtyAi.current = true;
+                  setCurrentBaseUrl(e.target.value);
+                  setAiSaved(false);
+                  setTestResult(null);
+                }}
+                placeholder={
+                  provider === 'openai'
+                    ? 'https://api.openai.com/v1'
+                    : 'https://api.deepseek.com'
+                }
+              />
+            </Field>
+          )}
+
           {/* Preferred Model selection */}
           <Field label={t.preferredModelLabel}>
             <select
-              value={isCustomPrimary ? 'custom' : primaryModel}
+              value={currentIsCustomPrimary ? 'custom' : currentPrimaryModel}
               onChange={(e) => {
                 dirtyAi.current = true;
                 setAiSaved(false);
                 setTestResult(null);
                 if (e.target.value === 'custom') {
-                  setIsCustomPrimary(true);
-                  if (PRESET_MODELS.includes(primaryModel)) {
-                    setPrimaryModel('');
+                  setCurrentIsCustomPrimary(true);
+                  if (currentPresetModels.includes(currentPrimaryModel)) {
+                    setCurrentPrimaryModel('');
                   }
                 } else {
                   const selectedModel = e.target.value;
-                  setIsCustomPrimary(false);
-                  setPrimaryModel(selectedModel);
-                  setFallbackModels((prev) => prev.filter((item) => item !== selectedModel));
+                  setCurrentIsCustomPrimary(false);
+                  setCurrentPrimaryModel(selectedModel);
+                  setCurrentFallbackModels((prev) => prev.filter((item) => item !== selectedModel));
                 }
               }}
             >
-              <option value="models/gemini-3.8-flash">gemini-3.8-flash (Recommended)</option>
-              <option value="models/gemini-3.7-flash">gemini-3.7-flash</option>
-              <option value="models/gemini-3.6-flash">gemini-3.6-flash</option>
-              <option value="models/gemini-3.5-flash">gemini-3.5-flash</option>
-              <option value="models/gemini-3.5-flash-lite">gemini-3.5-flash-lite</option>
-              <option value="models/gemini-2.5-flash">gemini-2.5-flash</option>
-              <option value="models/gemini-2.5-pro">gemini-2.5-pro</option>
+              {currentPresetModels.map((m, idx) => (
+                <option key={m} value={m}>
+                  {m.replace('models/', '')}{idx === 0 ? (zh ? '（推荐）' : ' (Recommended)') : ''}
+                </option>
+              ))}
               <option value="custom">{t.customModelOption}</option>
             </select>
           </Field>
 
           {/* Custom primary model input when custom option is selected */}
-          {isCustomPrimary && (
+          {currentIsCustomPrimary && (
             <Field label={zh ? '自定义模型名称' : 'Custom Model Identifier'}>
               <input
                 type="text"
-                value={primaryModel}
+                value={currentPrimaryModel}
                 onChange={(e) => {
                   dirtyAi.current = true;
                   const newCustom = e.target.value;
-                  setPrimaryModel(newCustom);
+                  setCurrentPrimaryModel(newCustom);
                   if (newCustom.trim()) {
-                    setFallbackModels((prev) => prev.filter((item) => item !== newCustom.trim()));
+                    setCurrentFallbackModels((prev) => prev.filter((item) => item !== newCustom.trim()));
                   }
                   setAiSaved(false);
                   setTestResult(null);
                 }}
-                placeholder={t.customModelPlaceholder}
+                placeholder={
+                  provider === 'gemini'
+                    ? 'models/gemini-custom'
+                    : provider === 'openai'
+                    ? 'gpt-4o'
+                    : 'deepseek-chat'
+                }
               />
             </Field>
           )}
@@ -487,9 +709,9 @@ export function SettingsView({
             <span>{t.candidateModelsLabel}</span>
             <small>{t.candidateModelsDesc}</small>
             <div className="candidate-chips" role="group" aria-label={t.candidateModelsLabel}>
-              {PRESET_MODELS.map((m) => {
-                const isSelected = fallbackModels.includes(m);
-                const isPrimary = m === primaryModel.trim();
+              {currentPresetModels.map((m) => {
+                const isSelected = currentFallbackModels.includes(m);
+                const isPrimary = m === currentPrimaryModel.trim();
                 return (
                   <button
                     key={m}
@@ -502,10 +724,10 @@ export function SettingsView({
                       dirtyAi.current = true;
                       setAiSaved(false);
                       setTestResult(null);
-                      setFallbackModels((prev) =>
+                      setCurrentFallbackModels((prev) =>
                         prev.includes(m)
                           ? prev.filter((item) => item !== m)
-                          : [...prev, m].filter((item) => item !== primaryModel.trim())
+                          : [...prev, m].filter((item) => item !== currentPrimaryModel.trim())
                       );
                     }}
                   >
@@ -519,9 +741,9 @@ export function SettingsView({
             <div className="fallback-chain-preview">
               <span className="chain-label">{t.fallbackChainLabel}:</span>
               <span className="chain-path">
-                <strong>{primaryModel.replace('models/', '') || '(none)'}</strong>
-                {fallbackModels.length > 0 &&
-                  fallbackModels.map((m) => (
+                <strong>{currentPrimaryModel.replace('models/', '') || '(none)'}</strong>
+                {currentFallbackModels.length > 0 &&
+                  currentFallbackModels.map((m) => (
                     <span key={m} className="chain-step">
                       {' → '}{m.replace('models/', '')}
                     </span>
@@ -536,7 +758,7 @@ export function SettingsView({
               type="button"
               className="btn btn-secondary"
               onClick={handleTestConnection}
-              disabled={testingAi || !apiKey.trim()}
+              disabled={testingAi || !currentApiKey.trim()}
             >
               {testingAi ? t.testingAi : t.testAiConnection}
             </button>
@@ -550,10 +772,11 @@ export function SettingsView({
           {testResult && (
             <Feedback tone={testResult.ok ? 'success' : 'error'}>
               {testResult.ok
-                ? t.testAiSuccess.replace('{model}', testResult.model || primaryModel)
+                ? t.testAiSuccess.replace('{model}', testResult.model || currentPrimaryModel)
                 : `${t.testAiFailed}: ${testResult.message}`}
             </Feedback>
           )}
+        </fieldset>
         </form>
       </section>
 

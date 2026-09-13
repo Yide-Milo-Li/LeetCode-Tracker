@@ -7,6 +7,7 @@ All maintained documentation is English. The implemented desktop interface suppo
 - [Requirements](requirements.md)
 - [Desktop workflow guide](desktop-workflow.md)
 - [Architecture](architecture.md)
+- [AI provider configuration](llm-providers.md)
 - [Data format](data-format.md)
 - [Roadmap](roadmap.md)
 - [Implementation status](status.md)

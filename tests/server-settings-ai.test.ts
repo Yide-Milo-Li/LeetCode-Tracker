@@ -123,7 +123,7 @@ describe('Server Settings & Gemini AI Configuration (/api/v1/settings)', () => {
     const successBody = JSON.parse(successRes.payload);
     assert.equal(successBody.ok, true);
     assert.equal(successBody.model, 'models/gemini-3.8-flash');
-    assert.deepEqual(testedWith, { apiKey: 'valid-key', model: 'models/gemini-3.8-flash' });
+    assert.deepEqual(testedWith, { provider: 'gemini', apiKey: 'valid-key', model: 'models/gemini-3.8-flash' });
 
     // Failed test
     shouldSucceed = false;

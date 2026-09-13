@@ -82,7 +82,7 @@ export interface PlanItem {
 }
 export interface DailyPlan {
   id: string; date: string; timezone: string; version: number; strategyId: string | null; strategyVersion: number | null;
-  rules: Rules; items: PlanItem[]; source: 'gemini' | 'local'; model: string | null; encouragement: Bilingual;
+  rules: Rules; items: PlanItem[]; source: 'gemini' | 'openai' | 'deepseek' | 'local'; model: string | null; encouragement: Bilingual;
   notices: Bilingual[]; catalogRevision: number; practiceRevision: number; planningRevision: number;
   algorithmVersion: string; createdAt: number; updatedAt: number; action: string;
 }

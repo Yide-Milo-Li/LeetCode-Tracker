@@ -1,10 +1,16 @@
 # Implementation status
 
+## Phase 17 multi-provider AI — audited local implementation
+
+Gemini, OpenAI and DeepSeek settings, adapters, runtime reload, legacy routes and provider-labelled plans are implemented. The implementation audit reproduced and repaired configuration-reset, JSON-contract, timeout, provenance and desktop draft/masking defects. See [AI provider configuration](llm-providers.md) for the scope and deviations from the original plan.
+
+The offline suite passes **287 tests**: 200 domain/storage/API and 87 frontend tests, with zero failures or skips. Type checking and production build pass. Vite emits existing plugin deprecation warnings. Isolated Chrome also passed 24 provider/language/theme/desktop-width cases, 24 screenshots and four workflow groups with zero runtime errors, console messages or external requests. These results are synthetic/local; live provider credentials, model availability and production deployment were not tested.
+
 ## Phase 16 topic insights and optional adaptive review — local implementation
 
 Implemented the [evidence-based topic rules](topic-practice-insights.md), independent optional strategy switches, shared selection across generation/replacement/overrides, fixed-cache isolation and saved explanation snapshots. No schema migration is required. Existing working-tree changes were retained and revised.
 
-The current offline suite passes **267 tests**: 181 domain/storage/API tests and 86 frontend tests, with zero failures or skips. Type checking and frontend build pass. Phase 16 uses isolated synthetic Chrome verification and 4,046-problem synthetic benchmarks, not the private catalog or live Gemini. Pure analysis p95 was approximately 42/64 ms for 10k/50k records; the complete local API measured approximately 98/319 ms on the tested machine. These are local measurements, not production guarantees.
+At Phase 16 closure, the offline suite passed **267 tests**: 181 domain/storage/API tests and 86 frontend tests, with zero failures or skips. Type checking and frontend build pass. Phase 16 uses isolated synthetic Chrome verification and 4,046-problem synthetic benchmarks, not the private catalog or live Gemini. Pure analysis p95 was approximately 42/64 ms for 10k/50k records; the complete local API measured approximately 98/319 ms on the tested machine. These are local measurements, not production guarantees.
 
 The phase-specific browser harness verifies twelve desktop language/theme/size combinations, unsaved draft navigation, independent controls, strategy saving, replacements, explicit overrides, saved numeric explanations, request failure/retry and 200% CSS zoom. The older generic browser harness remains incompatible with the added Notes navigation: its historical three-item assertion encounters four items. Its attempted run is recorded as failed, not silently removed or reported as passing. Phase-specific evidence lives in ignored `.local/evidence/phase16/`.
 

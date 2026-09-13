@@ -302,9 +302,22 @@ export function getUserSettings(db: DatabaseSync): UserSettings {
   let language: 'en' | 'zh' = 'en';
   let theme: 'light' | 'dark' | 'system' = 'system';
   let timezone: string | null = null;
+  let llmProvider: 'gemini' | 'openai' | 'deepseek' = 'gemini';
+
   let geminiApiKey: string | null = null;
   let geminiModel: string | null = null;
   let geminiFallbackModels: string[] | null = null;
+
+  let openaiApiKey: string | null = null;
+  let openaiModel: string | null = null;
+  let openaiBaseUrl: string | null = null;
+  let openaiFallbackModels: string[] | null = null;
+
+  let deepseekApiKey: string | null = null;
+  let deepseekModel: string | null = null;
+  let deepseekBaseUrl: string | null = null;
+  let deepseekFallbackModels: string[] | null = null;
+
   let maxUpdatedAt = 0;
 
   for (const r of rows) {
@@ -317,6 +330,11 @@ export function getUserSettings(db: DatabaseSync): UserSettings {
     if (r.key === 'timezone') {
       timezone = r.value && r.value.trim().length > 0 ? r.value : null;
     }
+    if (r.key === 'llm_provider' && (r.value === 'gemini' || r.value === 'openai' || r.value === 'deepseek')) {
+      llmProvider = r.value;
+    }
+
+    // Gemini
     if (r.key === 'gemini_api_key') {
       geminiApiKey = r.value && r.value.trim().length > 0 ? r.value.trim() : null;
     }
@@ -333,23 +351,81 @@ export function getUserSettings(db: DatabaseSync): UserSettings {
         geminiFallbackModels = null;
       }
     }
+
+    // OpenAI
+    if (r.key === 'openai_api_key') {
+      openaiApiKey = r.value && r.value.trim().length > 0 ? r.value.trim() : null;
+    }
+    if (r.key === 'openai_model') {
+      openaiModel = r.value && r.value.trim().length > 0 ? r.value.trim() : null;
+    }
+    if (r.key === 'openai_base_url') {
+      openaiBaseUrl = r.value && r.value.trim().length > 0 ? r.value.trim() : null;
+    }
+    if (r.key === 'openai_fallback_models') {
+      try {
+        const parsed = JSON.parse(r.value);
+        if (Array.isArray(parsed)) {
+          openaiFallbackModels = parsed.map(String).filter(s => s.trim().length > 0);
+        }
+      } catch {
+        openaiFallbackModels = null;
+      }
+    }
+
+    // DeepSeek
+    if (r.key === 'deepseek_api_key') {
+      deepseekApiKey = r.value && r.value.trim().length > 0 ? r.value.trim() : null;
+    }
+    if (r.key === 'deepseek_model') {
+      deepseekModel = r.value && r.value.trim().length > 0 ? r.value.trim() : null;
+    }
+    if (r.key === 'deepseek_base_url') {
+      deepseekBaseUrl = r.value && r.value.trim().length > 0 ? r.value.trim() : null;
+    }
+    if (r.key === 'deepseek_fallback_models') {
+      try {
+        const parsed = JSON.parse(r.value);
+        if (Array.isArray(parsed)) {
+          deepseekFallbackModels = parsed.map(String).filter(s => s.trim().length > 0);
+        }
+      } catch {
+        deepseekFallbackModels = null;
+      }
+    }
+
     if (r.updated_at > maxUpdatedAt) {
       maxUpdatedAt = r.updated_at;
     }
   }
 
-  if (geminiFallbackModels && geminiFallbackModels.length > 0) {
-    geminiFallbackModels = [...new Set(geminiFallbackModels)].filter(m => !geminiModel || m !== geminiModel);
-    if (geminiFallbackModels.length === 0) geminiFallbackModels = null;
-  }
+  /** Preserve an explicit empty chain while removing primary-model duplicates. */
+  const sanitizeFb = (list: string[] | null, primary: string | null): string[] | null => {
+    if (!list) return null;
+    const res = [...new Set(list)].filter(m => !primary || m !== primary);
+    return res;
+  };
+
+  geminiFallbackModels = sanitizeFb(geminiFallbackModels, geminiModel);
+  openaiFallbackModels = sanitizeFb(openaiFallbackModels, openaiModel);
+  deepseekFallbackModels = sanitizeFb(deepseekFallbackModels, deepseekModel);
 
   return {
     language,
     theme,
     timezone,
+    llmProvider,
     geminiApiKey,
     geminiModel,
     geminiFallbackModels,
+    openaiApiKey,
+    openaiModel,
+    openaiBaseUrl,
+    openaiFallbackModels,
+    deepseekApiKey,
+    deepseekModel,
+    deepseekBaseUrl,
+    deepseekFallbackModels,
     updatedAt: maxUpdatedAt,
   };
 }
@@ -381,38 +457,60 @@ export function updateUserSettingsTransaction(
         "UPDATE catalog_meta SET value=CAST(value AS INTEGER)+1 WHERE key='planning_revision'"
       ).run();
     }
-    if (input.geminiApiKey !== undefined) {
-      updateStmt.run('gemini_api_key', input.geminiApiKey ? input.geminiApiKey.trim() : '', now);
+    if (input.llmProvider !== undefined) {
+      updateStmt.run('llm_provider', input.llmProvider, now);
     }
 
-    const effectiveModel = input.geminiModel !== undefined
-      ? (input.geminiModel ? input.geminiModel.trim() : null)
-      : (db.prepare("SELECT value FROM settings WHERE key = 'gemini_model'").get() as { value: string } | undefined)?.value?.trim() || null;
+    /** Persist only supplied provider fields within the enclosing settings transaction. */
+    const persistProviderConfig = (
+      prefix: 'gemini' | 'openai' | 'deepseek',
+      keyInput?: string | null,
+      modelInput?: string | null,
+      baseUrlInput?: string | null,
+      fallbacksInput?: string[] | null
+    ) => {
+      if (keyInput !== undefined) {
+        updateStmt.run(`${prefix}_api_key`, keyInput ? keyInput.trim() : '', now);
+      }
+      if (baseUrlInput !== undefined) {
+        updateStmt.run(`${prefix}_base_url`, baseUrlInput ? baseUrlInput.trim() : '', now);
+      }
 
-    if (input.geminiModel !== undefined) {
-      updateStmt.run('gemini_model', input.geminiModel ? input.geminiModel.trim() : '', now);
-    }
-    if (input.geminiFallbackModels !== undefined) {
-      const sanitized = input.geminiFallbackModels
-        ? [...new Set(input.geminiFallbackModels.map(s => s.trim()).filter(Boolean))]
-            .filter(m => !effectiveModel || m !== effectiveModel)
-        : null;
-      const serialized = sanitized && sanitized.length > 0 ? JSON.stringify(sanitized) : '';
-      updateStmt.run('gemini_fallback_models', serialized, now);
-    } else if (effectiveModel) {
-      const existingFbRow = db.prepare("SELECT value FROM settings WHERE key = 'gemini_fallback_models'").get() as { value: string } | undefined;
-      if (existingFbRow?.value) {
-        try {
-          const parsed = JSON.parse(existingFbRow.value);
-          if (Array.isArray(parsed) && parsed.includes(effectiveModel)) {
-            const pruned = parsed.filter(m => m !== effectiveModel);
-            updateStmt.run('gemini_fallback_models', pruned.length > 0 ? JSON.stringify(pruned) : '', now);
+      const effectiveModel = modelInput !== undefined
+        ? (modelInput ? modelInput.trim() : null)
+        : (db.prepare(`SELECT value FROM settings WHERE key = '${prefix}_model'`).get() as { value: string } | undefined)?.value?.trim() || null;
+
+      if (modelInput !== undefined) {
+        updateStmt.run(`${prefix}_model`, modelInput ? modelInput.trim() : '', now);
+      }
+
+      if (fallbacksInput !== undefined) {
+        const sanitized = fallbacksInput
+          ? [...new Set(fallbacksInput.map(s => s.trim()).filter(Boolean))]
+              .filter(m => !effectiveModel || m !== effectiveModel)
+          : null;
+        const serialized = JSON.stringify(sanitized ?? []);
+        updateStmt.run(`${prefix}_fallback_models`, serialized, now);
+      } else if (effectiveModel) {
+        const existingFbRow = db.prepare(`SELECT value FROM settings WHERE key = '${prefix}_fallback_models'`).get() as { value: string } | undefined;
+        if (existingFbRow?.value) {
+          try {
+            const parsed = JSON.parse(existingFbRow.value);
+            if (Array.isArray(parsed) && parsed.includes(effectiveModel)) {
+              const pruned = parsed.filter(m => m !== effectiveModel);
+              updateStmt.run(`${prefix}_fallback_models`, pruned.length > 0 ? JSON.stringify(pruned) : '', now);
+            }
+          } catch {
+            // ignore
           }
-        } catch {
-          // ignore
         }
       }
-    }
+    };
+
+    persistProviderConfig('gemini', input.geminiApiKey, input.geminiModel, undefined, input.geminiFallbackModels);
+    persistProviderConfig('openai', input.openaiApiKey, input.openaiModel, input.openaiBaseUrl, input.openaiFallbackModels);
+    persistProviderConfig('deepseek', input.deepseekApiKey, input.deepseekModel, input.deepseekBaseUrl, input.deepseekFallbackModels);
+
     db.exec('COMMIT;');
   } catch (err) {
     db.exec('ROLLBACK;');
