@@ -11,8 +11,11 @@ import { CatalogStore } from '../packages/database/src/store.ts';
 
 describe('Private Dataset Verification (Local Only)', async () => {
   it('validates full import of backup-4046.jsonl into empty SQLite and verifies metadata preservation', async (t) => {
-    const backupPath = process.env.PRIVATE_BACKUP_PATH ? path.resolve(process.env.PRIVATE_BACKUP_PATH) : null;
-    assert.ok(backupPath, 'Set PRIVATE_BACKUP_PATH to the local 4,046-record JSONL fixture');
+    const defaultPath = path.resolve(process.cwd(), '.local/backup-4046.jsonl');
+    const backupPath = process.env.PRIVATE_BACKUP_PATH
+      ? path.resolve(process.env.PRIVATE_BACKUP_PATH)
+      : (fs.existsSync(defaultPath) ? defaultPath : null);
+    assert.ok(backupPath, 'Set PRIVATE_BACKUP_PATH or place local backup-4046.jsonl in .local/');
     assert.ok(fs.existsSync(backupPath), 'PRIVATE_BACKUP_PATH must name an existing file');
 
     const content = fs.readFileSync(backupPath, 'utf-8');
