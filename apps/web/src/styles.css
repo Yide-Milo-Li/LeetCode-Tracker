@@ -2846,3 +2846,27 @@ input.form-input[aria-invalid="true"] { border-color: var(--danger); outline-col
 .chain-step {
   color: var(--text-main);
 }
+
+/* Phase 16: Weak Topic Sprint & Adaptive Spaced Repetition */
+.is-focus-session {
+  border-color: var(--warning) !important;
+  background: color-mix(in srgb, var(--warning-bg) 35%, var(--surface)) !important;
+}
+.focus-flame-icon {
+  display: inline-block;
+  font-size: 14px;
+}
+.focus-session-box {
+  transition: border-color var(--fast), background-color var(--fast);
+}
+.focus-session-box:hover {
+  border-color: var(--warning);
+}
+
+/* Evidence lists adapt to desktop windows and zoom without fixed column widths. */
+.topic-insights { margin-top: 1.5rem; }
+.topic-insight-list { display:grid; gap:1rem; }
+.topic-insight-row { border-top:1px solid var(--border-color); padding-top:1rem; overflow-wrap:anywhere; }
+.topic-insight-metrics { display:flex; flex-wrap:wrap; gap:0.75rem 1.5rem; margin:0.75rem 0; }
+.topic-insight-metrics dt { color:var(--text-muted); font-size:0.8rem; }
+.topic-insight-metrics dd { margin:0.25rem 0; font-weight:600; }

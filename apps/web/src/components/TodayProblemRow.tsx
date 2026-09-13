@@ -99,6 +99,14 @@ export function TodayProblemRow({
               <span style={{ fontSize: '0.6875rem', opacity: 0.8 }}>({zh ? '查看笔记' : 'Notes'})</span>
             </button>
           ) : null}
+          {!!item.explanation?.focusTagSlugs.length && <InfoPopover
+            label={t.focusSessionBadge}
+            content={<p>{t.focusWeakTagsDesc} {item.explanation.focusTagSlugs.map(slug=>item.problem.topicTags.find(t=>t.slug===slug)?.name??slug).join(', ')}</p>} />}
+          {item.explanation?.review && <InfoPopover
+            label={t.adaptiveReviewBadge}
+            content={<p>{zh
+              ? '记录用时 '+item.explanation.review.durationMinutes+' 分钟，达到 '+item.explanation.review.thresholdMinutes+' 分钟阈值；间隔从 '+item.explanation.review.baseIntervalDays+' 天缩短为 '+item.explanation.review.intervalDays+' 天。'
+              : 'Recorded '+item.explanation.review.durationMinutes+' minutes, meeting the '+item.explanation.review.thresholdMinutes+' minute threshold; interval shortened from '+item.explanation.review.baseIntervalDays+' to '+item.explanation.review.intervalDays+' days.'}</p>} />}
           {item.problem.isPaidOnly && <span className="tag-chip">{t.statPremium}</span>}
           {item.problem.topicTags.slice(0, 2).map((tag) => (
             <span className="tag-chip" key={tag.slug}>

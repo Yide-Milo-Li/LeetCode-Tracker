@@ -31,7 +31,14 @@ export const StrategyCard: React.FC<StrategyCardProps> = ({
     <div className="strategy-card">
       <div className="strategy-header">
         <div>
-          <h4 className="strategy-name">{s.name}</h4>
+          <div className="u-display-flex u-align-items-center u-gap-0-5rem">
+            <h4 className="strategy-name">{s.name}</h4>
+            {s.rules.focusWeakTags && (
+              <span className="badge badge-warning u-font-size-12px" title={t.focusWeakTagsDesc}>
+                🔥 {t.focusSessionBadge}
+              </span>
+            )}
+          </div>
           <span className="badge badge-secondary u-font-size-13px u-margin-top-0-25rem">
             v{s.version}
           </span>

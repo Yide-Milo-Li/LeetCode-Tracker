@@ -7,7 +7,7 @@
 import { quotas } from '../../../packages/domain/src/index.ts';
 import { GoogleGenAI } from '@google/genai';
 import type { ProgressCandidateInput } from '../../../packages/contracts/src/practice.ts';
-import type { Bilingual, Rules, RulePatch } from '../../../packages/contracts/src/recommendations.ts';
+import type { Bilingual, Rules, RulePatch, Candidate } from '../../../packages/contracts/src/recommendations.ts';
 import type { CatalogProblem } from '../../../packages/contracts/src/sync.ts';
 import {
   progressFormatResponseSchema,
@@ -528,13 +528,14 @@ Do not invent or hallucinate problems not in the input. If lines cannot be parse
       return fallbackPlanContent(problems, params.rules);
     }
 
-    const systemInstruction = `You are an encouraging AI coding coach. For each given LeetCode problem, generate an inspiring bilingual recommendation reason (in English and Chinese) explaining why this problem is valuable to solve today based on its topic and difficulty. Also generate an uplifting daily encouragement message in both English and Chinese. Keep each reason concise (1-2 sentences). Do not invent or hallucinate problem IDs.`;
+    const systemInstruction = `You are an encouraging AI coding coach. For each given LeetCode problem, generate an inspiring bilingual recommendation reason (in English and Chinese) explaining why this problem is valuable to solve today based on its topic and difficulty. Also generate an uplifting daily encouragement message in both English and Chinese. Keep each reason concise (1-2 sentences). Do not invent problem IDs, ability assessments, frequency claims, or duration adjustments. Topic focus tags are local practice signals, not proof of poor ability.`;
 
     const problemSummaries = params.problems.map(p => ({
       questionId: p.questionId,
       title: p.title,
       difficulty: p.difficulty,
       tags: p.topicTags.map(t => t.name),
+      focusTags: (p as Partial<Candidate>).explanation?.focusTagSlugs ?? [],
     }));
 
     const prompt = `Date: ${params.date}\nUser study preference: ${params.rules.preference || 'None'}\n\nSelected problems:\n${JSON.stringify(problemSummaries, null, 2)}`;
@@ -811,6 +812,7 @@ Return ONLY valid JSON conforming to the schema.`;
       title: c.title,
       difficulty: c.difficulty,
       tags: c.topicTags.map(t => t.name),
+      focusTags: (c as Partial<Candidate>).explanation?.focusTagSlugs ?? [],
     }));
 
     const systemInstruction = `You are a LeetCode training assistant.

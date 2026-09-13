@@ -28,6 +28,10 @@ const { StrategiesView } = await import('../apps/web/src/components/StrategiesVi
 const { PromptOverrideModal } = await import('../apps/web/src/components/PromptOverrideModal.tsx');
 const { translations } = await import('../apps/web/src/i18n.ts');
 
+afterEach(() => {
+  cleanup();
+});
+
 it('background refresh preserves unsaved prompt and does not overlap requests', async () => {
   let tick!: () => void;
   mock.method(globalThis, 'setInterval', (callback: () => void) => {
@@ -329,6 +333,13 @@ it('renders weekly schedule and saves difficulty counts with immediate validatio
       { name: 'Array', slug: 'array', problemCount: 200 },
     ],
   }));
+  mock.method(api, 'getMasteryReport', async () => ({
+    overallScore: 75,
+    weakTags: ['graph'],
+    developingTags: [],
+    masteredTags: ['array'],
+    tags: [],
+  }));
 
   const createMock = mock.method(api, 'createStrategy', async (input: any) => ({
     id: 's2',
@@ -492,6 +503,13 @@ async function openCountEditor(existing?: Strategy) {
   mock.method(api, 'getStrategies', async () => existing ? [existing] : []);
   mock.method(api, 'getWeeklySchedule', async () => []);
   mock.method(api, 'getAllTags', async () => ({ tags: [] }));
+  mock.method(api, 'getMasteryReport', async () => ({
+    overallScore: 100,
+    weakTags: [],
+    developingTags: [],
+    masteredTags: [],
+    tags: [],
+  }));
   const create = mock.method(api, 'createStrategy', async (input: any) => ({ ...input, id: 'saved', version: 1 }));
   const update = mock.method(api, 'updateStrategy', async (_id: string, input: any) => ({ ...input, id: 'saved', version: 2 }));
   await act(async () => { render(<StrategiesView lang="en" />); });

@@ -12,13 +12,16 @@ export const ruleFieldsSchema = z.object({
   reviewEnabled: z.boolean(),
   reviewPercent: z.number().min(0).max(100).nullable(),
   preference: z.string().max(2000).default(''),
+  focusWeakTags: z.boolean().optional(),
+  adaptiveReviewEnabled: z.boolean().optional(),
 }).strict();
 export const rulesSchema = ruleFieldsSchema.superRefine((value, ctx) => {
+  if(value.adaptiveReviewEnabled && !value.reviewEnabled) ctx.addIssue({code:'custom',path:['adaptiveReviewEnabled'],message:'Adaptive review requires review to be enabled'});
   if (Math.abs(difficulties.reduce((sum, d) => sum + value.difficulty[d], 0) - 100) > 1e-8) ctx.addIssue({ code: 'custom', path: ['difficulty'], message: 'Difficulty percentages must total 100' });
   if (value.reviewEnabled && (value.reviewPercent === null || value.reviewPercent <= 0)) ctx.addIssue({ code: 'custom', path: ['reviewPercent'], message: 'An explicit positive review share is required' });
 });
 export type Rules = z.infer<typeof rulesSchema>;
-export const rulePatchSchema = ruleFieldsSchema.partial();
+export const rulePatchSchema = ruleFieldsSchema.partial().extend({ preference: z.string().max(2000).optional() });
 export type RulePatch = z.infer<typeof rulePatchSchema>;
 export const strategyInputSchema = z.object({
   name: z.string().trim().min(1).max(100), rules: rulesSchema,
@@ -27,10 +30,56 @@ export const strategyInputSchema = z.object({
 export type StrategyInput = z.infer<typeof strategyInputSchema>;
 export interface Strategy extends StrategyInput { id: string; version: number; deleted: boolean }
 export interface Bilingual { en: string; zh: string }
-export interface Evidence { id: string; questionId: string; at: string; precision: 'date' | 'datetime'; zone: string | null; recordedAt: number }
-export interface ReviewState { questionId: string; solved: boolean; stage: number; dueDate: string | null; unknownDate: boolean }
-export interface Candidate extends CatalogProblem { kind: 'new' | 'review'; dueDate: string | null }
-export interface PlanItem { id: string; problem: CatalogProblem; kind: 'new' | 'review'; addedAt: number; reason: Bilingual; evidenceIds: string[]; completed: boolean }
+export interface Evidence {
+  id: string;
+  questionId: string;
+  at: string;
+  precision: 'date' | 'datetime';
+  zone: string | null;
+  recordedAt: number;
+  durationMinutes?: number | null;
+}
+/** Minimal immutable facts used for local bilingual explanations. */
+export interface ReviewAdjustment {
+  policyVersion: 'review-duration-v1'; durationMinutes: number; thresholdMinutes: number; baseIntervalDays: number; intervalDays: number;
+}
+export interface SelectionExplanation {
+  analysisVersion: 'mastery-v2'; asOfDate: string; focusTagSlugs: string[]; review: ReviewAdjustment | null;
+}
+export interface ReviewState {
+  questionId: string;
+  solved: boolean;
+  stage: number;
+  dueDate: string | null;
+  unknownDate: boolean;
+  adjustment?: ReviewAdjustment | null;
+  intervalDays?: number;
+  isAdaptive?: boolean;
+  adaptiveReason?: string | null;
+}
+export interface Candidate extends CatalogProblem {
+  kind: 'new' | 'review';
+  dueDate: string | null;
+  isFocusTopic?: boolean;
+  matchedWeakTags?: string[];
+  explanation?: SelectionExplanation;
+  isAdaptiveReview?: boolean;
+  adaptiveReason?: string | null;
+}
+export interface PlanItem {
+  id: string;
+  problem: CatalogProblem;
+  kind: 'new' | 'review';
+  addedAt: number;
+  reason: Bilingual;
+  evidenceIds: string[];
+  completed: boolean;
+  isFocusTopic?: boolean;
+  matchedWeakTags?: string[];
+  explanation?: SelectionExplanation;
+  isAdaptiveReview?: boolean;
+  adaptiveReason?: string | null;
+}
 export interface DailyPlan {
   id: string; date: string; timezone: string; version: number; strategyId: string | null; strategyVersion: number | null;
   rules: Rules; items: PlanItem[]; source: 'gemini' | 'local'; model: string | null; encouragement: Bilingual;
@@ -41,7 +90,7 @@ export interface RevisionStamp { catalog: number; practice: number; planning: nu
 export interface OverridePreview {
   id: string; date: string; expiresAt: number; base: Rules | null; rules: RulePatch; changed: string[];
   issues: string[]; unresolved: string[]; candidateCount: number; counts: Record<Difficulty, number>;
-  revision: RevisionStamp; planVersion: number | null;
+  revision: RevisionStamp; planVersion: number | null; analysisDate?: string;
 }
 export interface EnsureResult { status: 'ready' | 'rest' | 'setup'; plan: DailyPlan | null }
 export const operationSchema = z.object({ operationId: z.string().uuid() });

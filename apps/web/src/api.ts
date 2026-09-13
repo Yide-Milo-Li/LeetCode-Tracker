@@ -31,6 +31,7 @@ import type {
   SnapshotBundle,
   Strategy,
   StrategyInput,
+  TagMasteryReport,
   TopicTag,
   UpdatePracticeRecordInput,
   UpdateProgressSnapshotInput,
@@ -398,6 +399,10 @@ const dashboardApi = {
     if (query.pendingDate && query.pendingDate !== 'all') params.set('pendingDate', query.pendingDate);
     const qs = params.toString();
     return request<DashboardActivityListResponse>(`/dashboard/activity${qs ? `?${qs}` : ''}`);
+  },
+
+  getMasteryReport(): Promise<TagMasteryReport> {
+    return request<TagMasteryReport>('/mastery');
   },
 };
 

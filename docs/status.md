@@ -1,5 +1,15 @@
 # Implementation status
 
+## Phase 16 topic insights and optional adaptive review — local implementation
+
+Implemented the [evidence-based topic rules](topic-practice-insights.md), independent optional strategy switches, shared selection across generation/replacement/overrides, fixed-cache isolation and saved explanation snapshots. No schema migration is required. Existing working-tree changes were retained and revised.
+
+The current offline suite passes **267 tests**: 181 domain/storage/API tests and 86 frontend tests, with zero failures or skips. Type checking and frontend build pass. Phase 16 uses isolated synthetic Chrome verification and 4,046-problem synthetic benchmarks, not the private catalog or live Gemini. Pure analysis p95 was approximately 42/64 ms for 10k/50k records; the complete local API measured approximately 98/319 ms on the tested machine. These are local measurements, not production guarantees.
+
+The phase-specific browser harness verifies twelve desktop language/theme/size combinations, unsaved draft navigation, independent controls, strategy saving, replacements, explicit overrides, saved numeric explanations, request failure/retry and 200% CSS zoom. The older generic browser harness remains incompatible with the added Notes navigation: its historical three-item assertion encounters four items. Its attempted run is recorded as failed, not silently removed or reported as passing. Phase-specific evidence lives in ignored `.local/evidence/phase16/`.
+
+Private-data tests, live-provider checks, multi-browser/mobile testing and publication were not performed. The sections below retain earlier phase evidence and do not replace current counts.
+
 ## Phase 6 desktop refactor — local implementation
 
 The desktop refactor is implemented. The current verification uses synthetic catalog/practice data, isolated SQLite stores and injected Gemini responses. It is not a live-provider or release claim.
@@ -15,7 +25,7 @@ The desktop refactor is implemented. The current verification uses synthetic cat
 | Statistics | Existing metrics, yearly heatmap, 30-day trend, difficulty/tags, historical records and coverage; seven-day view reuses the same projection | Domain tests, including 23/25-hour DST days |
 | Publication | No Phase 6 commit, push or deployment | The separately authorized baseline commit is 86592fd |
 
-## Current checks
+## Historical Phase 6–9 checks
 
 The integration suite passes 191 tests: 144 storage/domain/API and 47 React DOM tests (including 6 automated keyboard workflow and shortcut guard tests). Type checking, frontend build, documentation link checks and `git diff --check` are required alongside the suite. The original pre-refactor baseline had 156 passing tests (134 + 22); Phase 6 reached 182; Phase 9 desktop polish raises the suite to 191 tests with zero failures.
 

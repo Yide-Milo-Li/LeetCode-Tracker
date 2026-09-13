@@ -12,6 +12,7 @@ import { registerDashboardRoutes } from './dashboard.ts';
 import { registerNotesRoutes } from './notes.ts';
 import { registerExportRoutes } from './export.ts';
 import { registerBundleRoutes } from './bundle.ts';
+import { registerMasteryRoutes } from './mastery.ts';
 
 export * from './types.ts';
 
@@ -31,4 +32,5 @@ export function registerAllRoutes(app: FastifyInstance, context: RouteContext): 
   registerNotesRoutes(app, context);
   registerExportRoutes(app, context);
   registerBundleRoutes(app, context);
+  registerMasteryRoutes(app, context);
 }

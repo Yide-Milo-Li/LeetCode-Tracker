@@ -3,7 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import type { CatalogStore } from './store.ts';
 import { strategyInputSchema, PlanningError, type Strategy, type StrategyInput, type DailyPlan, type Evidence, type RevisionStamp, type ReviewState, type Rules } from '../../contracts/src/recommendations.ts';
-import { evidenceAfter, reviewState } from '../../domain/src/index.ts';
+import { evidenceAfter, projectReviewStates, calculateTagMastery } from '../../domain/src/index.ts';
 import type { CatalogProblem } from '../../contracts/src/sync.ts';
 
 /** Persist strategy revisions and plan snapshots while computing completion from valid sources. */
@@ -112,7 +112,7 @@ export class PlanningStore {
 
   /** Active manual rows and explicit snapshot successes form the only event evidence. */
   evidence(): Evidence[] {
-    const manual = this.db.prepare("SELECT 'manual:'||id AS id, question_id AS questionId, practiced_at AS at, time_precision AS precision, source_timezone AS zone, created_at AS recordedAt FROM practice_records WHERE status='active' AND completed=1").all();
+    const manual = this.db.prepare("SELECT 'manual:'||id AS id, question_id AS questionId, practiced_at AS at, time_precision AS precision, source_timezone AS zone, created_at AS recordedAt, duration_minutes AS durationMinutes FROM practice_records WHERE status='active' AND completed=1").all();
     const snapshots = this.db.prepare("SELECT 'snapshot:'||s.question_id||':'||s.version AS id, s.question_id AS questionId, event_time AS at, precision, s.source_timezone AS zone, recorded_at AS recordedAt FROM snapshot_successes s JOIN progress_snapshots p ON p.question_id=s.question_id WHERE p.status='active' AND p.has_accepted=1").all();
     return [...manual, ...snapshots] as unknown as Evidence[];
   }
@@ -122,7 +122,31 @@ export class PlanningStore {
     const events = this.evidence(); const solved = new Set(events.map(e => e.questionId));
     for (const r of this.db.prepare("SELECT question_id FROM progress_snapshots WHERE status='active' AND has_accepted=1").all() as { question_id: string }[]) solved.add(r.question_id);
     const baseline = Number((this.db.prepare("SELECT value FROM catalog_meta WHERE key='review_baseline'").get() as { value: string }).value);
-    return [...solved].map(id => reviewState(id, true, events.filter(e => e.questionId === id), zone, baseline, now));
+    return projectReviewStates([],events,solved,zone,baseline,now);
+  }
+
+  /** Read one consistent local snapshot and derive fixed projections without mutating caches. */
+  analysisContext(zone:string,now:number) {
+    const raw=this.catalog.getDashboardRawData();
+    const events:Evidence[]=[
+      ...raw.manualRecords.filter(r=>r.status==='active' && r.completed).map(r=>({
+        id:'manual:'+r.id,questionId:r.questionId,at:r.practicedAt,precision:r.timePrecision,
+        zone:r.sourceTimezone,recordedAt:r.createdAt,durationMinutes:r.durationMinutes,
+      })),
+      ...raw.snapshotSuccesses.map(s=>({id:'snapshot:'+s.questionId+':'+s.version,questionId:s.questionId,
+        at:s.eventTime,precision:s.precision,zone:s.sourceTimezone,recordedAt:s.recordedAt})),
+    ];
+    const solved=new Set(events.map(e=>e.questionId));
+    for(const s of raw.snapshots)if(s.status==='active'&&s.hasAccepted)solved.add(s.questionId);
+    const baseline=Number((this.db.prepare("SELECT value FROM catalog_meta WHERE key='review_baseline'").get() as {value:string}).value);
+    const fixed=projectReviewStates(raw.problems,events,solved,zone,baseline,now);
+    return {raw,events,solved,baseline,fixed};
+  }
+
+  /** Expose only aggregate insight facts; GET never updates review caches or revisions. */
+  masteryReport(zone:string,now:number) {
+    const {raw,fixed}=this.analysisContext(zone,now);
+    return calculateTagMastery({...raw,now,userZone:zone,reviewStates:fixed});
   }
 
   /** Reconcile completion without mutating a historical version's event timestamps. */

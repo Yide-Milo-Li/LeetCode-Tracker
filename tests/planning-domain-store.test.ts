@@ -119,7 +119,7 @@ describe('Domain Scheduling Algorithms', () => {
 
     // Captured from the pre-refactor algorithm: iterating UTF-16 code units would
     // move this valid custom ID to last place and change the selected problems.
-    assert.equal(ALGORITHM_VERSION, 'phase4-v2');
+    assert.equal(ALGORITHM_VERSION, 'phase16-v2');
     assert.deepEqual(pool.map((problem) => problem.questionId), [
       'custom-😀', '1', '0', '2', '5', '4', '7', '6', '9', '8',
     ]);

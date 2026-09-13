@@ -20,15 +20,17 @@
     "start": "node apps/server/src/server.ts",
     "desktop": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start-desktop.ps1",
     "check": "tsc --noEmit",
-    "test": "node --test tests/practice-reliability.test.ts tests/phase4-closure-verification.test.ts tests/phase5-closure-verification.test.ts tests/planning-remediation.test.ts tests/time.test.ts tests/catalog-store.test.ts tests/notes-store.test.ts tests/bundle-backup.test.ts tests/server-api.test.ts tests/server-settings-ai.test.ts tests/review-regressions.test.ts tests/practice-store.test.ts tests/server-practice-api.test.ts tests/planning-domain-store.test.ts tests/server-planning-api.test.ts tests/dashboard-domain-store.test.ts tests/server-dashboard-api.test.ts && npm run test:web",
+    "test": "node --test tests/tag-mastery.test.ts tests/adaptive-review.test.ts tests/focus-session-planning.test.ts tests/practice-reliability.test.ts tests/phase4-closure-verification.test.ts tests/phase5-closure-verification.test.ts tests/planning-remediation.test.ts tests/time.test.ts tests/catalog-store.test.ts tests/notes-store.test.ts tests/bundle-backup.test.ts tests/server-api.test.ts tests/server-settings-ai.test.ts tests/review-regressions.test.ts tests/practice-store.test.ts tests/server-practice-api.test.ts tests/planning-domain-store.test.ts tests/server-planning-api.test.ts tests/dashboard-domain-store.test.ts tests/server-dashboard-api.test.ts && npm run test:web",
     "test:private": "node --test tests/private-backup.test.ts",
     "test:live": "node --test tests/live-gemini-verification.test.ts",
+    "benchmark:phase16": "node --import tsx scripts/benchmark-phase16.ts",
+    "verify:phase16": "node --import tsx scripts/verify-phase16-browser.ts",
     "benchmark": "node --import tsx scripts/benchmark-real-data.ts",
     "verify:real": "node --import tsx scripts/verify-real-data-browser.ts",
     "verify:desktop": "node --import tsx scripts/verify-refactor-browser.ts",
     "restore": "node scripts/restore-backup.ts",
     "docs:check": "node scripts/check-docs.ts",
-    "test:web": "node --max-old-space-size=4096 --import tsx --test tests/web-refactor.test.tsx tests/web-components.test.tsx tests/web-planning-components.test.tsx tests/web-dashboard-components.test.tsx tests/web-shortcuts.test.tsx tests/encouragement.test.ts tests/web-desktop-ui.test.tsx tests/web-notes-workspace.test.tsx"
+    "test:web": "node --max-old-space-size=4096 --import tsx --test tests/web-focus-session-mastery.test.tsx tests/web-refactor.test.tsx tests/web-components.test.tsx tests/web-planning-components.test.tsx tests/web-dashboard-components.test.tsx tests/web-shortcuts.test.tsx tests/encouragement.test.ts tests/web-desktop-ui.test.tsx tests/web-notes-workspace.test.tsx"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.2",

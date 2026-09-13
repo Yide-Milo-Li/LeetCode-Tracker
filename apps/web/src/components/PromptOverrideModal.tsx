@@ -104,6 +104,8 @@ export const PromptOverrideModal: React.FC<PromptOverrideModalProps> = ({
           reviewEnabled: '启用复习',
           reviewPercent: '复习占比',
           preference: '软偏好',
+          focusWeakTags: '薄弱专项突击',
+          adaptiveReviewEnabled: '自适应复习',
         }
       : {
           dailyCount: 'Daily count',
@@ -113,6 +115,8 @@ export const PromptOverrideModal: React.FC<PromptOverrideModalProps> = ({
           reviewEnabled: 'Include review',
           reviewPercent: 'Review share',
           preference: 'Soft preference',
+          focusWeakTags: 'Focus weak topics',
+          adaptiveReviewEnabled: 'Adaptive review',
         };
 
   return (
@@ -235,6 +239,7 @@ export const PromptOverrideModal: React.FC<PromptOverrideModalProps> = ({
                     edit({
                       reviewEnabled: e.target.value === '' ? undefined : e.target.value === 'true',
                       reviewPercent: null,
+                      ...(e.target.value==='false'?{adaptiveReviewEnabled:false}:{}),
                     })
                   }
                 >
@@ -264,6 +269,23 @@ export const PromptOverrideModal: React.FC<PromptOverrideModalProps> = ({
                   onChange={(e) => edit({ preference: e.target.value })}
                 />
               </label>
+              <label>
+                {t.focusWeakTags}
+                <select value={draft.focusWeakTags===undefined?'':String(draft.focusWeakTags)}
+                  onChange={e=>edit({focusWeakTags:e.target.value===''?undefined:e.target.value==='true'})}>
+                  <option value="">{lang==='zh'?'继承现有规则':'Inherit current rule'}</option>
+                  <option value="true">{lang==='zh'?'开启':'On'}</option><option value="false">{lang==='zh'?'关闭':'Off'}</option>
+                </select>
+              </label>
+              <label>
+                {t.adaptiveReviewEnabled}
+                <select value={draft.adaptiveReviewEnabled===undefined?'':String(draft.adaptiveReviewEnabled)}
+                  onChange={e=>edit({adaptiveReviewEnabled:e.target.value===''?undefined:e.target.value==='true'})}>
+                  <option value="">{lang==='zh'?'继承现有规则':'Inherit current rule'}</option>
+                  <option value="true">{lang==='zh'?'开启':'On'}</option><option value="false">{lang==='zh'?'关闭':'Off'}</option>
+                </select>
+              </label>
+              <p className="text-muted">{t.adaptiveReviewDescription}</p>
               <button className="btn btn-secondary" onClick={() => handleParse(true)}>
                 {lang === 'zh' ? '预览校对后的规则' : 'Preview edited rules'}
               </button>

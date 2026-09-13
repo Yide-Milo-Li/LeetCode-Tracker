@@ -5,7 +5,7 @@
  */
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Plus, CheckCircle2, AlertCircle, Clock } from 'lucide-react';
-import { api, type Strategy, type StrategyInput, type TopicTag } from '../api.ts';
+import { api, type Strategy, type StrategyInput, type TopicTag, type TagMastery } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
 import { Dialog } from './ui.tsx';
 import { useWorkspace } from '../workspace.tsx';
@@ -20,16 +20,18 @@ import { StrategyCard } from './StrategyCard.tsx';
 
 interface StrategiesViewProps {
   lang: Language;
+  focusRequest?: number;
 }
 
 /** Edit explicit strategies and weekday ownership while preserving historical plans. */
-export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang }) => {
+export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusRequest }) => {
   const t = translations[lang];
   const workspace = useWorkspace();
 
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [schedule, setSchedule] = useState<{ weekday: number; strategy: Strategy | null }[]>([]);
   const [allTags, setAllTags] = useState<TopicTag[]>([]);
+  const [weakTags, setWeakTags] = useState<TagMastery[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,6 +42,11 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang }) => {
   const [dailyCount, setDailyCount] = useState<number | ''>('');
   const [difficultyDraft, setDifficultyDraft] = useState(emptyDifficultyDraft);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [focusWeakTags, setFocusWeakTags] = useState(false);
+  const [adaptiveReviewEnabled,setAdaptiveReviewEnabled]=useState(false);
+  const [masteryLoading,setMasteryLoading]=useState(true);
+  const [masteryError,setMasteryError]=useState(false);
+  const [masteryRetry,setMasteryRetry]=useState(0);
   const [premium, setPremium] = useState(false);
   const [reviewMode, setReviewMode] = useState<ReviewMode>(null);
   const [reviewCount, setReviewCount] = useState<CountInput>('');
@@ -79,6 +86,24 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang }) => {
     };
   }, [loadData, workspace.revision]);
 
+  // Optional analytics must never delay loading the strategy library.
+  useEffect(()=>{
+    let active=true;
+    setWeakTags([]);setMasteryLoading(true);setMasteryError(false);
+    api.getMasteryReport().then(report=>{
+      if(active)setWeakTags(report.tags.filter(t=>t.level==='needs_practice'));
+    }).catch(()=>{if(active)setMasteryError(true);}).finally(()=>{if(active)setMasteryLoading(false);});
+    return ()=>{active=false;};
+  },[workspace.revision,workspace.timezone,masteryRetry]);
+
+  const consumedFocusRequest=useRef(0);
+  useEffect(()=>{
+    if(focusRequest && focusRequest!==consumedFocusRequest.current){
+      consumedFocusRequest.current=focusRequest;
+      openCreateModal();setFocusWeakTags(true);
+    }
+  },[focusRequest]);
+
   /** Leave count, mix and review choice unset until the user selects them. */
   function openCreateModal() {
     setEditingStrategy(null);
@@ -86,6 +111,8 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang }) => {
     setDailyCount('');
     setDifficultyDraft(emptyDifficultyDraft());
     setSelectedTags([]);
+    setFocusWeakTags(false);
+    setAdaptiveReviewEnabled(false);
     setPremium(false);
     setReviewMode(null);
     setReviewCount('');
@@ -102,6 +129,8 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang }) => {
     setDailyCount(s.rules.dailyCount);
     setDifficultyDraft({ values: difficultyCounts(s.rules), automatic: null });
     setSelectedTags(s.rules.tags);
+    setFocusWeakTags(!!s.rules.focusWeakTags);
+    setAdaptiveReviewEnabled(!!s.rules.adaptiveReviewEnabled);
     setPremium(s.rules.premium);
     setReviewMode(reviewModeForRules(s.rules));
     setReviewCount(reviewCountForRules(s.rules));
@@ -160,6 +189,12 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang }) => {
           reviewEnabled: reviewMode !== 'none',
           reviewPercent: reviewPercentForCount(dailyCount as number, reviewMode, reviewCount, editingStrategy?.rules),
           preference: preference.trim(),
+          ...(adaptiveReviewEnabled ? {adaptiveReviewEnabled:true} : editingStrategy?.rules.adaptiveReviewEnabled!==undefined ? {adaptiveReviewEnabled:false}:{}),
+          ...(focusWeakTags
+            ? { focusWeakTags: true }
+            : editingStrategy?.rules.focusWeakTags !== undefined
+              ? { focusWeakTags: false }
+              : {}),
         },
         weekdays,
       };
@@ -392,7 +427,7 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang }) => {
                 <span className="form-label" id={`${validationId}-review-mode`}>{t.reviewMode} *</span>
                 <div role="radiogroup" aria-labelledby={`${validationId}-review-mode`} className="u-display-flex u-flex-direction-column u-gap-0-5rem u-margin-top-0-25rem">
                   {(['none', 'partial', 'all'] as const).map((mode, index) => <label key={mode} className="form-checkbox-label u-cursor-pointer">
-                    <input type="radio" name="reviewMode" checked={reviewMode === mode} onChange={() => setReviewMode(mode)} />
+                    <input type="radio" name="reviewMode" checked={reviewMode === mode} onChange={() => {setReviewMode(mode);if(mode==='none')setAdaptiveReviewEnabled(false);}} />
                     <span>{[t.disableReview, t.partialReview, t.allReview][index]}</span>
                   </label>)}
                 </div>
@@ -416,6 +451,26 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang }) => {
                   <span>{t.includePremium}</span>
                 </label>
               </div>
+            </div>
+
+            <div className="form-group focus-session-box">
+              <label className="form-checkbox-label">
+                <input type="checkbox" checked={focusWeakTags} onChange={e=>setFocusWeakTags(e.target.checked)} />
+                <span>{t.focusWeakTags}</span>
+              </label>
+              <p className="text-muted">{t.focusWeakTagsDesc}</p>
+              {masteryLoading?<p role="status">{t.insightLoading}</p>:masteryError
+                ?<p role="status">{t.insightLoadError} <button type="button" className="btn btn-secondary" onClick={()=>setMasteryRetry(v=>v+1)}>{t.retry}</button></p>
+                :weakTags.length?<div className="top-tags-wrap">{weakTags.slice(0,3).map(tag=><span className="tag-chip" key={tag.tagSlug}>{tag.tagName}</span>)}</div>
+                :<p className="text-muted">{t.noWeakTopics}</p>}
+            </div>
+            <div className="form-group">
+              <label className="form-checkbox-label">
+                <input type="checkbox" checked={adaptiveReviewEnabled} disabled={reviewMode===null||reviewMode==='none'}
+                  onChange={e=>setAdaptiveReviewEnabled(e.target.checked)} />
+                <span>{t.adaptiveReviewEnabled}</span>
+              </label>
+              <p className="text-muted">{t.adaptiveReviewDescription}</p>
             </div>
 
             {/* Topic tags selection */}

@@ -31,3 +31,7 @@ The three primary destinations are Today (default), Problems and Progress. Setti
 Use warm neutral surfaces, sage emphasis, offline sans-serif fonts, readable 14–16 px body text and consistent CSS tokens. Provide localized labels, focus trapping/restoration and reduced-motion support. Loading must not fabricate progress or overwrite drafts. Details, filters and scroll survive ordinary workspace navigation.
 
 Documentation and code comments are English. Local verification is distinct from live-provider verification and publication. Hosted multi-user work is outside this refactor.
+
+## Topic focus and review options
+
+Provide evidence-based topic insights without mastery scores. Sample-poor topics remain unknown. Topic prioritization and duration-based adaptive review are independent opt-in settings, with omitted patch values inherited. Hard filters, quotas, earlier due dates and saved history remain authoritative. The Statistics entry opens only an unsaved strategy draft. See [topic practice insights](topic-practice-insights.md) for the initial rules and limitations.

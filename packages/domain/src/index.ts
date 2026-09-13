@@ -12,6 +12,8 @@ export {
   evidenceAfter,
   evidenceDate,
   reviewState,
+  projectReviewStates,
+  reorderCandidates,
   matches,
   candidates,
   select,
@@ -29,3 +31,10 @@ export {
   filterAndPaginateActivities,
   type DashboardStatsInput,
 } from './dashboard.ts';
+
+// Tag mastery analysis and weak topic identification
+export {
+  calculateTagMastery,
+  focusTopics,
+  type TagMasteryInput,
+} from './mastery.ts';

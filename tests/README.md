@@ -66,3 +66,7 @@ Missing configuration or a missing file fails this command rather than counting 
 ## Local verification notes
 
 A previous phase reported a clean public-file installation check; it was not repeated in Phase 6. No live Gemini or private-fixture command ran for this refactor. A previously reported `@fastify/static` advisory was not reassessed through a network audit; Vite emits dependency deprecation warnings and chunk size warnings (>500 kB); JSDOM emits Recharts container dimension warnings during test runs. None of these represent test failures.
+
+## Phase 16 offline evidence
+
+The default suite explicitly includes sample-gated topic analytics, fixed/adaptive scheduling, shared planning paths, read-only API reports, persistent explanation/replay and independent React controls. `npm run verify:phase16` runs isolated synthetic desktop Chrome; `npm run benchmark:phase16` measures 4,046 synthetic problems with 10k/50k records and five warmups plus thirty samples. The legacy `verify:desktop` script currently stops at a historical three-navigation-item assertion after the Notes destination was added; this does not constitute a passing legacy browser run. New Phase 16 coverage is reported separately. See [behavior and boundaries](../docs/topic-practice-insights.md).

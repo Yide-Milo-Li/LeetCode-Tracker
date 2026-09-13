@@ -16,9 +16,11 @@ import {
 import { isEventTime, localDate, addDays, isTimeZone } from '../../contracts/src/time.ts';
 import type { CatalogProblem } from '../../contracts/src/sync.ts';
 
-/** v2 makes 100% review a hard kind constraint without changing candidate ordering. */
-export const ALGORITHM_VERSION = 'phase4-v2';
-const intervals = [1, 3, 7, 14, 30];
+import { ANALYSIS_VERSION, DURATION_THRESHOLDS, REVIEW_VERSION, validDuration } from './review-policy.ts';
+
+/** Versioned opt-in topic priorities and duration-based review explanations. */
+export const ALGORITHM_VERSION = 'phase16-v2';
+export const intervals = [1, 3, 7, 14, 30] as const;
 
 /**
  * Largest remainder allocation with input-order tie breaking.
@@ -104,55 +106,70 @@ export function evidenceDate(evidence: Evidence, zone: string, now: number): str
   return evidence.at <= localDate(now, evidence.zone!) ? evidence.at : null;
 }
 
-/**
- * Replays post-baseline success days to advance spaced repetition intervals.
- */
-export function reviewState(
-  questionId: string,
-  solved: boolean,
-  evidence: Evidence[],
-  zone: string,
-  baseline: number,
-  now: number
-): ReviewState {
-  const datedEvents = evidence
-    .map((e) => ({ event: e, date: evidenceDate(e, zone, now) }))
-    .filter((item): item is { event: Evidence; date: string } => item.date !== null);
-
-  const historicalDates = datedEvents
-    .filter((item) => item.event.recordedAt <= baseline)
-    .map((item) => item.date)
-    .sort();
-
-  const postBaselineDates = [
-    ...new Set(
-      datedEvents
-        .filter((item) => item.event.recordedAt > baseline)
-        .map((item) => item.date)
-    ),
-  ].sort();
-
-  let stage = 0;
-  let due = historicalDates.length ? addDays(historicalDates[historicalDates.length - 1], 1) : null;
-
-  for (const date of postBaselineDates) {
-    if (due === null) {
-      due = addDays(date, 1);
-    } else if (date >= due) {
-      stage = Math.min(stage + 1, intervals.length - 1);
-      due = addDays(date, intervals[stage]);
+/** Resolve dates with request-local formatters without inventing a source zone. */
+export function createEvidenceDateResolver(zone:string,now:number):(e:Evidence)=>string|null {
+  const formatter=new Intl.DateTimeFormat('en-CA',{timeZone:zone,year:'numeric',month:'2-digit',day:'2-digit'});
+  const sourceToday=new Map<string,string|null>(),cache=new Map<string,string|null>();
+  return (e:Evidence)=>{
+    const key=JSON.stringify([e.at,e.precision,e.zone]);
+    if(cache.has(key))return cache.get(key)!;
+    let date:string|null=null;
+    if(isEventTime(e.at,e.precision)){
+      if(e.precision==='datetime'){
+        const epoch=Date.parse(e.at);
+        if(epoch<=now){const parts=formatter.formatToParts(epoch);date=['year','month','day'].map(type=>parts.find(p=>p.type===type)!.value).join('-');}
+      }else if(e.zone){
+        if(!sourceToday.has(e.zone))sourceToday.set(e.zone,isTimeZone(e.zone)?localDate(now,e.zone):null);
+        const today=sourceToday.get(e.zone);if(today && e.at<=today)date=e.at;
+      }
     }
-  }
-
-  return {
-    questionId,
-    solved,
-    stage,
-    dueDate: due,
-    unknownDate: solved && due === null,
+    cache.set(key,date);return date;
   };
 }
 
+/** Replay success days; opt-in adjustments hold stage and never inspect free text. */
+export function reviewState(
+  questionId:string,solved:boolean,evidence:Evidence[],zone:string,baseline:number,now:number,
+  options:{adaptive?:boolean;difficulty?:Difficulty;resolveDate?:(e:Evidence)=>string|null}={}
+):ReviewState {
+  const resolve=options.resolveDate??createEvidenceDateResolver(zone,now);
+  const historical:string[]=[],days=new Map<string,number|null>();
+  for(const event of evidence){
+    const date=resolve(event);if(!date)continue;
+    if(event.recordedAt<=baseline){historical.push(date);continue;}
+    const duration=event.id.startsWith('manual:') && validDuration(event.durationMinutes)?event.durationMinutes:null;
+    days.set(date,duration===null?days.get(date)??null:Math.max(days.get(date)??0,duration));
+  }
+  historical.sort();
+  let stage=0,due=historical.length?addDays(historical[historical.length-1],1):null,intervalDays=1;
+  let adjustment:ReviewState['adjustment']=null;
+  for(const date of [...days.keys()].sort()){
+    if(due===null){due=addDays(date,1);continue;}
+    if(date<due)continue;
+    const duration=days.get(date),threshold=options.difficulty?DURATION_THRESHOLDS[options.difficulty]:null;
+    if(options.adaptive && threshold!==null && validDuration(duration) && duration>=threshold){
+      const baseIntervalDays=intervals[stage];
+      intervalDays=Math.max(1,Math.floor(baseIntervalDays/2));
+      adjustment={policyVersion:REVIEW_VERSION,durationMinutes:duration,thresholdMinutes:threshold,baseIntervalDays,intervalDays};
+    }else{
+      stage=Math.min(stage+1,intervals.length-1);intervalDays=intervals[stage];adjustment=null;
+    }
+    due=addDays(date,intervalDays);
+  }
+  return {questionId,solved,stage,dueDate:due,unknownDate:solved && due===null,intervalDays,
+    isAdaptive:adjustment!==null,adaptiveReason:adjustment?'duration_threshold':null,adjustment};
+}
+
+/** Index once; fixed and adaptive projections never share mutable state. */
+export function projectReviewStates(
+  problems:CatalogProblem[],events:Evidence[],solved:Set<string>,zone:string,baseline:number,now:number,adaptive=false
+):ReviewState[] {
+  const grouped=new Map<string,Evidence[]>(),byId=new Map(problems.map(p=>[p.questionId,p]));
+  for(const event of events){const group=grouped.get(event.questionId);if(group)group.push(event);else grouped.set(event.questionId,[event]);}
+  const resolveDate=createEvidenceDateResolver(zone,now);
+  return [...solved].map(id=>reviewState(id,true,grouped.get(id)??[],zone,baseline,now,
+    {adaptive,difficulty:byId.get(id)?.difficulty,resolveDate}));
+}
 /**
  * Matches problem against verifiable hard constraints (premium and tags).
  */
@@ -194,51 +211,40 @@ function compareDueDates(dueDateA: string | null, dueDateB: string | null): numb
   return 0;
 }
 
-/**
- * Builds and sorts candidate pool adhering to review eligibility and hard constraints.
- */
+/** Apply due-date and optional topic priority before seeded ties. */
 export function candidates(
-  problems: CatalogProblem[],
-  states: ReviewState[],
-  rules: Rules,
-  date: string,
-  seed: string,
-  excluded: Set<string>
-): Candidate[] {
-  const stateByQuestionId = new Map(states.map((state) => [state.questionId, state]));
-
-  return problems
-    .filter((problem) => matches(problem, rules) && !excluded.has(problem.questionId))
-    .flatMap<Candidate>((problem) => {
-      const state = stateByQuestionId.get(problem.questionId);
-      if (!state?.solved) {
-        return [{ ...problem, kind: 'new' as const, dueDate: null }];
-      }
-      if (!rules.reviewEnabled || (state.dueDate && state.dueDate > date)) {
-        return [];
-      }
-      return [{ ...problem, kind: 'review' as const, dueDate: state.dueDate }];
-    })
-    .sort((a, b) => {
-      // 1. Review problems prioritized over new problems
-      if (a.kind !== b.kind) {
-        return a.kind === 'review' ? -1 : 1;
-      }
-
-      // 2. Compare due dates for review items
-      if (a.kind === 'review' && b.kind === 'review') {
-        const dueDiff = compareDueDates(a.dueDate, b.dueDate);
-        if (dueDiff !== 0) return dueDiff;
-      }
-
-      // 3. Deterministic pseudo-random rank based on seed and questionId
-      const rankDiff = rank(`${seed}:${a.questionId}`) - rank(`${seed}:${b.questionId}`);
-      if (rankDiff !== 0) return rankDiff;
-
-      return a.questionId.localeCompare(b.questionId);
-    });
+  problems:CatalogProblem[],states:ReviewState[],rules:Rules,date:string,seed:string,excluded:Set<string>,weakTagSlugs:string[]=[]
+):Candidate[]{
+  const stateById=new Map(states.map(s=>[s.questionId,s])),weak=new Set(rules.focusWeakTags?weakTagSlugs:[]);
+  return problems.filter(p=>matches(p,rules)&&!excluded.has(p.questionId)).flatMap<Candidate>(p=>{
+    const state=stateById.get(p.questionId);
+    if(state?.solved && (!rules.reviewEnabled || (state.dueDate && state.dueDate>date)))return [];
+    const matched=p.topicTags.filter(t=>weak.has(t.slug)).map(t=>t.slug);
+    const review=rules.adaptiveReviewEnabled?state?.adjustment??null:null;
+    return [{...p,kind:state?.solved?'review':'new',dueDate:state?.solved?state.dueDate:null,
+      isFocusTopic:matched.length>0,matchedWeakTags:matched,isAdaptiveReview:review!==null,
+      adaptiveReason:review?'duration_threshold':null,
+      explanation:{analysisVersion:ANALYSIS_VERSION,asOfDate:date,focusTagSlugs:matched,review}}];
+  }).sort((a,b)=>{
+    if(a.kind!==b.kind)return a.kind==='review'?-1:1;
+    if(a.kind==='review'){const diff=compareDueDates(a.dueDate,b.dueDate);if(diff)return diff;}
+    if(rules.focusWeakTags && a.isFocusTopic!==b.isFocusTopic)return a.isFocusTopic?-1:1;
+    return rank(seed+':'+a.questionId)-rank(seed+':'+b.questionId)||a.questionId.localeCompare(b.questionId);
+  });
 }
 
+/** Restrict model preferences to equal local-priority groups; malformed picks fall back unchanged. */
+export function reorderCandidates(pool:Candidate[],ids:string[],rules:Rules):Candidate[]{
+  const known=new Set(pool.map(p=>p.questionId));
+  if(new Set(ids).size!==ids.length || ids.some(id=>!known.has(id)) || ids.length>Math.min(30,rules.dailyCount))return pool;
+  const ranks=new Map(ids.map((id,i)=>[id,i]));
+  const key=(p:Candidate)=>JSON.stringify([p.difficulty,p.kind,p.kind==='review'?p.dueDate:null,!!p.isFocusTopic]);
+  const groups=new Map<string,Candidate[]>();
+  for(const p of pool){const k=key(p),g=groups.get(k);if(g)g.push(p);else groups.set(k,[p]);}
+  for(const group of groups.values())group.sort((a,b)=>(ranks.get(a.questionId)??Infinity)-(ranks.get(b.questionId)??Infinity));
+  const offsets=new Map<string,number>();
+  return pool.map(p=>{const k=key(p),i=offsets.get(k)??0;offsets.set(k,i+1);return groups.get(k)![i];});
+}
 export interface Selection {
   selected: Candidate[];
   notices: Bilingual[];

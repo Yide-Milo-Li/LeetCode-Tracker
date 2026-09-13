@@ -27,7 +27,10 @@ export const WeeklyScheduleGrid: React.FC<WeeklyScheduleGridProps> = ({ schedule
 
       <div className="weekly-schedule-grid">
         {schedule.map(({ weekday, strategy }) => (
-          <div key={weekday} className={`day-schedule-card ${strategy ? 'has-strategy' : 'is-rest'}`}>
+          <div
+            key={weekday}
+            className={`day-schedule-card ${strategy ? 'has-strategy' : 'is-rest'} ${strategy?.rules.focusWeakTags ? 'is-focus-session' : ''}`}
+          >
             <div className="day-header">
               <span className="day-name">{t.weekdays[weekday]}</span>
               <span className="day-full-name">{t.weekdayFull[weekday]}</span>
@@ -35,7 +38,12 @@ export const WeeklyScheduleGrid: React.FC<WeeklyScheduleGridProps> = ({ schedule
             <div className="day-body">
               {strategy ? (
                 <>
-                  <div className="day-strat-name">{strategy.name}</div>
+                  <div className="day-strat-name u-display-flex u-align-items-center u-gap-0-25rem">
+                    <span>{strategy.name}</span>
+                    {strategy.rules.focusWeakTags && (
+                      <span title={t.focusWeakTagsDesc} className="focus-flame-icon">🔥</span>
+                    )}
+                  </div>
                   <div className="day-strat-meta">
                     <span>
                       {strategy.rules.dailyCount} {lang === 'zh' ? '题' : 'problems'}

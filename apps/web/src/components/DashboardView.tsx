@@ -29,7 +29,7 @@ import {
   Tooltip as RechartsTooltip,
   CartesianGrid,
 } from 'recharts';
-import { api, type DashboardResponse, type RecentActivityItem, type YearlyActivityDay } from '../api.ts';
+import { api, type DashboardResponse, type RecentActivityItem, type YearlyActivityDay, type TagMasteryReport } from '../api.ts';
 import type { UseDailyPlanReturn } from '../hooks/useDailyPlan.ts';
 import { translations, type Language } from '../i18n.ts';
 import { ActivityHistoryDrawer } from './ActivityHistoryDrawer.tsx';
@@ -45,6 +45,7 @@ interface DashboardViewProps {
   planController?: UseDailyPlanReturn;
   onNavigateToToday?: () => void;
   onNavigateToSettings?: () => void;
+  onNavigateToStrategies?: () => void;
 }
 
 /** Render read-only analysis; plan generation belongs exclusively to the application controller. */
@@ -54,6 +55,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   planController,
   onNavigateToToday,
   onNavigateToSettings,
+  onNavigateToStrategies,
 }) => {
   const t = translations[lang];
   const workspace = useWorkspace();
@@ -67,6 +69,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   );
   const [sourceError, setSourceError] = useState('');
   const [sourceRetry, setSourceRetry] = useState(0);
+  const [masteryError,setMasteryError]=useState(false);
+  const [masteryLoading,setMasteryLoading]=useState(true);
+  const [masteryReport, setMasteryReport] = useState<TagMasteryReport | null>(null);
+
   useEffect(() => {
     let active = true;
     api
@@ -80,10 +86,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       .catch((err) => {
         if (active) setSourceError(String(err.message));
       });
+
+    setMasteryReport(null);setMasteryError(false);setMasteryLoading(true);
+    api
+      .getMasteryReport()
+      .then((report) => {
+        if (active) setMasteryReport(report);
+      })
+      .catch(() => {if(active)setMasteryError(true);})
+      .finally(()=>{if(active)setMasteryLoading(false);});
+
     return () => {
       active = false;
     };
-  }, [workspace.revision, sourceRetry]);
+  }, [workspace.revision, workspace.timezone, sourceRetry]);
 
   // History Drawer state
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -477,7 +493,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       </div>
 
       {/* Difficulty & Top Tags Distributions */}
-      <DashboardDistributions data={data} lang={lang} />
+      {masteryLoading && <p role="status">{t.insightLoading}</p>}
+      {masteryError && <Feedback retry={{label:t.retry,run:()=>setSourceRetry(v=>v+1)}}>{t.insightLoadError}</Feedback>}
+      <DashboardDistributions
+        data={data}
+        lang={lang}
+        masteryReport={masteryReport}
+        onNavigateToStrategies={onNavigateToStrategies}
+      />
 
       {/* Recent Activities Section & History Drawer Trigger */}
       <RecentActivitySection

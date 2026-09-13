@@ -93,6 +93,7 @@ export function App() {
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
   const [timezone, setTimezone] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
+  const [focusRequest,setFocusRequest]=useState(0);
   const [selectedNoteProblem, setSelectedNoteProblem] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [practiceQueue, setPracticeQueue] = useState<PracticeRequest[]>([]);
@@ -498,7 +499,7 @@ export function App() {
                   }
                   back={{ label: zh ? '返回今日' : 'Back to Today', run: () => navigate('today') }}
                 />
-                <StrategiesView lang={lang} />
+                <StrategiesView lang={lang} focusRequest={focusRequest} />
               </div>
             )}
             {visited.has('notes') && (
@@ -528,7 +529,11 @@ export function App() {
                 aria-labelledby="tab-statistics"
                 id="view-statistics"
               >
-                <DashboardView lang={lang} active={view === 'statistics'} />
+                <DashboardView
+                  lang={lang}
+                  active={view === 'statistics'}
+                  onNavigateToStrategies={() => {setFocusRequest(v=>v+1);navigate('schedule');}}
+                />
               </div>
             )}
             {visited.has('progress-import') && (

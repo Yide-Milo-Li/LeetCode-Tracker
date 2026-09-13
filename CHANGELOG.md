@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added sample-gated topic insights, optional topic prioritization and independently optional duration-based adaptive review.
+- Preserved fixed defaults and saved explanations; unified generation, replacement and temporary-override selection with bounded model reordering.
+- Added synthetic Phase 16 tests, isolated desktop acceptance and repeatable performance measurements; no live-provider or publication claim.
+
 - Added power-user keyboard workflow (`1`/`2`/`3` navigation, `/` catalog search focus, `n` manual practice logging, `?` shortcuts cheat sheet) with strict input, overlay, and IME composition guards.
 - Polished desktop micro-interactions including checkmark SVG draw and spring bounce completion animations, 100% daily goal celebration banner, and smooth modal/drawer transitions with full `prefers-reduced-motion` support.
 - Enhanced dashboard heatmap with rich hover tooltips detailing problem numbers, difficulty breakdown, and time spent, linked to review notes in the activity drawer.
