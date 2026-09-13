@@ -37,6 +37,26 @@ import {
 } from '../../contracts/src/practice.ts';
 import { BackupManager } from './backup.ts';
 import { PlanningStore } from './planning-store.ts';
+import type {
+  ProblemNote,
+  ProblemNoteSummary,
+  ProblemNoteListQuery,
+  SnapshotBundle,
+} from '../../contracts/src/notes.ts';
+import {
+  getProblemNote,
+  upsertProblemNote,
+  listProblemNoteSummaries,
+} from './notes-store.ts';
+import {
+  exportSnapshotBundle,
+  importSnapshotBundle,
+  type BundleRestoreResult,
+} from './bundle.ts';
+import {
+  generateKnowledgeZip,
+  generateNotionCsvs,
+} from './knowledge-exporter.ts';
 
 // Schema and migration exports
 export {
@@ -643,5 +663,45 @@ export class CatalogStore {
       this.getPracticeRevision(),
       this.getPlanningRevision()
     );
+  }
+
+  // ==========================================
+  // Notes & Knowledge Base Export Methods
+  // ==========================================
+
+  /** Retrieve a problem's long-form note by frontend question ID. */
+  public getProblemNote(questionFrontendId: string): ProblemNote | null {
+    return getProblemNote(this.db, questionFrontendId);
+  }
+
+  /** Create or update a problem's long-form note atomically. */
+  public upsertProblemNote(questionFrontendId: string, content: string): ProblemNote {
+    return upsertProblemNote(this.db, questionFrontendId, content);
+  }
+
+  /** Query problem note summaries with practice activity, difficulty, and tag filters. */
+  public listProblemNotes(query: Partial<ProblemNoteListQuery> = {}): { items: ProblemNoteSummary[]; total: number } {
+    return listProblemNoteSummaries(this.db, query);
+  }
+
+  /** Export all user configurations, strategies, records, and notes to a portable SnapshotBundle. */
+  public exportSnapshotBundle(): SnapshotBundle {
+    return exportSnapshotBundle(this.db);
+  }
+
+  /** Atomically restore database state from a SnapshotBundle with automatic safety backup. */
+  public async importSnapshotBundle(bundle: unknown): Promise<BundleRestoreResult> {
+    const mgr = this.backupManager ?? new BackupManager(this.options.backupDir ?? './backups');
+    return importSnapshotBundle(this.db, mgr, bundle, this.options.backupDir ?? './backups');
+  }
+
+  /** Generate full Obsidian knowledge base ZIP archive buffer. */
+  public generateObsidianZip(scope: 'all' | 'practiced' = 'all'): Buffer {
+    return generateKnowledgeZip(this.db, scope);
+  }
+
+  /** Generate Notion database CSV tables (problems summary and practice history). */
+  public generateNotionCsvs(): { problemsSummaryCsv: string; practiceHistoryCsv: string } {
+    return generateNotionCsvs(this.db);
   }
 }

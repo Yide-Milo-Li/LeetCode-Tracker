@@ -19,12 +19,16 @@ import type {
   PracticeQueryInput,
   PracticeRecord,
   PracticeStats,
+  ProblemNote,
+  ProblemNoteListQuery,
+  ProblemNoteSummary,
   ProgressCandidateInput,
   ProgressImportPreview,
   ProgressImportSummary,
   ProgressSnapshot,
   ProgressSnapshotHistory,
   RulePatch,
+  SnapshotBundle,
   Strategy,
   StrategyInput,
   TopicTag,
@@ -397,6 +401,73 @@ const dashboardApi = {
   },
 };
 
+export const notesApi = {
+  listNotes(
+    query: Partial<ProblemNoteListQuery> = {}
+  ): Promise<{ items: ProblemNoteSummary[]; total: number }> {
+    const params = new URLSearchParams();
+    if (query.page) params.set('page', String(query.page));
+    if (query.limit) params.set('limit', String(query.limit));
+    if (query.search) params.set('search', query.search);
+    if (query.difficulty && query.difficulty !== 'all') params.set('difficulty', query.difficulty);
+    if (query.hasNote && query.hasNote !== 'all') params.set('hasNote', query.hasNote);
+    if (query.scope) params.set('scope', query.scope);
+    if (query.tag) params.set('tag', query.tag);
+    const qs = params.toString();
+    return request<{ items: ProblemNoteSummary[]; total: number }>(`/notes${qs ? `?${qs}` : ''}`);
+  },
+
+  getNote(frontendId: string): Promise<{ note: ProblemNote | null }> {
+    return request<{ note: ProblemNote | null }>(`/notes/${encodeURIComponent(frontendId)}`);
+  },
+
+  upsertNote(frontendId: string, content: string): Promise<{ note: ProblemNote }> {
+    return request<{ note: ProblemNote }>(`/notes/${encodeURIComponent(frontendId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ content }),
+    });
+  },
+};
+
+export const exportApi = {
+  getObsidianZipUrl(scope: 'all' | 'practiced' = 'all'): string {
+    return `${API_BASE}/export/obsidian-zip?scope=${scope}`;
+  },
+
+  getNotionCsvUrl(table: 'summary' | 'history'): string {
+    return `${API_BASE}/export/notion-csv?table=${table}`;
+  },
+
+  getSingleMarkdownUrl(frontendId: string): string {
+    return `${API_BASE}/export/markdown/${encodeURIComponent(frontendId)}`;
+  },
+};
+
+export const bundleApi = {
+  getBundleExportUrl(): string {
+    return `${API_BASE}/bundle/export`;
+  },
+
+  exportBundle(): Promise<SnapshotBundle> {
+    return request<SnapshotBundle>('/bundle/export');
+  },
+
+  importBundle(
+    bundle: unknown
+  ): Promise<{
+    ok: boolean;
+    result: { success: boolean; restoredRecords: number; restoredNotes: number; safetyBackupPath: string };
+  }> {
+    return request<{
+      ok: boolean;
+      result: { success: boolean; restoredRecords: number; restoredNotes: number; safetyBackupPath: string };
+    }>('/bundle/import', {
+      method: 'POST',
+      body: JSON.stringify(bundle),
+    });
+  },
+};
+
 /** Unified API client instance aggregating all endpoint domains. */
 export const api = {
   ...catalogApi,
@@ -405,4 +476,7 @@ export const api = {
   ...progressApi,
   ...planningApi,
   ...dashboardApi,
+  ...notesApi,
+  ...exportApi,
+  ...bundleApi,
 };

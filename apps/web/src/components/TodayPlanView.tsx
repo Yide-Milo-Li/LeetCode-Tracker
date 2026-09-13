@@ -10,6 +10,7 @@ import { createPractice } from '../practice-service.ts';
 import { Dialog, Feedback, PageHeader, InfoPopover } from './ui.tsx';
 import { TodayRecentOverview } from './TodayRecentOverview.tsx';
 import { TodayProblemRow } from './TodayProblemRow.tsx';
+import { QuickNoteDrawer } from './QuickNoteDrawer.tsx';
 
 interface TodayPlanViewProps {
   lang: Language;
@@ -34,6 +35,7 @@ function TodayPlanViewInner({
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<Set<string>>(new Set());
   const [recentCompletions, setRecentCompletions] = useState<Set<string>>(new Set());
+  const [quickNoteProblem, setQuickNoteProblem] = useState<PlanItem | null>(null);
   const completionTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
   useEffect(() => {
     const clearFeedback = () => {
@@ -182,9 +184,19 @@ function TodayPlanViewInner({
       ) : plan ? (
         <>
           {completed === plan.items.length && plan.items.length > 0 && (
-            <div className="goal-completion-badge" role="status">
-              <CheckCircle2 size={18} className="goal-badge-icon" />
-              <span>{zh ? '今日计划已完成' : 'Today’s plan complete'}</span>
+            <div className="goal-completion-badge" role="status" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <CheckCircle2 size={18} className="goal-badge-icon" />
+                <span>{zh ? '今日计划已完成' : 'Today’s plan complete'}</span>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                style={{ fontSize: '0.8125rem' }}
+                onClick={() => workspace.navigate('notes')}
+              >
+                {zh ? '前往复盘工作区整理思路 →' : 'Organize Notes & Solutions →'}
+              </button>
             </div>
           )}
           <section className="today-plan-summary">
@@ -281,6 +293,7 @@ function TodayPlanViewInner({
                 replacingItemId={controller.replacingItemId}
                 onComplete={(target) => void complete(target)}
                 onReplaceOne={(target) => void controller.replaceOne(target)}
+                onOpenQuickNote={(target) => setQuickNoteProblem(target)}
               />
             ))}
           </div>
@@ -318,6 +331,25 @@ function TodayPlanViewInner({
             </article>
           ))}
         </Dialog>
+      )}
+      {quickNoteProblem && (
+        <QuickNoteDrawer
+          lang={lang}
+          problem={{
+            frontendId: quickNoteProblem.problem.questionFrontendId,
+            title: quickNoteProblem.problem.title,
+            url: quickNoteProblem.problem.url,
+            difficulty: quickNoteProblem.problem.difficulty,
+            tags: quickNoteProblem.problem.topicTags.map((t) => t.name),
+            slug: quickNoteProblem.problem.titleSlug,
+          }}
+          latestPracticeNotes={null}
+          onClose={() => setQuickNoteProblem(null)}
+          onOpenWorkspace={(frontendId) => {
+            setQuickNoteProblem(null);
+            workspace.navigate('notes', frontendId);
+          }}
+        />
       )}
       <PromptOverrideModal
         isOpen={override}

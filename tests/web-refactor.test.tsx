@@ -409,7 +409,7 @@ it('saves completion before optional details, blocks double clicks and preserves
   await act(async () => {
     render(<App />);
   });
-  assert.equal(within(screen.getByRole('navigation')).getAllByRole('button').length, 3);
+  assert.equal(within(screen.getByRole('navigation')).getAllByRole('button').length, 4);
   const circle = screen.getByRole('button', { name: 'Mark complete: ' + problem.title });
   circle.focus();
   const started = Date.now();

@@ -5,6 +5,7 @@ import type { CatalogProblem, PracticeRecord, PlanItem } from './api.ts';
 export type View =
   | 'today'
   | 'schedule'
+  | 'notes'
   | 'problems'
   | 'catalog-import'
   | 'records'
@@ -34,7 +35,8 @@ export interface PracticeOutcome {
 export interface WorkspaceState {
   revision: number;
   timezone: string | null;
-  navigate: (view: View) => void;
+  selectedNoteProblem?: string | null;
+  navigate: (view: View, targetId?: string) => void;
   notifyMutation: (record?: PracticeRecord) => void;
   openPractice: (request: PracticeRequest) => void;
   reportPracticeOutcome?: (outcome: PracticeOutcome) => void;

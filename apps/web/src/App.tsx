@@ -2,6 +2,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   BookOpen,
+  BookMarked,
   CalendarDays,
   ChartNoAxesCombined,
   Settings,
@@ -39,6 +40,9 @@ const StrategiesView = React.lazy(() =>
 const SettingsView = React.lazy(() =>
   import('./components/SettingsView.tsx').then((m) => ({ default: m.SettingsView })),
 );
+const NotesWorkspace = React.lazy(() =>
+  import('./components/NotesWorkspace.tsx').then((m) => ({ default: m.NotesWorkspace })),
+);
 
 /** Accessible lightweight placeholder while lazy-loading secondary workspaces. */
 function WorkspaceFallback({ label }: { label: string }) {
@@ -67,6 +71,7 @@ import { WorkspaceContext, type PracticeOutcome, type PracticeRequest, type View
 const views: View[] = [
   'today',
   'schedule',
+  'notes',
   'problems',
   'catalog-import',
   'records',
@@ -88,6 +93,7 @@ export function App() {
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
   const [timezone, setTimezone] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
+  const [selectedNoteProblem, setSelectedNoteProblem] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [practiceQueue, setPracticeQueue] = useState<PracticeRequest[]>([]);
   const practice = practiceQueue[0];
@@ -102,7 +108,10 @@ export function App() {
   const preferenceQueue = useRef(Promise.resolve());
   const priorTimezone = useRef<string | null>(null);
   /** Save outgoing scroll before moving; visited child views retain their unsaved input state. */
-  const navigate = useCallback((next: View) => {
+  const navigate = useCallback((next: View, targetId?: string) => {
+    if (targetId !== undefined) {
+      setSelectedNoteProblem(targetId);
+    }
     if (next === current.current) return;
     setPracticeQueue([]);
     scrolls.current[current.current] = window.scrollY;
@@ -159,6 +168,7 @@ export function App() {
     onNavigateToday: () => navigate('today'),
     onNavigateProblems: () => navigate('problems'),
     onNavigateRecords: () => navigate('records'),
+    onNavigateNotes: () => navigate('notes'),
     onOpenManualPractice: () => openPractice({ mode: 'manual' }),
     onFocusSearch: focusSearch,
     onToggleHelp: () => setShowShortcutHelp((open) => !open),
@@ -245,8 +255,8 @@ export function App() {
     [plan.onPracticeLogged],
   );
   const workspace = useMemo(
-    () => ({ revision, timezone, navigate, notifyMutation, openPractice, reportPracticeOutcome }),
-    [revision, timezone, navigate, notifyMutation, openPractice, reportPracticeOutcome],
+    () => ({ revision, timezone, selectedNoteProblem, navigate, notifyMutation, openPractice, reportPracticeOutcome }),
+    [revision, timezone, selectedNoteProblem, navigate, notifyMutation, openPractice, reportPracticeOutcome],
   );
   const zh = lang === 'zh';
   const progress = ['records', 'statistics', 'progress-import'].includes(view);
@@ -302,9 +312,10 @@ export function App() {
           <nav aria-label={zh ? '主导航' : 'Main navigation'}>
             {(
               [
-                { id: 'today', icon: CalendarDays, label: zh ? '今日' : 'Today' },
-                { id: 'problems', icon: BookOpen, label: zh ? '题库' : 'Problems' },
-                { id: 'records', icon: ChartNoAxesCombined, label: zh ? '进展' : 'Progress' },
+                { id: 'today', icon: CalendarDays, label: zh ? '今日' : 'Today', shortcut: '1' },
+                { id: 'problems', icon: BookOpen, label: zh ? '题库' : 'Problems', shortcut: '2' },
+                { id: 'records', icon: ChartNoAxesCombined, label: zh ? '进展' : 'Progress', shortcut: '3' },
+                { id: 'notes', icon: BookMarked, label: zh ? '复盘' : 'Notes', shortcut: '4' },
               ] as const
             ).map((item) => {
               const navBtn = (
@@ -320,7 +331,7 @@ export function App() {
                 </button>
               );
               return !sidebarExpanded ? (
-                <Tooltip key={item.id} text={item.label} shortcut={item.id === 'today' ? '1' : item.id === 'problems' ? '2' : '3'} position="right">
+                <Tooltip key={item.id} text={item.label} shortcut={item.shortcut} position="right">
                   {navBtn}
                 </Tooltip>
               ) : (
@@ -488,6 +499,11 @@ export function App() {
                   back={{ label: zh ? '返回今日' : 'Back to Today', run: () => navigate('today') }}
                 />
                 <StrategiesView lang={lang} />
+              </div>
+            )}
+            {visited.has('notes') && (
+              <div hidden={view !== 'notes'} id="view-notes">
+                <NotesWorkspace lang={lang} initialFrontendId={selectedNoteProblem} />
               </div>
             )}
             {visited.has('problems') && (

@@ -1,6 +1,6 @@
 /** Application preferences only; catalog and progress imports live in their respective workspaces. */
 import React, { useEffect, useRef, useState } from 'react';
-import { Eye, EyeOff, Copy, Check, ClipboardPaste } from 'lucide-react';
+import { Eye, EyeOff, Copy, Check, ClipboardPaste, Download, Upload, Archive, Database, AlertTriangle } from 'lucide-react';
 import { api } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
@@ -59,6 +59,13 @@ export function SettingsView({
   const [testingAi, setTestingAi] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; model?: string; message?: string } | null>(null);
   const dirtyAi = useRef(false);
+
+  // Bundle export / import state
+  const [importingBundle, setImportingBundle] = useState(false);
+  const [bundleSuccess, setBundleSuccess] = useState('');
+  const [bundleError, setBundleError] = useState('');
+  const [pendingBundle, setPendingBundle] = useState<unknown | null>(null);
+  const bundleFileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -183,6 +190,57 @@ export function SettingsView({
       });
     } finally {
       setTestingAi(false);
+    }
+  }
+
+  /** Read selected JSON snapshot bundle file. */
+  function handleSelectBundleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setBundleError('');
+    setBundleSuccess('');
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const text = String(reader.result);
+        const parsed = JSON.parse(text);
+        setPendingBundle(parsed);
+      } catch {
+        setBundleError(zh ? '无效的 JSON 文件格式。' : 'Invalid JSON file format.');
+      }
+    };
+    reader.onerror = () => {
+      setBundleError(zh ? '读取文件失败。' : 'Failed to read file.');
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  }
+
+  /** Execute atomic snapshot bundle restoration with automatic safety backup. */
+  async function handleConfirmRestore() {
+    if (!pendingBundle) return;
+    setImportingBundle(true);
+    setBundleError('');
+    setBundleSuccess('');
+
+    try {
+      const res = await api.importBundle(pendingBundle);
+      if (res.ok) {
+        setBundleSuccess(
+          zh
+            ? `还原成功！已恢复 ${res.result.restoredRecords} 条做题记录与 ${res.result.restoredNotes} 篇笔记。系统安全快照已自动归档至：${res.result.safetyBackupPath}`
+            : `Restore complete! Restored ${res.result.restoredRecords} records and ${res.result.restoredNotes} notes. Pre-restore safety backup created at: ${res.result.safetyBackupPath}`
+        );
+        workspace.notifyMutation();
+      } else {
+        setBundleError(zh ? '还原失败。' : 'Restore failed.');
+      }
+    } catch (err) {
+      setBundleError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setImportingBundle(false);
+      setPendingBundle(null);
     }
   }
 
@@ -497,6 +555,182 @@ export function SettingsView({
             </Feedback>
           )}
         </form>
+      </section>
+
+      {/* Data Management & Portable Snapshots row */}
+      <section className="preference-row">
+        <div>
+          <h2>{t.dataManagementTitle}</h2>
+          <p className="muted">{t.dataManagementDesc}</p>
+          <InfoPopover
+            label={zh ? '数据安全与迁移说明' : 'Data portability help'}
+            content={
+              <div>
+                <p>
+                  {zh
+                    ? '所有做题记录、笔记与配置保存在本地 SQLite 中，完全离线运行。'
+                    : 'All practice logs, notes, and settings reside in your local SQLite database, 100% offline.'}
+                </p>
+                <p>
+                  {zh
+                    ? '执行还原前，系统会自动在本地生成一份时间戳安全快照（.db.bak），确保随时可回退，零数据丢失风险。'
+                    : 'Before restoring a bundle, the system automatically creates a timestamped safety SQLite backup (.db.bak) for zero data loss.'}
+                </p>
+              </div>
+            }
+          />
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {/* Bundle Export & Import */}
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+              padding: '16px',
+              backgroundColor: 'var(--surface-muted)',
+              borderRadius: '8px',
+              border: '1px solid var(--border)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600 }}>
+              <Database size={18} />
+              <span>{zh ? '全量数据备份与还原（JSON Snapshot Bundle）' : 'Full Data Backup & Restore (JSON Snapshot Bundle)'}</span>
+            </div>
+            <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+              {t.exportJsonBundleDesc}
+            </p>
+
+            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+              <a
+                href={api.getBundleExportUrl()}
+                className="btn btn-primary btn-sm"
+                download
+              >
+                <Download size={14} />
+                <span>{t.exportJsonBundle}</span>
+              </a>
+
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => bundleFileInputRef.current?.click()}
+                disabled={importingBundle}
+              >
+                <Upload size={14} />
+                <span>{importingBundle ? (zh ? '正在还原…' : 'Restoring…') : t.importJsonBundle}</span>
+              </button>
+
+              <input
+                ref={bundleFileInputRef}
+                type="file"
+                accept=".json,application/json"
+                style={{ display: 'none' }}
+                onChange={handleSelectBundleFile}
+              />
+            </div>
+
+            {/* Pending restore confirmation prompt */}
+            {Boolean(pendingBundle) && (
+              <div
+                style={{
+                  padding: '12px 14px',
+                  backgroundColor: 'var(--warning-subtle)',
+                  borderRadius: '6px',
+                  border: '1px solid var(--warning)',
+                  marginTop: '8px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                  <AlertTriangle size={16} />
+                  <span>{zh ? '确认无损还原备份？' : 'Confirm Backup Restoration?'}</span>
+                </div>
+                <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
+                  {zh
+                    ? '导入备份将更新系统配置、策略与做题记录。系统已自动在后台为您创建当前数据库的安全快照。'
+                    : 'Restoring will merge/update settings, strategies, and practice records. An automated safety backup will be created before writing.'}
+                </p>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => void handleConfirmRestore()}
+                    disabled={importingBundle}
+                  >
+                    {importingBundle ? '…' : zh ? '确认并还原' : 'Confirm & Restore'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setPendingBundle(null)}
+                    disabled={importingBundle}
+                  >
+                    {zh ? '取消' : 'Cancel'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {bundleSuccess && <Feedback tone="success">{bundleSuccess}</Feedback>}
+            {bundleError && <Feedback tone="error">{bundleError}</Feedback>}
+          </div>
+
+          {/* External Knowledge Base Export */}
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+              padding: '16px',
+              backgroundColor: 'var(--surface-muted)',
+              borderRadius: '8px',
+              border: '1px solid var(--border)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600 }}>
+              <Archive size={18} />
+              <span>{zh ? '知识库导出（Obsidian & Notion）' : 'Knowledge Base Export (Obsidian & Notion)'}</span>
+            </div>
+            <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+              {zh
+                ? '一键导出支持本地双向链接的 Obsidian 题库与 Markdown 笔记骨架包，或 Notion 双结构化 CSV 表格。'
+                : 'Export complete Obsidian vault skeleton archive (.zip) and Notion CSV tables.'}
+            </p>
+
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+              <a
+                href={api.getObsidianZipUrl('all')}
+                className="btn btn-secondary btn-sm"
+                title="Download 4,000+ problem Obsidian vault skeleton"
+              >
+                <Archive size={14} />
+                <span>{t.exportObsidianVault}</span>
+              </a>
+
+              <a
+                href={api.getNotionCsvUrl('summary')}
+                className="btn btn-secondary btn-sm"
+                title="Download Notion Problems Summary CSV"
+              >
+                <Download size={14} />
+                <span>{t.exportNotionCsv} (题库表)</span>
+              </a>
+
+              <a
+                href={api.getNotionCsvUrl('history')}
+                className="btn btn-secondary btn-sm"
+                title="Download Notion Practice History CSV"
+              >
+                <Download size={14} />
+                <span>{t.exportNotionCsv} (做题历史表)</span>
+              </a>
+            </div>
+          </div>
+        </div>
       </section>
     </div>
   );

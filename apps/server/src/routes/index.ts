@@ -9,6 +9,9 @@ import { registerPracticeRoutes } from './practice.ts';
 import { registerProgressRoutes } from './progress.ts';
 import { registerPlanningRoutes } from './planning.ts';
 import { registerDashboardRoutes } from './dashboard.ts';
+import { registerNotesRoutes } from './notes.ts';
+import { registerExportRoutes } from './export.ts';
+import { registerBundleRoutes } from './bundle.ts';
 
 export * from './types.ts';
 
@@ -25,4 +28,7 @@ export function registerAllRoutes(app: FastifyInstance, context: RouteContext): 
   registerProgressRoutes(app, context);
   registerPlanningRoutes(app, context);
   registerDashboardRoutes(app, context);
+  registerNotesRoutes(app, context);
+  registerExportRoutes(app, context);
+  registerBundleRoutes(app, context);
 }

@@ -6,6 +6,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { CURRENT_SCHEMA_VERSION, inspectCatalogSchema } from './schema.ts';
 import { createPlanningSchema } from './planning-schema.ts';
 import { createPracticeMetadataSchema } from './practice-schema.ts';
+import { createNotesSchema } from './notes-schema.ts';
 
 /** Configure recommended pragmas for resilience, concurrency, and integrity. */
 export function configurePragmas(db: DatabaseSync): void {
@@ -146,6 +147,14 @@ export function createSchema(db: DatabaseSync): void {
       id TEXT PRIMARY KEY REFERENCES progress_import_history(id) ON DELETE CASCADE,
       summary_json TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS problem_notes (
+      question_id TEXT PRIMARY KEY REFERENCES problems(question_id) ON DELETE CASCADE,
+      content TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_problem_notes_updated ON problem_notes(updated_at);
   `);
 
   const now = Date.now();
@@ -317,6 +326,7 @@ export function initOrMigrateSchema(db: DatabaseSync): void {
       createPlanningSchema(db);
     }
     createPracticeMetadataSchema(db);
+    createNotesSchema(db);
     inspectCatalogSchema(db);
     db.exec('COMMIT');
   } catch (error) {

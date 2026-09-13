@@ -11,7 +11,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
-import { CatalogStore } from '../packages/database/src/store.ts';
+import { CatalogStore, CURRENT_SCHEMA_VERSION } from '../packages/database/src/store.ts';
 import { PlanningStore } from '../packages/database/src/planning-store.ts';
 import { BackupManager } from '../packages/database/src/backup.ts';
 import { PlanningService } from '../apps/server/src/planning-service.ts';
@@ -134,7 +134,7 @@ describe('Phase 4 Closure Gate Verification', () => {
     const restoreResult = await backupManager.restoreBackup(backupFile, restorePath);
     assert.equal(restoreResult.success, true);
     assert.equal(restoreResult.restoredProblems, 5);
-    assert.equal(restoreResult.restoredVersion, 8);
+    assert.equal(restoreResult.restoredVersion, CURRENT_SCHEMA_VERSION);
 
     // 8. Reopen database and verify all data integrity
     const restoredDb = new DatabaseSync(restorePath);

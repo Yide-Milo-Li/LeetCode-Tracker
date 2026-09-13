@@ -3,11 +3,12 @@
  * Renders reliable completion circle, topic tags with overflow dropdown, and contextual action links.
  */
 import React from 'react';
-import { Check, Circle, RefreshCw, ExternalLink, Plus } from 'lucide-react';
+import { Check, Circle, RefreshCw, ExternalLink, Plus, BookMarked } from 'lucide-react';
 import type { PlanItem } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
 import { Feedback, InfoPopover, Tooltip } from './ui.tsx';
+import { QuickCopyButtons } from './QuickCopyButtons.tsx';
 
 export interface TodayProblemRowProps {
   item: PlanItem;
@@ -20,6 +21,7 @@ export interface TodayProblemRowProps {
   replacingItemId: string | null;
   onComplete: (item: PlanItem) => void;
   onReplaceOne: (item: PlanItem) => void;
+  onOpenQuickNote?: (item: PlanItem) => void;
 }
 
 /**
@@ -35,6 +37,7 @@ export function TodayProblemRow({
   replacingItemId,
   onComplete,
   onReplaceOne,
+  onOpenQuickNote,
 }: TodayProblemRowProps) {
   const zh = lang === 'zh';
   const t = translations[lang];
@@ -77,7 +80,25 @@ export function TodayProblemRow({
           <span className={'difficulty ' + item.problem.difficulty.toLowerCase()}>
             {t[('stat' + item.problem.difficulty) as keyof typeof t]}
           </span>
-          {item.kind === 'review' && <span className="tag-chip">{t.kindReview}</span>}
+          {item.kind === 'review' ? (
+            <button
+              type="button"
+              className="tag-chip review-note-trigger"
+              style={{
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                border: '1px solid transparent',
+              }}
+              title={zh ? '查看往期解题笔记' : 'View past notes'}
+              onClick={() => onOpenQuickNote?.(item)}
+            >
+              <BookMarked size={12} />
+              <span>{t.kindReview}</span>
+              <span style={{ fontSize: '0.6875rem', opacity: 0.8 }}>({zh ? '查看笔记' : 'Notes'})</span>
+            </button>
+          ) : null}
           {item.problem.isPaidOnly && <span className="tag-chip">{t.statPremium}</span>}
           {item.problem.topicTags.slice(0, 2).map((tag) => (
             <span className="tag-chip" key={tag.slug}>
@@ -114,6 +135,29 @@ export function TodayProblemRow({
       </div>
 
       <div className="problem-actions">
+        <Tooltip text={zh ? '速查往期笔记' : 'Quick notes'} position="top">
+          <button
+            className="btn-icon"
+            aria-label={zh ? '速查往期笔记' : 'Quick notes'}
+            onClick={() => onOpenQuickNote?.(item)}
+          >
+            <BookMarked size={18} />
+          </button>
+        </Tooltip>
+        <Tooltip text={t.copyObsidianCard} position="top">
+          <QuickCopyButtons
+            lang={lang}
+            problem={{
+              frontendId: item.problem.questionFrontendId,
+              title: item.problem.title,
+              url: item.problem.url,
+              difficulty: item.problem.difficulty,
+              tags: item.problem.topicTags.map((t) => t.name),
+              slug: item.problem.titleSlug,
+            }}
+            compact
+          />
+        </Tooltip>
         <Tooltip text={zh ? '打开题目' : 'Open problem'} position="top">
           <a
             className="btn-icon"

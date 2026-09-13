@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CatalogStore, PracticeConflictError } from '../packages/database/src/store.ts';
+import { CatalogStore, PracticeConflictError, CURRENT_SCHEMA_VERSION } from '../packages/database/src/store.ts';
 import { BackupManager } from '../packages/database/src/backup.ts';
 import { inspectCatalogSchema } from '../packages/database/src/schema.ts';
 import { buildApp } from '../apps/server/src/app.ts';
@@ -193,14 +193,14 @@ it('backs up v7 before upgrade, preserves historical evidence, and replays after
     const evidence = db.prepare('SELECT * FROM snapshot_successes').all();
     const backups = join(directory, 'backups');
     const upgraded = await CatalogStore.open(db, { backupDir: backups });
-    assert.equal(inspectCatalogSchema(db), 8);
+    assert.equal(inspectCatalogSchema(db), CURRENT_SCHEMA_VERSION);
     assert.equal(upgraded.getPracticeRecord(old.id)!.durationMinutes, null);
     assert.deepEqual(upgraded.getPracticeRecord(old.id), old);
     assert.deepEqual(upgraded.getPracticeStats(), historicalStats);
     assert.deepEqual(upgraded.getDashboardRawData(), historicalProjection);
     assert.deepEqual(db.prepare('SELECT * FROM snapshot_successes').all(), evidence);
     const manager = new BackupManager(backups);
-    const migration = readdirSync(backups).find((name) => name.startsWith('migration-v7-to-v8'))!;
+    const migration = readdirSync(backups).find((name) => name.startsWith(`migration-v7-to-v${CURRENT_SCHEMA_VERSION}`))!;
     assert.equal(manager.verifyBackup(join(backups, migration)).version, 7);
     const record = await upgraded.createPracticeRecord({
       ...input,
