@@ -537,6 +537,7 @@ it('detail failure keeps the completed record and draft; retry patches the same 
       />,
     );
   });
+  assert.ok(!screen.queryByRole('button', { name: /Change completion or time/ }), 'Quick completion enrichment stays details-only');
   fireEvent.change(screen.getByLabelText('Duration (minutes, optional)'), { target: { value: '25' } });
   fireEvent.change(screen.getByLabelText('Notes (optional)'), {
     target: { value: 'Remember the boundary.' },
@@ -696,4 +697,85 @@ it('editing raw progress invalidates an in-flight Gemini response without resurr
   });
   assert.equal((screen.getByLabelText('Progress content') as HTMLTextAreaElement).value, 'B');
   assert.equal(screen.queryByRole('button', { name: 'Generate preview' }), null);
+});
+
+/** A single edit action must preserve exact record identity and leave completion evidence untouched by metadata edits. */
+it('unified record edit starts with details and only patches fields actually changed', async () => {
+  const saved = record({ practicedAt: '2026-09-08T10:20:30.456Z', sourceTimezone: 'America/Los_Angeles' });
+  records.push(saved);
+  const patches = mock.method(api, 'updatePracticeRecord', async (_id: string, input: any) => ({ ...saved, ...input, revision: 2 }));
+  await act(async () => { render(<PracticeWorkspace request={{ mode: 'detail', record: saved }} lang="en" onClose={() => {}} />); });
+  assert.ok(!screen.queryByRole('button', { name: 'Edit details' }), 'The separate detail edit action must be removed');
+  assert.ok(!screen.queryByRole('button', { name: 'Correct record' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit record' }));
+  assert.equal(screen.queryByLabelText('Practice result'), null);
+  const toggle = screen.getByRole('button', { name: 'Change completion or time' });
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+  fireEvent.click(toggle);
+  assert.ok(screen.getByLabelText('Practice result'));
+  fireEvent.click(toggle);
+  fireEvent.change(screen.getByLabelText('Notes (optional)'), { target: { value: 'Metadata only' } });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save record' })); });
+  assert.deepEqual(patches.mock.calls[0].arguments, [saved.id, { durationMinutes: null, notes: 'Metadata only', expectedRevision: 1 }]);
+});
+
+/** Collapsing is presentation only; cancel discards drafts while save preserves intentional corrections. */
+it('unified record edit retains collapsed corrections and cancel performs no write', async () => {
+  const saved = record({ practicedAt: '2026-09-08T10:20:30.456Z' });
+  const patches = mock.method(api, 'updatePracticeRecord', async (_id: string, input: any) => ({ ...saved, ...input, revision: 2 }));
+  await act(async () => { render(<PracticeWorkspace request={{ mode: 'detail', record: saved }} lang="en" onClose={() => {}} />); });
+  fireEvent.click(screen.getByRole('button', { name: 'Edit record' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Change completion or time' }));
+  fireEvent.change(screen.getByLabelText('Practice result'), { target: { value: 'false' } });
+  fireEvent.click(screen.getByRole('button', { name: /Change completion or time/ }));
+  assert.match(screen.getByRole('button', { name: /Change completion or time/ }).textContent!, /modified/);
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  assert.equal(patches.mock.callCount(), 0);
+  fireEvent.click(screen.getByRole('button', { name: 'Edit record' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Change completion or time' }));
+  assert.equal((screen.getByLabelText('Practice result') as HTMLSelectElement).value, 'true');
+  fireEvent.change(screen.getByLabelText('Practice result'), { target: { value: 'false' } });
+  fireEvent.click(screen.getByRole('button', { name: /Change completion or time/ }));
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save record' })); });
+  assert.deepEqual(patches.mock.calls[0].arguments, [saved.id, {
+    durationMinutes: null, notes: null, completed: false, expectedRevision: 1,
+  }]);
+});
+
+/** Late failures recover both the correction disclosure and the original revision-protected draft. */
+it('unified record edit recovers a time correction after closing a failed save', async () => {
+  const { WorkspaceContext } = await import('../apps/web/src/workspace.tsx');
+  const saved = record({ practicedAt: '2026-09-08T10:20:30.456Z' });
+  const pending = deferred<PracticeRecord>();
+  let recovery: any;
+  const patches = mock.method(api, 'updatePracticeRecord', async (_id: string, input: any) => {
+    if (!recovery) return pending.promise;
+    return { ...saved, ...input, revision: 2 };
+  });
+  await act(async () => { render(
+    <WorkspaceContext.Provider value={{ revision: 0, timezone: 'UTC', navigate() {}, notifyMutation() {}, openPractice() {},
+      reportPracticeOutcome(outcome) { recovery = outcome.recovery; } }}>
+      <PracticeWorkspace request={{ mode: 'detail', record: saved }} lang="en" onClose={() => {}} />
+    </WorkspaceContext.Provider>,
+  ); });
+  fireEvent.click(screen.getByRole('button', { name: 'Edit record' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Change completion or time' }));
+  fireEvent.change(screen.getByLabelText('Practiced at'), { target: { value: '2026-09-08T11:00:00' } });
+  fireEvent.change(screen.getByLabelText('Notes (optional)'), { target: { value: 'Correction draft' } });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save record' })); });
+  cleanup();
+  await act(async () => { pending.reject(new Error('Synthetic failed correction')); });
+  assert.equal(recovery.mode, 'detail');
+  assert.equal(recovery.draft.correctionOpen, true);
+  assert.equal(recovery.record.id, saved.id);
+  await act(async () => { render(<PracticeWorkspace request={recovery} lang="en" onClose={() => {}} />); });
+  assert.equal(screen.getByRole('button', { name: /Change completion or time/ }).getAttribute('aria-expanded'), 'true');
+  assert.equal((screen.getByLabelText('Notes (optional)') as HTMLTextAreaElement).value, 'Correction draft');
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save record' })); });
+  assert.equal(patches.mock.callCount(), 2);
+  assert.deepEqual(patches.mock.calls[1].arguments, patches.mock.calls[0].arguments);
+  assert.equal(patches.mock.calls[1].arguments[1].practicedAt, '2026-09-08T11:00:00.000Z');
+  assert.equal(patches.mock.calls[1].arguments[1].completed, undefined);
+  fireEvent.click(screen.getByRole('button', { name: 'Edit record' }));
+  assert.equal(screen.getByRole('button', { name: /Change completion or time/ }).getAttribute('aria-expanded'), 'false', 'A saved recovery draft must not replay on the next edit');
 });

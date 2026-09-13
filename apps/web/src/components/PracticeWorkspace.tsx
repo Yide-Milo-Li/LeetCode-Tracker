@@ -36,9 +36,11 @@ export function PracticeWorkspace({
   const zh = lang === 'zh';
   const [records, setRecords] = useState<PracticeRecord[]>('record' in request ? [request.record] : []);
   const [snapshots, setSnapshots] = useState<ProgressSnapshotHistory[]>([]);
-  const [editing, setEditing] = useState<{ record: PracticeRecord; full: boolean } | null>(
+  // Recovery belongs to one editing attempt; saving or cancelling must consume it.
+  const [draft, setDraft] = useState('draft' in request ? request.draft : undefined);
+  const [editing, setEditing] = useState<{ record: PracticeRecord } | null>(
     request.mode === 'enrich' || (request.mode === 'detail' && request.draft)
-      ? { record: request.record, full: request.full ?? false }
+      ? { record: request.record }
       : null,
   );
   const [loading, setLoading] = useState(request.mode === 'evidence');
@@ -116,14 +118,19 @@ export function PracticeWorkspace({
           key={editing.record.id}
           lang={lang}
           record={editing.record}
-          draft={'draft' in request ? request.draft : undefined}
-          detailsOnly={!editing.full}
+          draft={draft}
+          detailsOnly={request.mode === 'enrich'}
           onSaved={(record) => {
+            setDraft(undefined);
             changed(record);
             if (request.mode === 'enrich') onClose();
             else setEditing(null);
           }}
-          onCancel={() => (request.mode === 'enrich' ? onClose() : setEditing(null))}
+          onCancel={() => {
+            setDraft(undefined);
+            if (request.mode === 'enrich') onClose();
+            else setEditing(null);
+          }}
         />
       ) : (
         <>
@@ -150,7 +157,7 @@ export function PracticeWorkspace({
               key={record.id}
               record={record}
               lang={lang}
-              edit={(full) => setEditing({ record, full })}
+              edit={() => setEditing({ record })}
               onChange={changed}
             />
           ))}

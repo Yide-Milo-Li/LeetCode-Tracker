@@ -505,7 +505,9 @@ it('ActivityHistoryDrawer clears dateFilter when initialDate transitions from da
   assert.equal(queryParams?.date, undefined, 'Date filter should be cleared when initialDate becomes null');
 });
 
-it('supports heatmap keyboard roving tabIndex and navigation (Arrow keys and Enter)', async () => {
+it('supports heatmap keyboard roving tabIndex and navigation (Arrow keys and Enter)', async (t) => {
+  // Start midweek: ArrowDown intentionally stops at the end of a week, including Sundays.
+  t.mock.timers.enable({ apis: ['Date'], now: Date.UTC(2026, 8, 9, 12) });
   const mockData = createMockDashboardData();
   mock.method(api, 'getDashboard', async () => mockData);
 

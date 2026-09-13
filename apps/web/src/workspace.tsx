@@ -13,7 +13,7 @@ export type View =
   | 'settings';
 export type PracticeRequest =
   | { mode: 'manual'; problem?: CatalogProblem }
-  | { mode: 'enrich' | 'detail'; record: PracticeRecord; draft?: PracticeDraft; full?: boolean }
+  | { mode: 'enrich' | 'detail'; record: PracticeRecord; draft?: PracticeDraft }
   | { mode: 'evidence'; item: PlanItem };
 /** Retain the submitted fields when an editor closes before its request settles. */
 export interface PracticeDraft {
@@ -24,6 +24,8 @@ export interface PracticeDraft {
   precision: 'date' | 'datetime';
   zone: string;
   timeEdited: boolean;
+  /** Restore the unified editor disclosure without discarding collapsed corrections. */
+  correctionOpen?: boolean;
 }
 export interface PracticeOutcome {
   error?: string;

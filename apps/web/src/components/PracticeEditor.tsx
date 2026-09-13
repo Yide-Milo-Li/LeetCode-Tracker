@@ -2,6 +2,7 @@
  * Practice record editor form supporting manual logging, problem search, and details enrichment.
  */
 import React, { useEffect, useRef, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
 import {
   api,
   type CatalogProblem,
@@ -109,6 +110,8 @@ export function PracticeEditor({
     draft?.time ?? (initialTime.includes('T') ? zonedInput(initialTime, zone) : initialTime),
   );
   const [timeEdited, setTimeEdited] = useState(draft?.timeEdited ?? false);
+  const [correctionOpen, setCorrectionOpen] = useState(draft?.correctionOpen ?? Boolean(draft?.timeEdited));
+  const correctionId = React.useId();
   const [completed, setCompleted] = useState(
     draft?.completed ?? record?.completed ?? recovered?.completed ?? true,
   );
@@ -116,6 +119,7 @@ export function PracticeEditor({
     draft?.duration ?? String(record?.durationMinutes ?? recovered?.durationMinutes ?? ''),
   );
   const [notes, setNotes] = useState(draft?.notes ?? record?.notes ?? recovered?.notes ?? '');
+  const correctionChanged = Boolean(record && (timeEdited || completed !== record.completed));
   const [saving, setSaving] = useState(false);
   const [uncertain, setUncertain] = useState(Boolean(recovered));
   const [error, setError] = useState('');
@@ -170,18 +174,22 @@ export function PracticeEditor({
     setError('');
     try {
       const metadata = { durationMinutes: durationValue(duration), notes: notes.trim() || null };
+      // Expanding the editor is not a data change. Metadata-only saves must never rewrite
+      // original timestamp precision, timezone, or completion evidence.
       const temporal = detailsOnly
         ? {}
         : {
-            completed,
-            practicedAt:
-              precision === 'date'
-                ? time.slice(0, 10)
-                : timeEdited
-                  ? fromZonedInput(time, zone)
-                  : (record?.practicedAt ?? recovered?.practicedAt ?? new Date().toISOString()),
-            timePrecision: precision,
-            sourceTimezone: zone,
+            ...(!record || completed !== record.completed ? { completed } : {}),
+            ...(!record || timeEdited ? {
+              practicedAt:
+                precision === 'date'
+                  ? time.slice(0, 10)
+                  : timeEdited
+                    ? fromZonedInput(time, zone)
+                    : (recovered?.practicedAt ?? new Date().toISOString()),
+              timePrecision: precision,
+              sourceTimezone: zone,
+            } : {}),
           };
       const saved = record
         ? await api.updatePracticeRecord(record.id, {
@@ -211,8 +219,7 @@ export function PracticeEditor({
             ? {
                 mode: detailsOnly ? 'enrich' : 'detail',
                 record,
-                full: !detailsOnly,
-                draft: { duration, notes, completed, time, precision, zone, timeEdited },
+                draft: { duration, notes, completed, time, precision, zone, timeEdited, correctionOpen },
               }
             : { mode: 'manual', problem: selected },
         });
@@ -289,77 +296,90 @@ export function PracticeEditor({
             )}
           </div>
           <fieldset disabled={saving || uncertain}>
-            {!detailsOnly && (
-              <>
-                <div className="form-grid">
-                  <Field label={zh ? '本次结果' : 'Practice result'}>
-                    <select
-                      value={String(completed)}
-                      onChange={(e) => setCompleted(e.target.value === 'true')}
-                    >
-                      <option value="true">{zh ? '完成' : 'Completed'}</option>
-                      <option value="false">{zh ? '未完成' : 'Not completed'}</option>
-                    </select>
-                  </Field>
-                  <Field label={zh ? '时间精度' : 'Time precision'}>
-                    <select
-                      value={precision}
+            {record && <PracticeDetailsFields
+              lang={lang} duration={duration} notes={notes} setDuration={setDuration} setNotes={setNotes}
+            />}
+            {record && !detailsOnly && (
+              <button type="button" className="record-correction-toggle" aria-expanded={correctionOpen}
+                aria-controls={correctionId} onClick={() => setCorrectionOpen(open => !open)}>
+                <ChevronDown size={16} aria-hidden="true" />
+                {zh ? '修改完成状态或时间' : 'Change completion or time'}
+                {correctionChanged && <span className="muted">{zh ? '（已修改）' : ' (modified)'}</span>}
+              </button>
+            )}
+            <div id={correctionId}>
+              {!detailsOnly && (!record || correctionOpen) && (
+                <>
+                  <div className="form-grid">
+                    <Field label={zh ? '本次结果' : 'Practice result'}>
+                      <select
+                        value={String(completed)}
+                        onChange={(e) => setCompleted(e.target.value === 'true')}
+                      >
+                        <option value="true">{zh ? '完成' : 'Completed'}</option>
+                        <option value="false">{zh ? '未完成' : 'Not completed'}</option>
+                      </select>
+                    </Field>
+                    <Field label={zh ? '时间精度' : 'Time precision'}>
+                      <select
+                        value={precision}
+                        onChange={(e) => {
+                          const next = e.target.value as TimePrecision;
+                          setPrecision(next);
+                          setTime(
+                            next === 'date'
+                              ? time.slice(0, 10)
+                              : time.includes('T')
+                                ? time
+                                : time + 'T12:00:00',
+                          );
+                          setTimeEdited(true);
+                        }}
+                      >
+                        <option value="datetime">{zh ? '日期与时间' : 'Date and time'}</option>
+                        <option value="date">{zh ? '仅日期' : 'Date only'}</option>
+                      </select>
+                    </Field>
+                  </div>
+                  <Field label={zh ? '练习时间' : 'Practiced at'}>
+                    <input
+                      required
+                      type={precision === 'date' ? 'date' : 'datetime-local'}
+                      step="1"
+                      value={time}
                       onChange={(e) => {
-                        const next = e.target.value as TimePrecision;
-                        setPrecision(next);
-                        setTime(
-                          next === 'date'
-                            ? time.slice(0, 10)
-                            : time.includes('T')
-                              ? time
-                              : time + 'T12:00:00',
-                        );
+                        setTime(e.target.value);
                         setTimeEdited(true);
                       }}
-                    >
-                      <option value="datetime">{zh ? '日期与时间' : 'Date and time'}</option>
-                      <option value="date">{zh ? '仅日期' : 'Date only'}</option>
-                    </select>
+                    />
                   </Field>
-                </div>
-                <Field label={zh ? '练习时间' : 'Practiced at'}>
-                  <input
-                    required
-                    type={precision === 'date' ? 'date' : 'datetime-local'}
-                    step="1"
-                    value={time}
-                    onChange={(e) => {
-                      setTime(e.target.value);
-                      setTimeEdited(true);
-                    }}
-                  />
-                </Field>
-                <Field
-                  label={zh ? '记录时区' : 'Source timezone'}
-                  hint={
-                    zh
-                      ? '补录是否完成今日题目由有效证据规则判定。'
-                      : 'Existing evidence rules determine whether a backfill completes today’s task.'
-                  }
-                >
-                  <input
-                    required
-                    value={zone}
-                    onChange={(e) => {
-                      setZone(e.target.value);
-                      setTimeEdited(true);
-                    }}
-                  />
-                </Field>
-              </>
-            )}
-            <PracticeDetailsFields
+                  <Field
+                    label={zh ? '记录时区' : 'Source timezone'}
+                    hint={
+                      zh
+                        ? '补录是否完成今日题目由有效证据规则判定。'
+                        : 'Existing evidence rules determine whether a backfill completes today’s task.'
+                    }
+                  >
+                    <input
+                      required
+                      value={zone}
+                      onChange={(e) => {
+                        setZone(e.target.value);
+                        setTimeEdited(true);
+                      }}
+                    />
+                  </Field>
+                </>
+              )}
+            </div>
+            {!record && <PracticeDetailsFields
               lang={lang}
               duration={duration}
               notes={notes}
               setDuration={setDuration}
               setNotes={setNotes}
-            />
+            />}
           </fieldset>
         </>
       )}
