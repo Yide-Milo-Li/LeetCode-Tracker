@@ -10,7 +10,7 @@ import { PageHeader, Feedback, Field, InfoPopover } from './ui.tsx';
 interface SettingsViewProps {
   lang: Language;
   onLanguageChange: (lang: Language) => void;
-  onThemeChange: (theme: 'light' | 'dark') => void;
+  onThemeChange: (theme: 'light' | 'dark' | 'system') => void;
   currentTheme: 'light' | 'dark' | 'system';
   onPaletteChange?: (palette: ThemePalette) => void;
   currentPalette?: ThemePalette;
@@ -495,13 +495,23 @@ export function SettingsView({
           <h2>{t.themeModeLabel}</h2>
           <InfoPopover
             label={zh ? '模式说明' : 'Mode help'}
-            content={<p>{zh ? '在明亮模式和暗色模式之间快速切换。' : 'Switch between light and dark display modes.'}</p>}
+            content={<p>{zh ? '在浅色模式、深色模式或跟随系统之间切换。' : 'Switch between light, dark, or system display modes.'}</p>}
           />
         </div>
         <div className="segmented-control" aria-label={t.themeModeLabel}>
-          {(['light', 'dark'] as const).map((mode) => (
-            <button key={mode} aria-pressed={currentTheme === mode} onClick={() => onThemeChange(mode)}>
-              {mode === 'light' ? t.themeLight : t.themeDark}
+          {(['light', 'dark', 'system'] as const).map((mode) => (
+            <button
+              key={mode}
+              aria-pressed={currentTheme === mode}
+              onClick={() => {
+                // When in a custom palette, switching mode reverts back to the default palette.
+                if (currentPalette && currentPalette !== 'default') {
+                  onPaletteChange('default');
+                }
+                onThemeChange(mode);
+              }}
+            >
+              {mode === 'light' ? t.themeLight : mode === 'dark' ? t.themeDark : t.themeSystem}
             </button>
           ))}
         </div>
