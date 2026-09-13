@@ -713,3 +713,36 @@ describe('Recommendation & Planning API Endpoints', () => {
     assert.ok(updatedPlan.notices.some((n: any) => n.en.includes('No alternative Easy (review) problem available')));
   });
 });
+
+/** Invalid creates and ownership conflicts must not leave strategy, version, assignment or revision writes. */
+it('rejects invalid strategy creation atomically at the API boundary', async () => {
+  const { app, store, db } = await createTestApp();
+  const valid: StrategyInput = { name: 'Existing', weekdays: [1], rules: { dailyCount: 3,
+    difficulty: { Easy: 100, Medium: 0, Hard: 0 }, tags: [], premium: false,
+    reviewEnabled: false, reviewPercent: null, preference: '' } };
+  try {
+    assert.equal((await app.inject({ method: 'POST', url: '/api/v1/strategies', payload: valid })).statusCode, 201);
+    const snapshot = () => JSON.stringify({
+      strategies: db.prepare('SELECT * FROM strategies').all(),
+      versions: db.prepare('SELECT * FROM strategy_versions').all(),
+      assignments: db.prepare('SELECT * FROM weekday_assignments').all(),
+      revision: store.planning.stamp().planning,
+    });
+    const before = snapshot();
+    const invalid: unknown[] = [
+      { ...valid, name: ' ' },
+      ...[0, -1, 1.5].map(dailyCount => ({ ...valid, rules: { ...valid.rules, dailyCount } })),
+      { ...valid, rules: { ...valid.rules, difficulty: { Easy: 80, Medium: 0, Hard: 0 } } },
+      { ...valid, rules: { ...valid.rules, difficulty: { Easy: 101, Medium: -1, Hard: 0 } } },
+      ...[null, 0, -1, 101].map(reviewPercent => ({ ...valid, rules: { ...valid.rules, reviewEnabled: true, reviewPercent } })),
+      { ...valid, weekdays: [2, 2] },
+      { ...valid, weekdays: [2, 1], name: 'Conflicting' },
+      { ...valid, weekdays: [2], rules: { ...valid.rules, tags: ['not-a-catalog-tag'] } },
+    ];
+    for (const payload of invalid) {
+      const response = await app.inject({ method: 'POST', url: '/api/v1/strategies', payload: payload as any });
+      assert.ok([400, 409].includes(response.statusCode), response.body);
+      assert.equal(snapshot(), before, 'Failed creation must have no persistent side effects');
+    }
+  } finally { await app.close(); db.close(); }
+});

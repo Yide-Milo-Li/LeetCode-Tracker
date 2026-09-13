@@ -16,7 +16,8 @@ import {
 import { isEventTime, localDate, addDays, isTimeZone } from '../../contracts/src/time.ts';
 import type { CatalogProblem } from '../../contracts/src/sync.ts';
 
-export const ALGORITHM_VERSION = 'phase4-v1';
+/** v2 makes 100% review a hard kind constraint without changing candidate ordering. */
+export const ALGORITHM_VERSION = 'phase4-v2';
 const intervals = [1, 3, 7, 14, 30];
 
 /**
@@ -244,7 +245,7 @@ export interface Selection {
 }
 
 /**
- * Selects candidate items to fulfill daily quotas while preserving completed items.
+ * Select daily quotas while preserving completed items; 100% review forbids new-item backfill.
  */
 export function select(
   pool: Candidate[],
@@ -254,6 +255,7 @@ export function select(
   const limits = quotas(rules);
   const selected: Candidate[] = [];
   const notices: Bilingual[] = [];
+  const reviewOnly = rules.reviewEnabled && rules.reviewPercent === 100;
 
   const reviewTargetCount = Math.round(
     (rules.dailyCount * (rules.reviewEnabled ? rules.reviewPercent ?? 0 : 0)) / 100
@@ -282,7 +284,8 @@ export function select(
     );
 
     const reviews = pool.filter((p) => p.difficulty === difficulty && p.kind === 'review');
-    const fresh = pool.filter((p) => p.difficulty === difficulty && p.kind === 'new');
+    // All-review is an explicit kind constraint, even when too few reviews are due.
+    const fresh = reviewOnly ? [] : pool.filter((p) => p.difficulty === difficulty && p.kind === 'new');
 
     const chosen = [
       ...reviews.slice(0, targetReviewCount),

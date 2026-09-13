@@ -119,7 +119,7 @@ describe('Domain Scheduling Algorithms', () => {
 
     // Captured from the pre-refactor algorithm: iterating UTF-16 code units would
     // move this valid custom ID to last place and change the selected problems.
-    assert.equal(ALGORITHM_VERSION, 'phase4-v1');
+    assert.equal(ALGORITHM_VERSION, 'phase4-v2');
     assert.deepEqual(pool.map((problem) => problem.questionId), [
       'custom-😀', '1', '0', '2', '5', '4', '7', '6', '9', '8',
     ]);
@@ -495,4 +495,21 @@ describe('PlanningStore Database Operations', () => {
       (err: any) => err instanceof PlanningError && err.code === 'OPERATION_REUSED'
     );
   });
+});
+
+/** All-review is a hard kind constraint; candidate shortages must not silently introduce new work. */
+it('all-review selection never backfills with new problems', () => {
+  const rules: Rules = { dailyCount: 3, difficulty: { Easy: 100, Medium: 0, Hard: 0 },
+    tags: [], premium: false, reviewEnabled: true, reviewPercent: 100, preference: '' };
+  const pool = [
+    { ...createMockProblem('review'), kind: 'review' as const, dueDate: '2026-09-08' },
+    { ...createMockProblem('new-1'), kind: 'new' as const, dueDate: null },
+    { ...createMockProblem('new-2'), kind: 'new' as const, dueDate: null },
+  ];
+  const result = select(pool, rules);
+  assert.deepEqual(result.selected.map(p => p.questionId), ['review']);
+  assert.ok(result.notices.some(n => n.en.includes('2 slots unavailable')));
+  assert.equal(select(pool.slice(1), rules).selected.length, 0);
+  assert.equal(select(pool, { ...rules, reviewPercent: 50 }).selected.length, 3,
+    'Partial review retains the existing shortage fallback');
 });

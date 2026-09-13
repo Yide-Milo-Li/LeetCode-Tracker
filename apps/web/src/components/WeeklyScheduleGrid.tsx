@@ -2,6 +2,7 @@
  * Weekly schedule grid component displaying day-by-day recommendation strategy assignments.
  */
 import React from 'react';
+import { difficultyCounts } from '../strategy-counts.ts';
 import { Calendar } from 'lucide-react';
 import type { Strategy } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
@@ -40,9 +41,8 @@ export const WeeklyScheduleGrid: React.FC<WeeklyScheduleGridProps> = ({ schedule
                       {strategy.rules.dailyCount} {lang === 'zh' ? '题' : 'problems'}
                     </span>
                     <span>
-                      E:{Math.round(strategy.rules.difficulty.Easy)}% M:
-                      {Math.round(strategy.rules.difficulty.Medium)}% H:
-                      {Math.round(strategy.rules.difficulty.Hard)}%
+                      {Object.values(difficultyCounts(strategy.rules)).map((count, index) =>
+                        `${[t.statEasy, t.statMedium, t.statHard][index]}: ${count}`).join(' · ')}
                     </span>
                   </div>
                 </>

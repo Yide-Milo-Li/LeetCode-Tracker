@@ -2,6 +2,7 @@
  * Strategy card component for displaying individual recommendation strategy rules and actions.
  */
 import React from 'react';
+import { difficultyCounts, reviewCountForRules } from '../strategy-counts.ts';
 import { IconButton } from './ui.tsx';
 import { Edit2, Trash2 } from 'lucide-react';
 import type { Strategy } from '../api.ts';
@@ -24,6 +25,7 @@ export const StrategyCard: React.FC<StrategyCardProps> = ({
   onDelete,
 }) => {
   const t = translations[lang];
+  const counts = difficultyCounts(s.rules);
 
   return (
     <div className="strategy-card">
@@ -51,16 +53,16 @@ export const StrategyCard: React.FC<StrategyCardProps> = ({
         </div>
 
         <div className="strategy-detail-row">
-          <span className="text-muted">{t.difficultyDistribution}:</span>
+          <span className="text-muted">{t.difficultyCounts}:</span>
           <div className="diff-pills-group">
             <span className="badge difficulty-easy">
-              {t.statEasy}: {s.rules.difficulty.Easy}%
+              {t.statEasy}: {counts.Easy}
             </span>
             <span className="badge difficulty-medium">
-              {t.statMedium}: {s.rules.difficulty.Medium}%
+              {t.statMedium}: {counts.Medium}
             </span>
             <span className="badge difficulty-hard">
-              {t.statHard}: {s.rules.difficulty.Hard}%
+              {t.statHard}: {counts.Hard}
             </span>
           </div>
         </div>
@@ -81,11 +83,11 @@ export const StrategyCard: React.FC<StrategyCardProps> = ({
         </div>
 
         <div className="strategy-detail-row">
-          <span className="text-muted">{t.enableReview}:</span>
+          <span className="text-muted">{t.reviewCount}:</span>
           <span>
             {s.rules.reviewEnabled ? (
               <span className="badge badge-success">
-                {lang === 'zh' ? '启用' : 'Enabled'} ({s.rules.reviewPercent}%)
+                {reviewCountForRules(s.rules)} / {s.rules.dailyCount}
               </span>
             ) : (
               <span className="badge badge-secondary">{lang === 'zh' ? '关闭' : 'Disabled'}</span>

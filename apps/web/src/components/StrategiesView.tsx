@@ -4,27 +4,17 @@
  * topic tags, spaced repetition, premium) and map them across weekdays with conflict detection.
  */
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import {
-  Calendar,
-  Plus,
-  Edit2,
-  Trash2,
-  CheckCircle2,
-  AlertTriangle,
-  AlertCircle,
-  Clock,
-  Layers,
-  Sparkles,
-  Tag,
-  Shield,
-  RotateCcw,
-  X,
-} from 'lucide-react';
+import { Plus, CheckCircle2, AlertCircle, Clock } from 'lucide-react';
 import { api, type Strategy, type StrategyInput, type TopicTag } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
 import { Dialog } from './ui.tsx';
 import { useWorkspace } from '../workspace.tsx';
-import { allocate } from '../../../../packages/domain/src/index.ts';
+import { difficulties, strategyInputSchema } from '../../../../packages/contracts/src/recommendations.ts';
+import {
+  emptyDifficultyDraft, difficultyCounts, reviewCountForRules, reviewModeForRules,
+  updateDifficultyDraft, isCount, percentagesForCounts, reviewPercentForCount,
+  unchangedReview, type ReviewMode, type CountInput,
+} from '../strategy-counts.ts';
 import { WeeklyScheduleGrid } from './WeeklyScheduleGrid.tsx';
 import { StrategyCard } from './StrategyCard.tsx';
 
@@ -48,13 +38,12 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang }) => {
   const [editingStrategy, setEditingStrategy] = useState<Strategy | null>(null);
   const [name, setName] = useState('');
   const [dailyCount, setDailyCount] = useState<number | ''>('');
-  const [easyPercent, setEasyPercent] = useState<number | ''>('');
-  const [medPercent, setMedPercent] = useState<number | ''>('');
-  const [hardPercent, setHardPercent] = useState<number | ''>('');
+  const [difficultyDraft, setDifficultyDraft] = useState(emptyDifficultyDraft);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [premium, setPremium] = useState(false);
-  const [reviewEnabled, setReviewEnabled] = useState<boolean | null>(null);
-  const [reviewPercent, setReviewPercent] = useState<number | '' | null>(null);
+  const [reviewMode, setReviewMode] = useState<ReviewMode>(null);
+  const [reviewCount, setReviewCount] = useState<CountInput>('');
+  const validationId = React.useId();
   const [weekdays, setWeekdays] = useState<number[]>([]);
   const [preference, setPreference] = useState('');
   const [saving, setSaving] = useState(false);
@@ -95,13 +84,11 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang }) => {
     setEditingStrategy(null);
     setName('');
     setDailyCount('');
-    setEasyPercent('');
-    setMedPercent('');
-    setHardPercent('');
+    setDifficultyDraft(emptyDifficultyDraft());
     setSelectedTags([]);
     setPremium(false);
-    setReviewEnabled(null);
-    setReviewPercent(null);
+    setReviewMode(null);
+    setReviewCount('');
     setWeekdays([]);
     setPreference('');
     setError(null);
@@ -113,34 +100,40 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang }) => {
     setEditingStrategy(s);
     setName(s.name);
     setDailyCount(s.rules.dailyCount);
-    setEasyPercent(s.rules.difficulty.Easy);
-    setMedPercent(s.rules.difficulty.Medium);
-    setHardPercent(s.rules.difficulty.Hard);
+    setDifficultyDraft({ values: difficultyCounts(s.rules), automatic: null });
     setSelectedTags(s.rules.tags);
     setPremium(s.rules.premium);
-    setReviewEnabled(s.rules.reviewEnabled);
-    setReviewPercent(s.rules.reviewPercent);
+    setReviewMode(reviewModeForRules(s.rules));
+    setReviewCount(reviewCountForRules(s.rules));
     setWeekdays(s.weekdays);
     setPreference(s.rules.preference);
     setError(null);
     setModalOpen(true);
   }
 
-  const hasDailyCount = typeof dailyCount === 'number' && dailyCount > 0;
-  const hasDifficulties =
-    typeof easyPercent === 'number' && typeof medPercent === 'number' && typeof hardPercent === 'number';
-  const currentSum = hasDifficulties
-    ? Math.round(((easyPercent as number) + (medPercent as number) + (hardPercent as number)) * 100) / 100
-    : 0;
-  const isSumValid = hasDifficulties && Math.abs(currentSum - 100) < 1e-4;
-  const isReviewValid =
-    reviewEnabled !== null &&
-    (!reviewEnabled || (typeof reviewPercent === 'number' && reviewPercent > 0 && reviewPercent <= 100));
-  const isFormValid = name.trim().length > 0 && hasDailyCount && isSumValid && isReviewValid;
+  const counts = difficultyDraft.values;
+  const hasDailyCount = isCount(dailyCount) && dailyCount >= 1 && dailyCount <= 50;
+  const currentSum = difficulties.reduce((sum, d) => sum + (typeof counts[d] === 'number' ? counts[d] : 0), 0);
+  const hasDifficulties = difficulties.every(d => isCount(counts[d]));
+  const isSumValid = hasDifficulties && currentSum === dailyCount;
+  const reviewUnchanged = unchangedReview(dailyCount, reviewMode, reviewCount, editingStrategy?.rules);
+  const isReviewValid = reviewMode !== null && (reviewMode !== 'partial' || reviewUnchanged ||
+    (isCount(reviewCount) && reviewCount >= 1 && typeof dailyCount === 'number' && reviewCount <= dailyCount));
+  const exceedsTotal = typeof dailyCount === 'number' && (
+    difficulties.some(d => typeof counts[d] === 'number' && counts[d] > dailyCount) || currentSum > dailyCount ||
+    (reviewMode === 'partial' && typeof reviewCount === 'number' && reviewCount > dailyCount));
+  const invalidCount = difficulties.some(d => counts[d] !== '' && !isCount(counts[d]));
+  const validationMessage = exceedsTotal ? t.countExceedsTotal
+    : dailyCount !== '' && !hasDailyCount ? t.dailyCountInvalid
+    : invalidCount ? t.wholeCountsRequired
+    : hasDifficulties && !isSumValid ? t.countsMustMatch
+    : reviewMode === 'partial' && reviewCount !== '' && !isReviewValid ? t.reviewCountInvalid : '';
+  const isFormValid = name.trim().length > 0 && name.trim().length <= 100 && preference.trim().length <= 2000 &&
+    hasDailyCount && isSumValid && isReviewValid && !exceedsTotal && !invalidCount;
 
   /** Persist rules and weekday ownership atomically; conflicts retain the draft. */
   async function handleSave() {
-    if (!isFormValid) return;
+    if (!isFormValid || saving) return;
 
     // Explain known conflicts before submission; the server still arbitrates stale/concurrent assignments.
     const knownConflicts = weekdays.flatMap((day) => {
@@ -161,27 +154,29 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang }) => {
         name: name.trim(),
         rules: {
           dailyCount: dailyCount as number,
-          difficulty: {
-            Easy: easyPercent as number,
-            Medium: medPercent as number,
-            Hard: hardPercent as number,
-          },
+          difficulty: percentagesForCounts(dailyCount as number, counts, editingStrategy?.rules),
           tags: selectedTags,
           premium,
-          reviewEnabled: reviewEnabled as boolean,
-          reviewPercent: reviewEnabled ? (reviewPercent as number) : null,
+          reviewEnabled: reviewMode !== 'none',
+          reviewPercent: reviewPercentForCount(dailyCount as number, reviewMode, reviewCount, editingStrategy?.rules),
           preference: preference.trim(),
         },
         weekdays,
       };
 
+      // The shared contract is the final gate before any mutation request leaves the browser.
+      const validated = strategyInputSchema.safeParse(payload);
+      if (!validated.success) {
+        setError(t.invalidStrategy);
+        return;
+      }
       if (editingStrategy) {
         await api.updateStrategy(editingStrategy.id, {
           expectedVersion: editingStrategy.version,
-          ...payload,
+          ...validated.data,
         });
       } else {
-        await api.createStrategy(payload);
+        await api.createStrategy(validated.data);
       }
 
       setModalOpen(false);
@@ -312,6 +307,7 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang }) => {
                   type="text"
                   className="form-input"
                   aria-label={t.strategyName}
+                  maxLength={100}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder={t.strategyNamePlaceholder}
@@ -328,97 +324,43 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang }) => {
                   placeholder="e.g. 3"
                   aria-label={t.dailyCount}
                   value={dailyCount}
+                  step="1"
+                  aria-invalid={exceedsTotal || (dailyCount !== '' && !hasDailyCount)}
+                  aria-describedby={validationMessage ? validationId : undefined}
                   onChange={(e) => {
-                    const val = e.target.value;
-                    setDailyCount(val === '' ? '' : Math.max(1, parseInt(val, 10) || 1));
+                    const total = e.target.value === '' ? '' : Number(e.target.value);
+                    setDailyCount(total);
+                    setDifficultyDraft(draft => updateDifficultyDraft(draft, total));
                   }}
                   required
                 />
               </div>
             </div>
 
-            {/* Difficulty mix */}
+            {/* Counts remain explicit; only the system-owned third field tracks the remainder. */}
             <div className="form-group">
               <div className="u-display-flex u-justify-content-space-between u-margin-bottom-0-25rem">
-                <label className="form-label">{t.difficultyDistribution} *</label>
-                <span
-                  style={{
-                    fontSize: '0.85rem',
-                    fontWeight: 600,
-                    color: isSumValid ? 'var(--success)' : 'var(--danger)',
-                  }}
-                >
-                  {t.currentSum.replace('{sum}', String(currentSum))}
-                  {!isSumValid && ` (${t.sumMustBe100})`}
-                </span>
+                <span className="form-label">{t.difficultyCounts} *</span>
+                <span className="text-muted" aria-live="polite">{currentSum} / {dailyCount || '—'}</span>
               </div>
               <div className="difficulty-inputs-row">
-                <div className="diff-input-group">
-                  <span className="diff-input-label difficulty-easy">{t.statEasy} %</span>
-                  <input
-                    type="number"
-                    className="form-input"
-                    min="0"
-                    max="100"
-                    step="any"
-                    placeholder="e.g. 33.33"
-                    aria-label={t.statEasy + ' %'}
-                    value={easyPercent}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setEasyPercent(val === '' ? '' : Math.max(0, parseFloat(val) || 0));
-                    }}
-                  />
-                </div>
-                <div className="diff-input-group">
-                  <span className="diff-input-label difficulty-medium">{t.statMedium} %</span>
-                  <input
-                    type="number"
-                    className="form-input"
-                    min="0"
-                    max="100"
-                    step="any"
-                    placeholder="e.g. 33.33"
-                    aria-label={t.statMedium + ' %'}
-                    value={medPercent}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setMedPercent(val === '' ? '' : Math.max(0, parseFloat(val) || 0));
-                    }}
-                  />
-                </div>
-                <div className="diff-input-group">
-                  <span className="diff-input-label difficulty-hard">{t.statHard} %</span>
-                  <input
-                    type="number"
-                    className="form-input"
-                    min="0"
-                    max="100"
-                    step="any"
-                    placeholder="e.g. 33.34"
-                    aria-label={t.statHard + ' %'}
-                    value={hardPercent}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setHardPercent(val === '' ? '' : Math.max(0, parseFloat(val) || 0));
-                    }}
-                  />
-                </div>
+                {difficulties.map((difficulty, index) => {
+                  const label = [t.easyCount, t.mediumCount, t.hardCount][index];
+                  return <div className="diff-input-group" key={difficulty}>
+                    <label className={`diff-input-label difficulty-${difficulty.toLowerCase()}`} htmlFor={`${validationId}-${difficulty}`}>{label}</label>
+                    <input id={`${validationId}-${difficulty}`} type="number" className="form-input"
+                      min="0" max={dailyCount || undefined} step="1" aria-label={label}
+                      value={counts[difficulty]} aria-invalid={counts[difficulty] !== '' &&
+                        (!isCount(counts[difficulty]) || (typeof dailyCount === 'number' && counts[difficulty] > dailyCount))}
+                      aria-describedby={validationMessage ? validationId : undefined}
+                      onChange={e => setDifficultyDraft(draft => updateDifficultyDraft(draft, dailyCount, {
+                        difficulty, value: e.target.value === '' ? '' : Number(e.target.value),
+                      }))} />
+                  </div>;
+                })}
               </div>
             </div>
-
-            {hasDailyCount && isSumValid && (
-              <p className="coverage-note">
-                {lang === 'zh' ? '实际题数配额：' : 'Actual problem allocation: '}
-                {allocate(dailyCount as number, [
-                  easyPercent as number,
-                  medPercent as number,
-                  hardPercent as number,
-                ])
-                  .map((count, index) => [t.statEasy, t.statMedium, t.statHard][index] + ' ' + count)
-                  .join(' · ')}
-              </p>
-            )}
+            {validationMessage && <p id={validationId} role="alert" className="strategy-count-error">{validationMessage}</p>}
             {/* Weekday Assignment */}
             <div className="form-group">
               <label className="form-label">{t.assignedDays}</label>
@@ -447,52 +389,22 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang }) => {
             {/* Review & Premium settings */}
             <div className="form-grid-2">
               <div className="form-group">
-                <label className="form-label">{t.enableReview} *</label>
-                <div className="u-display-flex u-flex-direction-column u-gap-0-5rem u-margin-top-0-25rem">
-                  <label className="form-checkbox-label u-cursor-pointer">
-                    <input
-                      type="radio"
-                      name="reviewMode"
-                      checked={reviewEnabled === true}
-                      onChange={() => {
-                        setReviewEnabled(true);
-                        if (reviewPercent === null) setReviewPercent('');
-                      }}
-                    />
-                    <span>{t.enableReview}</span>
-                  </label>
-                  <label className="form-checkbox-label u-cursor-pointer">
-                    <input
-                      type="radio"
-                      name="reviewMode"
-                      checked={reviewEnabled === false}
-                      onChange={() => {
-                        setReviewEnabled(false);
-                        setReviewPercent(null);
-                      }}
-                    />
-                    <span>{t.disableReview}</span>
-                  </label>
+                <span className="form-label" id={`${validationId}-review-mode`}>{t.reviewMode} *</span>
+                <div role="radiogroup" aria-labelledby={`${validationId}-review-mode`} className="u-display-flex u-flex-direction-column u-gap-0-5rem u-margin-top-0-25rem">
+                  {(['none', 'partial', 'all'] as const).map((mode, index) => <label key={mode} className="form-checkbox-label u-cursor-pointer">
+                    <input type="radio" name="reviewMode" checked={reviewMode === mode} onChange={() => setReviewMode(mode)} />
+                    <span>{[t.disableReview, t.partialReview, t.allReview][index]}</span>
+                  </label>)}
                 </div>
-                {reviewEnabled && (
+                {(reviewMode === 'partial' || reviewMode === 'all') && (
                   <div className="u-margin-top-0-75rem">
-                    <label className="form-label u-font-size-0-8rem">{t.reviewPercentage} *</label>
-                    <input
-                      type="number"
-                      className="form-input"
-                      min="1"
-                      max="100"
-                      placeholder="e.g. 33"
-                      aria-label={t.reviewPercentage}
-                      value={reviewPercent ?? ''}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setReviewPercent(
-                          val === '' ? '' : Math.max(1, Math.min(100, parseInt(val, 10) || 1)),
-                        );
-                      }}
-                      required
-                    />
+                    <label className="form-label" htmlFor={`${validationId}-review`}>{t.reviewCount} *</label>
+                    <input id={`${validationId}-review`} type="number" className="form-input" min="1"
+                      max={dailyCount || undefined} step="1" aria-label={t.reviewCount}
+                      value={reviewMode === 'all' ? dailyCount : reviewCount} readOnly={reviewMode === 'all'}
+                      aria-invalid={reviewMode === 'partial' && reviewCount !== '' && !isReviewValid}
+                      aria-describedby={validationMessage ? validationId : undefined}
+                      onChange={e => setReviewCount(e.target.value === '' ? '' : Number(e.target.value))} required />
                   </div>
                 )}
               </div>
@@ -533,6 +445,7 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang }) => {
                 className="form-textarea"
                 rows={2}
                 aria-label={t.studyPreferences}
+                maxLength={2000}
                 value={preference}
                 onChange={(e) => setPreference(e.target.value)}
                 placeholder={t.preferencesPlaceholder}
