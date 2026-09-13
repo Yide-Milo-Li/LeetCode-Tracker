@@ -159,14 +159,14 @@ describe('Notes Store & Schema v9', () => {
 
     // English content checks
     assert.ok(md.includes('> **Difficulty**: `Easy` | **Status**: `Solved`'));
-    assert.ok(md.includes('## Practice Timeline'));
+    assert.ok(md.includes('## 📅 Practice Timeline'));
     assert.ok(md.includes('| Date | Status | Duration | Notes |'));
     assert.ok(md.includes('| 2026-09-01 | Solved | 15 min | First time solved |'));
-    assert.ok(md.includes('## Solution & Reflection'));
+    assert.ok(md.includes('## 📝 Solution & Reflection'));
     assert.ok(md.includes('Store complements in a map.'));
   });
 
-  it('generates single problem Markdown adapted to Chinese (zh) mode with localized headings and templates', () => {
+  it('generates single problem Markdown adapted to Chinese (zh) mode with localized headings, emojis and dividers', () => {
     // 1. With custom note
     const mdWithCustomNote = generateProblemMarkdown({
       questionId: '1',
@@ -191,13 +191,13 @@ describe('Notes Store & Schema v9', () => {
 
     assert.ok(mdWithCustomNote.includes('> **难度**: `Easy` | **状态**: `已解决`'));
     assert.ok(mdWithCustomNote.includes('> **标签**: #leetcode/array #leetcode/hash-table'));
-    assert.ok(mdWithCustomNote.includes('## 练习记录'));
+    assert.ok(mdWithCustomNote.includes('## 📅 练习记录'));
     assert.ok(mdWithCustomNote.includes('| 日期 | 状态 | 耗时 | 备注 |'));
     assert.ok(mdWithCustomNote.includes('| 2026-09-01 | 已解决 | 15 分钟 | 初次 AC |'));
-    assert.ok(mdWithCustomNote.includes('## 解题复盘与深度笔记'));
+    assert.ok(mdWithCustomNote.includes('## 📝 解题复盘与深度笔记'));
     assert.ok(mdWithCustomNote.includes('一次遍历存补数。'));
 
-    // 2. Without custom note (should provide clean Chinese skeleton template)
+    // 2. Without custom note (should provide clean Chinese skeleton template with emojis and dividers)
     const mdDefaultTemplate = generateProblemMarkdown({
       questionId: '2',
       questionFrontendId: '2',
@@ -212,12 +212,13 @@ describe('Notes Store & Schema v9', () => {
     }, 'zh');
 
     assert.ok(mdDefaultTemplate.includes('> **难度**: `Medium` | **状态**: `未开始`'));
-    assert.ok(mdDefaultTemplate.includes('## 核心思路'));
-    assert.ok(mdDefaultTemplate.includes('## 复杂度分析'));
+    assert.ok(mdDefaultTemplate.includes('---'));
+    assert.ok(mdDefaultTemplate.includes('## 💡 核心思路'));
+    assert.ok(mdDefaultTemplate.includes('## ⏱️ 复杂度分析'));
     assert.ok(mdDefaultTemplate.includes('- 时间复杂度: $O(N)$'));
     assert.ok(mdDefaultTemplate.includes('- 空间复杂度: $O(1)$'));
-    assert.ok(mdDefaultTemplate.includes('## 最佳实现'));
-    assert.ok(mdDefaultTemplate.includes('## 避坑与边界情况'));
+    assert.ok(mdDefaultTemplate.includes('## 💻 最佳实现'));
+    assert.ok(mdDefaultTemplate.includes('## ⚠️ 避坑与边界情况'));
   });
 
   it('generates Notion CSVs with correct escaping and headers', async () => {

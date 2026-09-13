@@ -25,36 +25,48 @@ import { PageHeader, Feedback, Field, Pagination } from './ui.tsx';
 import { QuickCopyButtons } from './QuickCopyButtons.tsx';
 
 const NOTE_TEMPLATES = {
-  en: `## Key Idea & Approach
+  en: `## 💡 Key Idea & Approach
 - 
 
-## Complexity Analysis
+---
+
+## ⏱️ Complexity Analysis
 - Time Complexity: $O(N)$
 - Space Complexity: $O(1)$
 
-## Clean Implementation
+---
+
+## 💻 Clean Implementation
 \`\`\`python
 class Solution:
     pass
 \`\`\`
 
-## Edge Cases & Traps
+---
+
+## ⚠️ Edge Cases & Traps
 - 
 `,
-  zh: `## 核心思路
+  zh: `## 💡 核心思路
 - 
 
-## 复杂度分析
+---
+
+## ⏱️ 复杂度分析
 - 时间复杂度: $O(N)$
 - 空间复杂度: $O(1)$
 
-## 最佳实现
+---
+
+## 💻 最佳实现
 \`\`\`python
 class Solution:
     pass
 \`\`\`
 
-## 避坑与边界情况
+---
+
+## ⚠️ 避坑与边界情况
 - 
 `,
 };

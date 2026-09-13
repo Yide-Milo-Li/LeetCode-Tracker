@@ -76,12 +76,14 @@ review_stage: ${data.reviewStage ?? 'null'}
       return `| ${date} | ${st} | ${dur} | ${cleanNotes} |`;
     });
 
-    const timelineTitle = isZh ? '## 练习记录' : '## Practice Timeline';
+    const timelineTitle = isZh ? '## 📅 练习记录' : '## 📅 Practice Timeline';
     const timelineHeaders = isZh
       ? '| 日期 | 状态 | 耗时 | 备注 |\n| :--- | :--- | :--- | :--- |'
       : '| Date | Status | Duration | Notes |\n| :--- | :--- | :--- | :--- |';
 
-    timeline = `${timelineTitle}
+    timeline = `---
+
+${timelineTitle}
 
 ${timelineHeaders}
 ${rows.join('\n')}`;
@@ -90,41 +92,59 @@ ${rows.join('\n')}`;
   // 4. Deep note section
   let deepNote = '';
   if (data.customNote && data.customNote.trim().length > 0) {
-    const noteHeading = isZh ? '## 解题复盘与深度笔记' : '## Solution & Reflection';
-    deepNote = `${noteHeading}
+    const noteHeading = isZh ? '## 📝 解题复盘与深度笔记' : '## 📝 Solution & Reflection';
+    deepNote = `---
+
+${noteHeading}
 
 ${data.customNote.trim()}`;
   } else if (isZh) {
-    deepNote = `## 核心思路
+    deepNote = `---
+
+## 💡 核心思路
 - 
 
-## 复杂度分析
+---
+
+## ⏱️ 复杂度分析
 - 时间复杂度: $O(N)$
 - 空间复杂度: $O(1)$
 
-## 最佳实现
+---
+
+## 💻 最佳实现
 \`\`\`python
 class Solution:
     pass
 \`\`\`
 
-## 避坑与边界情况
+---
+
+## ⚠️ 避坑与边界情况
 - `;
   } else {
-    deepNote = `## Key Idea & Approach
+    deepNote = `---
+
+## 💡 Key Idea & Approach
 - 
 
-## Complexity Analysis
+---
+
+## ⏱️ Complexity Analysis
 - Time Complexity: $O(N)$
 - Space Complexity: $O(1)$
 
-## Clean Implementation
+---
+
+## 💻 Clean Implementation
 \`\`\`python
 class Solution:
     pass
 \`\`\`
 
-## Edge Cases & Traps
+---
+
+## ⚠️ Edge Cases & Traps
 - `;
   }
 
