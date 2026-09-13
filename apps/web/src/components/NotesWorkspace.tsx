@@ -24,20 +24,20 @@ import { translations, type Language } from '../i18n.ts';
 import { PageHeader, Feedback, Field, Pagination } from './ui.tsx';
 import { QuickCopyButtons } from './QuickCopyButtons.tsx';
 
-const DEFAULT_NOTE_TEMPLATE = `## 💡 核心思路 (Key Idea & Approach)
+const DEFAULT_NOTE_TEMPLATE = `## Key Idea & Approach
 - 
 
-## ⏱️ 复杂度分析 (Complexity)
-- 时间复杂度 (Time Complexity): $O(N)$
-- 空间复杂度 (Space Complexity): $O(1)$
+## Complexity Analysis
+- Time Complexity: $O(N)$
+- Space Complexity: $O(1)$
 
-## 💻 最佳实现 (Clean Implementation)
+## Clean Implementation
 \`\`\`python
 class Solution:
     pass
 \`\`\`
 
-## ⚠️ 避坑与边界情况 (Edge Cases & Common Traps)
+## Edge Cases & Traps
 - 
 `;
 
@@ -82,6 +82,7 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
   // Selected problem practice timeline
   const [practices, setPractices] = useState<PracticeRecord[]>([]);
   const [loadingPractices, setLoadingPractices] = useState(false);
+  const [showTimeline, setShowTimeline] = useState(false);
 
   // Load problem notes list
   const loadList = useCallback(() => {
@@ -230,17 +231,19 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
               href={api.getObsidianZipUrl('all')}
               className="btn btn-secondary btn-sm"
               title="Download 4,000+ Obsidian markdown skeleton"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
             >
-              <Archive size={15} />
+              <Archive size={14} />
               <span>{t.exportObsidianVault}</span>
             </a>
             <a
               href={api.getNotionCsvUrl('summary')}
               className="btn btn-secondary btn-sm"
               title="Download Notion Problems Summary CSV"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
             >
-              <Download size={15} />
-              <span>{zh ? '导出 Notion 题库表' : 'Notion CSV'}</span>
+              <Download size={14} />
+              <span>{zh ? 'Notion 题库表' : 'Notion CSV'}</span>
             </a>
           </div>
         }
@@ -251,8 +254,8 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
         className="notes-master-detail"
         style={{
           display: 'grid',
-          gridTemplateColumns: '360px 1fr',
-          gap: '20px',
+          gridTemplateColumns: '340px 1fr',
+          gap: '16px',
           flex: 1,
           minHeight: '620px',
           alignItems: 'start',
@@ -264,22 +267,44 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
           style={{
             display: 'flex',
             flexDirection: 'column',
-            gap: '12px',
+            gap: '10px',
             backgroundColor: 'var(--surface)',
-            border: '1px solid var(--border)',
-            borderRadius: '12px',
-            padding: '16px',
+            border: '1px solid var(--border-color)',
+            borderRadius: '10px',
+            padding: '14px',
             height: '100%',
             maxHeight: 'calc(100vh - 160px)',
             overflow: 'hidden',
           }}
         >
-          {/* Scope switch */}
-          <div style={{ display: 'flex', borderRadius: '6px', border: '1px solid var(--border)', overflow: 'hidden' }}>
+          {/* Scope switch: Sleek segmented control pill */}
+          <div
+            role="tablist"
+            style={{
+              display: 'flex',
+              padding: '3px',
+              backgroundColor: 'var(--muted-surface)',
+              borderRadius: '8px',
+              gap: '2px',
+            }}
+          >
             <button
               type="button"
-              className={`btn btn-sm ${scope === 'practiced' ? 'btn-primary' : 'btn-secondary'}`}
-              style={{ flex: 1, borderRadius: 0, border: 'none' }}
+              role="tab"
+              aria-selected={scope === 'practiced'}
+              style={{
+                flex: 1,
+                padding: '5px 10px',
+                borderRadius: '6px',
+                border: 'none',
+                fontSize: '0.8125rem',
+                fontWeight: scope === 'practiced' ? 600 : 450,
+                backgroundColor: scope === 'practiced' ? 'var(--surface)' : 'transparent',
+                color: scope === 'practiced' ? 'var(--text-main)' : 'var(--text-muted)',
+                boxShadow: scope === 'practiced' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
               onClick={() => {
                 setScope('practiced');
                 setPage(1);
@@ -289,8 +314,21 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
             </button>
             <button
               type="button"
-              className={`btn btn-sm ${scope === 'all' ? 'btn-primary' : 'btn-secondary'}`}
-              style={{ flex: 1, borderRadius: 0, border: 'none' }}
+              role="tab"
+              aria-selected={scope === 'all'}
+              style={{
+                flex: 1,
+                padding: '5px 10px',
+                borderRadius: '6px',
+                border: 'none',
+                fontSize: '0.8125rem',
+                fontWeight: scope === 'all' ? 600 : 450,
+                backgroundColor: scope === 'all' ? 'var(--surface)' : 'transparent',
+                color: scope === 'all' ? 'var(--text-main)' : 'var(--text-muted)',
+                boxShadow: scope === 'all' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
               onClick={() => {
                 setScope('all');
                 setPage(1);
@@ -303,13 +341,14 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
           {/* Search bar */}
           <div style={{ position: 'relative' }}>
             <Search
-              size={15}
+              size={14}
               style={{
                 position: 'absolute',
-                left: '10px',
+                left: '9px',
                 top: '50%',
                 transform: 'translateY(-50%)',
                 color: 'var(--text-muted)',
+                pointerEvents: 'none',
               }}
             />
             <input
@@ -322,18 +361,20 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
               }}
               style={{
                 width: '100%',
-                padding: '8px 12px 8px 32px',
+                padding: '6px 10px 6px 28px',
                 borderRadius: '6px',
-                border: '1px solid var(--border)',
-                backgroundColor: 'var(--surface-muted)',
-                color: 'var(--text-primary)',
-                fontSize: '0.875rem',
+                border: '1px solid var(--border-color)',
+                backgroundColor: 'var(--surface)',
+                color: 'var(--text-main)',
+                fontSize: '0.8125rem',
+                minHeight: '32px',
+                boxSizing: 'border-box',
               }}
             />
           </div>
 
-          {/* Filter row */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+          {/* Filter row: high contrast in both light and dark mode */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
             <select
               value={difficulty}
               onChange={(e) => {
@@ -341,18 +382,20 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
                 setPage(1);
               }}
               style={{
-                padding: '6px 8px',
+                padding: '5px 8px',
                 borderRadius: '6px',
-                border: '1px solid var(--border)',
-                backgroundColor: 'var(--surface-muted)',
-                color: 'var(--text-primary)',
+                border: '1px solid var(--border-color)',
+                backgroundColor: 'var(--surface)',
+                color: 'var(--text-main)',
                 fontSize: '0.8125rem',
+                minHeight: '32px',
+                cursor: 'pointer',
               }}
             >
-              <option value="all">{t.allDifficulties}</option>
-              <option value="Easy">{t.statEasy}</option>
-              <option value="Medium">{t.statMedium}</option>
-              <option value="Hard">{t.statHard}</option>
+              <option value="all" style={{ backgroundColor: 'var(--surface)', color: 'var(--text-main)' }}>{t.allDifficulties}</option>
+              <option value="Easy" style={{ backgroundColor: 'var(--surface)', color: 'var(--text-main)' }}>{t.statEasy}</option>
+              <option value="Medium" style={{ backgroundColor: 'var(--surface)', color: 'var(--text-main)' }}>{t.statMedium}</option>
+              <option value="Hard" style={{ backgroundColor: 'var(--surface)', color: 'var(--text-main)' }}>{t.statHard}</option>
             </select>
 
             <select
@@ -362,17 +405,19 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
                 setPage(1);
               }}
               style={{
-                padding: '6px 8px',
+                padding: '5px 8px',
                 borderRadius: '6px',
-                border: '1px solid var(--border)',
-                backgroundColor: 'var(--surface-muted)',
-                color: 'var(--text-primary)',
+                border: '1px solid var(--border-color)',
+                backgroundColor: 'var(--surface)',
+                color: 'var(--text-main)',
                 fontSize: '0.8125rem',
+                minHeight: '32px',
+                cursor: 'pointer',
               }}
             >
-              <option value="all">{t.filterHasNote}: 全部</option>
-              <option value="true">{t.hasNoteOnly}</option>
-              <option value="false">{t.noNoteOnly}</option>
+              <option value="all" style={{ backgroundColor: 'var(--surface)', color: 'var(--text-main)' }}>{t.filterHasNote}: 全部</option>
+              <option value="true" style={{ backgroundColor: 'var(--surface)', color: 'var(--text-main)' }}>{t.hasNoteOnly}</option>
+              <option value="false" style={{ backgroundColor: 'var(--surface)', color: 'var(--text-main)' }}>{t.noNoteOnly}</option>
             </select>
           </div>
 
@@ -384,21 +429,28 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
               overflowY: 'auto',
               display: 'flex',
               flexDirection: 'column',
-              gap: '6px',
-              paddingRight: '4px',
+              gap: '3px',
+              paddingRight: '2px',
             }}
           >
             {loadingList ? (
-              <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}>
+              <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
                 Loading notes...
               </div>
             ) : items.length === 0 ? (
-              <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.875rem' }}>
+              <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
                 {t.noNotesFound}
               </div>
             ) : (
               items.map((it) => {
                 const isSelected = selectedId === it.questionFrontendId;
+                const diffColor =
+                  it.difficulty === 'Easy'
+                    ? 'var(--easy)'
+                    : it.difficulty === 'Medium'
+                    ? 'var(--medium)'
+                    : 'var(--hard)';
+
                 return (
                   <button
                     key={it.questionId}
@@ -406,48 +458,70 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
                     onClick={() => setSelectedId(it.questionFrontendId)}
                     style={{
                       display: 'flex',
-                      alignItems: 'flex-start',
-                      justifyContent: 'space-between',
-                      padding: '10px 12px',
-                      borderRadius: '8px',
-                      border: isSelected ? '1px solid var(--primary)' : '1px solid transparent',
-                      backgroundColor: isSelected ? 'var(--primary-subtle)' : 'var(--surface-muted)',
+                      flexDirection: 'column',
+                      gap: '3px',
+                      padding: '8px 10px',
+                      borderRadius: '6px',
+                      borderTop: 'none',
+                      borderRight: 'none',
+                      borderBottom: 'none',
+                      borderLeft: isSelected ? '3px solid var(--primary)' : '3px solid transparent',
+                      backgroundColor: isSelected ? 'var(--selected)' : 'transparent',
                       textAlign: 'left',
                       cursor: 'pointer',
-                      transition: 'background-color 0.15s',
+                      transition: 'background-color 0.12s ease',
+                      boxSizing: 'border-box',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isSelected) e.currentTarget.style.backgroundColor = 'var(--muted-surface)';
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isSelected) e.currentTarget.style.backgroundColor = 'transparent';
                     }}
                   >
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px' }}>
-                        <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-muted)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', fontFamily: 'monospace' }}>
                           #{it.questionFrontendId}
                         </span>
-                        <span className={`badge badge-${it.difficulty.toLowerCase()}`} style={{ fontSize: '0.6875rem' }}>
+                        <span
+                          style={{
+                            display: 'inline-block',
+                            width: '6px',
+                            height: '6px',
+                            borderRadius: '50%',
+                            backgroundColor: diffColor,
+                          }}
+                          title={it.difficulty}
+                        />
+                        <span style={{ fontSize: '0.6875rem', color: diffColor, fontWeight: 500 }}>
                           {it.difficulty}
                         </span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
                         {it.hasAccepted && (
-                          <span title="Solved" style={{ color: 'var(--success)', fontSize: '0.8125rem' }}>
+                          <span title="Solved" style={{ color: 'var(--primary)', fontSize: '0.75rem', fontWeight: 600, lineHeight: 1 }}>
                             ✓
                           </span>
                         )}
                         {it.hasCustomNote && (
-                          <span title={t.hasNoteOnly} style={{ color: 'var(--primary)' }}>
-                            <FileText size={12} />
+                          <span title={t.hasNoteOnly} style={{ color: 'var(--text-muted)', display: 'inline-flex' }}>
+                            <FileText size={11} />
                           </span>
                         )}
                       </div>
-                      <div
-                        style={{
-                          fontSize: '0.875rem',
-                          fontWeight: 500,
-                          color: 'var(--text-primary)',
-                          whiteSpace: 'nowrap',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                        }}
-                      >
-                        {it.title}
-                      </div>
+                    </div>
+                    <div
+                      style={{
+                        fontSize: '0.8125rem',
+                        fontWeight: isSelected ? 600 : 450,
+                        color: 'var(--text-main)',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}
+                    >
+                      {it.title}
                     </div>
                   </button>
                 );
@@ -457,7 +531,7 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
 
           {/* Pagination */}
           {total > limit && (
-            <div style={{ paddingTop: '8px', borderTop: '1px solid var(--border)' }}>
+            <div style={{ paddingTop: '6px', borderTop: '1px solid var(--border-color)' }}>
               <Pagination lang={lang} page={page} total={total} limit={limit} onPage={setPage} />
             </div>
           )}
@@ -468,12 +542,12 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
           className="notes-detail-pane"
           style={{
             backgroundColor: 'var(--surface)',
-            border: '1px solid var(--border)',
-            borderRadius: '12px',
-            padding: '24px',
+            border: '1px solid var(--border-color)',
+            borderRadius: '10px',
+            padding: '20px',
             display: 'flex',
             flexDirection: 'column',
-            gap: '20px',
+            gap: '16px',
             maxHeight: 'calc(100vh - 160px)',
             overflowY: 'auto',
           }}
@@ -486,65 +560,64 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'flex-start',
-                  borderBottom: '1px solid var(--border)',
-                  paddingBottom: '16px',
+                  borderBottom: '1px solid var(--border-color)',
+                  paddingBottom: '14px',
+                  gap: '12px',
                 }}
               >
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-                    <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-muted)' }}>
-                      #{selectedSummary.questionFrontendId}
-                    </span>
-                    <span className={`badge badge-${selectedSummary.difficulty.toLowerCase()}`}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '6px' }}>
+                    <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 620, color: 'var(--text-main)', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                      <span>#{selectedSummary.questionFrontendId}. {selectedSummary.title}</span>
+                      <a
+                        href={selectedSummary.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="btn-icon"
+                        title="Open on LeetCode ↗"
+                        style={{ color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center' }}
+                      >
+                        <ExternalLink size={14} />
+                      </a>
+                    </h2>
+                    <span className={`badge badge-${selectedSummary.difficulty.toLowerCase()}`} style={{ fontSize: '0.6875rem' }}>
                       {selectedSummary.difficulty}
                     </span>
                     {selectedSummary.hasAccepted && (
-                      <span className="badge" style={{ backgroundColor: 'var(--success-subtle)', color: 'var(--success)' }}>
-                        Solved
+                      <span style={{ fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 600 }}>
+                        ✓ Solved
                       </span>
                     )}
-                    {selectedSummary.reviewStage && (
-                      <span className="badge" style={{ backgroundColor: 'var(--accent-subtle)', color: 'var(--accent)' }}>
+                    {Boolean(selectedSummary.reviewStage) && (
+                      <span style={{ fontSize: '0.6875rem', padding: '1px 6px', borderRadius: '4px', backgroundColor: 'var(--warning-bg)', color: 'var(--warning)', fontWeight: 500 }}>
                         Review · Stage {selectedSummary.reviewStage}
                       </span>
                     )}
                   </div>
 
-                  <h2 style={{ margin: '0 0 8px', fontSize: '1.375rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span>{selectedSummary.title}</span>
-                    <a
-                      href={selectedSummary.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="btn-icon"
-                      title="Open on LeetCode ↗"
-                      style={{ color: 'var(--text-muted)' }}
-                    >
-                      <ExternalLink size={16} />
-                    </a>
-                  </h2>
-
-                  {/* Tags */}
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                    {selectedSummary.tags.map((tag) => (
-                      <span
-                        key={tag}
-                        style={{
-                          fontSize: '0.75rem',
-                          backgroundColor: 'var(--surface-muted)',
-                          padding: '2px 8px',
-                          borderRadius: '4px',
-                          color: 'var(--text-muted)',
-                        }}
-                      >
-                        #{tag}
-                      </span>
-                    ))}
-                  </div>
+                  {/* Subtle tags */}
+                  {selectedSummary.tags.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                      {selectedSummary.tags.map((tag) => (
+                        <span
+                          key={tag}
+                          style={{
+                            fontSize: '0.6875rem',
+                            backgroundColor: 'var(--muted-surface)',
+                            padding: '1px 6px',
+                            borderRadius: '3px',
+                            color: 'var(--text-muted)',
+                          }}
+                        >
+                          #{tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Actions: Quick Copy and single Markdown download */}
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexShrink: 0 }}>
                   <QuickCopyButtons
                     lang={lang}
                     problem={{
@@ -566,84 +639,101 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
                     href={api.getSingleMarkdownUrl(selectedSummary.questionFrontendId)}
                     className="btn btn-secondary btn-sm"
                     title={t.exportSingleMarkdown}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                   >
-                    <Download size={14} />
+                    <Download size={13} />
                     <span>.md</span>
                   </a>
                 </div>
               </div>
 
-              {/* Practice timeline */}
-              <div>
-                <div
+              {/* Practice timeline: Collapsible Accordion to save vertical height */}
+              <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: showTimeline ? '12px' : '0' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowTimeline((prev) => !prev)}
                   style={{
-                    fontSize: '0.875rem',
-                    fontWeight: 600,
-                    color: 'var(--text-secondary)',
-                    marginBottom: '8px',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '6px',
+                    justifyContent: 'space-between',
+                    width: '100%',
+                    padding: '6px 8px',
+                    borderRadius: '6px',
+                    backgroundColor: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: 'var(--text-muted)',
+                    transition: 'background-color 0.12s ease',
                   }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--muted-surface)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
                 >
-                  <Clock size={16} />
-                  <span>{t.practiceTimelineTitle} ({practices.length})</span>
-                </div>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8125rem', fontWeight: 500, color: 'var(--text-secondary)' }}>
+                    <Clock size={13} />
+                    <span>{t.practiceTimelineTitle} ({practices.length})</span>
+                  </span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    {showTimeline ? (zh ? '收起 ▴' : 'Collapse ▴') : (zh ? '展开 ▾' : 'Expand ▾')}
+                  </span>
+                </button>
 
-                {loadingPractices ? (
-                  <div style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>Loading practice logs...</div>
-                ) : practices.length === 0 ? (
-                  <div style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-                    {zh ? '暂无打卡记录。' : 'No practice logs recorded yet.'}
-                  </div>
-                ) : (
-                  <div
-                    style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '8px',
-                      maxHeight: '160px',
-                      overflowY: 'auto',
-                      paddingRight: '4px',
-                    }}
-                  >
-                    {practices.map((pr) => (
+                {showTimeline && (
+                  <div style={{ marginTop: '8px' }}>
+                    {loadingPractices ? (
+                      <div style={{ color: 'var(--text-muted)', fontSize: '0.8125rem', padding: '4px 8px' }}>Loading practice logs...</div>
+                    ) : practices.length === 0 ? (
+                      <div style={{ color: 'var(--text-muted)', fontSize: '0.8125rem', padding: '4px 8px' }}>
+                        {zh ? '暂无打卡记录。' : 'No practice logs recorded yet.'}
+                      </div>
+                    ) : (
                       <div
-                        key={pr.id}
                         style={{
                           display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          padding: '8px 12px',
-                          backgroundColor: 'var(--surface-muted)',
-                          borderRadius: '6px',
-                          fontSize: '0.8125rem',
-                          border: '1px solid var(--border)',
+                          flexDirection: 'column',
+                          gap: '6px',
+                          maxHeight: '130px',
+                          overflowY: 'auto',
+                          paddingRight: '4px',
                         }}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span>{pr.completed ? '✅' : '⚠️'}</span>
-                          <span style={{ fontWeight: 500 }}>{pr.practicedAt.slice(0, 10)}</span>
-                          {pr.durationMinutes && (
-                            <span style={{ color: 'var(--text-muted)' }}>⏱️ {pr.durationMinutes}m</span>
-                          )}
-                        </div>
-                        {pr.notes && (
+                        {practices.map((pr) => (
                           <div
+                            key={pr.id}
                             style={{
-                              color: 'var(--text-secondary)',
-                              fontStyle: 'italic',
-                              maxWidth: '300px',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '6px 10px',
+                              backgroundColor: 'var(--muted-surface)',
+                              borderRadius: '6px',
+                              fontSize: '0.75rem',
                             }}
                           >
-                            "{pr.notes}"
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span>{pr.completed ? '✅' : '⚠️'}</span>
+                              <span style={{ fontWeight: 500 }}>{pr.practicedAt.slice(0, 10)}</span>
+                              {pr.durationMinutes && (
+                                <span style={{ color: 'var(--text-muted)' }}>⏱️ {pr.durationMinutes}m</span>
+                              )}
+                            </div>
+                            {pr.notes && (
+                              <div
+                                style={{
+                                  color: 'var(--text-secondary)',
+                                  fontStyle: 'italic',
+                                  maxWidth: '280px',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                "{pr.notes}"
+                              </div>
+                            )}
                           </div>
-                        )}
+                        ))}
                       </div>
-                    ))}
+                    )}
                   </div>
                 )}
               </div>
@@ -661,34 +751,35 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
                       gap: '6px',
                     }}
                   >
-                    <BookOpen size={16} />
+                    <BookOpen size={15} />
                     <span>{t.solutionReflectionTitle}</span>
                   </div>
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     {saveSuccess && (
-                      <span style={{ color: 'var(--success)', fontSize: '0.8125rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <Check size={14} />
+                      <span style={{ color: 'var(--primary)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <Check size={13} />
                         <span>{t.noteSaved}</span>
                       </span>
                     )}
-                    {saveError && <span style={{ color: 'var(--error)', fontSize: '0.8125rem' }}>{saveError}</span>}
+                    {saveError && <span style={{ color: 'var(--danger)', fontSize: '0.75rem' }}>{saveError}</span>}
 
                     <button
                       type="button"
                       className="btn btn-primary btn-sm"
                       onClick={handleSaveNote}
                       disabled={savingNote}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}
                     >
-                      <Save size={14} />
+                      <Save size={13} />
                       <span>{savingNote ? t.savingNote : t.saveNote}</span>
-                      <span style={{ fontSize: '0.6875rem', opacity: 0.7 }}>(Ctrl+S)</span>
+                      <span style={{ fontSize: '0.6875rem', opacity: 0.75 }}>(Ctrl+S)</span>
                     </button>
                   </div>
                 </div>
 
                 <textarea
-                  rows={14}
+                  rows={16}
                   value={noteContent}
                   onChange={(e) => setNoteContent(e.target.value)}
                   placeholder="Write your comprehensive solution, approach, and edge cases here..."
@@ -696,16 +787,24 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
                     width: '100%',
                     padding: '12px 14px',
                     borderRadius: '8px',
-                    border: '1px solid var(--border)',
-                    backgroundColor: 'var(--surface-muted)',
-                    color: 'var(--text-primary)',
-                    fontSize: '0.9375rem',
-                    lineHeight: 1.6,
-                    fontFamily: 'Consolas, Monaco, "Courier New", monospace',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--canvas)',
+                    color: 'var(--text-main)',
+                    fontSize: '0.875rem',
+                    lineHeight: 1.65,
+                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
                     resize: 'vertical',
-                    minHeight: '260px',
+                    minHeight: '340px',
+                    outline: 'none',
+                    boxSizing: 'border-box',
                   }}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--focus)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border-color)')}
                 />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.6875rem', color: 'var(--text-muted)' }}>
+                  <span>Markdown & LaTeX KaTeX math ($O(N)$) supported</span>
+                  <span>{noteContent.length} chars</span>
+                </div>
               </div>
             </>
           ) : (
@@ -718,6 +817,7 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
                 height: '100%',
                 color: 'var(--text-muted)',
                 gap: '12px',
+                minHeight: '400px',
               }}
             >
               <BookOpen size={36} style={{ opacity: 0.5 }} />

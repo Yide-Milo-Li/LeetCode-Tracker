@@ -43,6 +43,10 @@
     'Microsoft YaHei',
     'Noto Sans CJK SC',
     sans-serif;
+  --border: var(--border-color);
+  --text-primary: var(--text-main);
+  --text-secondary: var(--text-muted);
+  --surface-muted: var(--muted-surface);
   color-scheme: light;
 }
 html.dark {
@@ -63,6 +67,10 @@ html.dark {
   --danger: #f0a79d;
   --danger-bg: #482f2b;
   --shadow-md: 0 8px 28px #10140e40;
+  --border: var(--border-color);
+  --text-primary: var(--text-main);
+  --text-secondary: var(--text-muted);
+  --surface-muted: var(--muted-surface);
   color-scheme: dark;
 }
 * {
@@ -198,6 +206,19 @@ textarea {
 }
 select {
   padding-right: 28px;
+  color-scheme: inherit;
+  background-color: var(--surface);
+  color: var(--text-main);
+}
+select option {
+  background-color: var(--surface);
+  color: var(--text-main);
+}
+html.dark select,
+html.dark select option {
+  background-color: var(--surface);
+  color: var(--text-main);
+  color-scheme: dark;
 }
 input::placeholder,
 textarea::placeholder {
