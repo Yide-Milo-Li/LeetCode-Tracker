@@ -48,13 +48,13 @@ export function QuickCopyButtons({
 
   function handleCopyObsidian(e: React.MouseEvent) {
     e.stopPropagation();
-    const text = formatObsidianCallout(problem, record, customNote);
+    const text = formatObsidianCallout(problem, record, customNote, lang);
     void copyToClipboard(text, 'obsidian');
   }
 
   function handleCopyNotion(e: React.MouseEvent) {
     e.stopPropagation();
-    const text = formatNotionCard(problem, record, customNote);
+    const text = formatNotionCard(problem, record, customNote, lang);
     void copyToClipboard(text, 'notion');
   }
 

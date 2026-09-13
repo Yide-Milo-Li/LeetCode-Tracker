@@ -56,6 +56,7 @@ export type ProblemNoteListQuery = z.infer<typeof problemNoteListQuerySchema>;
 /** Query options for exporting the knowledge base. */
 export const exportKnowledgeQuerySchema = z.object({
   scope: z.enum(['practiced', 'all']).default('all'),
+  lang: z.enum(['en', 'zh']).default('en'),
 });
 
 export type ExportKnowledgeQuery = z.infer<typeof exportKnowledgeQuerySchema>;
@@ -158,52 +159,81 @@ export function formatProblemFilename(frontendId: string, slug: string): string 
 
 /**
  * Format single problem as an Obsidian Callout card for clipboard copying.
+ * Adapts labels and statuses according to the requested language ('en' | 'zh').
  */
 export function formatObsidianCallout(
   problem: { frontendId: string; title: string; url: string; difficulty: string; tags: string[]; slug: string },
   record?: { durationMinutes: number | null; practicedAt?: string; completed?: boolean; notes: string | null },
-  customNote?: string | null
+  customNote?: string | null,
+  lang: 'en' | 'zh' = 'en'
 ): string {
+  const isZh = lang === 'zh';
   const noteContent = customNote || record?.notes;
   const tagList = problem.tags.map((t) => `#leetcode/${t.toLowerCase().replace(/\s+/g, '-')}`).join(' ');
   const link = formatProblemFilename(problem.frontendId, problem.slug).replace(/\.md$/, '');
 
-  const durationStr = record?.durationMinutes ? `${record.durationMinutes} min` : 'Unrecorded';
-  const statusStr = record?.completed ? '✅ Solved' : '⚠️ Attempted';
+  const durationStr = record?.durationMinutes
+    ? (isZh ? `${record.durationMinutes} 分钟` : `${record.durationMinutes} min`)
+    : (isZh ? '未记录' : 'Unrecorded');
+  const statusStr = record?.completed
+    ? (isZh ? '✅ 已解决' : '✅ Solved')
+    : (isZh ? '⚠️ 尝试中' : '⚠️ Attempted');
   const dateStr = record?.practicedAt ? record.practicedAt.slice(0, 10) : new Date().toISOString().slice(0, 10);
 
+  const diffLabel = isZh ? '难度' : 'Difficulty';
+  const statusLabel = isZh ? '状态' : 'Status';
+  const dateLabel = isZh ? '日期' : 'Date';
+  const durLabel = isZh ? '耗时' : 'Duration';
+  const tagsLabel = isZh ? '标签' : 'Tags';
+  const linkLabel = isZh ? '双链索引' : 'Vault Link';
+  const notesHeading = isZh ? '复盘笔记' : 'Notes & Reflections';
+
   return `> [!example] [${problem.frontendId}. ${problem.title}](${problem.url})
-> - **Difficulty**: \`${problem.difficulty}\` | **Status**: ${statusStr}
-> - **Date**: ${dateStr} | **Duration**: ${durationStr}
-> - **Tags**: ${tagList || '#leetcode'}
-> - **Vault Link**: [[${link}]]
+> - **${diffLabel}**: \`${problem.difficulty}\` | **${statusLabel}**: ${statusStr}
+> - **${dateLabel}**: ${dateStr} | **${durLabel}**: ${durationStr}
+> - **${tagsLabel}**: ${tagList || '#leetcode'}
+> - **${linkLabel}**: [[${link}]]
 ${
   noteContent && noteContent.trim().length > 0
-    ? `> \n> **Notes & Reflections**:\n> ${noteContent.trim().replace(/\r?\n/g, '\n> ')}`
+    ? `> \n> **${notesHeading}**:\n> ${noteContent.trim().replace(/\r?\n/g, '\n> ')}`
     : ''
 }`;
 }
 
 /**
  * Format single problem as a Notion Rich Block card for clipboard copying.
+ * Adapts labels and statuses according to the requested language ('en' | 'zh').
  */
 export function formatNotionCard(
   problem: { frontendId: string; title: string; url: string; difficulty: string; tags: string[] },
   record?: { durationMinutes: number | null; practicedAt?: string; completed?: boolean; notes: string | null },
-  customNote?: string | null
+  customNote?: string | null,
+  lang: 'en' | 'zh' = 'en'
 ): string {
+  const isZh = lang === 'zh';
   const noteContent = customNote || record?.notes;
   const tagList = problem.tags.join(', ');
-  const durationStr = record?.durationMinutes ? `${record.durationMinutes} min` : 'Unrecorded';
-  const statusStr = record?.completed ? '✅ Solved' : '⚠️ Attempted';
+  const durationStr = record?.durationMinutes
+    ? (isZh ? `${record.durationMinutes} 分钟` : `${record.durationMinutes} min`)
+    : (isZh ? '未记录' : 'Unrecorded');
+  const statusStr = record?.completed
+    ? (isZh ? '✅ 已解决' : '✅ Solved')
+    : (isZh ? '⚠️ 尝试中' : '⚠️ Attempted');
   const dateStr = record?.practicedAt ? record.practicedAt.slice(0, 10) : new Date().toISOString().slice(0, 10);
 
+  const dateLabel = isZh ? '日期' : 'Date';
+  const durLabel = isZh ? '耗时' : 'Duration';
+  const statusLabel = isZh ? '状态' : 'Status';
+  const tagsLabel = isZh ? '标签' : 'Tags';
+  const noneStr = isZh ? '无' : 'None';
+  const notesHeading = isZh ? '复盘笔记与核心心得' : 'Notes & Key Takeaways';
+
   return `> 🎯 **[${problem.frontendId}. ${problem.title}](${problem.url})** · \`${problem.difficulty}\`
-> 📅 **Date**: ${dateStr} · ⏱️ **Duration**: ${durationStr} · 🏆 **Status**: ${statusStr}
-> 🏷️ **Tags**: ${tagList || 'None'}
+> 📅 **${dateLabel}**: ${dateStr} · ⏱️ **${durLabel}**: ${durationStr} · 🏆 **${statusLabel}**: ${statusStr}
+> 🏷️ **${tagsLabel}**: ${tagList || noneStr}
 ${
   noteContent && noteContent.trim().length > 0
-    ? `> \n> 💡 **Notes & Key Takeaways**:\n> ${noteContent.trim().replace(/\r?\n/g, '\n> ')}`
+    ? `> \n> 💡 **${notesHeading}**:\n> ${noteContent.trim().replace(/\r?\n/g, '\n> ')}`
     : ''
 }`;
 }

@@ -703,7 +703,7 @@ export function SettingsView({
 
             <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
               <a
-                href={api.getObsidianZipUrl('all')}
+                href={api.getObsidianZipUrl('all', lang)}
                 className="btn btn-secondary btn-sm"
                 title="Download 4,000+ problem Obsidian vault skeleton"
               >

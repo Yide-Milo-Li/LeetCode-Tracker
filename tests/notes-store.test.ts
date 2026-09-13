@@ -12,6 +12,7 @@ import {
   CURRENT_SCHEMA_VERSION,
   generateKnowledgeZip,
   generateNotionCsvs,
+  generateObsidianReadme,
   generateProblemMarkdown,
 } from '../packages/database/src/index.ts';
 
@@ -125,7 +126,7 @@ describe('Notes Store & Schema v9', () => {
     assert.equal(searchRes.items[0].questionFrontendId, '3');
   });
 
-  it('generates single problem Markdown with frontmatter and practice history', () => {
+  it('generates single problem Markdown with frontmatter and practice history in English by default', () => {
     store.upsertProblemNote('1', '## Hash Map Approach\nStore complements in a map.');
 
     const md = generateProblemMarkdown({
@@ -147,7 +148,7 @@ describe('Notes Store & Schema v9', () => {
       ],
       customNote: '## Hash Map Approach\nStore complements in a map.',
       reviewStage: 1,
-    });
+    }, 'en');
 
     // Frontmatter checks
     assert.ok(md.startsWith('---'));
@@ -156,10 +157,67 @@ describe('Notes Store & Schema v9', () => {
     assert.ok(md.includes('difficulty: Easy'));
     assert.ok(md.includes('Array'));
 
-    // Content checks
+    // English content checks
+    assert.ok(md.includes('> **Difficulty**: `Easy` | **Status**: `Solved`'));
     assert.ok(md.includes('## Practice Timeline'));
+    assert.ok(md.includes('| Date | Status | Duration | Notes |'));
+    assert.ok(md.includes('| 2026-09-01 | Solved | 15 min | First time solved |'));
     assert.ok(md.includes('## Solution & Reflection'));
     assert.ok(md.includes('Store complements in a map.'));
+  });
+
+  it('generates single problem Markdown adapted to Chinese (zh) mode with localized headings and templates', () => {
+    // 1. With custom note
+    const mdWithCustomNote = generateProblemMarkdown({
+      questionId: '1',
+      questionFrontendId: '1',
+      title: 'Two Sum',
+      titleSlug: 'two-sum',
+      difficulty: 'Easy',
+      url: 'https://leetcode.com/problems/two-sum/',
+      tags: ['Array', 'Hash Table'],
+      practices: [
+        {
+          practicedAt: '2026-09-01T12:00:00.000Z',
+          completed: true,
+          durationMinutes: 15,
+          notes: '初次 AC',
+          timePrecision: 'datetime',
+        },
+      ],
+      customNote: '## 哈希表题解\n一次遍历存补数。',
+      reviewStage: 1,
+    }, 'zh');
+
+    assert.ok(mdWithCustomNote.includes('> **难度**: `Easy` | **状态**: `已解决`'));
+    assert.ok(mdWithCustomNote.includes('> **标签**: #leetcode/array #leetcode/hash-table'));
+    assert.ok(mdWithCustomNote.includes('## 练习记录'));
+    assert.ok(mdWithCustomNote.includes('| 日期 | 状态 | 耗时 | 备注 |'));
+    assert.ok(mdWithCustomNote.includes('| 2026-09-01 | 已解决 | 15 分钟 | 初次 AC |'));
+    assert.ok(mdWithCustomNote.includes('## 解题复盘与深度笔记'));
+    assert.ok(mdWithCustomNote.includes('一次遍历存补数。'));
+
+    // 2. Without custom note (should provide clean Chinese skeleton template)
+    const mdDefaultTemplate = generateProblemMarkdown({
+      questionId: '2',
+      questionFrontendId: '2',
+      title: 'Add Two Numbers',
+      titleSlug: 'add-two-numbers',
+      difficulty: 'Medium',
+      url: 'https://leetcode.com/problems/add-two-numbers/',
+      tags: ['Linked List'],
+      practices: [],
+      customNote: null,
+      reviewStage: null,
+    }, 'zh');
+
+    assert.ok(mdDefaultTemplate.includes('> **难度**: `Medium` | **状态**: `未开始`'));
+    assert.ok(mdDefaultTemplate.includes('## 核心思路'));
+    assert.ok(mdDefaultTemplate.includes('## 复杂度分析'));
+    assert.ok(mdDefaultTemplate.includes('- 时间复杂度: $O(N)$'));
+    assert.ok(mdDefaultTemplate.includes('- 空间复杂度: $O(1)$'));
+    assert.ok(mdDefaultTemplate.includes('## 最佳实现'));
+    assert.ok(mdDefaultTemplate.includes('## 避坑与边界情况'));
   });
 
   it('generates Notion CSVs with correct escaping and headers', async () => {
@@ -184,16 +242,29 @@ describe('Notes Store & Schema v9', () => {
     assert.ok(practiceHistoryCsv.includes('"Used ""hash"" map"'));
   });
 
-  it('builds an Obsidian vault ZIP archive with valid ZIP magic bytes', () => {
+  it('generates Obsidian README.md with Dataview queries in English and Chinese', () => {
+    const enReadme = generateObsidianReadme(100, 20, 'en');
+    assert.ok(enReadme.includes('# 📚 LeetCode Personal Knowledge Base'));
+    assert.ok(enReadme.includes('TABLE difficulty AS "Difficulty"'));
+    assert.ok(enReadme.includes('## 🔗 Wikilink Index Convention'));
+
+    const zhReadme = generateObsidianReadme(100, 20, 'zh');
+    assert.ok(zhReadme.includes('# 📚 LeetCode 个人算法知识库'));
+    assert.ok(zhReadme.includes('TABLE difficulty AS "难度"'));
+    assert.ok(zhReadme.includes('## 🔗 双链引用规范'));
+  });
+
+  it('builds an Obsidian vault ZIP archive with valid ZIP magic bytes for both languages', () => {
     store.upsertProblemNote('1', '## Hash map note');
 
-    const zipBuffer = generateKnowledgeZip(db, 'all');
+    const zipEn = store.generateObsidianZip('all', 'en');
+    assert.ok(zipEn.length > 100);
+    assert.equal(zipEn[0], 0x50);
+    assert.equal(zipEn[1], 0x4b);
 
-    assert.ok(zipBuffer.length > 100);
-    // Standard ZIP local file header starts with 0x50, 0x4b, 0x03, 0x04 ('PK\x03\x04')
-    assert.equal(zipBuffer[0], 0x50);
-    assert.equal(zipBuffer[1], 0x4b);
-    assert.equal(zipBuffer[2], 0x03);
-    assert.equal(zipBuffer[3], 0x04);
+    const zipZh = store.generateObsidianZip('all', 'zh');
+    assert.ok(zipZh.length > 100);
+    assert.equal(zipZh[0], 0x50);
+    assert.equal(zipZh[1], 0x4b);
   });
 });

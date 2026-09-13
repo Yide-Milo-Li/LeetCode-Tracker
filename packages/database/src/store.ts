@@ -696,8 +696,8 @@ export class CatalogStore {
   }
 
   /** Generate full Obsidian knowledge base ZIP archive buffer. */
-  public generateObsidianZip(scope: 'all' | 'practiced' = 'all'): Buffer {
-    return generateKnowledgeZip(this.db, scope);
+  public generateObsidianZip(scope: 'all' | 'practiced' = 'all', lang: 'en' | 'zh' = 'en'): Buffer {
+    return generateKnowledgeZip(this.db, scope, lang);
   }
 
   /** Generate Notion database CSV tables (problems summary and practice history). */

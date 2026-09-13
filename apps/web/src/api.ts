@@ -430,16 +430,16 @@ export const notesApi = {
 };
 
 export const exportApi = {
-  getObsidianZipUrl(scope: 'all' | 'practiced' = 'all'): string {
-    return `${API_BASE}/export/obsidian-zip?scope=${scope}`;
+  getObsidianZipUrl(scope: 'all' | 'practiced' = 'all', lang: 'en' | 'zh' = 'en'): string {
+    return `${API_BASE}/export/obsidian-zip?scope=${scope}&lang=${lang}`;
   },
 
   getNotionCsvUrl(table: 'summary' | 'history'): string {
     return `${API_BASE}/export/notion-csv?table=${table}`;
   },
 
-  getSingleMarkdownUrl(frontendId: string): string {
-    return `${API_BASE}/export/markdown/${encodeURIComponent(frontendId)}`;
+  getSingleMarkdownUrl(frontendId: string, lang: 'en' | 'zh' = 'en'): string {
+    return `${API_BASE}/export/markdown/${encodeURIComponent(frontendId)}?lang=${lang}`;
   },
 };
 

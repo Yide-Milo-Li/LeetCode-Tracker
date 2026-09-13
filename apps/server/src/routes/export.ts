@@ -17,8 +17,10 @@ export function registerExportRoutes(app: FastifyInstance, context: RouteContext
   app.get('/api/v1/export/obsidian-zip', async (request: FastifyRequest, reply: FastifyReply) => {
     const parseRes = exportKnowledgeQuerySchema.safeParse(request.query);
     const scope = parseRes.success ? parseRes.data.scope : 'all';
+    const systemLang = (store.getSettings().language as 'en' | 'zh' | undefined) ?? 'en';
+    const lang = parseRes.success && parseRes.data.lang ? parseRes.data.lang : systemLang;
 
-    const zipBuffer = store.generateObsidianZip(scope);
+    const zipBuffer = store.generateObsidianZip(scope, lang);
     return reply
       .status(200)
       .header('Content-Type', 'application/zip')
@@ -56,12 +58,19 @@ export function registerExportRoutes(app: FastifyInstance, context: RouteContext
   /** GET /api/v1/export/markdown/:frontendId: Download single problem's Markdown note */
   app.get(
     '/api/v1/export/markdown/:frontendId',
-    async (request: FastifyRequest<{ Params: { frontendId: string } }>, reply: FastifyReply) => {
+    async (
+      request: FastifyRequest<{ Params: { frontendId: string }; Querystring: { lang?: string } }>,
+      reply: FastifyReply
+    ) => {
       const frontendId = request.params.frontendId;
       const problem = store.getProblem(frontendId, 'frontendId');
       if (!problem) {
         return reply.status(404).send({ error: 'PROBLEM_NOT_FOUND', message: `Problem #${frontendId} not found` });
       }
+
+      const queryLang = request.query.lang;
+      const systemLang = (store.getSettings().language as 'en' | 'zh' | undefined) ?? 'en';
+      const lang: 'en' | 'zh' = queryLang === 'zh' || queryLang === 'en' ? queryLang : systemLang;
 
       const note = store.getProblemNote(frontendId);
       const practiceRes = store.queryPracticeRecords({ questionFrontendId: frontendId, limit: 100, page: 1 });
@@ -86,7 +95,7 @@ export function registerExportRoutes(app: FastifyInstance, context: RouteContext
         reviewStage: null,
       };
 
-      const markdown = generateProblemMarkdown(exportData);
+      const markdown = generateProblemMarkdown(exportData, lang);
       return reply
         .status(200)
         .header('Content-Type', 'text/markdown; charset=utf-8')

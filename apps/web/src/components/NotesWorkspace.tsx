@@ -24,7 +24,8 @@ import { translations, type Language } from '../i18n.ts';
 import { PageHeader, Feedback, Field, Pagination } from './ui.tsx';
 import { QuickCopyButtons } from './QuickCopyButtons.tsx';
 
-const DEFAULT_NOTE_TEMPLATE = `## Key Idea & Approach
+const NOTE_TEMPLATES = {
+  en: `## Key Idea & Approach
 - 
 
 ## Complexity Analysis
@@ -39,7 +40,24 @@ class Solution:
 
 ## Edge Cases & Traps
 - 
-`;
+`,
+  zh: `## 核心思路
+- 
+
+## 复杂度分析
+- 时间复杂度: $O(N)$
+- 空间复杂度: $O(1)$
+
+## 最佳实现
+\`\`\`python
+class Solution:
+    pass
+\`\`\`
+
+## 避坑与边界情况
+- 
+`,
+};
 
 export interface NotesWorkspaceProps {
   lang: Language;
@@ -149,11 +167,11 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
         if (res.note && res.note.content.trim().length > 0) {
           setNoteContent(res.note.content);
         } else {
-          setNoteContent(DEFAULT_NOTE_TEMPLATE);
+          setNoteContent(NOTE_TEMPLATES[lang]);
         }
       })
       .catch(() => {
-        if (active) setNoteContent(DEFAULT_NOTE_TEMPLATE);
+        if (active) setNoteContent(NOTE_TEMPLATES[lang]);
       })
       .finally(() => {
         if (active) setLoadingNote(false);
@@ -177,7 +195,16 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
     return () => {
       active = false;
     };
-  }, [selectedId, items]);
+  }, [selectedId, items, lang]);
+
+  // Adapt untouched default template when language changes without overwriting user notes
+  useEffect(() => {
+    if (noteContent === NOTE_TEMPLATES.en && lang === 'zh') {
+      setNoteContent(NOTE_TEMPLATES.zh);
+    } else if (noteContent === NOTE_TEMPLATES.zh && lang === 'en') {
+      setNoteContent(NOTE_TEMPLATES.en);
+    }
+  }, [lang, noteContent]);
 
   // Save note handler
   async function handleSaveNote() {
@@ -228,7 +255,7 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
         actions={
           <div style={{ display: 'flex', gap: '8px' }}>
             <a
-              href={api.getObsidianZipUrl('all')}
+              href={api.getObsidianZipUrl('all', lang)}
               className="btn btn-secondary btn-sm"
               title="Download 4,000+ Obsidian markdown skeleton"
               style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
@@ -636,7 +663,7 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
                   />
 
                   <a
-                    href={api.getSingleMarkdownUrl(selectedSummary.questionFrontendId)}
+                    href={api.getSingleMarkdownUrl(selectedSummary.questionFrontendId, lang)}
                     className="btn btn-secondary btn-sm"
                     title={t.exportSingleMarkdown}
                     style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}

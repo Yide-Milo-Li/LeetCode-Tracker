@@ -180,7 +180,8 @@ describe('QuickCopyButtons Component', () => {
     });
 
     assert.ok(lastCopiedText.includes('> [!example] [1. Two Sum](https://leetcode.com/problems/two-sum/)'));
-    assert.ok(lastCopiedText.includes('**Difficulty**: `Easy`'));
+    assert.ok(lastCopiedText.includes('**难度**: `Easy`'));
+    assert.ok(lastCopiedText.includes('**双链索引**: [[0001-two-sum]]'));
     assert.ok(lastCopiedText.includes('#leetcode/array'));
     assert.ok(lastCopiedText.includes('Custom solution notes'));
   });
