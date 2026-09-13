@@ -1,14 +1,52 @@
 # Architecture
 
-The repository baseline implements an offline-first, Bring-Your-Own-Data (BYOD) practice workbench. It provides shared TypeScript contracts, transactional SQLite storage (schema v8), a local Fastify loopback API, a server-side Gemini structured format assistant, and a bilingual React web client.
+The repository baseline implements an offline-first, Bring-Your-Own-Data (BYOD) practice workbench. It provides shared TypeScript contracts, transactional SQLite storage (schema v9), a local Fastify loopback API, a multi-provider LLM assistant tier (Gemini, OpenAI, DeepSeek), and a bilingual React web client.
+
+For an interactive SVG diagram with dark/light themes, search, pan/zoom, and guided views, see the [Interactive Architecture Diagram](diagrams/architecture.html).
+
+## Visual topology
+
+```mermaid
+flowchart TD
+    User["Desktop User (1024px+ Browser)"]
+    JSONL["BYOD Problem Datasets (.jsonl)"]
+
+    subgraph Host ["Local Host Workstation"]
+        Web["React 19 Desktop SPA (apps/web)"]
+        Server["Fastify API Loopback (apps/server)"]
+        AsyncLock["AsyncLock Mutex Serializer"]
+        Domain["Pure Domain Algorithms (packages/domain)"]
+        DB[("SQLite Storage Engine v9 (packages/database)")]
+        Backups[("14-Day Rolling Snapshots (.local/backups)")]
+        LLMAssistant["LLM Assistant Tier (apps/server/src/llm)"]
+    end
+
+    subgraph Providers ["Optional AI Providers"]
+        Gemini["Google Gemini API"]
+        OpenAI["OpenAI API"]
+        DeepSeek["DeepSeek API"]
+    end
+
+    User --> Web
+    JSONL --> Web
+    Web --> Server
+    Server --> AsyncLock
+    Server --> Domain
+    Server --> LLMAssistant
+    AsyncLock --> DB
+    DB --> Backups
+    LLMAssistant --> DB
+    LLMAssistant -.->|"JSON mode / streaming"| Providers
+    LLMAssistant -.->|"Deterministic local fallback (<0.2ms)"| Domain
+```
 
 ## Component structure
 
 - **`packages/contracts`**: Validated Zod schemas and normalization pipelines for JSON Lines parsing, preflight preview, import summaries, catalog filtering, manual practice records, progress snapshots, conflict evaluation, planning lifecycle, and dashboard analytics.
-- **`packages/database`**: High-performance SQLite engine (`DatabaseSync`) managing schema migrations (supported v3–v7 to v8), preflight validation, atomic multi-table writes, point-in-time backups via native Node SQLite backup, daily backup pruning, planning store, dashboard query layer, and offline restore.
+- **`packages/database`**: High-performance SQLite engine (`DatabaseSync`) managing schema migrations (supported v3–v8 to v9), preflight validation, atomic multi-table writes, point-in-time backups via native Node SQLite backup, daily backup pruning, problem notes store, planning store, dashboard query layer, and offline restore.
 - **`packages/domain`**: Pure algorithmic domain logic for deterministic quota calculation (largest remainder), review candidate selection, streak calculation, yearly heatmap matrix generation, and activity pagination.
-- **`apps/server`**: Local Fastify API bound to `127.0.0.1`. Exposes `/api/v1` endpoints for catalog, imports, practice records, progress snapshots, recommendation planning, read-only dashboard overview and activity stream, and Gemini format & planning assistant with write serialization mutex and static SPA hosting.
-- **`apps/web`**: React/Vite desktop SPA with three destinations. App owns the single `useDailyPlan` controller and a small React context for mutation invalidation, timezone and shared practice overlays. Hash navigation uses existing React state; visited workspaces retain drafts, filters and scroll. `PracticeEditor`, `Dialog`, `Field`, `Feedback` and `Pagination` are shared; catalog ingestion and progress ingestion have independent ownership. CSS variables define warm light/dark palettes, spacing and motion. Statistics alone hosts full Recharts analysis.
+- **`apps/server`**: Local Fastify API bound to `127.0.0.1`. Exposes `/api/v1` endpoints for catalog, imports, practice records, progress snapshots, recommendation planning, problem notes, read-only dashboard overview and activity stream, and multi-provider LLM assistant with write serialization mutex and static SPA hosting.
+- **`apps/web`**: React/Vite desktop SPA with three primary destinations and contextual workspaces. App owns the single `useDailyPlan` controller and a small React context for mutation invalidation, timezone and shared practice overlays. Hash navigation uses existing React state; visited workspaces retain drafts, filters and scroll. `PracticeEditor`, `Dialog`, `Field`, `Feedback` and `Pagination` are shared; catalog ingestion and progress ingestion have independent ownership. CSS variables define warm light/dark palettes, spacing and motion. Statistics alone hosts full Recharts analysis.
 
 ## Ingestion pipeline
 

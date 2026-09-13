@@ -1,0 +1,218 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "LeetCode Tracker Architecture",
+    "output": "architecture.html",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "full-topology",
+        "label": "Full system topology",
+        "focus": ["desktop-ui", "fastify-server", "database-store", "domain-engine", "llm-assistant", "ai-providers", "byod-files", "backup-engine", "async-lock"],
+        "note": "Complete offline-first architecture from desktop UI to local SQLite and multi-provider AI."
+      },
+      {
+        "id": "storage-core",
+        "label": "Storage & persistence core",
+        "focus": ["fastify-server", "async-lock", "database-store", "backup-engine"],
+        "note": "Transactional SQLite engine, async write serializer, and point-in-time daily backups."
+      },
+      {
+        "id": "ai-planning",
+        "label": "Domain & AI planning tier",
+        "focus": ["fastify-server", "domain-engine", "database-store", "llm-assistant", "ai-providers"],
+        "note": "Deterministic quota calculations paired with multi-provider AI reasoning and instant fallback."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "byod-files",
+      "type": "external",
+      "label": "BYOD Datasets",
+      "sublabel": "JSON Lines (.jsonl)",
+      "pos": [50, 70],
+      "size": [140, 56],
+      "tag": "Zero Scrapers"
+    },
+    {
+      "id": "desktop-ui",
+      "type": "frontend",
+      "label": "Desktop Web UI",
+      "sublabel": "React 19 + Vite 8",
+      "brand": "react",
+      "pos": [50, 206],
+      "size": [140, 56],
+      "tag": "SPA (1024px+)"
+    },
+    {
+      "id": "domain-engine",
+      "type": "backend",
+      "label": "Domain Engine",
+      "sublabel": "Quota & Spaced Repetition",
+      "pos": [270, 70],
+      "size": [150, 56],
+      "tag": "Pure Domain"
+    },
+    {
+      "id": "fastify-server",
+      "type": "backend",
+      "label": "Fastify API Server",
+      "sublabel": "Node 24 / Loopback :3000",
+      "pos": [270, 206],
+      "size": [150, 56],
+      "tag": "127.0.0.1 Only"
+    },
+    {
+      "id": "async-lock",
+      "type": "security",
+      "label": "Write Serializer",
+      "sublabel": "AsyncLock Mutex",
+      "pos": [270, 342],
+      "size": [150, 56],
+      "tag": "Single Writer"
+    },
+    {
+      "id": "database-store",
+      "type": "database",
+      "label": "SQLite Engine",
+      "sublabel": "node:sqlite DatabaseSync",
+      "brand": "sqlite",
+      "pos": [510, 206],
+      "size": [160, 56],
+      "tag": "Schema v9 (WAL)"
+    },
+    {
+      "id": "backup-engine",
+      "type": "database",
+      "label": "Backup & Lease",
+      "sublabel": "Snapshot & Lease Mutex",
+      "pos": [510, 342],
+      "size": [160, 56],
+      "tag": "14-Day Retention"
+    },
+    {
+      "id": "llm-assistant",
+      "type": "backend",
+      "label": "LLM Assistant Tier",
+      "sublabel": "Multi-Provider (Phase 17)",
+      "pos": [760, 206],
+      "size": [160, 56],
+      "tag": "Local Fallback"
+    },
+    {
+      "id": "ai-providers",
+      "type": "external",
+      "label": "External AI Providers",
+      "sublabel": "Gemini / OpenAI / DeepSeek",
+      "pos": [760, 342],
+      "size": [160, 56],
+      "tag": "BYO API Key"
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Local Workstation (Offline-First Host)",
+      "wraps": ["desktop-ui", "domain-engine", "fastify-server", "async-lock", "database-store", "backup-engine", "llm-assistant"]
+    }
+  ],
+  "connections": [
+    {
+      "id": "byod-to-ui",
+      "from": "byod-files",
+      "to": "desktop-ui",
+      "label": "file upload",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 40
+    },
+    {
+      "id": "ui-to-server",
+      "from": "desktop-ui",
+      "to": "fastify-server",
+      "label": "HTTP /api/v1",
+      "variant": "emphasis"
+    },
+    {
+      "id": "server-to-domain",
+      "from": "fastify-server",
+      "to": "domain-engine",
+      "label": "calc quota",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "labelDy": -40
+    },
+    {
+      "id": "server-to-lock",
+      "from": "fastify-server",
+      "to": "async-lock",
+      "label": "mutex lock",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 40
+    },
+    {
+      "id": "server-to-db",
+      "from": "fastify-server",
+      "to": "database-store",
+      "label": "CRUD & commit"
+    },
+    {
+      "id": "db-to-backup",
+      "from": "database-store",
+      "to": "backup-engine",
+      "label": "snapshot copy",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 40
+    },
+    {
+      "id": "server-to-llm",
+      "from": "database-store",
+      "to": "llm-assistant",
+      "label": "plan context"
+    },
+    {
+      "id": "llm-to-ai",
+      "from": "llm-assistant",
+      "to": "ai-providers",
+      "label": "structured JSON",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 40
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Desktop & Loopback",
+      "items": [
+        "Strict 1024px+ desktop browser UI without mobile collapse",
+        "Fastify loopback strictly on 127.0.0.1 with write serialization"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Domain & LLM Tier",
+      "items": [
+        "Largest Remainder quota distribution and spaced repetition",
+        "Provider-agnostic LLM tier (Gemini, OpenAI, DeepSeek)",
+        "Deterministic <0.2ms local fallback when offline"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "BYOD & ACID Storage",
+      "items": [
+        "100% user-supplied JSONL without crawlers or account scrapers",
+        "Native Node 24 SQLite DatabaseSync with WAL and schema v9",
+        "Pre-import safety snapshots and automated 14-day retention"
+      ]
+    }
+  ]
+}
