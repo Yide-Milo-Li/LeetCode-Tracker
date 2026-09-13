@@ -25,9 +25,9 @@ Click the empty circle after practicing. The application immediately saves a com
 
 After saving, the optional dialog offers duration in whole minutes and notes. Save details updates the same record. Skip, Close, Escape or backdrop dismissal retain the completion. Failed initial saves remain unchecked and can be retried. Failed detail edits retain their input and never revoke the underlying completion.
 
-If several problems finish saving together, their optional detail prompts appear in order without replacing the open draft. If you close a pending detail save, its outcome appears in the workspace. A failed save offers **Recover draft**, preserving the submitted fields and original record identity for retry. This recovery is kept in the current application session.
+If several problems finish saving together, their optional detail prompts appear in order without replacing the open draft. If you close a pending detail save, its outcome appears in the workspace. A failed save offers **Recover draft**, preserving the submitted fields and original record identity for retry. This recovery is kept in the current application session. Record-edit recovery also retains pending corrections and their expanded or collapsed state.
 
-Click a checked circle to inspect the exact supporting records. You can supplement details, correct a manual record or explicitly revoke that record. Other manual practices and imported evidence remain; the problem stays completed if another valid basis still qualifies. A failed background refresh shows feedback without undoing an acknowledged save.
+Click a checked circle to inspect the exact supporting records. Use the single Edit record action to update duration and notes. Expand Change completion or time to correct the completion result, practiced time, precision or timezone. Unchanged completion and time fields are omitted from the update; expanding alone does not rewrite evidence. Collapsing retains pending corrections and marks them as modified. Cancel discards the draft. Revocation remains a separate action. Other manual practices and imported evidence remain; the problem stays completed if another valid basis still qualifies. A failed background refresh shows feedback without undoing an acknowledged save.
 
 ## Extra and historical practice
 
@@ -58,3 +58,21 @@ Date-based projections refresh when the saved timezone changes, at the next visi
 ## Motion and keyboard feedback
 
 Dialog and drawer entry takes 220ms and exit 160ms. The exiting overlay retains its focus and background lock until removal; navigation immediately cancels its pending dismissal. Responses arriving after an editor starts closing still expose recovery for failed drafts. Reduced motion removes these transitions. Completion feedback runs only for a newly saved completion, without replaying when returning to Today.
+
+## Strategy counts and review modes
+
+In Study schedule, enter the daily total (1–50) and nonnegative whole counts for each difficulty. Enter any two counts to fill the remaining difficulty automatically. The automatic field follows changes to the other two or the total until you edit it yourself. The difficulty sum must equal the total. Overflow highlights the total immediately; invalid or incomplete counts cannot be saved.
+
+Review Mode offers new problems only, some review, and all review. Some review takes a whole count from 1 to the daily total. All review follows the total automatically and never fills a review shortage with new problems. Insufficient eligible reviews produce fewer items and a shortage notice; completed items in an existing plan remain preserved. Partial review retains the existing same-difficulty shortage fallback.
+
+Newly generated plans record algorithm version `phase4-v2` for the strict all-review behavior. Historical versions remain unchanged.
+
+Existing strategies display the planner's actual rounded counts. Saving without changing their counts preserves the original stored percentages, including legacy review targets that round to zero. Invalid rules and weekday conflicts reject the entire save without creating a strategy or changing assignments. These flows are validated with synthetic local data; this does not imply live-provider verification or publication.
+
+## Desktop launcher
+
+For Windows desktop usage without manual terminal commands:
+- Double-click `start.bat` from the repository root, or run `npm run desktop`.
+- **Port detection**: Probes `127.0.0.1:3000`. If LeetCode Tracker is already running, it opens your default browser immediately and avoids duplicate startup to prevent SQLite lease collisions.
+- **Service bootstrap**: If not already running, it ensures production frontend assets exist (building via `npm run build` if needed), starts the local Fastify service, awaits loopback readiness, and opens your default browser to `http://127.0.0.1:3000`.
+- **Explicit shutdown**: Press `Ctrl+C` in the console window to trigger graceful shutdown, releasing the database lease and closing the database cleanly.

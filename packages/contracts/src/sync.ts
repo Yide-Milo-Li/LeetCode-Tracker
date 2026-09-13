@@ -265,6 +265,9 @@ export const userSettingsSchema = z.object({
   language: z.enum(['en', 'zh']),
   theme: z.enum(['light', 'dark', 'system']),
   timezone: z.string().max(100).nullable().default(null),
+  geminiApiKey: z.string().max(256).nullable().optional(),
+  geminiModel: z.string().max(100).nullable().optional(),
+  geminiFallbackModels: z.array(z.string().max(100)).nullable().optional(),
   updatedAt: z.number().int().nonnegative(),
 });
 
@@ -275,10 +278,32 @@ export const updateSettingsInputSchema = z.object({
   language: z.enum(['en', 'zh']).optional(),
   theme: z.enum(['light', 'dark', 'system']).optional(),
   timezone: timeZoneSchema.nullable().optional(),
-}).refine(data => data.language !== undefined || data.theme !== undefined || data.timezone !== undefined, {
-  message: 'At least one setting (language, theme, or timezone) must be provided',
+  geminiApiKey: z.string().max(256).nullable().optional(),
+  geminiModel: z.string().max(100).nullable().optional(),
+  geminiFallbackModels: z.array(z.string().max(100)).nullable().optional(),
+}).refine(data =>
+  data.language !== undefined ||
+  data.theme !== undefined ||
+  data.timezone !== undefined ||
+  data.geminiApiKey !== undefined ||
+  data.geminiModel !== undefined ||
+  data.geminiFallbackModels !== undefined, {
+  message: 'At least one setting must be provided',
+}).refine(data => {
+  if (data.geminiModel && data.geminiFallbackModels) {
+    return !data.geminiFallbackModels.includes(data.geminiModel);
+  }
+  return true;
+}, {
+  message: 'Primary model and fallback models cannot contain duplicate entries',
+}).refine(data => {
+  if (data.geminiFallbackModels && data.geminiFallbackModels.length > 0) {
+    return new Set(data.geminiFallbackModels).size === data.geminiFallbackModels.length;
+  }
+  return true;
+}, {
+  message: 'Fallback models cannot contain duplicate entries',
 });
-
 
 export type UpdateSettingsInput = z.infer<typeof updateSettingsInputSchema>;
 

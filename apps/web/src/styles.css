@@ -2720,3 +2720,108 @@ html.dark .heatmap-cell-3 {
 .today-plan-summary .section-heading:last-child { justify-content: flex-end; }
 .preference-row > div:first-child { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .preference-row > div:first-child > p { flex-basis: 100%; }
+
+/* Keep the total's validation state visible in both themes, including keyboard focus. */
+input.form-input[aria-invalid="true"] { border-color: var(--danger); outline-color: var(--danger); }
+.strategy-count-error { color: var(--danger); font-size: 0.85rem; margin: 0 0 1rem; }
+
+/* Corrections are secondary to ordinary notes, but remain keyboard-accessible. */
+.record-correction-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  border: 0;
+  background: transparent;
+  color: var(--text-main);
+  padding: 8px 0;
+  margin: 4px 0 12px;
+  text-align: start;
+}
+.record-correction-toggle[aria-expanded='true'] > svg { transform: rotate(180deg); }
+
+/* Gemini AI Settings in preferences */
+.ai-settings-form {
+  display: grid;
+  gap: 16px;
+}
+.input-with-action {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+.input-with-action input {
+  padding-right: 42px;
+}
+.input-with-action .icon-action-btn {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: 0;
+  padding: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: color var(--fast), background-color var(--fast);
+}
+.input-with-action .icon-action-btn:hover {
+  color: var(--text-main);
+  background: var(--muted-surface);
+}
+.api-key-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.candidate-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.candidate-chip {
+  padding: 4px 10px;
+  font-size: 13px;
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background-color var(--fast), border-color var(--fast), color var(--fast);
+}
+.candidate-chip:hover:not(:disabled) {
+  border-color: var(--outline);
+  color: var(--text-main);
+}
+.candidate-chip.active {
+  background: var(--selected);
+  color: var(--primary);
+  border-color: var(--primary);
+  font-weight: 550;
+}
+.candidate-chip:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.fallback-chain-preview {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.chain-path strong {
+  color: var(--primary);
+}
+.chain-step {
+  color: var(--text-main);
+}

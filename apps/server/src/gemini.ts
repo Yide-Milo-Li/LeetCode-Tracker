@@ -104,6 +104,15 @@ export interface IGeminiAssistant {
     deadline?: number;
   }): Promise<{ selectedQuestionIds: string[]; model: string }>;
   getStatus(): GeminiAssistantStatus;
+  updateConfig?(config: {
+    apiKey?: string | null;
+    model?: string | null;
+    fallbackModels?: string[] | null;
+  }): void;
+  testConnection?(params?: {
+    apiKey?: string;
+    model?: string;
+  }): Promise<{ ok: boolean; model: string; message?: string }>;
 }
 
 /** Promisified delay helper for exponential backoff between retries. */
@@ -117,9 +126,9 @@ function sleep(ms: number): Promise<void> {
  * Primary (models/gemini-3.8-flash) -> Tier 1 (models/gemini-3.7-flash) -> Tier 2 (models/gemini-3.6-flash).
  */
 export class GeminiAssistant implements IGeminiAssistant {
-  private readonly apiKey?: string;
-  private readonly model: string;
-  private readonly fallbackModels: string[];
+  private apiKey?: string;
+  private model: string;
+  private fallbackModels: string[];
   private readonly maxRetriesPerModel: number;
   private readonly initialBackoffMs: number;
   private readonly timeoutMs: number;
@@ -130,20 +139,101 @@ export class GeminiAssistant implements IGeminiAssistant {
     this.apiKey = options.apiKey || process.env.GEMINI_API_KEY;
     this.model = options.model || process.env.GEMINI_MODEL || 'models/gemini-3.5-flash';
 
+    let fallbacks: string[];
     if (options.fallbackModels) {
-      this.fallbackModels = options.fallbackModels;
+      fallbacks = options.fallbackModels;
     } else if (process.env.GEMINI_FALLBACK_MODELS) {
-      this.fallbackModels = process.env.GEMINI_FALLBACK_MODELS.split(',')
+      fallbacks = process.env.GEMINI_FALLBACK_MODELS.split(',')
         .map(s => s.trim())
         .filter(Boolean);
     } else {
-      this.fallbackModels = ['models/gemini-3.5-flash-lite', 'models/gemini-3.6-flash', 'models/gemini-3.7-flash'];
+      fallbacks = ['models/gemini-3.5-flash-lite', 'models/gemini-3.6-flash', 'models/gemini-3.7-flash'];
     }
+    this.fallbackModels = [...new Set(fallbacks)].filter(m => m !== this.model);
 
     this.maxRetriesPerModel = options.maxRetriesPerModel ?? 2;
     this.initialBackoffMs = options.initialBackoffMs ?? 1000;
     this.timeoutMs = options.timeoutMs ?? 60000;
     this.generateContentFn = options.generateContentFn;
+  }
+
+  /**
+   * Dynamically update credentials, primary model, or candidate fallback models.
+   */
+  public updateConfig(config: {
+    apiKey?: string | null;
+    model?: string | null;
+    fallbackModels?: string[] | null;
+  }): void {
+    if (config.apiKey !== undefined) {
+      this.apiKey = config.apiKey ? config.apiKey.trim() : undefined;
+    }
+    if (config.model !== undefined) {
+      this.model = config.model ? config.model.trim() : (process.env.GEMINI_MODEL || 'models/gemini-3.5-flash');
+    }
+    if (config.fallbackModels !== undefined) {
+      if (config.fallbackModels && config.fallbackModels.length > 0) {
+        this.fallbackModels = config.fallbackModels.map(s => s.trim()).filter(Boolean);
+      } else if (process.env.GEMINI_FALLBACK_MODELS) {
+        this.fallbackModels = process.env.GEMINI_FALLBACK_MODELS.split(',').map(s => s.trim()).filter(Boolean);
+      } else {
+        this.fallbackModels = ['models/gemini-3.5-flash-lite', 'models/gemini-3.6-flash', 'models/gemini-3.7-flash'];
+      }
+    }
+    this.fallbackModels = [...new Set(this.fallbackModels)].filter(m => m !== this.model);
+  }
+
+  /**
+   * Test connection to Gemini API with optional explicit key/model overrides.
+   */
+  public async testConnection(params?: {
+    apiKey?: string;
+    model?: string;
+  }): Promise<{ ok: boolean; model: string; message?: string }> {
+    const testKey = params?.apiKey?.trim() || this.apiKey;
+    const testModel = params?.model?.trim() || this.model;
+    if (!testKey) {
+      return { ok: false, model: testModel, message: 'API key is not configured' };
+    }
+    try {
+      if (this.generateContentFn) {
+        const abort = new AbortController();
+        const timeoutId = setTimeout(() => abort.abort(), 10000);
+        try {
+          await this.generateContentFn({
+            model: testModel,
+            contents: 'ping',
+            config: {
+              systemInstruction: 'Respond with pong',
+              responseMimeType: 'text/plain',
+              responseSchema: undefined,
+              abortSignal: abort.signal,
+            },
+          });
+        } finally {
+          clearTimeout(timeoutId);
+        }
+      } else {
+        const ai = new GoogleGenAI({ apiKey: testKey });
+        const abort = new AbortController();
+        const timeoutId = setTimeout(() => abort.abort(), 10000);
+        try {
+          await ai.models.generateContent({
+            model: testModel,
+            contents: 'ping',
+            config: {
+              abortSignal: abort.signal,
+            },
+          });
+        } finally {
+          clearTimeout(timeoutId);
+        }
+      }
+      return { ok: true, model: testModel };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, model: testModel, message };
+    }
   }
 
   /**

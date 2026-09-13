@@ -34,7 +34,14 @@ export interface AppOptions {
  */
 export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const { store } = options;
-  const gemini = options.geminiAssistant ?? new GeminiAssistant();
+  const storedSettings = store.getSettings();
+  const gemini = options.geminiAssistant ?? new GeminiAssistant({
+    apiKey: storedSettings.geminiApiKey || undefined,
+    model: storedSettings.geminiModel || undefined,
+    fallbackModels: storedSettings.geminiFallbackModels && storedSettings.geminiFallbackModels.length > 0
+      ? storedSettings.geminiFallbackModels
+      : undefined,
+  });
   const writeLock = new AsyncLock();
   const planningService = new PlanningService(store, gemini);
 

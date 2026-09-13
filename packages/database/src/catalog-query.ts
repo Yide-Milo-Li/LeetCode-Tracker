@@ -302,6 +302,9 @@ export function getUserSettings(db: DatabaseSync): UserSettings {
   let language: 'en' | 'zh' = 'en';
   let theme: 'light' | 'dark' | 'system' = 'system';
   let timezone: string | null = null;
+  let geminiApiKey: string | null = null;
+  let geminiModel: string | null = null;
+  let geminiFallbackModels: string[] | null = null;
   let maxUpdatedAt = 0;
 
   for (const r of rows) {
@@ -314,12 +317,41 @@ export function getUserSettings(db: DatabaseSync): UserSettings {
     if (r.key === 'timezone') {
       timezone = r.value && r.value.trim().length > 0 ? r.value : null;
     }
+    if (r.key === 'gemini_api_key') {
+      geminiApiKey = r.value && r.value.trim().length > 0 ? r.value.trim() : null;
+    }
+    if (r.key === 'gemini_model') {
+      geminiModel = r.value && r.value.trim().length > 0 ? r.value.trim() : null;
+    }
+    if (r.key === 'gemini_fallback_models') {
+      try {
+        const parsed = JSON.parse(r.value);
+        if (Array.isArray(parsed)) {
+          geminiFallbackModels = parsed.map(String).filter(s => s.trim().length > 0);
+        }
+      } catch {
+        geminiFallbackModels = null;
+      }
+    }
     if (r.updated_at > maxUpdatedAt) {
       maxUpdatedAt = r.updated_at;
     }
   }
 
-  return { language, theme, timezone, updatedAt: maxUpdatedAt };
+  if (geminiFallbackModels && geminiFallbackModels.length > 0) {
+    geminiFallbackModels = [...new Set(geminiFallbackModels)].filter(m => !geminiModel || m !== geminiModel);
+    if (geminiFallbackModels.length === 0) geminiFallbackModels = null;
+  }
+
+  return {
+    language,
+    theme,
+    timezone,
+    geminiApiKey,
+    geminiModel,
+    geminiFallbackModels,
+    updatedAt: maxUpdatedAt,
+  };
 }
 
 /**
@@ -348,6 +380,38 @@ export function updateUserSettingsTransaction(
       db.prepare(
         "UPDATE catalog_meta SET value=CAST(value AS INTEGER)+1 WHERE key='planning_revision'"
       ).run();
+    }
+    if (input.geminiApiKey !== undefined) {
+      updateStmt.run('gemini_api_key', input.geminiApiKey ? input.geminiApiKey.trim() : '', now);
+    }
+
+    const effectiveModel = input.geminiModel !== undefined
+      ? (input.geminiModel ? input.geminiModel.trim() : null)
+      : (db.prepare("SELECT value FROM settings WHERE key = 'gemini_model'").get() as { value: string } | undefined)?.value?.trim() || null;
+
+    if (input.geminiModel !== undefined) {
+      updateStmt.run('gemini_model', input.geminiModel ? input.geminiModel.trim() : '', now);
+    }
+    if (input.geminiFallbackModels !== undefined) {
+      const sanitized = input.geminiFallbackModels
+        ? [...new Set(input.geminiFallbackModels.map(s => s.trim()).filter(Boolean))]
+            .filter(m => !effectiveModel || m !== effectiveModel)
+        : null;
+      const serialized = sanitized && sanitized.length > 0 ? JSON.stringify(sanitized) : '';
+      updateStmt.run('gemini_fallback_models', serialized, now);
+    } else if (effectiveModel) {
+      const existingFbRow = db.prepare("SELECT value FROM settings WHERE key = 'gemini_fallback_models'").get() as { value: string } | undefined;
+      if (existingFbRow?.value) {
+        try {
+          const parsed = JSON.parse(existingFbRow.value);
+          if (Array.isArray(parsed) && parsed.includes(effectiveModel)) {
+            const pruned = parsed.filter(m => m !== effectiveModel);
+            updateStmt.run('gemini_fallback_models', pruned.length > 0 ? JSON.stringify(pruned) : '', now);
+          }
+        } catch {
+          // ignore
+        }
+      }
     }
     db.exec('COMMIT;');
   } catch (err) {

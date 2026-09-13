@@ -12,7 +12,7 @@ import type { RouteContext } from './types.ts';
  * @param context Injected server dependencies.
  */
 export function registerSettingsRoutes(app: FastifyInstance, context: RouteContext): void {
-  const { store, writeLock } = context;
+  const { store, writeLock, gemini } = context;
 
   /** GET /api/v1/settings: Retrieve persisted user preferences */
   app.get('/api/v1/settings', async (_request: FastifyRequest, reply: FastifyReply) => {
@@ -31,6 +31,38 @@ export function registerSettingsRoutes(app: FastifyInstance, context: RouteConte
     }
 
     const updated = await writeLock.run(() => store.updateSettings(parseRes.data));
+    if (
+      parseRes.data.geminiApiKey !== undefined ||
+      parseRes.data.geminiModel !== undefined ||
+      parseRes.data.geminiFallbackModels !== undefined
+    ) {
+      gemini.updateConfig?.({
+        apiKey: updated.geminiApiKey,
+        model: updated.geminiModel,
+        fallbackModels: updated.geminiFallbackModels,
+      });
+    }
     return reply.status(200).send(updated);
+  });
+
+  /** POST /api/v1/settings/test-gemini: Test Gemini API connectivity and credentials */
+  app.post('/api/v1/settings/test-gemini', async (request: FastifyRequest, reply: FastifyReply) => {
+    const body = request.body && typeof request.body === 'object' ? (request.body as Record<string, unknown>) : {};
+    const apiKey = typeof body.apiKey === 'string' ? body.apiKey : undefined;
+    const model = typeof body.model === 'string' ? body.model : undefined;
+
+    if (gemini.testConnection) {
+      const res = await gemini.testConnection({ apiKey, model });
+      if (!res.ok) {
+        return reply.status(400).send({
+          error: 'TEST_CONNECTION_FAILED',
+          message: res.message || 'Gemini connection test failed',
+          model: res.model,
+        });
+      }
+      return reply.status(200).send({ ok: true, model: res.model });
+    }
+
+    return reply.status(200).send({ ok: true, model: gemini.getStatus().model });
   });
 }

@@ -167,10 +167,19 @@ const settingsApi = {
     return request<UserSettings>('/settings');
   },
 
-  updateSettings(settings: Partial<Pick<UserSettings, 'language' | 'theme' | 'timezone'>>): Promise<UserSettings> {
+  updateSettings(
+    settings: Partial<Pick<UserSettings, 'language' | 'theme' | 'timezone' | 'geminiApiKey' | 'geminiModel' | 'geminiFallbackModels'>>
+  ): Promise<UserSettings> {
     return request<UserSettings>('/settings', {
       method: 'PATCH',
       body: JSON.stringify(settings),
+    });
+  },
+
+  testGeminiConnection(params?: { apiKey?: string; model?: string }): Promise<{ ok: boolean; model: string; message?: string }> {
+    return request<{ ok: boolean; model: string; message?: string }>('/settings/test-gemini', {
+      method: 'POST',
+      body: JSON.stringify(params ?? {}),
     });
   },
 };

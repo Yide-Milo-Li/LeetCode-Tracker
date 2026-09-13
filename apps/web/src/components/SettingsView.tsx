@@ -1,5 +1,6 @@
 /** Application preferences only; catalog and progress imports live in their respective workspaces. */
 import React, { useEffect, useRef, useState } from 'react';
+import { Eye, EyeOff, Copy, Check, ClipboardPaste } from 'lucide-react';
 import { api } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
@@ -13,7 +14,17 @@ interface SettingsViewProps {
   onTimezoneSaved?: (zone: string | null) => void;
 }
 
-/** Keep the timezone draft intact on background refresh; only explicit save changes date interpretation. */
+const PRESET_MODELS = [
+  'models/gemini-3.8-flash',
+  'models/gemini-3.7-flash',
+  'models/gemini-3.6-flash',
+  'models/gemini-3.5-flash',
+  'models/gemini-3.5-flash-lite',
+  'models/gemini-2.5-flash',
+  'models/gemini-2.5-pro',
+];
+
+/** Keep the timezone and AI drafts intact on background refresh; only explicit save changes preferences. */
 export function SettingsView({
   lang,
   onLanguageChange,
@@ -24,17 +35,52 @@ export function SettingsView({
   const t = translations[lang];
   const workspace = useWorkspace();
   const zh = lang === 'zh';
+
+  // Timezone state
   const [zone, setZone] = useState(workspace.timezone ?? '');
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const dirty = useRef(false);
+
+  // Gemini AI configuration state
+  const [apiKey, setApiKey] = useState('');
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [primaryModel, setPrimaryModel] = useState('models/gemini-3.8-flash');
+  const [isCustomPrimary, setIsCustomPrimary] = useState(false);
+  const [fallbackModels, setFallbackModels] = useState<string[]>([
+    'models/gemini-3.7-flash',
+    'models/gemini-3.6-flash',
+  ]);
+  const [copied, setCopied] = useState(false);
+  const [savingAi, setSavingAi] = useState(false);
+  const [aiSaved, setAiSaved] = useState(false);
+  const [aiError, setAiError] = useState('');
+  const [testingAi, setTestingAi] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; model?: string; message?: string } | null>(null);
+  const dirtyAi = useRef(false);
+
   useEffect(() => {
     let active = true;
     api
       .getSettings()
       .then((settings) => {
-        if (active && !dirty.current) setZone(settings.timezone ?? '');
+        if (active) {
+          if (!dirty.current) setZone(settings.timezone ?? '');
+          if (!dirtyAi.current) {
+            setApiKey(settings.geminiApiKey ?? '');
+            const effectivePrimary = settings.geminiModel ?? primaryModel;
+            if (settings.geminiModel) {
+              setPrimaryModel(settings.geminiModel);
+              setIsCustomPrimary(!PRESET_MODELS.includes(settings.geminiModel));
+            }
+            if (settings.geminiFallbackModels) {
+              setFallbackModels(
+                [...new Set(settings.geminiFallbackModels)].filter((m) => m !== effectivePrimary)
+              );
+            }
+          }
+        }
       })
       .catch((err) => {
         if (active) setError(String(err.message));
@@ -43,6 +89,7 @@ export function SettingsView({
       active = false;
     };
   }, []);
+
   /** Validate IANA names locally and wait for server persistence before publishing the new timezone. */
   async function saveZone(event: React.FormEvent) {
     event.preventDefault();
@@ -61,11 +108,89 @@ export function SettingsView({
       setSaving(false);
     }
   }
+
+  /** Copy API key to clipboard with visual confirmation. */
+  async function handleCopyApiKey() {
+    if (!apiKey) return;
+    try {
+      await navigator.clipboard.writeText(apiKey);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard write failed or unpermitted
+    }
+  }
+
+  /** Paste API key from clipboard into draft. */
+  async function handlePasteApiKey() {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) {
+        dirtyAi.current = true;
+        setApiKey(text.trim());
+        setAiSaved(false);
+        setTestResult(null);
+      }
+    } catch {
+      // Clipboard read failed or unpermitted
+    }
+  }
+
+  /** Save Gemini API key and model hierarchy to local SQLite settings. */
+  async function saveAiConfig(event: React.FormEvent) {
+    event.preventDefault();
+    setSavingAi(true);
+    setAiError('');
+    setAiSaved(false);
+    const trimmedPrimary = primaryModel.trim();
+    const sanitizedFallbacks = [...new Set(fallbackModels.map((m) => m.trim()).filter(Boolean))].filter(
+      (m) => !trimmedPrimary || m !== trimmedPrimary
+    );
+
+    try {
+      await api.updateSettings({
+        geminiApiKey: apiKey.trim() || null,
+        geminiModel: trimmedPrimary || null,
+        geminiFallbackModels: sanitizedFallbacks.length > 0 ? sanitizedFallbacks : null,
+      });
+      setFallbackModels(sanitizedFallbacks);
+      workspace.notifyMutation();
+      setAiSaved(true);
+      dirtyAi.current = false;
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSavingAi(false);
+    }
+  }
+
+  /** Send a test ping to verify configured or drafted key and model connectivity. */
+  async function handleTestConnection() {
+    if (!apiKey.trim()) return;
+    setTestingAi(true);
+    setTestResult(null);
+    setAiError('');
+    try {
+      const res = await api.testGeminiConnection({
+        apiKey: apiKey.trim(),
+        model: primaryModel.trim() || undefined,
+      });
+      setTestResult({ ok: true, model: res.model });
+    } catch (err) {
+      setTestResult({
+        ok: false,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setTestingAi(false);
+    }
+  }
+
   return (
     <div className="settings-view">
-      <PageHeader
-        title={zh ? '设置' : 'Settings'}
-      />
+      <PageHeader title={zh ? '设置' : 'Settings'} />
+
+      {/* Language row */}
       <section className="preference-row">
         <div>
           <h2>{t.langLabel}</h2>
@@ -79,10 +204,15 @@ export function SettingsView({
           </button>
         </div>
       </section>
+
+      {/* Theme row */}
       <section className="preference-row">
         <div>
           <h2>{t.themeLabel}</h2>
-          <InfoPopover label={zh ? '主题说明' : 'Theme help'} content={<p>{zh ? '跟随系统会响应桌面外观的变化。' : 'System mode follows your desktop appearance.'}</p>} />
+          <InfoPopover
+            label={zh ? '主题说明' : 'Theme help'}
+            content={<p>{zh ? '跟随系统会响应桌面外观的变化。' : 'System mode follows your desktop appearance.'}</p>}
+          />
         </div>
         <div className="segmented-control" aria-label={t.themeLabel}>
           {(['light', 'dark', 'system'] as const).map((theme) => (
@@ -92,6 +222,8 @@ export function SettingsView({
           ))}
         </div>
       </section>
+
+      {/* Timezone row */}
       <section className="preference-row">
         <div>
           <h2>{t.timezoneLabel}</h2>
@@ -145,6 +277,225 @@ export function SettingsView({
           </div>
           {error && <Feedback>{error}</Feedback>}
           {saved && <Feedback tone="success">{zh ? '时区已保存' : 'Timezone saved'}</Feedback>}
+        </form>
+      </section>
+
+      {/* Gemini AI Configuration row */}
+      <section className="preference-row">
+        <div>
+          <h2>{t.geminiSettingsTitle}</h2>
+          <p className="muted">{t.geminiSettingsDesc}</p>
+          <InfoPopover
+            label={zh ? 'AI 配置说明' : 'AI configuration help'}
+            content={
+              <div>
+                <p>
+                  {zh
+                    ? 'API 密钥及模型配置保存在本地 SQLite 数据库中，仅在生成计划与导入分析时向 Google Gemini 发送请求。'
+                    : 'API keys and model choices are saved locally in your SQLite database, used only for planning and progress formatting.'}
+                </p>
+                <p>
+                  {zh
+                    ? '密钥默认以圆点掩码保护，点击眼睛图标随时切换查看明文。'
+                    : 'API key is masked with dots by default. Click the eye icon to toggle visibility.'}
+                </p>
+              </div>
+            }
+          />
+        </div>
+
+        <form className="ai-settings-form" onSubmit={saveAiConfig}>
+          {/* API Key field with eye toggle */}
+          <Field label={t.apiKeyLabel}>
+            <div className="input-with-action">
+              <input
+                type={showApiKey ? 'text' : 'password'}
+                value={apiKey}
+                onChange={(e) => {
+                  dirtyAi.current = true;
+                  setApiKey(e.target.value);
+                  setAiSaved(false);
+                  setTestResult(null);
+                }}
+                placeholder={t.apiKeyPlaceholder}
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <button
+                type="button"
+                className="icon-action-btn"
+                onClick={() => setShowApiKey((prev) => !prev)}
+                aria-label={showApiKey ? t.hideApiKey : t.showApiKey}
+                title={showApiKey ? t.hideApiKey : t.showApiKey}
+              >
+                {showApiKey ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
+              </button>
+            </div>
+          </Field>
+
+          {/* Quick API Key Copy / Paste / Clear bar */}
+          <div className="api-key-actions">
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={handleCopyApiKey}
+              disabled={!apiKey}
+              title={t.copyApiKey}
+            >
+              {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
+              <span>{copied ? t.keyCopied : t.copyApiKey}</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={handlePasteApiKey}
+              title={t.pasteApiKey}
+            >
+              <ClipboardPaste size={14} aria-hidden="true" />
+              <span>{t.pasteApiKey}</span>
+            </button>
+            {apiKey && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  dirtyAi.current = true;
+                  setApiKey('');
+                  setAiSaved(false);
+                  setTestResult(null);
+                }}
+                title={t.clearApiKey}
+              >
+                <span>{t.clearApiKey}</span>
+              </button>
+            )}
+          </div>
+
+          {/* Preferred Model selection */}
+          <Field label={t.preferredModelLabel}>
+            <select
+              value={isCustomPrimary ? 'custom' : primaryModel}
+              onChange={(e) => {
+                dirtyAi.current = true;
+                setAiSaved(false);
+                setTestResult(null);
+                if (e.target.value === 'custom') {
+                  setIsCustomPrimary(true);
+                  if (PRESET_MODELS.includes(primaryModel)) {
+                    setPrimaryModel('');
+                  }
+                } else {
+                  const selectedModel = e.target.value;
+                  setIsCustomPrimary(false);
+                  setPrimaryModel(selectedModel);
+                  setFallbackModels((prev) => prev.filter((item) => item !== selectedModel));
+                }
+              }}
+            >
+              <option value="models/gemini-3.8-flash">gemini-3.8-flash (Recommended)</option>
+              <option value="models/gemini-3.7-flash">gemini-3.7-flash</option>
+              <option value="models/gemini-3.6-flash">gemini-3.6-flash</option>
+              <option value="models/gemini-3.5-flash">gemini-3.5-flash</option>
+              <option value="models/gemini-3.5-flash-lite">gemini-3.5-flash-lite</option>
+              <option value="models/gemini-2.5-flash">gemini-2.5-flash</option>
+              <option value="models/gemini-2.5-pro">gemini-2.5-pro</option>
+              <option value="custom">{t.customModelOption}</option>
+            </select>
+          </Field>
+
+          {/* Custom primary model input when custom option is selected */}
+          {isCustomPrimary && (
+            <Field label={zh ? '自定义模型名称' : 'Custom Model Identifier'}>
+              <input
+                type="text"
+                value={primaryModel}
+                onChange={(e) => {
+                  dirtyAi.current = true;
+                  const newCustom = e.target.value;
+                  setPrimaryModel(newCustom);
+                  if (newCustom.trim()) {
+                    setFallbackModels((prev) => prev.filter((item) => item !== newCustom.trim()));
+                  }
+                  setAiSaved(false);
+                  setTestResult(null);
+                }}
+                placeholder={t.customModelPlaceholder}
+              />
+            </Field>
+          )}
+
+          {/* Candidate fallback models chips */}
+          <div className="form-field">
+            <span>{t.candidateModelsLabel}</span>
+            <small>{t.candidateModelsDesc}</small>
+            <div className="candidate-chips" role="group" aria-label={t.candidateModelsLabel}>
+              {PRESET_MODELS.map((m) => {
+                const isSelected = fallbackModels.includes(m);
+                const isPrimary = m === primaryModel.trim();
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    className={`candidate-chip ${isSelected ? 'active' : ''}`}
+                    aria-pressed={isSelected}
+                    disabled={isPrimary}
+                    onClick={() => {
+                      if (isPrimary) return;
+                      dirtyAi.current = true;
+                      setAiSaved(false);
+                      setTestResult(null);
+                      setFallbackModels((prev) =>
+                        prev.includes(m)
+                          ? prev.filter((item) => item !== m)
+                          : [...prev, m].filter((item) => item !== primaryModel.trim())
+                      );
+                    }}
+                  >
+                    {m.replace('models/', '')}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Fallback chain preview */}
+            <div className="fallback-chain-preview">
+              <span className="chain-label">{t.fallbackChainLabel}:</span>
+              <span className="chain-path">
+                <strong>{primaryModel.replace('models/', '') || '(none)'}</strong>
+                {fallbackModels.length > 0 &&
+                  fallbackModels.map((m) => (
+                    <span key={m} className="chain-step">
+                      {' → '}{m.replace('models/', '')}
+                    </span>
+                  ))}
+              </span>
+            </div>
+          </div>
+
+          {/* Save & Test Action Row */}
+          <div className="action-row">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleTestConnection}
+              disabled={testingAi || !apiKey.trim()}
+            >
+              {testingAi ? t.testingAi : t.testAiConnection}
+            </button>
+            <button className="btn btn-primary" disabled={savingAi}>
+              {savingAi ? '…' : t.saveAiSettings}
+            </button>
+          </div>
+
+          {aiError && <Feedback tone="error">{aiError}</Feedback>}
+          {aiSaved && <Feedback tone="success">{t.aiSettingsSaved}</Feedback>}
+          {testResult && (
+            <Feedback tone={testResult.ok ? 'success' : 'error'}>
+              {testResult.ok
+                ? t.testAiSuccess.replace('{model}', testResult.model || primaryModel)
+                : `${t.testAiFailed}: ${testResult.message}`}
+            </Feedback>
+          )}
         </form>
       </section>
     </div>

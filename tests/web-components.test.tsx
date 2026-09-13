@@ -437,3 +437,122 @@ it('updates and persists timezone preference in SettingsView', async () => {
   assert.equal(updateCalls.mock.callCount(), 1);
   assert.deepEqual(updateCalls.mock.calls[0].arguments[0], { timezone: 'Asia/Shanghai' });
 });
+
+it('configures Gemini API key with default dots masking, eye icon toggle, and model selection', async () => {
+  let copiedText = '';
+  Object.assign(navigator, {
+    clipboard: {
+      writeText: async (text: string) => {
+        copiedText = text;
+      },
+      readText: async () => 'AIzaSyPastedKey456',
+    },
+  });
+
+  mock.method(api, 'getImportHistory', async () => ({ total: 0, items: [] }));
+  mock.method(api, 'getSettings', async () => ({
+    language: 'en',
+    theme: 'light',
+    timezone: 'UTC',
+    geminiApiKey: 'AIzaSyExistingKey123',
+    geminiModel: 'models/gemini-3.8-flash',
+    geminiFallbackModels: ['models/gemini-3.7-flash'],
+    updatedAt: 1,
+  }));
+
+  const updateCalls = mock.method(api, 'updateSettings', async (payload: any) => ({
+    language: 'en' as const,
+    theme: 'light' as const,
+    timezone: 'UTC',
+    geminiApiKey: payload.geminiApiKey,
+    geminiModel: payload.geminiModel,
+    geminiFallbackModels: payload.geminiFallbackModels,
+    updatedAt: 2,
+  }));
+
+  mock.method(api, 'testGeminiConnection', async () => ({ ok: true, model: 'models/gemini-3.8-flash' }));
+
+  await act(async () => {
+    render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} />);
+  });
+
+  // 1. Verify default masking as dots (type="password")
+  const apiKeyInput = screen.getByPlaceholderText('Enter or paste your Gemini API key...') as HTMLInputElement;
+  assert.ok(apiKeyInput);
+  assert.equal(apiKeyInput.type, 'password');
+  assert.equal(apiKeyInput.value, 'AIzaSyExistingKey123');
+
+  // 2. Click eye icon to reveal original key
+  const eyeBtn = screen.getByRole('button', { name: 'Show key' });
+  assert.ok(eyeBtn);
+  await act(async () => {
+    fireEvent.click(eyeBtn);
+  });
+
+  // Now input should be type="text" and button label should be "Hide key"
+  assert.equal(apiKeyInput.type, 'text');
+  const hideEyeBtn = screen.getByRole('button', { name: 'Hide key' });
+  assert.ok(hideEyeBtn);
+
+  // Click again to mask back to dots
+  await act(async () => {
+    fireEvent.click(hideEyeBtn);
+  });
+  assert.equal(apiKeyInput.type, 'password');
+
+  // 3. Test Copy API key button
+  const copyBtn = screen.getByRole('button', { name: 'Copy key' });
+  await act(async () => {
+    fireEvent.click(copyBtn);
+  });
+  assert.equal(copiedText, 'AIzaSyExistingKey123');
+  assert.ok(screen.getByText('Copied!'));
+
+  // 4. Test Paste API key button
+  const pasteBtn = screen.getByRole('button', { name: 'Paste from clipboard' });
+  await act(async () => {
+    fireEvent.click(pasteBtn);
+  });
+  assert.equal(apiKeyInput.value, 'AIzaSyPastedKey456');
+
+  // 5. Test Preferred Model dropdown
+  const modelSelect = screen.getByLabelText('Preferred Model') as HTMLSelectElement;
+  assert.ok(modelSelect);
+  await act(async () => {
+    fireEvent.change(modelSelect, { target: { value: 'models/gemini-3.7-flash' } });
+  });
+  assert.equal(modelSelect.value, 'models/gemini-3.7-flash');
+
+  // Verify that the newly selected primary model is disabled in candidate chips and pruned from fallbacks
+  const chip37 = screen.getByRole('button', { name: 'gemini-3.7-flash' });
+  assert.equal(chip37.hasAttribute('disabled'), true);
+
+  // 6. Test Candidate model chip toggle
+  const chip36 = screen.getByRole('button', { name: 'gemini-3.6-flash' });
+  assert.ok(chip36);
+  assert.equal(chip36.getAttribute('aria-pressed'), 'false');
+  await act(async () => {
+    fireEvent.click(chip36);
+  });
+  assert.equal(chip36.getAttribute('aria-pressed'), 'true');
+
+  // 7. Test Save AI settings
+  assert.equal(updateCalls.mock.callCount(), 0);
+  const saveAiBtn = screen.getByRole('button', { name: 'Save AI settings' });
+  await act(async () => {
+    fireEvent.click(saveAiBtn);
+  });
+  assert.equal(updateCalls.mock.callCount(), 1);
+  const sentPayload = updateCalls.mock.calls[0].arguments[0];
+  assert.equal(sentPayload.geminiApiKey, 'AIzaSyPastedKey456');
+  assert.equal(sentPayload.geminiModel, 'models/gemini-3.7-flash');
+  assert.deepEqual(sentPayload.geminiFallbackModels, ['models/gemini-3.6-flash']);
+  assert.ok(screen.getByText('AI settings saved'));
+
+  // 8. Test Connection button
+  const testBtn = screen.getByRole('button', { name: 'Test Connection' });
+  await act(async () => {
+    fireEvent.click(testBtn);
+  });
+  assert.ok(screen.getByText('Connection successful (models/gemini-3.8-flash)'));
+});

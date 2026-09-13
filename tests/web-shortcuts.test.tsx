@@ -42,6 +42,9 @@ beforeEach(() => {
     language: 'en',
     theme: 'system',
     timezone: 'UTC',
+    geminiApiKey: null,
+    geminiModel: null,
+    geminiFallbackModels: null,
     updatedAt: Date.now(),
   });
   api.ensureDailyPlan = async () => ({
