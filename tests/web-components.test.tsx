@@ -22,6 +22,21 @@ const { WorkspaceContext } = await import('../apps/web/src/workspace.tsx');
 
 afterEach(() => { cleanup(); mock.restoreAll(); });
 
+it('offers only Luna and V4.1 Flash even when legacy models were saved', async () => {
+  for (const [provider, model] of [['openai', 'gpt-5.6-luna'], ['deepseek', 'deepseek-flash']] as const) {
+  mock.method(api, 'getSettings', async () => ({ language: 'en', theme: 'light', timezone: 'UTC', updatedAt: 1,
+    llmProvider: provider, [`${provider}Model`]: 'old-model', [`${provider}FallbackModels`]: ['old-backup'] }));
+  await act(async () => { render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} />); });
+  const select = screen.getByLabelText('Preferred Model') as HTMLSelectElement;
+  assert.deepEqual([...select.options].map(option => option.value), [model]);
+  assert.equal(select.value, model);
+  assert.equal(screen.queryByLabelText('Custom Model Identifier'), null);
+  assert.equal(screen.queryByRole('group', { name: 'Candidate Fallback Models' }), null);
+  cleanup();
+  mock.restoreAll();
+  }
+});
+
 it('keeps provider drafts independent, remasks switched keys and saves empty fallback chains', async () => {
   const initial = { language: 'en' as const, theme: 'light' as const, timezone: 'UTC', updatedAt: 1,
     llmProvider: 'gemini' as const, geminiApiKey: 'synthetic-g', openaiApiKey: 'synthetic-o', deepseekApiKey: 'synthetic-d',

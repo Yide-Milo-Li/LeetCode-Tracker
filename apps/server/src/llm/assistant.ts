@@ -95,15 +95,15 @@ export class LLMAssistant implements ILLMAssistant {
       },
       openai: {
         apiKey: openaiOpts?.apiKey ?? (this.activeProviderType === 'openai' ? options.apiKey : undefined) ?? process.env.OPENAI_API_KEY,
-        model: openaiOpts?.model || (this.activeProviderType === 'openai' ? options.model : undefined) || process.env.OPENAI_MODEL || 'gpt-4o-mini',
+        model: openaiOpts?.model || (this.activeProviderType === 'openai' ? options.model : undefined) || process.env.OPENAI_MODEL || 'gpt-5.6-luna',
         baseUrl: openaiOpts?.baseUrl || (this.activeProviderType === 'openai' ? options.baseUrl : undefined) || process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
-        fallbackModels: openaiOpts?.fallbackModels || (this.activeProviderType === 'openai' ? options.fallbackModels : undefined) || ['gpt-4o'],
+        fallbackModels: openaiOpts?.fallbackModels || (this.activeProviderType === 'openai' ? options.fallbackModels : undefined) || [],
       },
       deepseek: {
         apiKey: deepseekOpts?.apiKey ?? (this.activeProviderType === 'deepseek' ? options.apiKey : undefined) ?? process.env.DEEPSEEK_API_KEY,
-        model: deepseekOpts?.model || (this.activeProviderType === 'deepseek' ? options.model : undefined) || process.env.DEEPSEEK_MODEL || 'deepseek-chat',
+        model: deepseekOpts?.model || (this.activeProviderType === 'deepseek' ? options.model : undefined) || process.env.DEEPSEEK_MODEL || 'deepseek-flash',
         baseUrl: deepseekOpts?.baseUrl || (this.activeProviderType === 'deepseek' ? options.baseUrl : undefined) || process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
-        fallbackModels: deepseekOpts?.fallbackModels || (this.activeProviderType === 'deepseek' ? options.fallbackModels : undefined) || ['deepseek-reasoner'],
+        fallbackModels: deepseekOpts?.fallbackModels || (this.activeProviderType === 'deepseek' ? options.fallbackModels : undefined) || [],
       },
     };
 

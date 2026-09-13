@@ -1,6 +1,6 @@
 # AI provider configuration
 
-Settings supports Gemini, OpenAI and DeepSeek. Each provider keeps an independent API key, model and fallback chain in the existing SQLite settings table. OpenAI and DeepSeek also support an optional HTTP(S) API base URL; requests append `/chat/completions`. No OpenAI SDK or schema migration was added.
+Settings supports Gemini, OpenAI and DeepSeek. OpenAI offers only GPT-5.6 Luna (`gpt-5.6-luna`); DeepSeek offers only DeepSeek V4.1 Flash (`deepseek-flash`). These two providers have no custom-model or fallback-model controls. Gemini retains its existing choices. Each provider keeps an independent API key, model and fallback chain in the existing SQLite settings table. OpenAI and DeepSeek also support an optional HTTP(S) API base URL; requests append `/chat/completions`. No OpenAI SDK or schema migration was added.
 
 Choose a provider, edit its configuration and save to activate it. Switching the displayed provider preserves other drafts and remasks keys. Configuration changes apply immediately; in-flight requests retain their original adapter. Save and probe controls remain unavailable until settings load successfully and while a form action is pending.
 
@@ -8,9 +8,9 @@ Keys are stored locally in plaintext, like the existing Gemini configuration. Pr
 
 ## Defaults and reset behavior
 
-Missing settings may use `GEMINI_API_KEY`, `OPENAI_API_KEY` or `DEEPSEEK_API_KEY`, along with the corresponding `*_MODEL` variables. OpenAI and DeepSeek also recognize `OPENAI_BASE_URL` and `DEEPSEEK_BASE_URL`. A saved, explicitly cleared API key disables that provider, including after restart. Clearing a saved model or URL returns to its environment or built-in default. An explicitly empty fallback list stays empty after restart.
+Missing settings may use `GEMINI_API_KEY`, `OPENAI_API_KEY` or `DEEPSEEK_API_KEY`, along with the corresponding `*_MODEL` variables. OpenAI and DeepSeek also recognize `OPENAI_BASE_URL` and `DEEPSEEK_BASE_URL`. A saved, explicitly cleared API key disables that provider, including after restart. Clearing a saved Gemini model or a provider URL returns to its environment or built-in default. OpenAI and DeepSeek application requests always use the fixed model above, including after loading old settings or testing a connection. Legacy stored model fields remain readable for compatibility but cannot override the application choice. An explicitly empty fallback list stays empty after restart.
 
-Preset identifiers are editable conveniences, not proof that an account has access to every listed model. Use a custom model identifier and the connection test to check your account or gateway. Historical Gemini presets are retained for compatibility. This audit did not verify live model availability.
+Preset identifiers are editable conveniences, not proof that an account has access to every listed model. Use the connection test to check your account or gateway; custom model identifiers remain available only for Gemini. Historical Gemini presets are retained for compatibility. Official model identifiers were checked against the [OpenAI model page](https://developers.openai.com/api/docs/models/gpt-5.6-luna) and [DeepSeek model table](https://api-docs.deepseek.com/quick_start/pricing/). No live account availability was tested.
 
 ## Provider boundary and failure behavior
 

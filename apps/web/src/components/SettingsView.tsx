@@ -1,6 +1,7 @@
 /** Application preferences only; catalog and progress imports live in their respective workspaces. */
 import React, { useEffect, useRef, useState } from 'react';
 import { Eye, EyeOff, Copy, Check, ClipboardPaste, Download, Upload, Archive, Database, AlertTriangle } from 'lucide-react';
+import { fixedProviderModels } from '../../../../packages/contracts/src/sync.ts';
 import { api } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
@@ -26,15 +27,8 @@ export const PROVIDER_PRESET_MODELS: Record<ProviderType, string[]> = {
     'models/gemini-2.5-flash',
     'models/gemini-2.5-pro',
   ],
-  openai: [
-    'gpt-4o-mini',
-    'gpt-4o',
-    'o3-mini',
-  ],
-  deepseek: [
-    'deepseek-chat',
-    'deepseek-reasoner',
-  ],
+  openai: [fixedProviderModels.openai],
+  deepseek: [fixedProviderModels.deepseek],
 };
 
 /** Keep the timezone and AI drafts intact on background refresh; only explicit save changes preferences. */
@@ -71,17 +65,17 @@ export function SettingsView({
 
   // OpenAI state
   const [openaiApiKey, setOpenaiApiKey] = useState('');
-  const [openaiPrimaryModel, setOpenaiPrimaryModel] = useState('gpt-4o-mini');
+  const [openaiPrimaryModel, setOpenaiPrimaryModel] = useState<string>(fixedProviderModels.openai);
   const [openaiIsCustomPrimary, setOpenaiIsCustomPrimary] = useState(false);
   const [openaiBaseUrl, setOpenaiBaseUrl] = useState('');
-  const [openaiFallbackModels, setOpenaiFallbackModels] = useState<string[]>(['gpt-4o']);
+  const [openaiFallbackModels, setOpenaiFallbackModels] = useState<string[]>([]);
 
   // DeepSeek state
   const [deepseekApiKey, setDeepseekApiKey] = useState('');
-  const [deepseekPrimaryModel, setDeepseekPrimaryModel] = useState('deepseek-chat');
+  const [deepseekPrimaryModel, setDeepseekPrimaryModel] = useState<string>(fixedProviderModels.deepseek);
   const [deepseekIsCustomPrimary, setDeepseekIsCustomPrimary] = useState(false);
   const [deepseekBaseUrl, setDeepseekBaseUrl] = useState('');
-  const [deepseekFallbackModels, setDeepseekFallbackModels] = useState<string[]>(['deepseek-reasoner']);
+  const [deepseekFallbackModels, setDeepseekFallbackModels] = useState<string[]>([]);
 
   // Shared AI form & action state
   const [showApiKey, setShowApiKey] = useState(false);
@@ -170,31 +164,20 @@ export function SettingsView({
 
             // OpenAI
             if (settings.openaiApiKey !== undefined) setOpenaiApiKey(settings.openaiApiKey ?? '');
-            const effOpenai = settings.openaiModel ?? 'gpt-4o-mini';
-            if (settings.openaiModel) {
-              setOpenaiPrimaryModel(settings.openaiModel);
-              setOpenaiIsCustomPrimary(!PROVIDER_PRESET_MODELS.openai.includes(settings.openaiModel));
-            }
+            // Ignore legacy model choices: the application offers only Luna for OpenAI.
+            setOpenaiPrimaryModel(fixedProviderModels.openai);
+            setOpenaiIsCustomPrimary(false);
+            setOpenaiFallbackModels([]);
             if (settings.openaiBaseUrl !== undefined) setOpenaiBaseUrl(settings.openaiBaseUrl ?? '');
-            if (settings.openaiFallbackModels) {
-              setOpenaiFallbackModels(
-                [...new Set(settings.openaiFallbackModels)].filter((m) => m !== effOpenai)
-              );
-            }
 
             // DeepSeek
             if (settings.deepseekApiKey !== undefined) setDeepseekApiKey(settings.deepseekApiKey ?? '');
-            const effDeepseek = settings.deepseekModel ?? 'deepseek-chat';
-            if (settings.deepseekModel) {
-              setDeepseekPrimaryModel(settings.deepseekModel);
-              setDeepseekIsCustomPrimary(!PROVIDER_PRESET_MODELS.deepseek.includes(settings.deepseekModel));
-            }
+            // Legacy DeepSeek choices must not reactivate an unsupported model.
+            setDeepseekPrimaryModel(fixedProviderModels.deepseek);
+            setDeepseekIsCustomPrimary(false);
+            setDeepseekFallbackModels([]);
             if (settings.deepseekBaseUrl !== undefined) setDeepseekBaseUrl(settings.deepseekBaseUrl ?? '');
-            if (settings.deepseekFallbackModels) {
-              setDeepseekFallbackModels(
-                [...new Set(settings.deepseekFallbackModels)].filter((m) => m !== effDeepseek)
-              );
-            }
+
           }
         }
       })
@@ -670,15 +653,15 @@ export function SettingsView({
             >
               {currentPresetModels.map((m, idx) => (
                 <option key={m} value={m}>
-                  {m.replace('models/', '')}{idx === 0 ? (zh ? '（推荐）' : ' (Recommended)') : ''}
+                  {provider === 'openai' ? 'GPT-5.6 Luna' : provider === 'deepseek' ? 'DeepSeek V4.1 Flash' : m.replace('models/', '')}{idx === 0 ? (zh ? '（推荐）' : ' (Recommended)') : ''}
                 </option>
               ))}
-              <option value="custom">{t.customModelOption}</option>
+              {provider === 'gemini' && <option value="custom">{t.customModelOption}</option>}
             </select>
           </Field>
 
           {/* Custom primary model input when custom option is selected */}
-          {currentIsCustomPrimary && (
+          {provider === 'gemini' && currentIsCustomPrimary && (
             <Field label={zh ? '自定义模型名称' : 'Custom Model Identifier'}>
               <input
                 type="text"
@@ -705,7 +688,7 @@ export function SettingsView({
           )}
 
           {/* Candidate fallback models chips */}
-          <div className="form-field">
+          {provider === 'gemini' && <div className="form-field">
             <span>{t.candidateModelsLabel}</span>
             <small>{t.candidateModelsDesc}</small>
             <div className="candidate-chips" role="group" aria-label={t.candidateModelsLabel}>
@@ -750,7 +733,7 @@ export function SettingsView({
                   ))}
               </span>
             </div>
-          </div>
+          </div>}
 
           {/* Save & Test Action Row */}
           <div className="action-row">

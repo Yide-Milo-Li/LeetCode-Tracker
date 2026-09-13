@@ -1,6 +1,6 @@
 # Testing boundaries
 
-Run `npm test` for 287 offline synthetic tests: 200 storage/domain/API tests and 87 rendered React DOM tests. `npm run test:web` runs the 87 web component tests separately. `npm run check` includes TypeScript and TSX test files (`tsc --noEmit`). Tests use in-memory or temporary databases and never require private data, credentials, remote services, or `apps/web/dist`.
+Run `npm test` for 289 offline synthetic tests: 201 storage/domain/API tests and 88 rendered React DOM tests. `npm run test:web` runs the 88 web component tests separately. `npm run check` includes TypeScript and TSX test files (`tsc --noEmit`). Tests use in-memory or temporary databases and never require private data, credentials, remote services, or `apps/web/dist`.
 
 Coverage includes:
 

@@ -164,20 +164,20 @@ describe('Multi-Provider LLM Settings & Server Endpoints (/api/v1/settings)', ()
       getStatus: (): LLMAssistantStatus => ({
         configured: true,
         provider: 'openai',
-        model: 'gpt-4o-mini',
+        model: 'gpt-5.6-luna',
       }),
       testConnection: async (params) => {
         testedParams = params;
         if (shouldSucceed) {
           return {
             ok: true,
-            model: params?.model || 'gpt-4o-mini',
+            model: params?.model || 'gpt-5.6-luna',
             provider: params?.provider || 'openai',
           };
         }
         return {
           ok: false,
-          model: params?.model || 'gpt-4o-mini',
+          model: params?.model || 'gpt-5.6-luna',
           provider: params?.provider || 'openai',
           message: 'Invalid authorization token',
         };
@@ -193,19 +193,19 @@ describe('Multi-Provider LLM Settings & Server Endpoints (/api/v1/settings)', ()
       payload: {
         provider: 'openai',
         apiKey: 'sk-test-valid',
-        model: 'gpt-4o-mini',
+        model: 'gpt-5.6-luna',
         baseUrl: 'https://api.openai.com/v1',
       },
     });
     assert.equal(successRes.statusCode, 200);
     const successBody = JSON.parse(successRes.payload);
     assert.equal(successBody.ok, true);
-    assert.equal(successBody.model, 'gpt-4o-mini');
+    assert.equal(successBody.model, 'gpt-5.6-luna');
     assert.equal(successBody.provider, 'openai');
     assert.deepEqual(testedParams, {
       provider: 'openai',
       apiKey: 'sk-test-valid',
-      model: 'gpt-4o-mini',
+      model: 'gpt-5.6-luna',
       baseUrl: 'https://api.openai.com/v1',
     });
 
@@ -260,8 +260,8 @@ describe('Multi-Provider LLM Settings & Server Endpoints (/api/v1/settings)', ()
     const received = updatedConfigs[0] as Record<string, unknown>;
     assert.equal(received.provider, 'deepseek');
     assert.equal(received.apiKey, 'new-deepseek-key');
-    assert.equal(received.model, 'deepseek-chat');
-    assert.deepEqual(received.fallbackModels, ['deepseek-reasoner']);
+    assert.equal(received.model, 'deepseek-flash');
+    assert.deepEqual((received.providers as any).deepseek.fallbackModels, []);
   });
 });
 

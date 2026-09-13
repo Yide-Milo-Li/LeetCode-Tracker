@@ -260,6 +260,9 @@ export const catalogStatsSchema = z.object({
 
 export type CatalogStats = z.infer<typeof catalogStatsSchema>;
 
+/** Application model choices for providers with a single supported selection. */
+export const fixedProviderModels = { openai: 'gpt-5.6-luna', deepseek: 'deepseek-flash' } as const;
+
 /** Supported LLM provider types. */
 export const llmProviderSchema = z.enum(['gemini', 'openai', 'deepseek']);
 export type LLMProvider = z.infer<typeof llmProviderSchema>;

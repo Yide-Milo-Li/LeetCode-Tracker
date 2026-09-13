@@ -15,6 +15,19 @@ const rules: Rules = { dailyCount: 1, difficulty: { Easy: 100, Medium: 0, Hard: 
 
 afterEach(() => mock.restoreAll());
 
+it('application configuration pins the single OpenAI and DeepSeek models over legacy settings', async () => {
+  for (const [provider, model] of [['openai', 'gpt-5.6-luna'], ['deepseek', 'deepseek-flash']] as const) {
+  const store = new CatalogStore(new DatabaseSync(':memory:'), { skipBackup: true });
+  await store.updateSettings({ llmProvider: provider, [`${provider}ApiKey`]: 'synthetic', [`${provider}Model`]: 'old-model', [`${provider}FallbackModels`]: ['old-backup'] });
+  const app = await buildApp({ store, disableStatic: true });
+  try {
+    const response = await app.inject({ method: 'GET', url: '/api/v1/progress-imports/status' });
+    assert.equal(response.json().model, model);
+    assert.deepEqual(response.json().fallbackModels, []);
+  } finally { await app.close(); store.db.close(); }
+  }
+});
+
 it('hot reload keeps inactive keys isolated and clears keys, URLs and fallbacks', async () => {
   const store = new CatalogStore(new DatabaseSync(':memory:'), { skipBackup: true });
   const assistant = new LLMAssistant({ apiKey: '', providers: { openai: { apiKey: '' }, deepseek: { apiKey: '' } } });

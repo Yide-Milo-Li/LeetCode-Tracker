@@ -2,9 +2,9 @@
 
 ## Phase 17 multi-provider AI — audited local implementation
 
-Gemini, OpenAI and DeepSeek settings, adapters, runtime reload, legacy routes and provider-labelled plans are implemented. The implementation audit reproduced and repaired configuration-reset, JSON-contract, timeout, provenance and desktop draft/masking defects. See [AI provider configuration](llm-providers.md) for the scope and deviations from the original plan.
+Gemini, OpenAI and DeepSeek settings, adapters, runtime reload, legacy routes and provider-labelled plans are implemented. OpenAI is restricted to GPT-5.6 Luna and DeepSeek to V4.1 Flash, including old saved configurations and connection probes; Gemini retains its model options. The implementation audit reproduced and repaired configuration-reset, JSON-contract, timeout, provenance and desktop draft/masking defects. See [AI provider configuration](llm-providers.md) for the scope and deviations from the original plan.
 
-The offline suite passes **287 tests**: 200 domain/storage/API and 87 frontend tests, with zero failures or skips. Type checking and production build pass. Vite emits existing plugin deprecation warnings. Isolated Chrome also passed 24 provider/language/theme/desktop-width cases, 24 screenshots and four workflow groups with zero runtime errors, console messages or external requests. These results are synthetic/local; live provider credentials, model availability and production deployment were not tested.
+The offline suite passes **289 tests**: 201 domain/storage/API and 88 frontend tests, with zero failures or skips. Type checking and production build pass. Vite emits existing plugin deprecation warnings. Isolated Chrome also passed 24 provider/language/theme/desktop-width cases, 24 screenshots and four workflow groups with zero runtime errors, console messages or external requests. These results are synthetic/local; live provider credentials, model availability and production deployment were not tested.
 
 ## Phase 16 topic insights and optional adaptive review — local implementation
 

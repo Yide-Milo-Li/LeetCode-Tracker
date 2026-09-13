@@ -198,6 +198,12 @@ try {
       await until("document.querySelector('.ai-settings-form fieldset:not(:disabled)')");
       assert.equal(store.getSettings().llmProvider, provider);
       assert.equal(assistant.getStatus().provider, provider);
+      if (provider !== 'gemini') {
+        const expected = provider === 'openai' ? 'gpt-5.6-luna' : 'deepseek-flash';
+        assert.equal(assistant.getStatus().model, expected);
+        assert.deepEqual(await evaluate("[...document.querySelector('.ai-settings-form select').options].map(o=>o.value)"), [expected]);
+        assert.equal(await evaluate("Boolean(document.querySelector('.candidate-chips'))"), false);
+      }
       await evaluate("document.querySelector('.ai-settings-form').scrollIntoView({block:'start'})");
       const layout = await evaluate('({scroll:document.documentElement.scrollWidth,width:document.documentElement.clientWidth})');
       assert.ok(layout.scroll <= layout.width + 1, 'Desktop horizontal overflow');

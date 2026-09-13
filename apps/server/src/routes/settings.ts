@@ -2,7 +2,7 @@
  * Fastify routes for managing user preferences and settings (e.g. timezone).
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { updateSettingsInputSchema } from '../../../../packages/contracts/src/sync.ts';
+import { updateSettingsInputSchema, fixedProviderModels } from '../../../../packages/contracts/src/sync.ts';
 import { z } from 'zod';
 import { resolveAssistantSettings } from '../llm/settings.ts';
 import { LLMAssistant } from '../llm/assistant.ts';
@@ -72,7 +72,9 @@ export function registerSettingsRoutes(app: FastifyInstance, context: RouteConte
     const { provider, apiKey, model, baseUrl } = parsed.data;
 
     if (gemini.testConnection) {
-      const res = await gemini.testConnection({ provider, apiKey, model, baseUrl });
+      const effectiveProvider = provider ?? gemini.getStatus().provider ?? 'gemini';
+      const effectiveModel = effectiveProvider === 'gemini' ? model : fixedProviderModels[effectiveProvider];
+      const res = await gemini.testConnection({ provider: effectiveProvider, apiKey, model: effectiveModel, baseUrl });
       if (!res.ok) {
         return reply.status(400).send({
           error: 'TEST_CONNECTION_FAILED',

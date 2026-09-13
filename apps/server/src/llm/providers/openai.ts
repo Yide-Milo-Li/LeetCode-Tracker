@@ -38,7 +38,7 @@ export class OpenAIProvider extends BaseLLMProvider {
     super();
     this.providerId = options.providerId || 'openai';
     this.apiKey = options.apiKey ?? (this.providerId === 'openai' ? process.env.OPENAI_API_KEY : undefined);
-    this.defaultModel = options.defaultModel || process.env.OPENAI_MODEL || 'gpt-4o-mini';
+    this.defaultModel = options.defaultModel || process.env.OPENAI_MODEL || 'gpt-5.6-luna';
     this.baseUrl = (options.baseUrl || process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, '');
     this.fetchFn = options.fetchFn || globalThis.fetch;
     this.customGenerateFn = options.customGenerateFn;
@@ -54,7 +54,7 @@ export class OpenAIProvider extends BaseLLMProvider {
       this.apiKey = config.apiKey ? config.apiKey.trim() : undefined;
     }
     if (config.defaultModel !== undefined) {
-      this.defaultModel = config.defaultModel ? config.defaultModel.trim() : (this.providerId === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini');
+      this.defaultModel = config.defaultModel ? config.defaultModel.trim() : (this.providerId === 'deepseek' ? 'deepseek-flash' : 'gpt-5.6-luna');
     }
     if (config.baseUrl !== undefined) {
       this.baseUrl = (config.baseUrl ? config.baseUrl.trim() : (this.providerId === 'deepseek' ? 'https://api.deepseek.com' : 'https://api.openai.com/v1')).replace(/\/+$/, '');
