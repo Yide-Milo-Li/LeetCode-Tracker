@@ -157,8 +157,8 @@ describe('Notes Store & Schema v9', () => {
     assert.ok(md.includes('Array'));
 
     // Content checks
-    assert.ok(md.includes('## 🕒 练习记录 (Practice Timeline)'));
-    assert.ok(md.includes('## 📝 解题复盘与深度笔记'));
+    assert.ok(md.includes('## Practice Timeline'));
+    assert.ok(md.includes('## Solution & Reflection'));
     assert.ok(md.includes('Store complements in a map.'));
   });
 
