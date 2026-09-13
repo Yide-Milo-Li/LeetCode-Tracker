@@ -1,6 +1,26 @@
 {
   "name": "leetcode-tracker",
   "version": "0.1.0",
+  "description": "Local-first desktop practice tracker with BYOD JSON Lines problem ingestion, weekly study strategies, multi-provider AI recommendations, and Markdown/Obsidian/Notion knowledge export.",
+  "homepage": "https://github.com/Yide-Milo-Li/Leetcode-Tracker#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Yide-Milo-Li/Leetcode-Tracker.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Yide-Milo-Li/Leetcode-Tracker/issues"
+  },
+  "keywords": [
+    "leetcode",
+    "practice-tracker",
+    "spaced-repetition",
+    "ai-recommendations",
+    "local-first",
+    "obsidian",
+    "notion-export",
+    "desktop"
+  ],
+  "author": "Yide Milo Li",
   "private": true,
   "type": "module",
   "license": "MIT",

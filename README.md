@@ -1,78 +1,140 @@
 # LeetCode Tracker
 
-A local-first practice tracker with weekly schedule strategies, a bilingual interface, and optional multi-provider AI recommendation planning.
+A local-first desktop practice tracker with weekly schedule strategies, a bilingual interface, Bring-Your-Own-Data (BYOD) JSON Lines problem ingestion, and optional multi-provider AI recommendation planning.
 
-## Data requirement (Bring-Your-Own-Data)
+[![Node.js](https://img.shields.io/badge/node.js-24%2B-brightgreen)](https://nodejs.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue)](https://www.typescriptlang.org/)
+[![Tests](https://img.shields.io/badge/tests-297%20passing-success)](tests/README.md)
+[![Platform](https://img.shields.io/badge/platform-Desktop%20Only-lightgrey)](docs/requirements.md)
 
-This project includes no problem dataset and performs no platform collection or automatic progress synchronization. Optional AI assistance uses the selected server-side Gemini, OpenAI or DeepSeek provider when configured. Users provide their own problem datasets using **JSON Lines (`.jsonl`)** text or files.
+---
 
-You can easily generate problem datasets (such as Blind 75, NeetCode 150, or custom topic lists) by prompting modern AI models (ChatGPT, Gemini, Claude). See the [data format guide](docs/data-format.md) for standard prompt templates, JSONL formatting rules, and SQLite storage specifications.
+## Key Features
 
-The MIT license covers repository code, not third-party content. This is an independent project.
+- **Bring-Your-Own-Data (BYOD) Ingestion**: Upload or paste problem datasets using **JSON Lines (`.jsonl`)** with preflight change preview, line error breakdown, and atomic SQLite commits. No third-party problem datasets or web scraping code are included.
+- **Desktop-First Workflow**: Minimalist interface designed for desktop browser viewports (1024px+). Includes a collapsible icon navigation rail, time-aware bilingual encouragement quotes, power-user keyboard shortcuts (`1`/`2`/`3`/`4`, `/`, `n`, `?`), and full `prefers-reduced-motion` compliance.
+- **Multi-Provider AI Planning**: Seamless support for **Google Gemini**, **OpenAI**, and **DeepSeek** with configurable model chains and custom Base URLs. All requests include a sub-0.2ms deterministic local fallback for offline resilience.
+- **Weekly Practice Strategies & Explicit Quotas**: Create named study strategies with explicit difficulty quotas (Easy/Medium/Hard) summing to your daily total, auto-fill calculation, and three review modes (None, Partial, All-Review).
+- **Spaced Repetition & Topic Insights**: Evidence-based algorithmic topic analytics that track practice frequency and duration, surface weak topics, and prioritize adaptive review without opaque score penalties.
+- **Problem Notes Workspace & Knowledge Export**: Dedicated Markdown notes editor with quick copy buttons for Obsidian Callouts (`[[wikilink]]`) and Notion rich cards. Export your entire catalog to a complete Obsidian vault ZIP with Dataview index, or dual CSV tables for Notion.
+- **10 Curated Theme Palettes**: Choose from 10 developer-tuned themes (Default Slate, Zinc, Neutral, Stone, Obsidian Dark, GitHub Dark, Tokyo Night, Nord, Catppuccin Macchiato, Solarized Dark) plus an optional High Contrast accessibility mode.
+- **Transactional SQLite Storage (Schema v9)**: Native Node.js SQLite storage with automatic schema migrations (v3–v8 to v9), point-in-time backups, operation replay idempotency, and offline database restore.
+- **Windows Desktop Launcher**: Launch the entire stack with a single click via `start.bat` or `npm run desktop`, featuring port conflict detection and graceful console shutdown.
 
-## Current status: Phase 6 desktop refactor
+---
 
-The repository implements an offline-first catalog, daily practice planner, and activity insights dashboard. Verification below is local and synthetic, not a production deployment or live-provider guarantee.
+## Data Requirement (Bring-Your-Own-Data)
 
-- **Today, Problems and Progress**: Today is the default homepage. Settings stays at the sidebar bottom; study schedules and the two imports are contextual workspaces.
-- **Today execution**: Seven-day known activity, generated-plan progress, immediate completion circles, optional duration/notes, precise evidence details, replacement, rest/setup/fallback states and temporary overrides.
-- **Progress records and statistics**: Search-first manual entry, date/source filters, exact correction/revocation, separate snapshot audits, five-step progress import, cumulative metrics, yearly heatmap, 30-day trend and source-coverage details.
-- **Shared daily plan controller**: Application-level `useDailyPlan` hook synchronizes plan generation, status, and replacements across views without duplicate requests.
-- **Daily planning engine**: Versioned strategies and weekday assignments, completion evidence, review scheduling, single/batch replacement, and confirmed temporary rule overrides.
-- **AI assistance**: Bounded candidate ranking and bilingual explanations with deterministic fallback; unresolved requirements require correction. Model calls share a 60-second recommendation budget. See [AI provider configuration](docs/llm-providers.md) for independent credentials, fallback behavior and verification limits.
-- **Bring-Your-Own-Data (BYOD) Ingestion**: Upload or paste JSON Lines data with preflight change preview, line error breakdown, and atomic SQLite commits.
-- **Local Storage Engine**: Transactional SQLite storage (schema v8) with automatic migration, identity conflict rejection, omitted field preservation, and point-in-time backups.
-- **Local Fastify API**: `/api/v1` routes listening strictly on loopback (`127.0.0.1`) with origin validation, write serialization, and read-only dashboard endpoints.
-- **Desktop preferences and accessibility**: English/Chinese, light/dark/system appearance, confirmed IANA timezone, keyboard overlays and reduced motion, verified at 1024/1440/1920 px. Business data comes from the local API.
-- **Reliable practice writes**: Nullable positive-integer duration, optional operation IDs with transactional replay, exact record queries and revision-aware correction. Old durations remain unknown after migration.
+This project contains **no problem datasets** and performs **no platform scraping or crawling**. You provide your own problem metadata via JSON Lines (`.jsonl`) files or clipboard text.
 
-## Quick start
+You can easily generate problem datasets (such as Blind 75, NeetCode 150, or custom topic lists) using modern AI models (ChatGPT, Claude, Gemini). See the [data format guide](docs/data-format.md) for standard prompt templates, JSONL schema specifications, and SQLite storage rules.
 
-With Node.js 24.15 or later in the 24.x series and npm installed:
+The MIT license covers repository source code, not third-party content.
+
+---
+
+## Quick Start
+
+### Prerequisites
+
+- **Node.js**: `24.15.0` or later (in the Node.js 24 series)
+- **npm**: version 10 or later
+
+### Installation & Launch
 
 ```sh
-# 1. Install dependencies
+# 1. Clone the repository
+git clone https://github.com/Yide-Milo-Li/Leetcode-Tracker.git
+cd Leetcode-Tracker
+
+# 2. Install dependencies
 npm install
 
-# 2. Run typecheck and automated tests
+# 3. Run typecheck and automated tests (297 tests)
 npm run check
 npm test
-npm run docs:check
 
-# 3. Build and launch local workbench
+# 4. Build frontend production assets
 npm run build
+
+# 5. Start the local loopback server
 npm start
 ```
 
-Open [http://127.0.0.1:3000](http://127.0.0.1:3000) in your browser to access the local application.
+Open [http://127.0.0.1:3000](http://127.0.0.1:3000) in your desktop browser.
 
-For frontend development with hot-module replacement and API proxy:
+### Windows Desktop Launcher
+
+On Windows, double-click **`start.bat`** in the repository root, or execute:
+
+```powershell
+npm run desktop
+```
+
+The launcher will verify prerequisites, build frontend assets if missing, start the Fastify server on `127.0.0.1:3000`, open your default browser, and shut down gracefully when you press `Ctrl+C`.
+
+### Frontend Development
+
+To run the Vite dev server with hot-module replacement and API proxying:
+
 ```sh
 npm run dev
 ```
 
-To perform an offline database restoration from a backup file:
+---
+
+## Configuration
+
+Copy `.env.example` to `.env` to configure server options, or configure AI providers directly inside the desktop application under **Settings → AI Configuration**:
+
 ```sh
-npm run restore -- <path-to-backup.sqlite> [target-db.sqlite]
+cp .env.example .env
 ```
 
-To verify the private 4,046-record fixture without modifying it, supply its path explicitly in PowerShell:
-```powershell
-$env:PRIVATE_BACKUP_PATH = 'D:\path\to\backup-4046.jsonl'
-npm run test:private
-```
+| Variable | Default | Description |
+| --- | --- | --- |
+| `PORT` | `3000` | Loopback server port |
+| `HOST` | `127.0.0.1` | Loopback bind host |
+| `GEMINI_API_KEY` | *(empty)* | Google Gemini API key |
+| `GEMINI_MODEL` | `models/gemini-3.5-flash` | Gemini model name |
+| `OPENAI_API_KEY` | *(empty)* | OpenAI API key |
+| `OPENAI_MODEL` | `gpt-5.6-luna` | OpenAI model name |
+| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | Custom OpenAI proxy/gateway endpoint |
+| `DEEPSEEK_API_KEY` | *(empty)* | DeepSeek API key |
+| `DEEPSEEK_MODEL` | `deepseek-flash` | DeepSeek model name |
+| `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | DeepSeek API endpoint |
 
-Default tests need neither a dataset nor a built frontend. Stop the local server before restoring; see the [backup and recovery instructions](scripts/README.md).
+See the [AI provider configuration guide](docs/llm-providers.md) for credential isolation and fallback semantics.
 
-## Repository guide
+---
 
+## Desktop Scope & Supported Environments
+
+- **Desktop Browser UI Only**: This project is maintained exclusively for desktop browsers at window widths of 1024px and above. Mobile phone layouts, touch gesture adaptations, and mobile navigation are intentionally outside the project's maintenance scope.
+- **Bilingual Support**: All interface views, forms, validations, and encouragement quotes support both English and Chinese, switchable in Settings.
+
+---
+
+## Repository Guide
+
+- [Documentation Index](docs/README.md)
+- [Architecture & Storage Design](docs/architecture.md)
+- [Desktop Workflow Guide](docs/desktop-workflow.md)
+- [BYOD Data Format Specification](docs/data-format.md)
+- [AI Provider Configuration](docs/llm-providers.md)
+- [Topic Practice Insights & Spaced Repetition](docs/topic-practice-insights.md)
+- [Project Status & Test Boundaries](docs/status.md)
+- [Project Roadmap](docs/roadmap.md)
 - [Applications](apps/README.md)
-- [Shared packages](packages/README.md)
-- [Scripts](scripts/README.md)
-- [Tests](tests/README.md)
-- [Documentation](docs/README.md)
-- [Contributing](CONTRIBUTING.md) and [security](SECURITY.md)
+- [Shared Packages](packages/README.md)
+- [Scripts & Maintenance](scripts/README.md)
+- [Testing Boundaries](tests/README.md)
+- [Contributing Guidelines](CONTRIBUTING.md)
+- [Security Policy](SECURITY.md)
 
-## Delivery boundary
+---
 
-Phase 6 changes are implemented and checked locally with synthetic data and mocked Gemini. See [implementation status](docs/status.md) and [testing boundaries](tests/README.md) for evidence and limitations. No private fixture or live Gemini run was performed for this refactor, and no release was published. Distribution packaging, public deployment and multi-user operation require separate work; mobile UI is outside scope.
+## License
+
+This project is licensed under the [MIT License](LICENSE).

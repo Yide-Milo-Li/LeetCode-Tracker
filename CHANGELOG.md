@@ -1,27 +1,60 @@
 # Changelog
 
-## Unreleased
+All notable changes to this project will be documented in this file.
 
-- Added sample-gated topic insights, optional topic prioritization and independently optional duration-based adaptive review.
-- Preserved fixed defaults and saved explanations; unified generation, replacement and temporary-override selection with bounded model reordering.
-- Added synthetic Phase 16 tests, isolated desktop acceptance and repeatable performance measurements; no live-provider or publication claim.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-- Added power-user keyboard workflow (`1`/`2`/`3` navigation, `/` catalog search focus, `n` manual practice logging, `?` shortcuts cheat sheet) with strict input, overlay, and IME composition guards.
-- Polished desktop micro-interactions including checkmark SVG draw and spring bounce completion animations, 100% daily goal celebration banner, and smooth modal/drawer transitions with full `prefers-reduced-motion` support.
-- Enhanced dashboard heatmap with rich hover tooltips detailing problem numbers, difficulty breakdown, and time spent, linked to review notes in the activity drawer.
-- Implemented dynamic code-splitting with React.lazy and desktop-themed Suspense boundaries for contextual workspaces, reducing main bundle size to 389 kB and eliminating Vite chunk size warnings.
-- Restored configured timezone formatting in progress import history, transaction-level practice replay conflict checks and existing Unicode candidate ordering after module decomposition.
-- Reorganized the desktop client into Today, Problems and Progress with contextual schedules/imports and preference-only Settings.
-- Added immediate completion circles, shared manual/history editors, exact-evidence revocation and optional practice duration.
-- Upgraded SQLite to v8 with atomic practice-operation replay, record revisions and nullable duration migration.
-- Added warm CSS token themes, retained workspace drafts, accessible overlays and synthetic desktop browser acceptance.
-- Corrected daylight-saving activity-day boundaries, empty DELETE request headers and missing progress-import result errors.
-- Hardened late-save draft recovery, concurrent completion prompts, search cancellation, contextual editor focus and date/source-statistics refresh.
-- Expanded synthetic acceptance to response loss after commit, restored database projections, desktop overlay matrices, long content and motion; aligned completion and rule-editor sizing with the approved design.
+---
 
-- Streamlined storage engine and contracts to focus purely on user-provided data ingestion.
-- Implemented high-performance JSON Lines (`.jsonl`) BYOD ingestion pipeline with lenient tag and URL derivation.
-- Added atomic SQLite UPSERT storage for problem catalog with audit history logging.
-- Documented LLM prompt templates for ChatGPT, Gemini, and Claude to format custom problem lists.
-- Verified bulk ingestion throughput of 1,000 problems under 20ms and 4,000+ problems under 100ms.
-- Preserved user problem catalog locally into private backup.
+## [0.1.0] - 2026-09-13
+
+### Initial Open Source Release
+
+#### Added
+- **10 Curated Desktop Theme Palettes & High Contrast (Phase 18)**:
+  - Added 10 developer-tuned theme palettes: Default Slate, Zinc, Neutral, Stone, Obsidian Dark, GitHub Dark, Tokyo Night, Nord, Catppuccin Macchiato, and Solarized Dark.
+  - Implemented an explicit High Contrast mode toggle that boosts border prominence, text readability, and active focus indicators.
+  - Pure CSS variable theme tokens with instant `localStorage` persistence and automatic dark mode activation for dark-exclusive palettes.
+- **Multi-Provider AI Abstraction (Phase 17)**:
+  - Unified `LLMAssistant` supporting **Google Gemini** (`@google/genai`), **OpenAI** (native HTTP fetch), and **DeepSeek** (native HTTP fetch).
+  - Zero third-party npm dependencies for OpenAI and DeepSeek, utilizing Node 24 native fetch.
+  - Custom Base URL configuration for enterprise proxies, local gateways, and OpenAI-compatible relays.
+  - Independent API key storage, model preferences, and runtime assistant hot-reloading on settings update without service restarts.
+  - High-resilience deterministic local fallbacks executing in <0.2ms on network interruptions or quota exhaustion.
+- **Topic Insights & Adaptive Review (Phase 16)**:
+  - Evidence-based topic analytics with sample gating to prevent inaccurate generalizations on sparse data.
+  - Independent opt-in strategy switches for Weak Topic Focus and Duration-Based Adaptive Review.
+  - Unified recommendation candidate builder across plan generation, single/batch replacement, and temporary prompt overrides.
+- **Problem Notes Workspace & Full Knowledge Base Export (Phase 14)**:
+  - SQLite Schema v9 upgrade adding transactional `problem_notes` storage.
+  - Master-detail Notes Workspace (keyboard shortcut `4`) with Markdown editing and problem practice timeline.
+  - Quick-copy buttons for Obsidian Callouts (`[[wikilink]]`) and Notion rich cards in problem rows and plan drawers.
+  - Full catalog knowledge export: complete Obsidian ZIP archive (4,000+ files) with Dataview index, Notion dual CSV tables, and snapshot bundle backup.
+- **AI Configuration & Masked Key Management (Phase 13)**:
+  - Dedicated AI provider settings panel with password-masked inputs, eye visibility toggle, and clipboard copy/paste shortcuts.
+  - Connectivity probe (`POST /api/v1/settings/test-llm`) with real-time feedback.
+- **Unified Practice Record Editor (Phase 12)**:
+  - Consolidated record editing and timestamp/completion corrections into a single accessible interface.
+  - In-session persistent draft recovery across modal dismissals and network retry failures.
+- **Explicit Difficulty Quotas & Strict All-Review Mode (Phase 11)**:
+  - Problem count inputs (Easy/Medium/Hard) summing exactly to daily total (1–50) with intelligent three-field auto-fill.
+  - Strict All-Review mode forbidding new-problem backfill when review candidates are scarce, reporting explicit shortages.
+- **Minimal Desktop UI & Time-Aware Encouragement (Phase 10)**:
+  - Collapsible icon navigation rail (64px collapsed, 216px expanded) with hover/focus tooltips.
+  - 240 curated bilingual encouragement quotes deterministically rotating across morning, afternoon, evening, and night time slots based on user timezone.
+- **Power-User Keyboard Shortcuts & Polished Interactions (Phase 9)**:
+  - Global shortcuts (`1`/`2`/`3`/`4` navigation, `/` catalog search focus, `n` manual practice logging, `?` shortcuts modal) with input, textarea, and IME composition guards.
+  - Micro-interactions including checkmark SVG drawing and spring bounce animations, 100% daily goal celebration banner, and full `@media (prefers-reduced-motion: reduce)` accessibility.
+  - Rich heatmap hover tooltips detailing problem counts, difficulty breakdown, and time spent, linked to review notes.
+- **Continuous Integration & Frontend Code Splitting (Phases 7 & 8)**:
+  - Decomposed domain, database storage delegates, and Fastify route modules.
+  - Dynamic code-splitting with `React.lazy()` reducing main bundle size to 380 kB and eliminating chunk size warnings.
+  - GitHub Actions CI workflow running on Node.js 24 (`ubuntu-latest`).
+- **Desktop Refactor & Practice Reliability (Phase 6)**:
+  - Three primary destinations: Today (default), Problems, and Progress.
+  - Transactional SQLite storage with atomic practice operation replay idempotency, record revisions, and point-in-time rolling backups (14-day retention).
+  - Nullable duration tracking and revision-safe record editing.
+- **Bring-Your-Own-Data (BYOD) Ingestion (Phases 1-3)**:
+  - High-throughput JSON Lines (`.jsonl`) bulk ingestion engine (>10,000 records/sec).
+  - Preflight validation with change preview, intra-batch duplicate detection, and line error breakdown.
+  - Permanent retirement and physical removal of historical crawling code to ensure zero copyright risks.

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security Vulnerability
+    url: https://github.com/Yide-Milo-Li/Leetcode-Tracker/security/policy
+    about: Please report security vulnerabilities privately according to our security policy.

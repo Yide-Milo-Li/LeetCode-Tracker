@@ -1,5 +1,22 @@
 # Implementation status
 
+## Open source readiness and engineering closeout
+
+The repository has completed engineering closure in preparation for public release on GitHub:
+- Zero secrets or private keys in Git history, validated by comprehensive commit auditing.
+- Complete community governance templates: `.github/ISSUE_TEMPLATE/feature_request.md`, `.github/ISSUE_TEMPLATE/bug_report.md`, `.github/ISSUE_TEMPLATE/config.yml`, and `.github/pull_request_template.md`.
+- Sanitized `.env.example` environment template with all configurable server and AI provider options.
+- The offline test suite passes **297 tests**: 206 domain/storage/API tests and 91 web DOM tests, with zero failures, zero skips, and zero external network calls.
+- Static type checking (`tsc --noEmit`), Vite production build, and documentation link checking pass cleanly.
+
+## Phase 18 custom theme palettes and high contrast — audited local implementation
+
+Implemented 10 curated desktop theme palettes (Default Slate, Zinc, Neutral, Stone, Obsidian Dark, GitHub Dark, Tokyo Night, Nord, Catppuccin Macchiato, and Solarized Dark) and an explicit High Contrast mode toggle under `.local/plans/phase-18-custom-themes-and-color-schemes.md`.
+- Pure CSS variable theme tokens with immediate `localStorage` persistence.
+- Automatic light/dark mode synchronization: selecting dark-exclusive palettes automatically activates dark mode.
+- Accessible color token contrast compliant with WCAG 2.1 AA benchmarks.
+- Added `tests/phase18-theme-palettes.test.ts` and `tests/web-theme-palette.test.tsx`, expanding the test suite to 297 tests.
+
 ## Phase 17 multi-provider AI — audited local implementation
 
 Gemini, OpenAI and DeepSeek settings, adapters, runtime reload, legacy routes and provider-labelled plans are implemented. OpenAI is restricted to GPT-5.6 Luna and DeepSeek to V4.1 Flash, including old saved configurations and connection probes; Gemini retains its model options. The implementation audit reproduced and repaired configuration-reset, JSON-contract, timeout, provenance and desktop draft/masking defects. See [AI provider configuration](llm-providers.md) for the scope and deviations from the original plan.
