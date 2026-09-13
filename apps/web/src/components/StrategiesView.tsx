@@ -4,7 +4,7 @@
  * topic tags, spaced repetition, premium) and map them across weekdays with conflict detection.
  */
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { Plus, CheckCircle2, AlertCircle, Clock } from 'lucide-react';
+import { Plus, CheckCircle2, AlertCircle, Clock, ChevronDown } from 'lucide-react';
 import { api, type Strategy, type StrategyInput, type TopicTag, type TagMastery } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
 import { Dialog } from './ui.tsx';
@@ -53,6 +53,7 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
   const validationId = React.useId();
   const [weekdays, setWeekdays] = useState<number[]>([]);
   const [preference, setPreference] = useState('');
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const loadSequence = useRef(0);
@@ -100,7 +101,9 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
   useEffect(()=>{
     if(focusRequest && focusRequest!==consumedFocusRequest.current){
       consumedFocusRequest.current=focusRequest;
-      openCreateModal();setFocusWeakTags(true);
+      openCreateModal();
+      setFocusWeakTags(true);
+      setAdvancedOpen(true);
     }
   },[focusRequest]);
 
@@ -118,6 +121,7 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
     setReviewCount('');
     setWeekdays([]);
     setPreference('');
+    setAdvancedOpen(false);
     setError(null);
     setModalOpen(true);
   }
@@ -136,6 +140,7 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
     setReviewCount(reviewCountForRules(s.rules));
     setWeekdays(s.weekdays);
     setPreference(s.rules.preference);
+    setAdvancedOpen(Boolean(s.rules.focusWeakTags || s.rules.tags?.length > 0 || (s.rules.preference && s.rules.preference.trim().length > 0)));
     setError(null);
     setModalOpen(true);
   }
@@ -334,178 +339,230 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
               </div>
             )}
 
-            {/* Name & Count */}
-            <div className="form-grid-2">
-              <div className="form-group">
-                <label className="form-label">{t.strategyName} *</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  aria-label={t.strategyName}
-                  maxLength={100}
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder={t.strategyNamePlaceholder}
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label">{t.dailyCount} *</label>
-                <input
-                  type="number"
-                  className="form-input"
-                  min="1"
-                  max="50"
-                  placeholder="e.g. 3"
-                  aria-label={t.dailyCount}
-                  value={dailyCount}
-                  step="1"
-                  aria-invalid={exceedsTotal || (dailyCount !== '' && !hasDailyCount)}
-                  aria-describedby={validationMessage ? validationId : undefined}
-                  onChange={(e) => {
-                    const total = e.target.value === '' ? '' : Number(e.target.value);
-                    setDailyCount(total);
-                    setDifficultyDraft(draft => updateDifficultyDraft(draft, total));
-                  }}
-                  required
-                />
-              </div>
-            </div>
-
-            {/* Counts remain explicit; only the system-owned third field tracks the remainder. */}
-            <div className="form-group">
-              <div className="u-display-flex u-justify-content-space-between u-margin-bottom-0-25rem">
-                <span className="form-label">{t.difficultyCounts} *</span>
-                <span className="text-muted" aria-live="polite">{currentSum} / {dailyCount || '—'}</span>
-              </div>
-              <div className="difficulty-inputs-row">
-                {difficulties.map((difficulty, index) => {
-                  const label = [t.easyCount, t.mediumCount, t.hardCount][index];
-                  return <div className="diff-input-group" key={difficulty}>
-                    <label className={`diff-input-label difficulty-${difficulty.toLowerCase()}`} htmlFor={`${validationId}-${difficulty}`}>{label}</label>
-                    <input id={`${validationId}-${difficulty}`} type="number" className="form-input"
-                      min="0" max={dailyCount || undefined} step="1" aria-label={label}
-                      value={counts[difficulty]} aria-invalid={counts[difficulty] !== '' &&
-                        (!isCount(counts[difficulty]) || (typeof dailyCount === 'number' && counts[difficulty] > dailyCount))}
-                      aria-describedby={validationMessage ? validationId : undefined}
-                      onChange={e => setDifficultyDraft(draft => updateDifficultyDraft(draft, dailyCount, {
-                        difficulty, value: e.target.value === '' ? '' : Number(e.target.value),
-                      }))} />
-                  </div>;
-                })}
-              </div>
-            </div>
-            {validationMessage && <p id={validationId} role="alert" className="strategy-count-error">{validationMessage}</p>}
-            {/* Weekday Assignment */}
-            <div className="form-group">
-              <label className="form-label">{t.assignedDays}</label>
-              <div className="weekday-selector-row">
-                {Array.from({ length: 7 }, (_, day) => {
-                  const isSelected = weekdays.includes(day);
-                  const occupiedBy = schedule.find((s) => s.weekday === day)?.strategy;
-                  const isConflict = occupiedBy && occupiedBy.id !== editingStrategy?.id;
-
-                  return (
-                    <button
-                      key={day}
-                      type="button"
-                      className={`weekday-select-btn ${isSelected ? 'selected' : ''} ${isConflict ? 'conflict' : ''}`}
-                      onClick={() => toggleWeekday(day)}
-                      title={isConflict ? `${t.conflictWarning} (${occupiedBy.name})` : undefined}
-                    >
-                      {t.weekdays[day]}
-                      {isConflict && <span className="conflict-dot" />}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Review & Premium settings */}
-            <div className="form-grid-2">
-              <div className="form-group">
-                <span className="form-label" id={`${validationId}-review-mode`}>{t.reviewMode} *</span>
-                <div role="radiogroup" aria-labelledby={`${validationId}-review-mode`} className="u-display-flex u-flex-direction-column u-gap-0-5rem u-margin-top-0-25rem">
-                  {(['none', 'partial', 'all'] as const).map((mode, index) => <label key={mode} className="form-checkbox-label u-cursor-pointer">
-                    <input type="radio" name="reviewMode" checked={reviewMode === mode} onChange={() => {setReviewMode(mode);if(mode==='none')setAdaptiveReviewEnabled(false);}} />
-                    <span>{[t.disableReview, t.partialReview, t.allReview][index]}</span>
-                  </label>)}
+            {/* 1. Essential Settings */}
+            <div className="strategy-form-section">
+              {/* Name & Count */}
+              <div className="form-grid-2">
+                <div className="form-group">
+                  <label className="form-label">{t.strategyName} *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    aria-label={t.strategyName}
+                    maxLength={100}
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder={t.strategyNamePlaceholder}
+                    required
+                  />
                 </div>
-                {(reviewMode === 'partial' || reviewMode === 'all') && (
-                  <div className="u-margin-top-0-75rem">
+                <div className="form-group">
+                  <label className="form-label">{t.dailyCount} *</label>
+                  <input
+                    type="number"
+                    className="form-input"
+                    min="1"
+                    max="50"
+                    placeholder="e.g. 3"
+                    aria-label={t.dailyCount}
+                    value={dailyCount}
+                    step="1"
+                    aria-invalid={exceedsTotal || (dailyCount !== '' && !hasDailyCount)}
+                    aria-describedby={validationMessage ? validationId : undefined}
+                    onChange={(e) => {
+                      const total = e.target.value === '' ? '' : Number(e.target.value);
+                      setDailyCount(total);
+                      setDifficultyDraft(draft => updateDifficultyDraft(draft, total));
+                    }}
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* Counts remain explicit; only the system-owned third field tracks the remainder. */}
+              <div className="form-group">
+                <div className="u-display-flex u-justify-content-space-between u-margin-bottom-0-25rem">
+                  <span className="form-label">{t.difficultyCounts} *</span>
+                  <span className="text-muted" aria-live="polite">{currentSum} / {dailyCount || '—'}</span>
+                </div>
+                <div className="difficulty-inputs-row">
+                  {difficulties.map((difficulty, index) => {
+                    const label = [t.easyCount, t.mediumCount, t.hardCount][index];
+                    return <div className="diff-input-group" key={difficulty}>
+                      <label className={`diff-input-label difficulty-${difficulty.toLowerCase()}`} htmlFor={`${validationId}-${difficulty}`}>{label}</label>
+                      <input id={`${validationId}-${difficulty}`} type="number" className="form-input"
+                        min="0" max={dailyCount || undefined} step="1" aria-label={label}
+                        value={counts[difficulty]} aria-invalid={counts[difficulty] !== '' &&
+                          (!isCount(counts[difficulty]) || (typeof dailyCount === 'number' && counts[difficulty] > dailyCount))}
+                        aria-describedby={validationMessage ? validationId : undefined}
+                        onChange={e => setDifficultyDraft(draft => updateDifficultyDraft(draft, dailyCount, {
+                          difficulty, value: e.target.value === '' ? '' : Number(e.target.value),
+                        }))} />
+                    </div>;
+                  })}
+                </div>
+              </div>
+              {validationMessage && <p id={validationId} role="alert" className="strategy-count-error">{validationMessage}</p>}
+
+              {/* Weekday Assignment */}
+              <div className="form-group">
+                <label className="form-label">{t.assignedDays}</label>
+                <div className="weekday-selector-row">
+                  {Array.from({ length: 7 }, (_, day) => {
+                    const isSelected = weekdays.includes(day);
+                    const occupiedBy = schedule.find((s) => s.weekday === day)?.strategy;
+                    const isConflict = occupiedBy && occupiedBy.id !== editingStrategy?.id;
+
+                    return (
+                      <button
+                        key={day}
+                        type="button"
+                        className={`weekday-select-btn ${isSelected ? 'selected' : ''} ${isConflict ? 'conflict' : ''}`}
+                        onClick={() => toggleWeekday(day)}
+                        title={isConflict ? `${t.conflictWarning} (${occupiedBy.name})` : undefined}
+                      >
+                        {t.weekdays[day]}
+                        {isConflict && <span className="conflict-dot" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* 2. Review & Problem Pool Settings */}
+            <div className="strategy-form-section u-margin-top-1rem">
+              <div className="form-grid-2">
+                <div className="form-group">
+                  <span className="form-label" id={`${validationId}-review-mode`}>{t.reviewMode} *</span>
+                  <div role="radiogroup" aria-labelledby={`${validationId}-review-mode`} className="u-display-flex u-flex-direction-column u-gap-0-5rem u-margin-top-0-25rem">
+                    {(['none', 'partial', 'all'] as const).map((mode, index) => <label key={mode} className="form-checkbox-label u-cursor-pointer">
+                      <input type="radio" name="reviewMode" checked={reviewMode === mode} onChange={() => {setReviewMode(mode);if(mode==='none')setAdaptiveReviewEnabled(false);}} />
+                      <span>{[t.disableReview, t.partialReview, t.allReview][index]}</span>
+                    </label>)}
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">{t.includePremium}</label>
+                  <label className="form-checkbox-label u-margin-top-0-5rem">
+                    <input type="checkbox" checked={premium} onChange={(e) => setPremium(e.target.checked)} />
+                    <span>{t.includePremium}</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Sub-options revealed only when review mode is active */}
+              {(reviewMode === 'partial' || reviewMode === 'all') && (
+                <div className="review-sub-options u-margin-top-0-75rem">
+                  <div className="form-group u-margin-bottom-0-75rem">
                     <label className="form-label" htmlFor={`${validationId}-review`}>{t.reviewCount} *</label>
-                    <input id={`${validationId}-review`} type="number" className="form-input" min="1"
-                      max={dailyCount || undefined} step="1" aria-label={t.reviewCount}
-                      value={reviewMode === 'all' ? dailyCount : reviewCount} readOnly={reviewMode === 'all'}
+                    <input
+                      id={`${validationId}-review`}
+                      type="number"
+                      className="form-input"
+                      min="1"
+                      max={dailyCount || undefined}
+                      step="1"
+                      aria-label={t.reviewCount}
+                      value={reviewMode === 'all' ? dailyCount : reviewCount}
+                      readOnly={reviewMode === 'all'}
                       aria-invalid={reviewMode === 'partial' && reviewCount !== '' && !isReviewValid}
                       aria-describedby={validationMessage ? validationId : undefined}
-                      onChange={e => setReviewCount(e.target.value === '' ? '' : Number(e.target.value))} required />
+                      onChange={e => setReviewCount(e.target.value === '' ? '' : Number(e.target.value))}
+                      required
+                    />
                   </div>
+                  <div className="form-group u-margin-top-0-5rem">
+                    <label className="form-checkbox-label">
+                      <input type="checkbox" checked={adaptiveReviewEnabled}
+                        onChange={e=>setAdaptiveReviewEnabled(e.target.checked)} />
+                      <span>{t.adaptiveReviewEnabled}</span>
+                    </label>
+                    <p className="text-muted u-margin-top-0-25rem">{t.adaptiveReviewDescription}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 3. Advanced & Optional Preferences (Collapsible) */}
+            <details
+              className="strategy-advanced-details u-margin-top-1rem"
+              open={advancedOpen}
+              onToggle={(e) => setAdvancedOpen(e.currentTarget.open)}
+            >
+              <summary className="strategy-advanced-summary">
+                <div className="strategy-advanced-title">
+                  <ChevronDown size={16} className="strategy-advanced-chevron" aria-hidden="true" />
+                  <span className="form-label">{t.advancedStrategyOptions}</span>
+                </div>
+                {selectedTags.length > 0 && (
+                  <span className="tag-count-badge">
+                    {selectedTags.length} {t.tagsSelected}
+                  </span>
                 )}
+              </summary>
+              <div className="strategy-advanced-content">
+                {/* Focus weak tags */}
+                <div className="form-group focus-session-box">
+                  <label className="form-checkbox-label">
+                    <input type="checkbox" checked={focusWeakTags} onChange={e=>setFocusWeakTags(e.target.checked)} />
+                    <span>{t.focusWeakTags}</span>
+                  </label>
+                  <p className="text-muted">{t.focusWeakTagsDesc}</p>
+                  {masteryLoading?<p role="status">{t.insightLoading}</p>:masteryError
+                    ?<p role="status">{t.insightLoadError} <button type="button" className="btn btn-secondary" onClick={()=>setMasteryRetry(v=>v+1)}>{t.retry}</button></p>
+                    :weakTags.length?<div className="top-tags-wrap">{weakTags.slice(0,3).map(tag=><span className="tag-chip" key={tag.tagSlug}>{tag.tagName}</span>)}</div>
+                    :<p className="text-muted">{t.noWeakTopics}</p>}
+                </div>
+
+                {/* Topic tags selection */}
+                <div className="form-group">
+                  <div className="u-display-flex u-justify-content-space-between u-margin-bottom-0-25rem">
+                    <label className="form-label">{t.topicTagsFilter}</label>
+                    {selectedTags.length > 0 && (
+                      <button
+                        type="button"
+                        className="btn-link text-muted"
+                        onClick={() => setSelectedTags([])}
+                      >
+                        {t.clearTags}
+                      </button>
+                    )}
+                  </div>
+                  <div className="tag-chips-scroll">
+                    {allTags.slice(0, 40).map((tag) => {
+                      const isSelected = selectedTags.includes(tag.slug);
+                      return (
+                        <button
+                          key={tag.slug}
+                          type="button"
+                          className={`tag-chip selectable ${isSelected ? 'selected' : ''}`}
+                          onClick={() => toggleTag(tag.slug)}
+                        >
+                          {tag.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Qualitative Study Preferences */}
+                <div className="form-group">
+                  <label className="form-label">{t.studyPreferences}</label>
+                  <p className="text-muted u-margin-bottom-0-5rem">{t.studyPreferencesDesc}</p>
+                  <textarea
+                    className="form-textarea"
+                    rows={2}
+                    aria-label={t.studyPreferences}
+                    maxLength={2000}
+                    value={preference}
+                    onChange={(e) => setPreference(e.target.value)}
+                    placeholder={t.preferencesPlaceholder}
+                  />
+                </div>
               </div>
-
-              <div className="form-group">
-                <label className="form-label">{t.includePremium}</label>
-                <label className="form-checkbox-label u-margin-top-0-5rem">
-                  <input type="checkbox" checked={premium} onChange={(e) => setPremium(e.target.checked)} />
-                  <span>{t.includePremium}</span>
-                </label>
-              </div>
-            </div>
-
-            <div className="form-group focus-session-box">
-              <label className="form-checkbox-label">
-                <input type="checkbox" checked={focusWeakTags} onChange={e=>setFocusWeakTags(e.target.checked)} />
-                <span>{t.focusWeakTags}</span>
-              </label>
-              <p className="text-muted">{t.focusWeakTagsDesc}</p>
-              {masteryLoading?<p role="status">{t.insightLoading}</p>:masteryError
-                ?<p role="status">{t.insightLoadError} <button type="button" className="btn btn-secondary" onClick={()=>setMasteryRetry(v=>v+1)}>{t.retry}</button></p>
-                :weakTags.length?<div className="top-tags-wrap">{weakTags.slice(0,3).map(tag=><span className="tag-chip" key={tag.tagSlug}>{tag.tagName}</span>)}</div>
-                :<p className="text-muted">{t.noWeakTopics}</p>}
-            </div>
-            <div className="form-group">
-              <label className="form-checkbox-label">
-                <input type="checkbox" checked={adaptiveReviewEnabled} disabled={reviewMode===null||reviewMode==='none'}
-                  onChange={e=>setAdaptiveReviewEnabled(e.target.checked)} />
-                <span>{t.adaptiveReviewEnabled}</span>
-              </label>
-              <p className="text-muted">{t.adaptiveReviewDescription}</p>
-            </div>
-
-            {/* Topic tags selection */}
-            <div className="form-group">
-              <label className="form-label">{t.topicTagsFilter}</label>
-              <div className="tag-chips-scroll">
-                {allTags.slice(0, 40).map((tag) => {
-                  const isSelected = selectedTags.includes(tag.slug);
-                  return (
-                    <button
-                      key={tag.slug}
-                      type="button"
-                      className={`tag-chip selectable ${isSelected ? 'selected' : ''}`}
-                      onClick={() => toggleTag(tag.slug)}
-                    >
-                      {tag.name}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Study Preferences */}
-            <div className="form-group">
-              <label className="form-label">{t.studyPreferences}</label>
-              <textarea
-                className="form-textarea"
-                rows={2}
-                aria-label={t.studyPreferences}
-                maxLength={2000}
-                value={preference}
-                onChange={(e) => setPreference(e.target.value)}
-                placeholder={t.preferencesPlaceholder}
-              />
-            </div>
+            </details>
           </div>
 
           <div className="modal-footer">

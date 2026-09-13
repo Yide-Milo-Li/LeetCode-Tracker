@@ -34,25 +34,24 @@ it('opens a focus-only draft without setting required quantities, review or week
     const dialog = screen.getByRole('dialog');
     assert.ok(dialog);
     assert.equal((screen.getByLabelText(translations.en.focusWeakTags) as HTMLInputElement).checked, true);
-    const adaptive = screen.getByLabelText(translations.en.adaptiveReviewEnabled) as HTMLInputElement;
-    assert.equal(adaptive.checked, false);
-    assert.equal(adaptive.disabled, true);
+    const adaptive = screen.queryByLabelText(translations.en.adaptiveReviewEnabled);
+    assert.equal(adaptive, null);
     assert.equal(save.mock.calls.length, 0);
     await act(async () => finish());
     assert.ok(screen.getByText(translations.en.noWeakTopics));
 });
-it('keeps the two switches independent and visibly disables adaptive when review is off', async () => {
+it('keeps the two switches independent and conditionally prompts adaptive review when review is active', async () => {
     library();
     mock.method(api, 'getMasteryReport', async () => { throw Error('offline'); });
     await act(async () => render(<StrategiesView lang="zh" focusRequest={1}/>));
+    assert.equal(screen.queryByLabelText(translations.zh.adaptiveReviewEnabled), null);
     fireEvent.click(screen.getByLabelText(translations.zh.allReview));
     const adaptive = screen.getByLabelText(translations.zh.adaptiveReviewEnabled) as HTMLInputElement;
     assert.equal(adaptive.disabled, false);
     fireEvent.click(adaptive);
     assert.equal(adaptive.checked, true);
     fireEvent.click(screen.getByLabelText(translations.zh.disableReview));
-    assert.equal(adaptive.checked, false);
-    assert.equal(adaptive.disabled, true);
+    assert.equal(screen.queryByLabelText(translations.zh.adaptiveReviewEnabled), null);
     assert.equal((screen.getByLabelText(translations.zh.focusWeakTags) as HTMLInputElement).checked, true);
     assert.ok(screen.getByText(translations.zh.insightLoadError));
 });

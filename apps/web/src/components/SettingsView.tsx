@@ -1061,7 +1061,7 @@ export function SettingsView({
               <a
                 href={api.getObsidianZipUrl('all', lang)}
                 className="btn btn-secondary btn-sm"
-                title="Download 4,000+ problem Obsidian vault skeleton"
+                title={t.exportObsidianTitle}
               >
                 <Archive size={14} />
                 <span>{t.exportObsidianVault}</span>
@@ -1070,19 +1070,19 @@ export function SettingsView({
               <a
                 href={api.getNotionCsvUrl('summary')}
                 className="btn btn-secondary btn-sm"
-                title="Download Notion Problems Summary CSV"
+                title={t.exportNotionSummaryTitle}
               >
                 <Download size={14} />
-                <span>{t.exportNotionCsv} (题库表)</span>
+                <span>{t.exportNotionSummary}</span>
               </a>
 
               <a
                 href={api.getNotionCsvUrl('history')}
                 className="btn btn-secondary btn-sm"
-                title="Download Notion Practice History CSV"
+                title={t.exportNotionHistoryTitle}
               >
                 <Download size={14} />
-                <span>{t.exportNotionCsv} (做题历史表)</span>
+                <span>{t.exportNotionHistory}</span>
               </a>
             </div>
           </div>

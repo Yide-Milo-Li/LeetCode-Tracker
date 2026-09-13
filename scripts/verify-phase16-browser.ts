@@ -363,7 +363,7 @@ try {
     await click(zh?'全部复习':'All review','label');
     await click(zh?'启用基于用时的自适应复习':'Use duration-based adaptive review','label');
     await click(zh?'仅新题训练（不复习）':'New Problems Only (No Review)','label');
-    assert.ok(await evaluate("[...document.querySelectorAll('[role=dialog] input[type=checkbox]')].some(e=>e.disabled&&!e.checked)"));
+    assert.ok(await evaluate("!document.querySelector('.review-sub-options')"));
     await click(zh?'保存策略':'Save Strategy');
     await until("!document.querySelector('[role=dialog]')");
     assert.ok(store.planning.strategies().some(s=>s.name==='Browser draft '+language&&s.weekdays.length===0&&s.rules.focusWeakTags));
