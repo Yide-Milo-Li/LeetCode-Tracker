@@ -1,7 +1,7 @@
 /** Application preferences only; catalog and progress imports live in their respective workspaces. */
 import React, { useEffect, useRef, useState } from 'react';
 import { Eye, EyeOff, Copy, Check, ClipboardPaste, Download, Upload, Archive, Database, AlertTriangle } from 'lucide-react';
-import { fixedProviderModels } from '../../../../packages/contracts/src/sync.ts';
+import { fixedProviderModels, type ThemePalette } from '../../../../packages/contracts/src/sync.ts';
 import { api } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
@@ -10,10 +10,115 @@ import { PageHeader, Feedback, Field, InfoPopover } from './ui.tsx';
 interface SettingsViewProps {
   lang: Language;
   onLanguageChange: (lang: Language) => void;
-  onThemeChange: (theme: 'light' | 'dark' | 'system') => void;
+  onThemeChange: (theme: 'light' | 'dark') => void;
   currentTheme: 'light' | 'dark' | 'system';
+  onPaletteChange?: (palette: ThemePalette) => void;
+  currentPalette?: ThemePalette;
   onTimezoneSaved?: (zone: string | null) => void;
 }
+
+export interface PaletteOption {
+  id: ThemePalette;
+  nameKey: keyof typeof translations.en;
+  type: 'dark' | 'light';
+  canvas: string;
+  surface: string;
+  primary: string;
+  accent: string;
+}
+
+export const PALETTE_OPTIONS: PaletteOption[] = [
+  {
+    id: 'default',
+    nameKey: 'paletteDefault',
+    type: 'light',
+    canvas: '#f7f6f2',
+    surface: '#ffffff',
+    primary: '#42634b',
+    accent: '#82561f',
+  },
+  {
+    id: 'dracula',
+    nameKey: 'paletteDracula',
+    type: 'dark',
+    canvas: '#282a36',
+    surface: '#343746',
+    primary: '#bd93f9',
+    accent: '#ff79c6',
+  },
+  {
+    id: 'nord',
+    nameKey: 'paletteNord',
+    type: 'dark',
+    canvas: '#2e3440',
+    surface: '#3b4252',
+    primary: '#88c0d0',
+    accent: '#a3be8c',
+  },
+  {
+    id: 'catppuccin-mocha',
+    nameKey: 'paletteCatppuccinMocha',
+    type: 'dark',
+    canvas: '#1e1e2e',
+    surface: '#252538',
+    primary: '#cba6f7',
+    accent: '#f5c2e7',
+  },
+  {
+    id: 'tokyo-night',
+    nameKey: 'paletteTokyoNight',
+    type: 'dark',
+    canvas: '#1a1b26',
+    surface: '#24283b',
+    primary: '#7aa2f7',
+    accent: '#bb9af7',
+  },
+  {
+    id: 'one-dark',
+    nameKey: 'paletteOneDark',
+    type: 'dark',
+    canvas: '#21252b',
+    surface: '#282c34',
+    primary: '#61afef',
+    accent: '#c678dd',
+  },
+  {
+    id: 'gruvbox-dark',
+    nameKey: 'paletteGruvboxDark',
+    type: 'dark',
+    canvas: '#282828',
+    surface: '#32302f',
+    primary: '#fabd2f',
+    accent: '#b8bb26',
+  },
+  {
+    id: 'midnight-oled',
+    nameKey: 'paletteMidnightOled',
+    type: 'dark',
+    canvas: '#000000',
+    surface: '#0f1117',
+    primary: '#10b981',
+    accent: '#06b6d4',
+  },
+  {
+    id: 'catppuccin-latte',
+    nameKey: 'paletteCatppuccinLatte',
+    type: 'light',
+    canvas: '#eff1f5',
+    surface: '#ffffff',
+    primary: '#8839ef',
+    accent: '#df8e1d',
+  },
+  {
+    id: 'github-light',
+    nameKey: 'paletteGithubLight',
+    type: 'light',
+    canvas: '#f6f8fa',
+    surface: '#ffffff',
+    primary: '#0969da',
+    accent: '#1a7f37',
+  },
+];
 
 export type ProviderType = 'gemini' | 'openai' | 'deepseek';
 
@@ -37,6 +142,8 @@ export function SettingsView({
   onLanguageChange,
   onThemeChange,
   currentTheme,
+  onPaletteChange = () => {},
+  currentPalette = 'default',
   onTimezoneSaved,
 }: SettingsViewProps) {
   const t = translations[lang];
@@ -382,21 +489,64 @@ export function SettingsView({
         </div>
       </section>
 
-      {/* Theme row */}
+      {/* Theme Mode row */}
       <section className="preference-row">
         <div>
-          <h2>{t.themeLabel}</h2>
+          <h2>{t.themeModeLabel}</h2>
           <InfoPopover
-            label={zh ? '主题说明' : 'Theme help'}
-            content={<p>{zh ? '跟随系统会响应桌面外观的变化。' : 'System mode follows your desktop appearance.'}</p>}
+            label={zh ? '模式说明' : 'Mode help'}
+            content={<p>{zh ? '在明亮模式和暗色模式之间快速切换。' : 'Switch between light and dark display modes.'}</p>}
           />
         </div>
-        <div className="segmented-control" aria-label={t.themeLabel}>
-          {(['light', 'dark', 'system'] as const).map((theme) => (
-            <button key={theme} aria-pressed={currentTheme === theme} onClick={() => onThemeChange(theme)}>
-              {theme === 'light' ? t.themeLight : theme === 'dark' ? t.themeDark : t.themeSystem}
+        <div className="segmented-control" aria-label={t.themeModeLabel}>
+          {(['light', 'dark'] as const).map((mode) => (
+            <button key={mode} aria-pressed={currentTheme === mode} onClick={() => onThemeChange(mode)}>
+              {mode === 'light' ? t.themeLight : t.themeDark}
             </button>
           ))}
+        </div>
+      </section>
+
+      {/* Custom Theme Palettes Gallery */}
+      <section className="preference-row palette-selection-section">
+        <div>
+          <h2>{t.paletteLabel}</h2>
+          <p className="muted">{t.paletteDesc}</p>
+        </div>
+        <div className="palette-grid" role="radiogroup" aria-label={t.paletteLabel}>
+          {PALETTE_OPTIONS.map((pal) => {
+            const isSelected = currentPalette === pal.id;
+            return (
+              <button
+                key={pal.id}
+                type="button"
+                role="radio"
+                aria-checked={isSelected}
+                className={`palette-card ${isSelected ? 'active' : ''}`}
+                onClick={() => {
+                  onPaletteChange(pal.id);
+                  if (pal.type === 'dark' && currentTheme !== 'dark') {
+                    onThemeChange('dark');
+                  } else if (pal.type === 'light' && currentTheme !== 'light' && pal.id !== 'default') {
+                    onThemeChange('light');
+                  }
+                }}
+              >
+                <div className="palette-swatches">
+                  <span style={{ backgroundColor: pal.canvas }} title="Canvas" />
+                  <span style={{ backgroundColor: pal.surface }} title="Surface" />
+                  <span style={{ backgroundColor: pal.primary }} title="Primary" />
+                  <span style={{ backgroundColor: pal.accent }} title="Accent" />
+                </div>
+                <div className="palette-meta">
+                  <span className="palette-name">{t[pal.nameKey] as string}</span>
+                  <span className={`palette-badge ${pal.type}`}>
+                    {pal.type === 'dark' ? (zh ? '暗色' : 'Dark') : (zh ? '浅色' : 'Light')}
+                  </span>
+                </div>
+              </button>
+            );
+          })}
         </div>
       </section>
 

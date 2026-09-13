@@ -23,6 +23,7 @@ import { PracticeWorkspace } from './components/PracticeWorkspace.tsx';
 import { ShortcutHelpModal } from './components/ShortcutHelpModal.tsx';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.ts';
 import { Feedback, PageHeader, Tooltip } from './components/ui.tsx';
+import type { ThemePalette } from '../../../packages/contracts/src/sync.ts';
 
 /** Lazy-load heavy contextual workspaces and charting views to optimize desktop bundle size. */
 const DashboardView = React.lazy(() =>
@@ -91,6 +92,7 @@ export function App() {
   const [visited, setVisited] = useState<Set<View>>(() => new Set([initialView()]));
   const [lang, setLang] = useState<Language>('en');
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
+  const [palette, setPalette] = useState<ThemePalette>('default');
   const [timezone, setTimezone] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   const [focusRequest,setFocusRequest]=useState(0);
@@ -191,6 +193,7 @@ export function App() {
         if (active && version === preferenceRevision.current) {
           setLang(settings.language);
           setTheme(settings.theme);
+          setPalette(settings.palette ?? 'default');
           setTimezone(settings.timezone);
         }
       })
@@ -210,8 +213,13 @@ export function App() {
     };
     apply();
     media.addEventListener('change', apply);
+    if (palette && palette !== 'default') {
+      document.documentElement.setAttribute('data-palette', palette);
+    } else {
+      document.documentElement.removeAttribute('data-palette');
+    }
     return () => media.removeEventListener('change', apply);
-  }, [theme]);
+  }, [theme, palette]);
   useEffect(() => {
     document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
   }, [lang]);
@@ -234,11 +242,12 @@ export function App() {
     return () => { clearInterval(timer); document.removeEventListener('visibilitychange', refreshDate); };
   }, [timezone]);
   /** Queue preference writes so a slow previous response cannot persist an older selection last. */
-  function persistPreference(value: { language?: Language; theme?: 'light' | 'dark' | 'system' }) {
+  function persistPreference(value: { language?: Language; theme?: 'light' | 'dark' | 'system'; palette?: ThemePalette }) {
     preferenceRevision.current++;
     setError('');
     if (value.language) setLang(value.language);
     if (value.theme) setTheme(value.theme);
+    if (value.palette) setPalette(value.palette);
     preferenceQueue.current = preferenceQueue.current.then(async () => {
       try {
         await api.updateSettings(value);
@@ -367,29 +376,36 @@ export function App() {
             <div className="sidebar-tools">
               <Tooltip
                 text={
-                  theme === 'light'
-                    ? (zh ? '切换主题 (当前: 明亮)' : 'Switch theme (current: Light)')
-                    : theme === 'dark'
-                      ? (zh ? '切换主题 (当前: 暗色)' : 'Switch theme (current: Dark)')
-                      : (zh ? '切换主题 (当前: 跟随系统)' : 'Switch theme (current: System)')
+                  theme === 'dark' || (theme === 'system' && typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches)
+                    ? (zh ? '切换为明亮模式' : 'Switch to light mode')
+                    : (zh ? '切换为暗色模式' : 'Switch to dark mode')
                 }
                 position={sidebarExpanded ? 'top' : 'right'}
               >
                 <button
                   className="btn-icon"
                   aria-label={zh ? '切换主题' : 'Switch theme'}
-                  onClick={() =>
+                  onClick={() => {
+                    const isDark = theme === 'dark' || (theme === 'system' && typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches);
+                    const nextTheme: 'light' | 'dark' = isDark ? 'light' : 'dark';
+                    const isCustomDark = palette !== 'default' && palette !== 'catppuccin-latte' && palette !== 'github-light';
+                    const isCustomLight = palette === 'catppuccin-latte' || palette === 'github-light';
+                    let nextPalette = palette;
+                    if (nextTheme === 'light' && isCustomDark) {
+                      nextPalette = 'default';
+                    } else if (nextTheme === 'dark' && isCustomLight) {
+                      nextPalette = 'default';
+                    }
                     persistPreference({
-                      theme: theme === 'light' ? 'dark' : theme === 'dark' ? 'system' : 'light',
-                    })
-                  }
+                      theme: nextTheme,
+                      palette: nextPalette,
+                    });
+                  }}
                 >
-                  {theme === 'light' ? (
-                    <Sun size={17} />
-                  ) : theme === 'dark' ? (
+                  {theme === 'dark' || (theme === 'system' && typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches) ? (
                     <Moon size={17} />
                   ) : (
-                    <Laptop size={17} />
+                    <Sun size={17} />
                   )}
                 </button>
               </Tooltip>
@@ -548,6 +564,8 @@ export function App() {
                   onLanguageChange={(language) => persistPreference({ language })}
                   onThemeChange={(theme) => persistPreference({ theme })}
                   currentTheme={theme}
+                  onPaletteChange={(palette) => persistPreference({ palette })}
+                  currentPalette={palette}
                   onTimezoneSaved={setTimezone}
                 />
               </div>

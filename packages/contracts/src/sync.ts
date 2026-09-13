@@ -263,6 +263,21 @@ export type CatalogStats = z.infer<typeof catalogStatsSchema>;
 /** Application model choices for providers with a single supported selection. */
 export const fixedProviderModels = { openai: 'gpt-5.6-luna', deepseek: 'deepseek-flash' } as const;
 
+/** Supported custom theme palettes for desktop UI. */
+export const themePaletteSchema = z.enum([
+  'default',
+  'dracula',
+  'nord',
+  'catppuccin-mocha',
+  'catppuccin-latte',
+  'tokyo-night',
+  'one-dark',
+  'gruvbox-dark',
+  'midnight-oled',
+  'github-light',
+]);
+export type ThemePalette = z.infer<typeof themePaletteSchema>;
+
 /** Supported LLM provider types. */
 export const llmProviderSchema = z.enum(['gemini', 'openai', 'deepseek']);
 export type LLMProvider = z.infer<typeof llmProviderSchema>;
@@ -271,6 +286,7 @@ export type LLMProvider = z.infer<typeof llmProviderSchema>;
 export const userSettingsSchema = z.object({
   language: z.enum(['en', 'zh']),
   theme: z.enum(['light', 'dark', 'system']),
+  palette: themePaletteSchema.default('default').optional(),
   timezone: z.string().max(100).nullable().default(null),
   llmProvider: llmProviderSchema.optional(),
   geminiApiKey: z.string().max(256).nullable().optional(),
@@ -309,6 +325,7 @@ function hasUniqueFallbacks(fallbacks?: string[] | null): boolean {
 export const updateSettingsInputSchema = z.object({
   language: z.enum(['en', 'zh']).optional(),
   theme: z.enum(['light', 'dark', 'system']).optional(),
+  palette: themePaletteSchema.optional(),
   timezone: timeZoneSchema.nullable().optional(),
   llmProvider: llmProviderSchema.optional(),
   geminiApiKey: z.string().max(256).nullable().optional(),
@@ -325,6 +342,7 @@ export const updateSettingsInputSchema = z.object({
 }).refine(data =>
   data.language !== undefined ||
   data.theme !== undefined ||
+  data.palette !== undefined ||
   data.timezone !== undefined ||
   data.llmProvider !== undefined ||
   data.geminiApiKey !== undefined ||

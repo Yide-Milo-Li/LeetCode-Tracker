@@ -19,8 +19,12 @@
   --success: var(--primary);
   --success-bg: var(--selected);
   --easy: var(--primary);
+  --easy-bg: var(--selected);
   --medium: var(--warning);
+  --medium-bg: var(--warning-bg);
   --hard: var(--danger);
+  --hard-bg: var(--danger-bg);
+  --focus-ring: rgba(66, 99, 75, 0.22);
   --bg-card: var(--surface);
   --bg-card-muted: var(--muted-surface);
   --bg-body: var(--canvas);
@@ -62,16 +66,371 @@ html.dark {
   --border-color: #424b3e;
   --outline: #7c8973;
   --focus: #bed2b1;
+  --focus-ring: rgba(170, 196, 155, 0.28);
   --warning: #e9c180;
   --warning-bg: #423523;
   --danger: #f0a79d;
   --danger-bg: #482f2b;
+  --success: var(--primary);
+  --success-bg: var(--selected);
+  --easy: var(--primary);
+  --easy-bg: var(--selected);
+  --medium: var(--warning);
+  --medium-bg: var(--warning-bg);
+  --hard: var(--danger);
+  --hard-bg: var(--danger-bg);
   --shadow-md: 0 8px 28px #10140e40;
   --border: var(--border-color);
   --text-primary: var(--text-main);
   --text-secondary: var(--text-muted);
   --surface-muted: var(--muted-surface);
   color-scheme: dark;
+}
+
+/* ==========================================================================
+   Phase 18 Custom Theme Palettes (Desktop-First, High-Contrast Design System)
+   ========================================================================== */
+
+/* 1. Dracula (Classic Vampire Dark Theme) */
+html[data-palette='dracula'] {
+  --canvas: #282a36;
+  --surface: #343746;
+  --muted-surface: #21222c;
+  --text-main: #f8f8f2;
+  --text-muted: #95a3cf;
+  --primary: #bd93f9;
+  --primary-hover: #caa9fa;
+  --on-primary: #282a36;
+  --selected: #44475a;
+  --border-color: #4d5470;
+  --outline: #6272a4;
+  --focus: #bd93f9;
+  --focus-ring: rgba(189, 147, 249, 0.28);
+  --warning: #ffb86c;
+  --warning-bg: rgba(255, 184, 108, 0.16);
+  --danger: #ff5555;
+  --danger-bg: rgba(255, 85, 85, 0.16);
+  --success: #50fa7b;
+  --success-bg: rgba(80, 250, 123, 0.16);
+  --easy: #50fa7b;
+  --easy-bg: rgba(80, 250, 123, 0.16);
+  --medium: #ffb86c;
+  --medium-bg: rgba(255, 184, 108, 0.16);
+  --hard: #ff5555;
+  --hard-bg: rgba(255, 85, 85, 0.16);
+  --shadow-md: 0 8px 28px #15161e66;
+  --border: var(--border-color);
+  --text-primary: var(--text-main);
+  --text-secondary: var(--text-muted);
+  --surface-muted: var(--muted-surface);
+  --bg-card: var(--surface);
+  --bg-card-muted: var(--muted-surface);
+  --bg-body: var(--canvas);
+  color-scheme: dark;
+}
+
+/* 2. Nord (Arctic Aurora Cold Minimal Dark) */
+html[data-palette='nord'] {
+  --canvas: #2e3440;
+  --surface: #3b4252;
+  --muted-surface: #242933;
+  --text-main: #eceff4;
+  --text-muted: #9aa8be;
+  --primary: #88c0d0;
+  --primary-hover: #8fbcbb;
+  --on-primary: #2e3440;
+  --selected: #434c5e;
+  --border-color: #4c566a;
+  --outline: #687794;
+  --focus: #88c0d0;
+  --focus-ring: rgba(136, 192, 208, 0.28);
+  --warning: #ebcb8b;
+  --warning-bg: rgba(235, 203, 139, 0.16);
+  --danger: #bf616a;
+  --danger-bg: rgba(191, 97, 106, 0.16);
+  --success: #a3be8c;
+  --success-bg: rgba(163, 190, 140, 0.16);
+  --easy: #a3be8c;
+  --easy-bg: rgba(163, 190, 140, 0.16);
+  --medium: #ebcb8b;
+  --medium-bg: rgba(235, 203, 139, 0.16);
+  --hard: #bf616a;
+  --hard-bg: rgba(191, 97, 106, 0.16);
+  --shadow-md: 0 8px 28px #181c2466;
+  --border: var(--border-color);
+  --text-primary: var(--text-main);
+  --text-secondary: var(--text-muted);
+  --surface-muted: var(--muted-surface);
+  --bg-card: var(--surface);
+  --bg-card-muted: var(--muted-surface);
+  --bg-body: var(--canvas);
+  color-scheme: dark;
+}
+
+/* 3. Catppuccin Mocha (Warm Pastel Macaron Dark) */
+html[data-palette='catppuccin-mocha'] {
+  --canvas: #1e1e2e;
+  --surface: #252538;
+  --muted-surface: #181825;
+  --text-main: #cdd6f4;
+  --text-muted: #a6adc8;
+  --primary: #cba6f7;
+  --primary-hover: #b4befe;
+  --on-primary: #11111b;
+  --selected: #313244;
+  --border-color: #3b3b52;
+  --outline: #585b70;
+  --focus: #cba6f7;
+  --focus-ring: rgba(203, 166, 247, 0.28);
+  --warning: #f9e2af;
+  --warning-bg: rgba(249, 226, 175, 0.16);
+  --danger: #f38ba8;
+  --danger-bg: rgba(243, 139, 168, 0.16);
+  --success: #a6e3a1;
+  --success-bg: rgba(166, 227, 161, 0.16);
+  --easy: #a6e3a1;
+  --easy-bg: rgba(166, 227, 161, 0.16);
+  --medium: #f9e2af;
+  --medium-bg: rgba(249, 226, 175, 0.16);
+  --hard: #f38ba8;
+  --hard-bg: rgba(243, 139, 168, 0.16);
+  --shadow-md: 0 8px 28px #0f0f1866;
+  --border: var(--border-color);
+  --text-primary: var(--text-main);
+  --text-secondary: var(--text-muted);
+  --surface-muted: var(--muted-surface);
+  --bg-card: var(--surface);
+  --bg-card-muted: var(--muted-surface);
+  --bg-body: var(--canvas);
+  color-scheme: dark;
+}
+
+/* 4. Tokyo Night (Cyberpunk Neon City Dark) */
+html[data-palette='tokyo-night'] {
+  --canvas: #1a1b26;
+  --surface: #24283b;
+  --muted-surface: #16161e;
+  --text-main: #c0caf5;
+  --text-muted: #8b95be;
+  --primary: #7aa2f7;
+  --primary-hover: #89ddff;
+  --on-primary: #15161e;
+  --selected: #283457;
+  --border-color: #3b4261;
+  --outline: #565f89;
+  --focus: #7aa2f7;
+  --focus-ring: rgba(122, 162, 247, 0.28);
+  --warning: #e0af68;
+  --warning-bg: rgba(224, 175, 104, 0.16);
+  --danger: #f7768e;
+  --danger-bg: rgba(247, 118, 142, 0.16);
+  --success: #9ece6a;
+  --success-bg: rgba(158, 206, 106, 0.16);
+  --easy: #9ece6a;
+  --easy-bg: rgba(158, 206, 106, 0.16);
+  --medium: #e0af68;
+  --medium-bg: rgba(224, 175, 104, 0.16);
+  --hard: #f7768e;
+  --hard-bg: rgba(247, 118, 142, 0.16);
+  --shadow-md: 0 8px 28px #0d0e1466;
+  --border: var(--border-color);
+  --text-primary: var(--text-main);
+  --text-secondary: var(--text-muted);
+  --surface-muted: var(--muted-surface);
+  --bg-card: var(--surface);
+  --bg-card-muted: var(--muted-surface);
+  --bg-body: var(--canvas);
+  color-scheme: dark;
+}
+
+/* 5. One Dark Pro (Atom / VSCode Classic Engineer Dark) */
+html[data-palette='one-dark'] {
+  --canvas: #21252b;
+  --surface: #282c34;
+  --muted-surface: #1b1d23;
+  --text-main: #abb2bf;
+  --text-muted: #7f899e;
+  --primary: #61afef;
+  --primary-hover: #74c0fc;
+  --on-primary: #1e2227;
+  --selected: #353b45;
+  --border-color: #3e4451;
+  --outline: #5c6370;
+  --focus: #61afef;
+  --focus-ring: rgba(97, 175, 239, 0.28);
+  --warning: #e5c07b;
+  --warning-bg: rgba(229, 192, 123, 0.16);
+  --danger: #e06c75;
+  --danger-bg: rgba(224, 108, 117, 0.16);
+  --success: #98c379;
+  --success-bg: rgba(152, 195, 121, 0.16);
+  --easy: #98c379;
+  --easy-bg: rgba(152, 195, 121, 0.16);
+  --medium: #e5c07b;
+  --medium-bg: rgba(229, 192, 123, 0.16);
+  --hard: #e06c75;
+  --hard-bg: rgba(224, 108, 117, 0.16);
+  --shadow-md: 0 8px 28px #13151866;
+  --border: var(--border-color);
+  --text-primary: var(--text-main);
+  --text-secondary: var(--text-muted);
+  --surface-muted: var(--muted-surface);
+  --bg-card: var(--surface);
+  --bg-card-muted: var(--muted-surface);
+  --bg-body: var(--canvas);
+  color-scheme: dark;
+}
+
+/* 6. Gruvbox Dark (Warm Retro Paper & Soil Tone) */
+html[data-palette='gruvbox-dark'] {
+  --canvas: #282828;
+  --surface: #32302f;
+  --muted-surface: #1d2021;
+  --text-main: #ebdbb2;
+  --text-muted: #a89984;
+  --primary: #fabd2f;
+  --primary-hover: #fe8019;
+  --on-primary: #282828;
+  --selected: #3c3836;
+  --border-color: #504945;
+  --outline: #665c54;
+  --focus: #fabd2f;
+  --focus-ring: rgba(250, 189, 47, 0.28);
+  --warning: #fe8019;
+  --warning-bg: rgba(254, 128, 25, 0.16);
+  --danger: #fb4934;
+  --danger-bg: rgba(251, 73, 52, 0.16);
+  --success: #b8bb26;
+  --success-bg: rgba(184, 187, 38, 0.16);
+  --easy: #b8bb26;
+  --easy-bg: rgba(184, 187, 38, 0.16);
+  --medium: #fe8019;
+  --medium-bg: rgba(254, 128, 25, 0.16);
+  --hard: #fb4934;
+  --hard-bg: rgba(251, 73, 52, 0.16);
+  --shadow-md: 0 8px 28px #15151566;
+  --border: var(--border-color);
+  --text-primary: var(--text-main);
+  --text-secondary: var(--text-muted);
+  --surface-muted: var(--muted-surface);
+  --bg-card: var(--surface);
+  --bg-card-muted: var(--muted-surface);
+  --bg-body: var(--canvas);
+  color-scheme: dark;
+}
+
+/* 7. Midnight OLED (Pitch Black High-Contrast Emerald) */
+html[data-palette='midnight-oled'] {
+  --canvas: #000000;
+  --surface: #0f1117;
+  --muted-surface: #06070a;
+  --text-main: #f1f5f9;
+  --text-muted: #8899b5;
+  --primary: #10b981;
+  --primary-hover: #34d399;
+  --on-primary: #000000;
+  --selected: #17221d;
+  --border-color: #1f2430;
+  --outline: #334155;
+  --focus: #10b981;
+  --focus-ring: rgba(16, 185, 129, 0.28);
+  --warning: #f59e0b;
+  --warning-bg: rgba(245, 158, 11, 0.16);
+  --danger: #f43f5e;
+  --danger-bg: rgba(244, 63, 94, 0.16);
+  --success: #10b981;
+  --success-bg: rgba(16, 185, 129, 0.16);
+  --easy: #10b981;
+  --easy-bg: rgba(16, 185, 129, 0.16);
+  --medium: #f59e0b;
+  --medium-bg: rgba(245, 158, 11, 0.16);
+  --hard: #f43f5e;
+  --hard-bg: rgba(244, 63, 94, 0.16);
+  --shadow-md: 0 8px 28px #00000088;
+  --border: var(--border-color);
+  --text-primary: var(--text-main);
+  --text-secondary: var(--text-muted);
+  --surface-muted: var(--muted-surface);
+  --bg-card: var(--surface);
+  --bg-card-muted: var(--muted-surface);
+  --bg-body: var(--canvas);
+  color-scheme: dark;
+}
+
+/* 8. Catppuccin Latte (Soft Warm Pastel Light) */
+html[data-palette='catppuccin-latte'] {
+  --canvas: #eff1f5;
+  --surface: #ffffff;
+  --muted-surface: #e6e9ef;
+  --text-main: #4c4f69;
+  --text-muted: #6c6f85;
+  --primary: #8839ef;
+  --primary-hover: #7287fd;
+  --on-primary: #ffffff;
+  --selected: #e6e9ef;
+  --border-color: #ccd0da;
+  --outline: #9ca0b0;
+  --focus: #8839ef;
+  --focus-ring: rgba(136, 57, 239, 0.28);
+  --warning: #df8e1d;
+  --warning-bg: rgba(223, 142, 29, 0.14);
+  --danger: #d20f39;
+  --danger-bg: rgba(210, 15, 57, 0.14);
+  --success: #40a02b;
+  --success-bg: rgba(64, 160, 43, 0.14);
+  --easy: #40a02b;
+  --easy-bg: rgba(64, 160, 43, 0.14);
+  --medium: #df8e1d;
+  --medium-bg: rgba(223, 142, 29, 0.14);
+  --hard: #d20f39;
+  --hard-bg: rgba(210, 15, 57, 0.14);
+  --shadow-md: 0 8px 28px #20232c12;
+  --border: var(--border-color);
+  --text-primary: var(--text-main);
+  --text-secondary: var(--text-muted);
+  --surface-muted: var(--muted-surface);
+  --bg-card: var(--surface);
+  --bg-card-muted: var(--muted-surface);
+  --bg-body: var(--canvas);
+  color-scheme: light;
+}
+
+/* 9. GitHub Clean Light (Engineered Crisp Pure Light) */
+html[data-palette='github-light'] {
+  --canvas: #f6f8fa;
+  --surface: #ffffff;
+  --muted-surface: #f3f4f6;
+  --text-main: #1f2328;
+  --text-muted: #59636e;
+  --primary: #0969da;
+  --primary-hover: #0550ae;
+  --on-primary: #ffffff;
+  --selected: #ddf4ff;
+  --border-color: #d0d7de;
+  --outline: #8c959f;
+  --focus: #0969da;
+  --focus-ring: rgba(9, 105, 218, 0.28);
+  --warning: #9a6700;
+  --warning-bg: #fff8c5;
+  --danger: #cf222e;
+  --danger-bg: #ffebe9;
+  --success: #1a7f37;
+  --success-bg: #dafbe1;
+  --easy: #1a7f37;
+  --easy-bg: #dafbe1;
+  --medium: #9a6700;
+  --medium-bg: #fff8c5;
+  --hard: #cf222e;
+  --hard-bg: #ffebe9;
+  --shadow-md: 0 8px 28px #1f232812;
+  --border: var(--border-color);
+  --text-primary: var(--text-main);
+  --text-secondary: var(--text-muted);
+  --surface-muted: var(--muted-surface);
+  --bg-card: var(--surface);
+  --bg-card-muted: var(--muted-surface);
+  --bg-body: var(--canvas);
+  color-scheme: light;
 }
 * {
   box-sizing: border-box;
@@ -175,19 +534,76 @@ fieldset {
 ::selection {
   background: var(--selected);
 }
+
+/* Smooth, elegant theme transitions across desktop UI surfaces */
+body,
+.sidebar,
+.page-header,
+.distribution-card,
+.kpi-card,
+.practice-card,
+.table-container,
+.data-table,
+.form-field input,
+.form-field select,
+.segmented-control,
+.overlay-panel,
+.card,
+.btn-icon {
+  transition:
+    background-color 160ms cubic-bezier(0.2, 0, 0, 1),
+    border-color 160ms cubic-bezier(0.2, 0, 0, 1),
+    color 160ms cubic-bezier(0.2, 0, 0, 1),
+    box-shadow 160ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body,
+  .sidebar,
+  .page-header,
+  .distribution-card,
+  .kpi-card,
+  .practice-card,
+  .table-container,
+  .data-table,
+  .form-field input,
+  .form-field select,
+  .segmented-control,
+  .overlay-panel,
+  .card,
+  .btn-icon {
+    transition: none !important;
+  }
+}
+
 input:not([type='checkbox']):not([type='radio']),
 select,
 textarea {
   background: var(--surface);
+  color: var(--text-main);
   border: 1px solid var(--outline);
   border-radius: var(--radius);
   min-height: 38px;
   padding: 7px 10px;
   min-width: 0;
   max-width: 100%;
-  transition:
-    border-color var(--fast),
-    box-shadow var(--fast);
+  font-size: 14px;
+}
+input:hover:not(:disabled),
+select:hover:not(:disabled),
+textarea:hover:not(:disabled) {
+  border-color: var(--primary);
+}
+input:focus,
+input:focus-visible,
+select:focus,
+select:focus-visible,
+textarea:focus,
+textarea:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+  border-color: var(--focus);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 input:not([type='checkbox']):not([type='radio']),
 textarea {
@@ -204,21 +620,38 @@ textarea {
   resize: vertical;
   line-height: 1.6;
 }
+
+/* Enhanced high-contrast select dropdowns with custom chevron indicator */
 select {
-  padding-right: 28px;
+  padding-right: 32px;
   color-scheme: inherit;
   background-color: var(--surface);
   color: var(--text-main);
+  border: 1px solid var(--outline);
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23888888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 14px 14px;
 }
-select option {
+select option,
+select optgroup {
   background-color: var(--surface);
   color: var(--text-main);
+  padding: 8px 10px;
 }
 html.dark select,
-html.dark select option {
-  background-color: var(--surface);
-  color: var(--text-main);
-  color-scheme: dark;
+html[data-palette='dracula'] select,
+html[data-palette='nord'] select,
+html[data-palette='catppuccin-mocha'] select,
+html[data-palette='tokyo-night'] select,
+html[data-palette='one-dark'] select,
+html[data-palette='gruvbox-dark'] select,
+html[data-palette='midnight-oled'] select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23a0aec0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
 input::placeholder,
 textarea::placeholder {
@@ -1200,7 +1633,10 @@ progress::-moz-progress-bar {
 .easy,
 .badge-easy,
 .difficulty-easy,
-.badge-success,
+.badge-success {
+  color: var(--easy, var(--primary));
+  background: var(--easy-bg, var(--selected));
+}
 .badge-primary {
   color: var(--primary);
   background: var(--selected);
@@ -1210,15 +1646,15 @@ progress::-moz-progress-bar {
 .difficulty-medium,
 .badge-warning,
 .badge-premium {
-  color: var(--warning);
-  background: var(--warning-bg);
+  color: var(--medium, var(--warning));
+  background: var(--medium-bg, var(--warning-bg));
 }
 .hard,
 .badge-hard,
 .difficulty-hard,
 .badge-danger {
-  color: var(--danger);
-  background: var(--danger-bg);
+  color: var(--hard, var(--danger));
+  background: var(--hard-bg, var(--danger-bg));
 }
 .filter-toolbar {
   display: flex;
@@ -2870,3 +3306,74 @@ input.form-input[aria-invalid="true"] { border-color: var(--danger); outline-col
 .topic-insight-metrics { display:flex; flex-wrap:wrap; gap:0.75rem 1.5rem; margin:0.75rem 0; }
 .topic-insight-metrics dt { color:var(--text-muted); font-size:0.8rem; }
 .topic-insight-metrics dd { margin:0.25rem 0; font-weight:600; }
+
+/* Phase 18: Personalized Theme Palette Gallery */
+.palette-selection-section {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 16px;
+}
+.palette-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+  width: 100%;
+}
+.palette-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--outline);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--fast), box-shadow var(--fast), background-color var(--fast);
+}
+.palette-card:hover {
+  border-color: var(--primary);
+  background: var(--muted-surface);
+}
+.palette-card.active,
+.palette-card[aria-checked='true'] {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary);
+  background: var(--selected);
+}
+.palette-swatches {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.palette-swatches > span {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+.palette-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.palette-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.palette-badge {
+  font-size: 11px;
+  font-family: monospace;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  background: var(--muted-surface);
+}

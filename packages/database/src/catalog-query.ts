@@ -7,11 +7,13 @@ import {
   catalogProblemSchema,
   catalogQuerySchema,
   importSummarySchema,
+  themePaletteSchema,
   type CatalogProblem,
   type CatalogQueryInput,
   type CatalogStats,
   type ImportHistoryItem,
   type ImportSummary,
+  type ThemePalette,
   type TopicTag,
   type UpdateSettingsInput,
   type UserSettings,
@@ -301,6 +303,7 @@ export function getUserSettings(db: DatabaseSync): UserSettings {
 
   let language: 'en' | 'zh' = 'en';
   let theme: 'light' | 'dark' | 'system' = 'system';
+  let palette: ThemePalette = 'default';
   let timezone: string | null = null;
   let llmProvider: 'gemini' | 'openai' | 'deepseek' = 'gemini';
 
@@ -326,6 +329,12 @@ export function getUserSettings(db: DatabaseSync): UserSettings {
     }
     if (r.key === 'theme' && (r.value === 'light' || r.value === 'dark' || r.value === 'system')) {
       theme = r.value;
+    }
+    if (r.key === 'palette') {
+      const parsed = themePaletteSchema.safeParse(r.value);
+      if (parsed.success) {
+        palette = parsed.data;
+      }
     }
     if (r.key === 'timezone') {
       timezone = r.value && r.value.trim().length > 0 ? r.value : null;
@@ -413,6 +422,7 @@ export function getUserSettings(db: DatabaseSync): UserSettings {
   return {
     language,
     theme,
+    palette,
     timezone,
     llmProvider,
     geminiApiKey,
@@ -450,6 +460,9 @@ export function updateUserSettingsTransaction(
     }
     if (input.theme) {
       updateStmt.run('theme', input.theme, now);
+    }
+    if (input.palette !== undefined) {
+      updateStmt.run('palette', input.palette, now);
     }
     if (input.timezone !== undefined) {
       updateStmt.run('timezone', input.timezone ?? '', now);
