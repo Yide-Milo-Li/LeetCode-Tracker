@@ -47,7 +47,7 @@ Because this repository contains no proprietary datasets, you provide your own p
 
 > [!TIP]
 > **Real-World Model Capacity Benchmark:**
-> - **Frontier Models (GPT-5.6 Sol, Gemini 3.8 Flash, GPT-4o, Gemini 3.5 Pro)**: Verified in practice to reliably stream **up to ~800 problems in a single session** without truncation when using this prompt!
+> - **Frontier Models (GPT-5.6 Sol, Gemini 3.8 Flash)**: Verified in practice to reliably stream **up to ~800 problems in a single session** without truncation when using this prompt!
 > - **Standard Models / Quick Start**: Set `Target Quantity` to **50–200** (e.g. Blind 75, NeetCode 150) for a 10-second instant generation.
 
 Copy the prompt below, adjust `Target Scope` and `Target Quantity`, and paste it into ChatGPT, Claude, or Gemini:
