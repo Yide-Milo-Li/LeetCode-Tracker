@@ -39,10 +39,22 @@
 
 ## Future Community Directions
 
-- **Additional Knowledge Export Formats**: Support for Anki flashcard deck export (`.apkg`), Logseq markdown graphs, and printable PDF study summaries.
-- **Custom Prompt Presets**: User-customizable prompt templates for AI problem selection and encouragement tone (e.g. strict mock interviewer, encouraging mentor, competitive coach).
-- **Extended Statistics Visualizations**: Topic mastery radar charts, difficulty progression over time, and retention curves.
-- **Community Theme Submissions**: Allow user-defined theme palette JSON definitions imported through Settings.
+- **Focus Practice Mode & Live Stopwatch (Zen Mode)**:
+  - Floating/pinned real-time practice stopwatch with keyboard shortcuts (e.g., pause/resume).
+  - Automated elapsed duration recording upon marking problems complete, eliminating manual time estimates.
+  - Distraction-free full-screen Zen mode that temporarily hides sidebar navigation and peripheral stats, keeping only the problem link, timer, and solution scratchpad.
+- **AI-Assisted Note Prettier**:
+  - One-click intelligent Markdown formatting for solution scratchpads and notes via the active LLM provider (Gemini, OpenAI, or DeepSeek).
+  - Automatically standardizes structure (Approach, Complexity Analysis, Clean Implementation, Traps & Edge Cases), formats multi-language code snippets, extracts LaTeX complexity notation, and polishes notes without altering original reasoning.
+- **Spaced Repetition: Mastery Rating & 7-Day Review Forecast**:
+  - Post-solve 4-tier self-evaluation (`Easy` / `Good` / `Hard` / `Again`) inspired by scientific spaced repetition mechanisms (Anki/SuperMemo), dynamically recalibrating subsequent review intervals.
+  - 7-day review workload forecast chart on the Today and Progress dashboards, helping users anticipate review pressure and prevent review pileups.
+- **Curated Problem Playlists & Study Roadmaps**:
+  - Local import and management of curated problem collections (e.g., Blind 75, NeetCode 150, Top Interview 100).
+  - Playlist milestone completion cards on the dashboard, with strategy options to prioritize recommendations from target playlists.
+- **Algorithm Pattern & Technique Taxonomy**:
+  - Granular problem tagging by algorithm design patterns (e.g., two pointers, sliding window, monotonic stack, prefix sum + hash map, binary search boundaries, interval DP, topological sort).
+  - Aggregated pattern mastery analytics on the dashboard to pinpoint and drill down into specific technique weaknesses.
 
 ---
 
