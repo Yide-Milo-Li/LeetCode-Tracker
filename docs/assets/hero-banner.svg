@@ -1,0 +1,173 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradients -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0d1410"/>
+      <stop offset="50%" stop-color="#141f18"/>
+      <stop offset="100%" stop-color="#0c120e"/>
+    </linearGradient>
+    
+    <radialGradient id="glowSage" cx="15%" cy="30%" r="55%">
+      <stop offset="0%" stop-color="#2d5a3c" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#0d1410" stop-opacity="0"/>
+    </radialGradient>
+
+    <radialGradient id="glowAccent" cx="85%" cy="75%" r="50%">
+      <stop offset="0%" stop-color="#1b4d3e" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#0c120e" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Title Gradient -->
+    <linearGradient id="titleGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="60%" stop-color="#e8f5e9"/>
+      <stop offset="100%" stop-color="#81c784"/>
+    </linearGradient>
+
+    <linearGradient id="badgeBorder" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#81c784" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#2e7d32" stop-opacity="0.2"/>
+    </linearGradient>
+
+    <linearGradient id="cardBg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1e2c22" stop-opacity="0.75"/>
+      <stop offset="100%" stop-color="#141e17" stop-opacity="0.85"/>
+    </linearGradient>
+
+    <!-- Grid Pattern -->
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#2a3d2e" stroke-width="0.7" stroke-opacity="0.35"/>
+    </pattern>
+  </defs>
+
+  <!-- Base Canvas -->
+  <rect width="1200" height="420" fill="url(#bgGrad)"/>
+  <rect width="1200" height="420" fill="url(#grid)"/>
+  <rect width="1200" height="420" fill="url(#glowSage)"/>
+  <rect width="1200" height="420" fill="url(#glowAccent)"/>
+
+  <!-- Outer Border -->
+  <rect x="1" y="1" width="1198" height="418" rx="16" fill="none" stroke="#2e4233" stroke-width="1.5" stroke-opacity="0.6"/>
+
+  <!-- Left Content Block -->
+  <g transform="translate(68, 54)">
+    <!-- Top Pill Tag -->
+    <g transform="translate(0, 0)">
+      <rect width="320" height="30" rx="15" fill="#1b281f" fill-opacity="0.9" stroke="url(#badgeBorder)" stroke-width="1"/>
+      <circle cx="16" cy="15" r="4.5" fill="#4caf50"/>
+      <text x="30" y="19.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11" font-weight="700" fill="#a5d6a7" letter-spacing="1.2">DESKTOP-FIRST • LOCAL-FIRST • BYOD</text>
+    </g>
+
+    <!-- App Title -->
+    <text x="0" y="86" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', Roboto, sans-serif" font-size="46" font-weight="800" fill="url(#titleGrad)" letter-spacing="-1.2">
+      LeetCode Tracker
+    </text>
+
+    <!-- Subtitle / Value Proposition -->
+    <text x="0" y="126" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="18" font-weight="500" fill="#b0bec5">
+      The high-performance desktop companion for deliberate LeetCode mastery.
+    </text>
+    <text x="0" y="152" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14.5" font-weight="400" fill="#78909c">
+      Evidence-based spaced repetition, multi-provider AI recommendation chains,
+    </text>
+    <text x="0" y="174" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14.5" font-weight="400" fill="#78909c">
+      custom weekly strategy quotas, and full Markdown notes export to Obsidian &amp; Notion.
+    </text>
+
+    <!-- Feature Pill Badges -->
+    <g transform="translate(0, 212)">
+      <!-- Badge 1: 100% Offline SQLite -->
+      <g transform="translate(0, 0)">
+        <rect width="168" height="34" rx="8" fill="#18231c" stroke="#2d4031" stroke-width="1"/>
+        <text x="14" y="21.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" font-weight="600" fill="#c8e6c9">💾 100% Offline SQLite</text>
+      </g>
+
+      <!-- Badge 2: 365-Day Heatmap -->
+      <g transform="translate(178, 0)">
+        <rect width="176" height="34" rx="8" fill="#18231c" stroke="#2d4031" stroke-width="1"/>
+        <text x="14" y="21.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" font-weight="600" fill="#c8e6c9">📊 365-Day Activity Map</text>
+      </g>
+
+      <!-- Badge 3: Multi-AI Support -->
+      <g transform="translate(364, 0)">
+        <rect width="216" height="34" rx="8" fill="#18231c" stroke="#2d4031" stroke-width="1"/>
+        <text x="14" y="21.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" font-weight="600" fill="#c8e6c9">🤖 Gemini • OpenAI • DeepSeek</text>
+      </g>
+    </g>
+
+    <g transform="translate(0, 256)">
+      <!-- Badge 4: 10 Themes -->
+      <g transform="translate(0, 0)">
+        <rect width="186" height="34" rx="8" fill="#18231c" stroke="#2d4031" stroke-width="1"/>
+        <text x="14" y="21.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" font-weight="600" fill="#c8e6c9">🎨 10 Developer Palettes</text>
+      </g>
+
+      <!-- Badge 5: Obsidian & Notion -->
+      <g transform="translate(196, 0)">
+        <rect width="204" height="34" rx="8" fill="#18231c" stroke="#2d4031" stroke-width="1"/>
+        <text x="14" y="21.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" font-weight="600" fill="#c8e6c9">📓 Obsidian &amp; Notion Export</text>
+      </g>
+
+      <!-- Badge 6: Zero Crawler Safe -->
+      <g transform="translate(410, 0)">
+        <rect width="170" height="34" rx="8" fill="#18231c" stroke="#2d4031" stroke-width="1"/>
+        <text x="14" y="21.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" font-weight="600" fill="#c8e6c9">🛡️ Pure BYOD JSONL</text>
+      </g>
+    </g>
+  </g>
+
+  <!-- Right Decorative Glassmorphic Graphic / Card -->
+  <g transform="translate(730, 48)">
+    <!-- Glassmorphic Card Container -->
+    <rect width="404" height="324" rx="14" fill="url(#cardBg)" stroke="#37533f" stroke-width="1.2"/>
+    
+    <!-- Top Mock Terminal Header -->
+    <g transform="translate(18, 16)">
+      <circle cx="6" cy="6" r="4.5" fill="#e57373" fill-opacity="0.85"/>
+      <circle cx="22" cy="6" r="4.5" fill="#ffb74d" fill-opacity="0.85"/>
+      <circle cx="38" cy="6" r="4.5" fill="#81c784" fill-opacity="0.85"/>
+      <text x="64" y="10" font-family="monospace" font-size="11" fill="#78909c">leetcode-tracker ~ session</text>
+    </g>
+
+    <line x1="0" y1="42" x2="404" y2="42" stroke="#2c3e32" stroke-width="1"/>
+
+    <!-- Daily Strategy Preview Pill in Card -->
+    <g transform="translate(18, 56)">
+      <rect width="368" height="66" rx="8" fill="#141d17" stroke="#253529" stroke-width="1"/>
+      <text x="16" y="24" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="12" font-weight="700" fill="#e0e0e0">TODAY'S DELIBERATE FOCUS</text>
+      <text x="16" y="46" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="13" font-weight="500" fill="#81c784">Dynamic Programming &amp; Trees (3 Problems)</text>
+      <rect x="290" y="16" width="64" height="22" rx="4" fill="#2e7d32" fill-opacity="0.3"/>
+      <text x="302" y="31" font-family="sans-serif" font-size="10" font-weight="700" fill="#a5d6a7">QUOTA 3/3</text>
+    </g>
+
+    <!-- Mini Heatmap Visualization Wireframe -->
+    <g transform="translate(18, 136)">
+      <text x="0" y="12" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11" font-weight="600" fill="#90a4ae">ANNUAL ACTIVITY HEATMAP</text>
+      <!-- 15 columns x 5 rows of activity blocks -->
+      <g transform="translate(0, 22)">
+        <rect x="0" y="0" width="20" height="20" rx="3.5" fill="#1e2e22"/><rect x="0" y="24" width="20" height="20" rx="3.5" fill="#2e7d32"/><rect x="0" y="48" width="20" height="20" rx="3.5" fill="#4caf50"/><rect x="0" y="72" width="20" height="20" rx="3.5" fill="#1b5e20"/><rect x="0" y="96" width="20" height="20" rx="3.5" fill="#81c784"/>
+        <rect x="25" y="0" width="20" height="20" rx="3.5" fill="#4caf50"/><rect x="25" y="24" width="20" height="20" rx="3.5" fill="#81c784"/><rect x="25" y="48" width="20" height="20" rx="3.5" fill="#2e7d32"/><rect x="25" y="72" width="20" height="20" rx="3.5" fill="#a5d6a7"/><rect x="25" y="96" width="20" height="20" rx="3.5" fill="#2e7d32"/>
+        <rect x="50" y="0" width="20" height="20" rx="3.5" fill="#1b5e20"/><rect x="50" y="24" width="20" height="20" rx="3.5" fill="#4caf50"/><rect x="50" y="48" width="20" height="20" rx="3.5" fill="#81c784"/><rect x="50" y="72" width="20" height="20" rx="3.5" fill="#2e7d32"/><rect x="50" y="96" width="20" height="20" rx="3.5" fill="#4caf50"/>
+        <rect x="75" y="0" width="20" height="20" rx="3.5" fill="#4caf50"/><rect x="75" y="24" width="20" height="20" rx="3.5" fill="#1e2e22"/><rect x="75" y="48" width="20" height="20" rx="3.5" fill="#2e7d32"/><rect x="75" y="72" width="20" height="20" rx="3.5" fill="#81c784"/><rect x="75" y="96" width="20" height="20" rx="3.5" fill="#2e7d32"/>
+        <rect x="100" y="0" width="20" height="20" rx="3.5" fill="#81c784"/><rect x="100" y="24" width="20" height="20" rx="3.5" fill="#4caf50"/><rect x="100" y="48" width="20" height="20" rx="3.5" fill="#2e7d32"/><rect x="100" y="72" width="20" height="20" rx="3.5" fill="#1e2e22"/><rect x="100" y="96" width="20" height="20" rx="3.5" fill="#a5d6a7"/>
+        <rect x="125" y="0" width="20" height="20" rx="3.5" fill="#2e7d32"/><rect x="125" y="24" width="20" height="20" rx="3.5" fill="#4caf50"/><rect x="125" y="48" width="20" height="20" rx="3.5" fill="#81c784"/><rect x="125" y="72" width="20" height="20" rx="3.5" fill="#4caf50"/><rect x="125" y="96" width="20" height="20" rx="3.5" fill="#2e7d32"/>
+        <rect x="150" y="0" width="20" height="20" rx="3.5" fill="#4caf50"/><rect x="150" y="24" width="20" height="20" rx="3.5" fill="#a5d6a7"/><rect x="150" y="48" width="20" height="20" rx="3.5" fill="#81c784"/><rect x="150" y="72" width="20" height="20" rx="3.5" fill="#2e7d32"/><rect x="150" y="96" width="20" height="20" rx="3.5" fill="#4caf50"/>
+        <rect x="175" y="0" width="20" height="20" rx="3.5" fill="#2e7d32"/><rect x="175" y="24" width="20" height="20" rx="3.5" fill="#4caf50"/><rect x="175" y="48" width="20" height="20" rx="3.5" fill="#1e2e22"/><rect x="175" y="72" width="20" height="20" rx="3.5" fill="#81c784"/><rect x="175" y="96" width="20" height="20" rx="3.5" fill="#a5d6a7"/>
+        <rect x="200" y="0" width="20" height="20" rx="3.5" fill="#81c784"/><rect x="200" y="24" width="20" height="20" rx="3.5" fill="#2e7d32"/><rect x="200" y="48" width="20" height="20" rx="3.5" fill="#4caf50"/><rect x="200" y="72" width="20" height="20" rx="3.5" fill="#4caf50"/><rect x="200" y="96" width="20" height="20" rx="3.5" fill="#2e7d32"/>
+        <rect x="225" y="0" width="20" height="20" rx="3.5" fill="#4caf50"/><rect x="225" y="24" width="20" height="20" rx="3.5" fill="#81c784"/><rect x="225" y="48" width="20" height="20" rx="3.5" fill="#2e7d32"/><rect x="225" y="72" width="20" height="20" rx="3.5" fill="#a5d6a7"/><rect x="225" y="96" width="20" height="20" rx="3.5" fill="#1e2e22"/>
+        <rect x="250" y="0" width="20" height="20" rx="3.5" fill="#2e7d32"/><rect x="250" y="24" width="20" height="20" rx="3.5" fill="#4caf50"/><rect x="250" y="48" width="20" height="20" rx="3.5" fill="#81c784"/><rect x="250" y="72" width="20" height="20" rx="3.5" fill="#2e7d32"/><rect x="250" y="96" width="20" height="20" rx="3.5" fill="#4caf50"/>
+        <rect x="275" y="0" width="20" height="20" rx="3.5" fill="#81c784"/><rect x="275" y="24" width="20" height="20" rx="3.5" fill="#2e7d32"/><rect x="275" y="48" width="20" height="20" rx="3.5" fill="#4caf50"/><rect x="275" y="72" width="20" height="20" rx="3.5" fill="#1e2e22"/><rect x="275" y="96" width="20" height="20" rx="3.5" fill="#81c784"/>
+        <rect x="300" y="0" width="20" height="20" rx="3.5" fill="#4caf50"/><rect x="300" y="24" width="20" height="20" rx="3.5" fill="#81c784"/><rect x="300" y="48" width="20" height="20" rx="3.5" fill="#2e7d32"/><rect x="300" y="72" width="20" height="20" rx="3.5" fill="#a5d6a7"/><rect x="300" y="96" width="20" height="20" rx="3.5" fill="#2e7d32"/>
+        <rect x="325" y="0" width="20" height="20" rx="3.5" fill="#a5d6a7"/><rect x="325" y="24" width="20" height="20" rx="3.5" fill="#4caf50"/><rect x="325" y="48" width="20" height="20" rx="3.5" fill="#81c784"/><rect x="325" y="72" width="20" height="20" rx="3.5" fill="#2e7d32"/><rect x="325" y="96" width="20" height="20" rx="3.5" fill="#4caf50"/>
+        <rect x="350" y="0" width="18" height="20" rx="3.5" fill="#4caf50"/><rect x="350" y="24" width="18" height="20" rx="3.5" fill="#2e7d32"/><rect x="350" y="48" width="18" height="20" rx="3.5" fill="#81c784"/><rect x="350" y="72" width="18" height="20" rx="3.5" fill="#1b5e20"/><rect x="350" y="96" width="18" height="20" rx="3.5" fill="#a5d6a7"/>
+      </g>
+    </g>
+
+    <!-- Bottom Status Row -->
+    <g transform="translate(18, 282)">
+      <rect width="368" height="26" rx="5" fill="#152018" stroke="#253529" stroke-width="0.8"/>
+      <circle cx="14" cy="13" r="3.5" fill="#81c784"/>
+      <text x="26" y="17" font-family="monospace" font-size="10.5" fill="#a5d6a7">Loopback Fastify @ 127.0.0.1:3000 • Schema v9</text>
+    </g>
+  </g>
+</svg>

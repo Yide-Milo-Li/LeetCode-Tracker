@@ -1,47 +1,205 @@
 # LeetCode Tracker
 
-A local-first desktop practice tracker with weekly schedule strategies, a bilingual interface, Bring-Your-Own-Data (BYOD) JSON Lines problem ingestion, and optional multi-provider AI recommendation planning.
+<p align="center">
+  <img src="docs/assets/hero-banner.svg" alt="LeetCode Tracker Hero Banner" width="100%">
+</p>
 
-[![Node.js](https://img.shields.io/badge/node.js-24%2B-brightgreen)](https://nodejs.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue)](https://www.typescriptlang.org/)
-[![Tests](https://img.shields.io/badge/tests-297%20passing-success)](tests/README.md)
-[![Platform](https://img.shields.io/badge/platform-Desktop%20Only-lightgrey)](docs/requirements.md)
-
----
-
-## Key Features
-
-- **Bring-Your-Own-Data (BYOD) Ingestion**: Upload or paste problem datasets using **JSON Lines (`.jsonl`)** with preflight change preview, line error breakdown, and atomic SQLite commits. No third-party problem datasets or web scraping code are included.
-- **Desktop-First Workflow**: Minimalist interface designed for desktop browser viewports (1024px+). Includes a collapsible icon navigation rail, time-aware bilingual encouragement quotes, power-user keyboard shortcuts (`1`/`2`/`3`/`4`, `/`, `n`, `?`), and full `prefers-reduced-motion` compliance.
-- **Multi-Provider AI Planning**: Seamless support for **Google Gemini**, **OpenAI**, and **DeepSeek** with configurable model chains and custom Base URLs. All requests include a sub-0.2ms deterministic local fallback for offline resilience.
-- **Weekly Practice Strategies & Explicit Quotas**: Create named study strategies with explicit difficulty quotas (Easy/Medium/Hard) summing to your daily total, auto-fill calculation, and three review modes (None, Partial, All-Review).
-- **Spaced Repetition & Topic Insights**: Evidence-based algorithmic topic analytics that track practice frequency and duration, surface weak topics, and prioritize adaptive review without opaque score penalties.
-- **Problem Notes Workspace & Knowledge Export**: Dedicated Markdown notes editor with quick copy buttons for Obsidian Callouts (`[[wikilink]]`) and Notion rich cards. Export your entire catalog to a complete Obsidian vault ZIP with Dataview index, or dual CSV tables for Notion.
-- **10 Curated Theme Palettes**: Choose from 10 developer-tuned themes (Default Slate, Zinc, Neutral, Stone, Obsidian Dark, GitHub Dark, Tokyo Night, Nord, Catppuccin Macchiato, Solarized Dark) plus an optional High Contrast accessibility mode.
-- **Transactional SQLite Storage (Schema v9)**: Native Node.js SQLite storage with automatic schema migrations (v3–v8 to v9), point-in-time backups, operation replay idempotency, and offline database restore.
-- **Windows Desktop Launcher**: Launch the entire stack with a single click via `start.bat` or `npm run desktop`, featuring port conflict detection and graceful console shutdown.
+<p align="center">
+  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/node.js-24%2B-2e7d32?style=flat-square&logo=node.js&logoColor=white" alt="Node.js 24+"></a>
+  <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/typescript-5.9-3178c6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript 5.9"></a>
+  <a href="https://fastify.dev/"><img src="https://img.shields.io/badge/fastify-5.x-000000?style=flat-square&logo=fastify&logoColor=white" alt="Fastify 5"></a>
+  <a href="tests/README.md"><img src="https://img.shields.io/badge/tests-297%20passing-brightgreen?style=flat-square" alt="297 Tests Passing"></a>
+  <a href="docs/architecture.md"><img src="https://img.shields.io/badge/sqlite-schema%20v9-003b57?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite Schema v9"></a>
+  <a href="docs/requirements.md"><img src="https://img.shields.io/badge/platform-desktop%20only%20(1024px%2B)-455a64?style=flat-square" alt="Desktop Only"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT License"></a>
+</p>
 
 ---
 
-## Data Requirement (Bring-Your-Own-Data)
+## Overview
 
-This project contains **no problem datasets** and performs **no platform scraping or crawling**. You provide your own problem metadata via JSON Lines (`.jsonl`) files or clipboard text.
+**LeetCode Tracker** is an engineered, local-first desktop application designed for deliberate algorithm practice. Unlike generic spreadsheet logs or cluttered extensions, it combines **rigorous weekly practice quotas**, **evidence-based spaced repetition**, **bilingual interface support (English / 简体中文)**, and **multi-provider AI recommendation chains** (Google Gemini, OpenAI, DeepSeek) with an offline sub-0.2ms deterministic fallback.
 
-You can easily generate problem datasets (such as Blind 75, NeetCode 150, or custom topic lists) using modern AI models (ChatGPT, Claude, Gemini). See the [data format guide](docs/data-format.md) for standard prompt templates, JSONL schema specifications, and SQLite storage rules.
-
-The MIT license covers repository source code, not third-party content.
+Built with **Node.js 24 native SQLite (`node:sqlite`)** and **React 19**, all your practice logs, notes, and study plans stay strictly on your local machine. It adheres to a strict **Bring-Your-Own-Data (BYOD)** philosophy: no proprietary web scrapers, no copyrighted problem repositories, and zero risk of vendor lock-in.
 
 ---
 
-## Quick Start
+## Visual Showcase & Key Features
+
+### 1. Today's Practice & Explainable AI Planning
+> Focus on what matters today. Deliberate practice with time-aware bilingual encouragement and explicit reasoning behind every recommendation.
+
+<p align="center">
+  <img src="docs/assets/screenshots/01-today-overview.png" alt="Today's Practice and AI Recommendation" width="900">
+</p>
+
+- **Deliberate Study Queue**: Clear separation between new problem acquisitions and spaced repetition review targets.
+- **Explainable Rationale**: Transparent bilingual explanation (*"Why this problem?"*) grounded in topic frequency, weak areas, or custom user preferences.
+- **Instant Practice Logging**: Mark problems complete with duration, solution approaches, and difficulty self-rating in a single modal drawer.
+- **Bilingual Encouragement**: Time-sensitive motivational quotes in English and Chinese that rotate based on your daily momentum.
+
+---
+
+### 2. 365-Day Activity Heatmap & Deep Analytics
+> Track your long-term consistency with GitHub-style contribution graphs and algorithmic topic mastery radars.
+
+<p align="center">
+  <img src="docs/assets/screenshots/02-dashboard-analytics.png" alt="365-Day Heatmap and Dashboard Analytics" width="900">
+</p>
+
+- **GitHub-Style Contribution Heatmap**: Complete 52-week visual history with customizable color thresholds and hover tooltips for daily counts.
+- **30-Day Practice Velocity**: Rolling frequency curve comparing completed sessions versus review ratios.
+- **Difficulty Distribution Rings**: Visual breakdown across Easy, Medium, and Hard problems with percentage quotas.
+- **Algorithmic Topic Mastery**: Topic radar displaying practice frequency, average solve time, and days since last practice without opaque score penalties.
+
+---
+
+### 3. High-Performance Problems Catalog
+> Instant client-side search and filtering across 4,000+ problems with zero lag.
+
+<p align="center">
+  <img src="docs/assets/screenshots/03-problems-catalog.png" alt="Problems Catalog with Real-Time Filtering" width="900">
+</p>
+
+- **Instant Search**: Sub-millisecond filtering by problem ID, English title, Chinese title, or topic slug.
+- **Multi-Attribute Filters**: Filter dynamically by difficulty (`Easy`, `Medium`, `Hard`), completion state (`Solved`, `Unsolved`), and topic tags.
+- **Integrated Actions**: Launch note-taking or manually record an external practice session directly from catalog rows.
+
+---
+
+### 4. Master-Detail Notes Workspace & Second-Brain Export
+> A distraction-free Markdown editor equipped with LaTeX math formulas, code blocks, and 1-click export to Obsidian and Notion.
+
+<p align="center">
+  <img src="docs/assets/screenshots/04-notes-workspace.png" alt="Master-Detail Markdown Notes Workspace" width="900">
+</p>
+
+- **Master-Detail Layout**: Fast left-hand problem switcher paired with a rich split-pane Markdown editor and previewer.
+- **Mathematical Complexity**: Full LaTeX rendering for asymptotic complexities ($\mathcal{O}(N \log N)$) and recurrence relations.
+- **Obsidian & Notion Ready**: Single-click copy buttons for Obsidian Callouts (`[[wikilink]]`) and Notion card toggles.
+- **Vault Export Engine**: Download your entire problem catalog as a ready-to-use Obsidian Vault ZIP (with Dataview index frontmatter) or dual structured CSV files for Notion databases.
+
+---
+
+### 5. Weekly Schedule Strategies & Strict Difficulty Quotas
+> Design predictable weekly routines with explicit difficulty distributions and customizable review modes.
+
+<p align="center">
+  <img src="docs/assets/screenshots/05-study-schedule.png" alt="Weekly Strategy and Quota Planner" width="900">
+</p>
+
+- **Weekday Strategy Mapping**: Assign specialized strategies to different days of the week (e.g. *"DP Tabulation on Weekdays"*, *"Hard Graph Sprint on Weekends"*).
+- **Strict Quota Balancing**: Difficulty sliders (Easy / Medium / Hard) that strictly total your daily target, with automatic auto-fill balancing.
+- **Three Review Modes**: Configure your spaced repetition intensity per strategy: *No Review*, *Balanced Partial Review (33%)*, or *Intensive All-Review (100%)*.
+
+---
+
+### 6. 10 Curated Developer Theme Palettes
+> Tailored color schemes designed for focus and terminal aesthetic perfection, plus OLED black and High Contrast support.
+
+<p align="center">
+  <img src="docs/assets/screenshots/06-theme-palettes.png" alt="10 Developer Theme Palettes" width="900">
+</p>
+
+| Dark Themes | Light Themes | Accessibility Modes |
+| :--- | :--- | :--- |
+| **Forest Sage** *(Default)* | **Forest Light** | **High Contrast Light** |
+| **Dracula Dark** | **Catppuccin Latte** | **High Contrast Dark** |
+| **Nord Arctic** | **GitHub Clean Light** | **Reduced Motion Support** |
+| **Catppuccin Mocha** | | |
+| **Tokyo Night** | | |
+| **One Dark Pro** | | |
+| **Gruvbox Dark** | | |
+| **Midnight OLED** | | |
+
+---
+
+### 7. Multi-Provider AI Architecture (Gemini • OpenAI • DeepSeek)
+> Seamless integration with industry-leading frontier models, complete with custom proxy endpoints and local fallbacks.
+
+<p align="center">
+  <img src="docs/assets/screenshots/07-ai-configuration.png" alt="Multi-Provider AI Configuration" width="900">
+</p>
+
+- **Supported Providers**: Native connectors for **Google Gemini** (`gemini-3.5-flash`, `gemini-3.7-flash`), **OpenAI** (`gpt-5.6-luna`, `gpt-4o`), and **DeepSeek** (`deepseek-flash`, `deepseek-chat`).
+- **Configurable Fallback Chains**: Define ordered model fallback chains that seamlessly take over when rate limits or transient network errors occur.
+- **Custom Base URLs**: First-class support for enterprise gateways, proxy servers, or local compatible endpoints.
+- **Sub-0.2ms Offline Fallback**: Even without an API key or when operating completely offline, the built-in deterministic planning engine constructs balanced, quota-compliant daily plans instantly.
+
+---
+
+### 8. Pure BYOD Ingestion (Zero Scraping, Legally Safe)
+> Bring your own data in standard JSON Lines (`.jsonl`) format with preflight change preview and atomic SQLite transactions.
+
+<p align="center">
+  <img src="docs/assets/screenshots/08-catalog-import-modal.png" alt="BYOD JSON Lines Ingestion Modal" width="900">
+</p>
+
+- **Zero Crawler Code**: Contains no scraping bots or proprietary datasets, ensuring 100% legal compliance and repository longevity.
+- **Preflight Change Diff**: Inspect added, updated, and skipped records prior to committing changes to SQLite.
+- **Batch Drag & Drop**: Import entire curriculum lists (Blind 75, NeetCode 150, Grind 169) in seconds.
+- **Audit History**: Complete transaction logs tracking import timestamps, line error counts, and catalog revisions.
+
+---
+
+## Power-User Keyboard Shortcuts
+
+Navigate and operate your practice workspace entirely from the keyboard:
+
+| Shortcut | Scope | Description |
+| :---: | :--- | :--- |
+| <kbd>1</kbd> | Global | Switch to **Today's Practice** view |
+| <kbd>2</kbd> | Global | Switch to **Problems Catalog** view |
+| <kbd>3</kbd> | Global | Switch to **Progress & Statistics** view |
+| <kbd>4</kbd> | Global | Switch to **Notes & Review** workspace |
+| <kbd>/</kbd> | Global | Instantly focus the problem catalog search input |
+| <kbd>n</kbd> | Global | Open quick note drawer for the active problem |
+| <kbd>?</kbd> | Global | Display keyboard shortcuts modal dialog |
+| <kbd>Esc</kbd> | Modal / Drawer | Dismiss active modal, popover, or drawer |
+| <kbd>Ctrl</kbd> + <kbd>Enter</kbd> | Form | Save active note or submit practice outcome |
+
+---
+
+## Bring-Your-Own-Data (BYOD) Quickstart
+
+Because this repository contains no proprietary problem datasets, you supply your own problem catalog via `.jsonl` files.
+
+### 1. Generating Problem Lists via AI
+You can easily generate curated problem lists (such as Blind 75 or NeetCode 150) using any modern AI model (ChatGPT, Claude, Gemini). Prompt template:
+
+```text
+Please generate a valid JSON Lines (.jsonl) file for the Blind 75 LeetCode problems.
+Each line must be a standalone JSON object adhering to this schema:
+{
+  "questionFrontendId": "1",
+  "title": "Two Sum",
+  "titleCn": "两数之和",
+  "titleSlug": "two-sum",
+  "difficulty": "Easy",
+  "paidOnly": false,
+  "topicTags": [{"name": "Array", "slug": "array"}, {"name": "Hash Table", "slug": "hash-table"}]
+}
+Output only the raw JSONL text, with no markdown code blocks.
+```
+
+### 2. Importing into LeetCode Tracker
+1. Open the application and press <kbd>2</kbd> to enter the **Problems** catalog.
+2. Click **Import problems** in the top right.
+3. Drag & drop your `.jsonl` file (or paste raw JSON Lines text into the editor).
+4. Review the preflight diff preview and click **Confirm & Import**.
+
+For detailed schema specifications and SQLite indexing rules, see the [BYOD Data Format Specification](docs/data-format.md).
+
+---
+
+## Installation & Quick Start
 
 ### Prerequisites
+- **Node.js**: `24.15.0` or later (Node.js 24 series required for native `node:sqlite`)
+- **npm**: version `10` or later
+- **Operating System**: Windows, macOS, or Linux (Desktop browser viewport 1024px+)
 
-- **Node.js**: `24.15.0` or later (in the Node.js 24 series)
-- **npm**: version 10 or later
-
-### Installation & Launch
+### Setup
 
 ```sh
 # 1. Clone the repository
@@ -51,7 +209,7 @@ cd Leetcode-Tracker
 # 2. Install dependencies
 npm install
 
-# 3. Run typecheck and automated tests (297 tests)
+# 3. Verify types and run test suite (297 tests)
 npm run check
 npm test
 
@@ -62,79 +220,98 @@ npm run build
 npm start
 ```
 
-Open [http://127.0.0.1:3000](http://127.0.0.1:3000) in your desktop browser.
+Visit [http://127.0.0.1:3000](http://127.0.0.1:3000) in your desktop browser.
 
-### Windows Desktop Launcher
+---
 
-On Windows, double-click **`start.bat`** in the repository root, or execute:
+### Windows 1-Click Desktop Launcher
 
-```powershell
-npm run desktop
-```
+On Windows, you can launch the complete application with a single action:
+- Double-click **`start.bat`** in the repository root, or
+- Run `npm run desktop` in your terminal.
 
-The launcher will verify prerequisites, build frontend assets if missing, start the Fastify server on `127.0.0.1:3000`, open your default browser, and shut down gracefully when you press `Ctrl+C`.
-
-### Frontend Development
-
-To run the Vite dev server with hot-module replacement and API proxying:
-
-```sh
-npm run dev
-```
+The launcher automatically:
+1. Verifies your Node.js 24 environment.
+2. Compiles Vite frontend production assets if missing.
+3. Performs port collision checks on `127.0.0.1:3000`.
+4. Starts the Fastify server and launches your default browser.
+5. Handles clean teardown on <kbd>Ctrl</kbd> + <kbd>C</kbd>.
 
 ---
 
 ## Configuration
 
-Copy `.env.example` to `.env` to configure server options, or configure AI providers directly inside the desktop application under **Settings → AI Configuration**:
+Copy `.env.example` to `.env` to customize default server settings:
 
 ```sh
 cp .env.example .env
 ```
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `PORT` | `3000` | Loopback server port |
-| `HOST` | `127.0.0.1` | Loopback bind host |
-| `GEMINI_API_KEY` | *(empty)* | Google Gemini API key |
-| `GEMINI_MODEL` | `models/gemini-3.5-flash` | Gemini model name |
-| `OPENAI_API_KEY` | *(empty)* | OpenAI API key |
-| `OPENAI_MODEL` | `gpt-5.6-luna` | OpenAI model name |
-| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | Custom OpenAI proxy/gateway endpoint |
-| `DEEPSEEK_API_KEY` | *(empty)* | DeepSeek API key |
-| `DEEPSEEK_MODEL` | `deepseek-flash` | DeepSeek model name |
+| Environment Variable | Default Value | Description |
+| :--- | :--- | :--- |
+| `PORT` | `3000` | Local loopback server port |
+| `HOST` | `127.0.0.1` | Loopback bind address (keeps server strictly local) |
+| `GEMINI_API_KEY` | *(empty)* | Google Gemini API key (optional) |
+| `GEMINI_MODEL` | `models/gemini-3.5-flash` | Default Gemini model |
+| `OPENAI_API_KEY` | *(empty)* | OpenAI API key (optional) |
+| `OPENAI_MODEL` | `gpt-5.6-luna` | Default OpenAI model |
+| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI proxy or compatible gateway |
+| `DEEPSEEK_API_KEY` | *(empty)* | DeepSeek API key (optional) |
+| `DEEPSEEK_MODEL` | `deepseek-flash` | Default DeepSeek model |
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | DeepSeek API endpoint |
 
-See the [AI provider configuration guide](docs/llm-providers.md) for credential isolation and fallback semantics.
+> [!TIP]
+> You do **not** need to restart the server when changing API keys or models. You can configure, test, and save AI providers dynamically in the web UI under **Settings → AI Assistant Configuration**.
 
 ---
 
-## Desktop Scope & Supported Environments
+## Architecture & Design Principles
 
-- **Desktop Browser UI Only**: This project is maintained exclusively for desktop browsers at window widths of 1024px and above. Mobile phone layouts, touch gesture adaptations, and mobile navigation are intentionally outside the project's maintenance scope.
-- **Bilingual Support**: All interface views, forms, validations, and encouragement quotes support both English and Chinese, switchable in Settings.
+```
+┌────────────────────────────────────────────────────────┐
+│               Desktop Web UI (React 19 + Vite 6)       │
+│  - 10 Themes & OLED Mode  - Bilingual i18n (EN/ZH)     │
+│  - 365-Day Activity Chart - Markdown & LaTeX Notes     │
+└───────────────────────────┬────────────────────────────┘
+                            │ HTTP JSON / SSE
+┌───────────────────────────▼────────────────────────────┐
+│               Fastify 5 Server (Node.js 24)            │
+│  - REST Endpoints         - Obsidian & Notion Exporters│
+│  - Input Validation (Zod) - Health & Audit Handlers    │
+└─────────────┬───────────────────────────┬──────────────┘
+              │                           │
+┌─────────────▼───────────────┐ ┌─────────▼──────────────┐
+│  AI Planning Engine         │ │ SQLite Storage (v9)    │
+│  - Gemini / OpenAI / Deep   │ │ - node:sqlite sync API │
+│  - Model Fallback Chains    │ │ - Atomic Migrations    │
+│  - 0.2ms Deterministic Core │ │ - Auto Point-in-Time   │
+└─────────────────────────────┘ └────────────────────────┘
+```
+
+- **Strict Desktop-First Scope**: Designed exclusively for desktop browsers (1024px+). Mobile touch layouts, gestures, and responsive mobile navbars are excluded by design to focus on desktop developer productivity.
+- **Transactional SQLite Reliability**: Schema migrations (v3 through v9) apply automatically on boot. Every write uses ACID transactions, and point-in-time safety snapshots (`.db.bak`) are created prior to full bundle restores.
+- **Zero Cloud Leakage**: Practice history, notes, and preferences never leave your machine. AI prompts send only problem IDs, difficulty levels, and topic tags—never sensitive personal data.
 
 ---
 
-## Repository Guide
+## Repository Guide & Documentation
 
-- [Documentation Index](docs/README.md)
-- [Architecture & Storage Design](docs/architecture.md)
-- [Desktop Workflow Guide](docs/desktop-workflow.md)
-- [BYOD Data Format Specification](docs/data-format.md)
-- [AI Provider Configuration](docs/llm-providers.md)
-- [Topic Practice Insights & Spaced Repetition](docs/topic-practice-insights.md)
-- [Project Status & Test Boundaries](docs/status.md)
-- [Project Roadmap](docs/roadmap.md)
-- [Applications](apps/README.md)
-- [Shared Packages](packages/README.md)
-- [Scripts & Maintenance](scripts/README.md)
-- [Testing Boundaries](tests/README.md)
-- [Contributing Guidelines](CONTRIBUTING.md)
-- [Security Policy](SECURITY.md)
+- [Architecture & Storage Design](docs/architecture.md) — SQLite schema v9, indexes, and transaction models.
+- [BYOD Data Format Specification](docs/data-format.md) — JSON Lines structure, field validations, and AI prompts.
+- [AI Provider Configuration](docs/llm-providers.md) — Gemini, OpenAI, DeepSeek setup, fallback chains, and security.
+- [Topic Practice Insights & Spaced Repetition](docs/topic-practice-insights.md) — Algorithmic review mechanics and scheduling.
+- [Desktop Workflow & Interaction Guide](docs/desktop-workflow.md) — Keyboard shortcuts, views, and accessibility.
+- [Project Status & Test Boundaries](docs/status.md) — Current state, synthetic testing limits, and verification history.
+- [Project Roadmap](docs/roadmap.md) — Future directions and release planning.
+- [Monorepo Apps](apps/README.md) & [Shared Packages](packages/README.md) — Source code architecture breakdown.
+- [Scripts & Maintenance](scripts/README.md) — Operational CLI tools, benchmarks, and backup utilities.
+- [Testing Standards](tests/README.md) — Automated testing philosophy, fixtures, and execution guide.
+- [Contributing Guidelines](CONTRIBUTING.md) — Contribution workflow, commit conventions, and pull request standards.
+- [Security Policy](SECURITY.md) — Vulnerability reporting and credential handling.
+- [Changelog](CHANGELOG.md) — Detailed version history from Phase 1 through Phase 19.
 
 ---
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+This project is open source and available under the [MIT License](LICENSE).
