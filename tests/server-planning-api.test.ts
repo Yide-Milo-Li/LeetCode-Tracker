@@ -38,6 +38,16 @@ async function createTestApp() {
   return { db, store, app };
 }
 
+/** Helper to generate future ISO calendar date strings and their UTC weekdays. */
+function getFutureDate(daysAhead: number): { dateStr: string; weekday: number } {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + daysAhead);
+  return {
+    dateStr: d.toISOString().slice(0, 10),
+    weekday: d.getUTCDay(),
+  };
+}
+
 describe('Recommendation & Planning API Endpoints', () => {
   it('handles strategy lifecycle: create, list, patch, schedule, and soft-delete', async () => {
     const { app } = await createTestApp();
@@ -179,27 +189,29 @@ describe('Recommendation & Planning API Endpoints', () => {
     res = await app.inject({
       method: 'POST',
       url: '/api/v1/daily-plans/ensure',
-      payload: { date: '2026-09-01' },
+      payload: { date: '2020-01-01' },
     });
     assert.equal(res.statusCode, 400);
     assert.equal(res.json().error, 'CANNOT_GENERATE_HISTORICAL_PLAN');
 
-    // 3. Target date is 2026-09-13 (Sunday = weekday 0). No strategy assigned -> returns 'rest'
+    // 3. Target date is a future date with no strategy assigned -> returns 'rest'
+    const restDay = getFutureDate(10);
     res = await app.inject({
       method: 'POST',
       url: '/api/v1/daily-plans/ensure',
-      payload: { date: '2026-09-13' },
+      payload: { date: restDay.dateStr },
     });
     assert.equal(res.statusCode, 200);
     assert.equal(res.json().status, 'rest');
     assert.equal(res.json().plan, null);
 
-    // 4. Create strategy for Monday (weekday 1)
+    // 4. Create strategy for future active day
+    const activeDay = getFutureDate(11);
     await app.inject({
       method: 'POST',
       url: '/api/v1/strategies',
       payload: {
-        name: 'Monday Grind',
+        name: 'Future Grind',
         rules: {
           dailyCount: 3,
           difficulty: { Easy: 33.33, Medium: 33.33, Hard: 33.34 },
@@ -209,21 +221,21 @@ describe('Recommendation & Planning API Endpoints', () => {
           reviewPercent: null,
           preference: '',
         },
-        weekdays: [1], // Monday
+        weekdays: [activeDay.weekday],
       },
     });
 
-    // 5. Target date 2026-09-14 is Monday -> returns 'ready' with newly generated plan
+    // 5. Target active date -> returns 'ready' with newly generated plan
     res = await app.inject({
       method: 'POST',
       url: '/api/v1/daily-plans/ensure',
-      payload: { date: '2026-09-14', operationId: randomUUID() },
+      payload: { date: activeDay.dateStr, operationId: randomUUID() },
     });
     assert.equal(res.statusCode, 200);
     const { status, plan } = res.json();
     assert.equal(status, 'ready');
     assert.ok(plan);
-    assert.equal(plan.date, '2026-09-14');
+    assert.equal(plan.date, activeDay.dateStr);
     assert.equal(plan.version, 1);
     assert.equal(plan.items.length, 3);
     assert.ok(plan.encouragement.en && plan.encouragement.zh);
@@ -232,7 +244,7 @@ describe('Recommendation & Planning API Endpoints', () => {
     const resRepeat = await app.inject({
       method: 'POST',
       url: '/api/v1/daily-plans/ensure',
-      payload: { date: '2026-09-14' },
+      payload: { date: activeDay.dateStr },
     });
     assert.equal(resRepeat.statusCode, 200);
     assert.equal(resRepeat.json().status, 'ready');
@@ -574,11 +586,11 @@ describe('Recommendation & Planning API Endpoints', () => {
   it('supports creating daily plan on a rest day via prompt override and rejects unknown tags', async () => {
     const { app } = await createTestApp();
 
-    // 2026-09-13 is Sunday. No strategy assigned -> rest day
+    const restDay = getFutureDate(15);
     let res = await app.inject({
       method: 'POST',
       url: '/api/v1/daily-plans/ensure',
-      payload: { date: '2026-09-13' },
+      payload: { date: restDay.dateStr },
     });
     assert.equal(res.statusCode, 200);
     assert.equal(res.json().status, 'rest');
@@ -589,7 +601,7 @@ describe('Recommendation & Planning API Endpoints', () => {
       method: 'POST',
       url: '/api/v1/daily-plan-overrides/preview',
       payload: {
-        date: '2026-09-13',
+        date: restDay.dateStr,
         rules: {
           dailyCount: 2,
           difficulty: { Easy: 100, Medium: 0, Hard: 0 },
@@ -618,7 +630,7 @@ describe('Recommendation & Planning API Endpoints', () => {
       method: 'POST',
       url: '/api/v1/daily-plan-overrides/preview',
       payload: {
-        date: '2026-09-13',
+        date: restDay.dateStr,
         rules: {
           dailyCount: 2,
           difficulty: { Easy: 100, Medium: 0, Hard: 0 },
@@ -645,7 +657,7 @@ describe('Recommendation & Planning API Endpoints', () => {
     });
     assert.equal(res.statusCode, 200);
     const newPlan = res.json();
-    assert.equal(newPlan.date, '2026-09-13');
+    assert.equal(newPlan.date, restDay.dateStr);
     assert.equal(newPlan.version, 1);
     assert.equal(newPlan.items.length, 2);
     assert.ok(newPlan.items.every((i: any) => i.problem.difficulty === 'Easy'));
