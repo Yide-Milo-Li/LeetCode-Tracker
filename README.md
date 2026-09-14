@@ -24,6 +24,80 @@ Built with **Node.js 24 native SQLite (`node:sqlite`)** and **React 19**, all yo
 
 ---
 
+## 🚀 Quick Start (Zero to Deliberate Practice in 2 Minutes)
+
+Follow these 4 simple steps to set up your tracker and import your first problem dataset:
+
+### Step 1: Launch Application
+- **Windows 1-Click**: Double-click **`start.bat`** in the repository root, or run `npm run desktop` in PowerShell.
+- **Terminal (macOS / Linux / Windows)**:
+  ```sh
+  git clone https://github.com/Yide-Milo-Li/Leetcode-Tracker.git
+  cd Leetcode-Tracker
+  npm install
+  npm start
+  ```
+- Open [http://127.0.0.1:3000](http://127.0.0.1:3000) in your desktop browser.
+
+---
+
+### Step 2: Generate Problem Catalog with AI (Zero Web Search)
+
+Because this repository contains no proprietary datasets, you provide your own problem catalog via standard **JSON Lines (`.jsonl`)**.
+
+> [!TIP]
+> **Real-World Model Capacity Benchmark:**
+> - **Frontier Models (GPT-5.6 Sol, Gemini 3.8 Flash, GPT-4o, Gemini 3.5 Pro)**: Verified in practice to reliably stream **up to ~800 problems in a single session** without truncation when using this prompt!
+> - **Standard Models / Quick Start**: Set `Target Quantity` to **50–200** (e.g. Blind 75, NeetCode 150) for a 10-second instant generation.
+
+Copy the prompt below, adjust `Target Scope` and `Target Quantity`, and paste it into ChatGPT, Claude, or Gemini:
+
+```text
+Act as a deterministic dataset extraction engine. Generate a comprehensive LeetCode problem catalog strictly in JSON Lines (.jsonl) format.
+
+Target Scope: [SPECIFY TARGET HERE, e.g. "NeetCode 150", "Blind 75", "Problems #1 to #200", or "Top 100 Dynamic Programming and Tree problems"]
+Target Quantity: [SPECIFY EXACT COUNT, e.g. 50, 150, 200, or 800]
+
+OPERATIONAL DIRECTIVES:
+- ZERO WEB SEARCH: Do NOT use web search, browsing tools, or external lookups. Retrieve and generate strictly from your internal pre-trained parametric knowledge base for maximum speed and consistency.
+- STRICT ONE OBJECT PER LINE: Output exactly ONE valid, self-contained JSON object per physical line. Do NOT format across multiple lines (no indentation, no multi-line pretty printing).
+- NO TRUNCATION: Do NOT truncate, summarize, or skip lines (never output "...and 50 more problems").
+- PURE DATA ONLY: Do NOT include any conversational preamble, explanation, notes, or postamble. Output raw text or enclose strictly within a single ```jsonl code block.
+
+JSON SCHEMA PER LINE:
+{
+  "id": "<frontend_problem_number_as_string>",
+  "title": "<official_english_title>",
+  "difficulty": "Easy" | "Medium" | "Hard",
+  "tags": ["<Topic Tag 1>", "<Topic Tag 2>"]
+}
+
+FEW-SHOT EXAMPLES:
+{"id": "1", "title": "Two Sum", "difficulty": "Easy", "tags": ["Array", "Hash Table"]}
+{"id": "15", "title": "3Sum", "difficulty": "Medium", "tags": ["Array", "Two Pointers", "Sorting"]}
+{"id": "146", "title": "LRU Cache", "difficulty": "Medium", "tags": ["Hash Table", "Linked List", "Design"]}
+{"id": "42", "title": "Trapping Rain Water", "difficulty": "Hard", "tags": ["Array", "Two Pointers", "Stack"]}
+
+Begin output immediately:
+```
+
+---
+
+### Step 3: 5-Second Ingestion
+1. In LeetCode Tracker, press <kbd>2</kbd> (or click **Problems** in the left rail).
+2. Click **Import problems** in the top right.
+3. Paste the generated JSON Lines directly into the text box (or drag & drop a `.jsonl` file).
+4. Review the preflight change preview and click **Confirm & Import**.
+
+---
+
+### Step 4: Configure Strategy & Practice
+1. Open **Study schedule** (press <kbd>1</kbd> -> *Adjust today* or click the calendar icon).
+2. Set your weekday target quotas (Easy, Medium, Hard distribution) and review intensity.
+3. Start deliberate practice with time-aware bilingual encouragement and spaced repetition!
+
+---
+
 ## Visual Showcase & Key Features
 
 ### 1. Today's Practice & Explainable AI Planning
@@ -157,85 +231,6 @@ Navigate and operate your practice workspace entirely from the keyboard:
 | <kbd>?</kbd> | Global | Display keyboard shortcuts modal dialog |
 | <kbd>Esc</kbd> | Modal / Drawer | Dismiss active modal, popover, or drawer |
 | <kbd>Ctrl</kbd> + <kbd>Enter</kbd> | Form | Save active note or submit practice outcome |
-
----
-
-## Bring-Your-Own-Data (BYOD) Quickstart
-
-Because this repository contains no proprietary problem datasets, you supply your own problem catalog via `.jsonl` files.
-
-### 1. Generating Problem Lists via AI
-You can easily generate curated problem lists (such as Blind 75 or NeetCode 150) using any modern AI model (ChatGPT, Claude, Gemini). Prompt template:
-
-```text
-Please generate a valid JSON Lines (.jsonl) file for the Blind 75 LeetCode problems.
-Each line must be a standalone JSON object adhering to this schema:
-{
-  "questionFrontendId": "1",
-  "title": "Two Sum",
-  "titleCn": "两数之和",
-  "titleSlug": "two-sum",
-  "difficulty": "Easy",
-  "paidOnly": false,
-  "topicTags": [{"name": "Array", "slug": "array"}, {"name": "Hash Table", "slug": "hash-table"}]
-}
-Output only the raw JSONL text, with no markdown code blocks.
-```
-
-### 2. Importing into LeetCode Tracker
-1. Open the application and press <kbd>2</kbd> to enter the **Problems** catalog.
-2. Click **Import problems** in the top right.
-3. Drag & drop your `.jsonl` file (or paste raw JSON Lines text into the editor).
-4. Review the preflight diff preview and click **Confirm & Import**.
-
-For detailed schema specifications and SQLite indexing rules, see the [BYOD Data Format Specification](docs/data-format.md).
-
----
-
-## Installation & Quick Start
-
-### Prerequisites
-- **Node.js**: `24.15.0` or later (Node.js 24 series required for native `node:sqlite`)
-- **npm**: version `10` or later
-- **Operating System**: Windows, macOS, or Linux (Desktop browser viewport 1024px+)
-
-### Setup
-
-```sh
-# 1. Clone the repository
-git clone https://github.com/Yide-Milo-Li/Leetcode-Tracker.git
-cd Leetcode-Tracker
-
-# 2. Install dependencies
-npm install
-
-# 3. Verify types and run test suite (297 tests)
-npm run check
-npm test
-
-# 4. Build frontend production assets
-npm run build
-
-# 5. Start the local loopback server
-npm start
-```
-
-Visit [http://127.0.0.1:3000](http://127.0.0.1:3000) in your desktop browser.
-
----
-
-### Windows 1-Click Desktop Launcher
-
-On Windows, you can launch the complete application with a single action:
-- Double-click **`start.bat`** in the repository root, or
-- Run `npm run desktop` in your terminal.
-
-The launcher automatically:
-1. Verifies your Node.js 24 environment.
-2. Compiles Vite frontend production assets if missing.
-3. Performs port collision checks on `127.0.0.1:3000`.
-4. Starts the Fastify server and launches your default browser.
-5. Handles clean teardown on <kbd>Ctrl</kbd> + <kbd>C</kbd>.
 
 ---
 

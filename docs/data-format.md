@@ -44,22 +44,38 @@ Each line in a JSONL file must represent a single, independent JSON object descr
 
 ## 2. Standard prompt template for LLMs
 
-To generate or format problem datasets using models such as ChatGPT, Gemini, or Claude, use the following prompt:
+To generate or format problem datasets using models such as ChatGPT, Gemini, or Claude, use the following standardized prompt template.
+
+> **Model Capacity Note:**
+> Real-world testing confirms that modern frontier models (**GPT-5.6 Sol, Gemini 3.8 Flash, GPT-4o, Gemini 3.5 Pro**) can reliably output **up to ~800 problems** in a single session when web search is disabled and output is formatted strictly as compact single-line JSONL.
 
 ```text
-Please format a list of LeetCode problems (e.g., Blind 75, NeetCode 150, or Top Interview 100) strictly as JSON Lines (JSONL).
+Act as a deterministic dataset extraction engine. Generate a comprehensive LeetCode problem catalog strictly in JSON Lines (.jsonl) format.
 
-Requirements:
-1. Each line MUST be a single, valid JSON object without surrounding brackets or arrays.
-2. Do not include markdown explanations, intros, or footnotes.
-3. Each object must have:
-   - "id": problem frontend number as a string (e.g. "1")
-   - "title": English problem title (e.g. "Two Sum")
-   - "difficulty": "Easy" | "Medium" | "Hard"
-   - "tags": array of core topic strings (e.g. ["Array", "Hash Table"])
+Target Scope: [SPECIFY TARGET HERE, e.g. "NeetCode 150", "Blind 75", "Problems #1 to #200", or "Top 100 Dynamic Programming and Tree problems"]
+Target Quantity: [SPECIFY EXACT COUNT, e.g. 50, 150, 200, or 800]
 
-Example line:
+OPERATIONAL DIRECTIVES:
+- ZERO WEB SEARCH: Do NOT use web search, browsing tools, or external lookups. Retrieve and generate strictly from your internal pre-trained parametric knowledge base for maximum speed and consistency.
+- STRICT ONE OBJECT PER LINE: Output exactly ONE valid, self-contained JSON object per physical line. Do NOT format across multiple lines (no indentation, no multi-line pretty printing).
+- NO TRUNCATION: Do NOT truncate, summarize, or skip lines (never output "...and 50 more problems").
+- PURE DATA ONLY: Do NOT include any conversational preamble, explanation, notes, or postamble. Output raw text or enclose strictly within a single ```jsonl code block.
+
+JSON SCHEMA PER LINE:
+{
+  "id": "<frontend_problem_number_as_string>",
+  "title": "<official_english_title>",
+  "difficulty": "Easy" | "Medium" | "Hard",
+  "tags": ["<Topic Tag 1>", "<Topic Tag 2>"]
+}
+
+FEW-SHOT EXAMPLES:
 {"id": "1", "title": "Two Sum", "difficulty": "Easy", "tags": ["Array", "Hash Table"]}
+{"id": "15", "title": "3Sum", "difficulty": "Medium", "tags": ["Array", "Two Pointers", "Sorting"]}
+{"id": "146", "title": "LRU Cache", "difficulty": "Medium", "tags": ["Hash Table", "Linked List", "Design"]}
+{"id": "42", "title": "Trapping Rain Water", "difficulty": "Hard", "tags": ["Array", "Two Pointers", "Stack"]}
+
+Begin output immediately:
 ```
 
 ---

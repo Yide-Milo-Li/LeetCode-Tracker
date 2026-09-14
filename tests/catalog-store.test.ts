@@ -70,6 +70,30 @@ describe('CatalogStore & JSONL Ingestion', async () => {
     assert.equal(stats.catalogRevision, 1);
   });
 
+  it('tolerates common LLM alias fields such as questionFrontendId and topicTags', async () => {
+    const db = new DatabaseSync(':memory:');
+    const store = new CatalogStore(db, { skipBackup: true });
+
+    const jsonlWithAliases = [
+      '{"questionFrontendId": "1", "title": "Two Sum", "difficulty": "Easy", "topicTags": ["Array", "Hash Table"]}',
+      '{"frontendQuestionId": "15", "title": "3Sum", "difficulty": "Medium", "topicTags": ["Array", "Two Pointers"]}'
+    ].join('\n');
+
+    const summary = await store.importJsonl(jsonlWithAliases);
+    assert.equal(summary.validCount, 2);
+    assert.equal(summary.insertedCount, 2);
+    assert.equal(summary.errorCount, 0);
+
+    const p1 = store.getProblem('1', 'frontendId');
+    assert.ok(p1);
+    assert.equal(p1.questionFrontendId, '1');
+    assert.deepEqual(p1.topicTags.map(t => t.name).sort(), ['Array', 'Hash Table']);
+
+    const p15 = store.getProblem('15', 'frontendId');
+    assert.ok(p15);
+    assert.equal(p15.questionFrontendId, '15');
+  });
+
   it('isolates malformed lines and ignores markdown fences', async () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });

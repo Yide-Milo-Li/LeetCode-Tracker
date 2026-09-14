@@ -56,27 +56,50 @@ export type CatalogProblem = z.infer<typeof catalogProblemSchema>;
  * Lenient schema for incoming raw lines from LLMs, JSON files, or user exports.
  * Accommodates numeric or string IDs, case-insensitive difficulties, and optional metadata fields.
  *
+ * Automatically normalizes common LLM output variations:
+ * - Maps `questionFrontendId` or `frontendQuestionId` to `id` if `id` is omitted.
+ * - Maps `topicTags` to `tags` if `tags` is omitted.
+ *
  * Optional fields (`tags`, `questionId`, `isPaidOnly`, `url`, `titleSlug`, `source`) default to undefined
  * so the importer can distinguish between omitted fields (which preserve existing DB values) and
  * explicit values (e.g. `tags: []` indicating tag clearing).
  */
-export const rawProblemInputSchema = z.object({
-  id: z.union([z.string(), z.number()]).transform(val => String(val).trim()),
-  title: z.string().min(1).max(500),
-  difficulty: z.enum(['Easy', 'Medium', 'Hard', 'easy', 'medium', 'hard']).transform(val => {
-    const capitalized = val.charAt(0).toUpperCase() + val.slice(1).toLowerCase();
-    return capitalized as 'Easy' | 'Medium' | 'Hard';
-  }),
-  tags: z.array(z.union([
-    z.string(),
-    z.object({ name: z.string(), slug: z.string().optional(), id: z.string().optional() }),
-  ])).optional(),
-  questionId: z.union([z.string(), z.number()]).optional().transform(v => v !== undefined ? String(v).trim() : undefined),
-  titleSlug: z.string().optional(),
-  url: z.string().url().optional(),
-  isPaidOnly: z.union([z.boolean(), z.number()]).optional().transform(v => v !== undefined ? Boolean(v) : undefined),
-  source: z.string().optional(),
-});
+export const rawProblemInputSchema = z.preprocess(
+  (input) => {
+    if (typeof input === 'object' && input !== null) {
+      const record = { ...input } as Record<string, unknown>;
+      if (record.id === undefined) {
+        if (record.questionFrontendId !== undefined) {
+          record.id = record.questionFrontendId;
+        } else if (record.frontendQuestionId !== undefined) {
+          record.id = record.frontendQuestionId;
+        }
+      }
+      if (record.tags === undefined && record.topicTags !== undefined) {
+        record.tags = record.topicTags;
+      }
+      return record;
+    }
+    return input;
+  },
+  z.object({
+    id: z.union([z.string(), z.number()]).transform(val => String(val).trim()),
+    title: z.string().min(1).max(500),
+    difficulty: z.enum(['Easy', 'Medium', 'Hard', 'easy', 'medium', 'hard']).transform(val => {
+      const capitalized = val.charAt(0).toUpperCase() + val.slice(1).toLowerCase();
+      return capitalized as 'Easy' | 'Medium' | 'Hard';
+    }),
+    tags: z.array(z.union([
+      z.string(),
+      z.object({ name: z.string(), slug: z.string().optional(), id: z.string().optional() }),
+    ])).optional(),
+    questionId: z.union([z.string(), z.number()]).optional().transform(v => v !== undefined ? String(v).trim() : undefined),
+    titleSlug: z.string().optional(),
+    url: z.string().url().optional(),
+    isPaidOnly: z.union([z.boolean(), z.number()]).optional().transform(v => v !== undefined ? Boolean(v) : undefined),
+    source: z.string().optional(),
+  })
+);
 
 export type RawProblemInput = z.infer<typeof rawProblemInputSchema>;
 
