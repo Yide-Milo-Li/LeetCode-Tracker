@@ -193,4 +193,55 @@ describe('Snapshot Bundle Export & Import', () => {
     assert.equal(records.total, 1);
     assert.equal(records.items[0].notes, 'Safe original record');
   });
+
+  it('excludes provider API keys from exported bundle and preserves local credentials on restore', async () => {
+    // 1. Configure settings with API keys
+    await store.updateSettings({
+      geminiApiKey: 'secret-gemini-key-123',
+      openaiApiKey: 'secret-openai-key-456',
+      deepseekApiKey: 'secret-deepseek-key-789',
+      language: 'zh',
+      timezone: 'Asia/Shanghai',
+    });
+
+    // 2. Export snapshot bundle
+    const bundle = store.exportSnapshotBundle();
+
+    // Verify secrets are NOT present in the bundle
+    assert.equal(bundle.settings.gemini_api_key, undefined);
+    assert.equal(bundle.settings.openai_api_key, undefined);
+    assert.equal(bundle.settings.deepseek_api_key, undefined);
+    assert.equal(bundle.settings.language, 'zh');
+    assert.equal(bundle.settings.timezone, 'Asia/Shanghai');
+
+    // 3. Prepare another database with its own local key
+    const tempDir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'bundle-target-test-'));
+    const dbPath2 = path.join(tempDir2, 'target.db');
+    const backupDir2 = path.join(tempDir2, 'backups');
+    fs.mkdirSync(backupDir2, { recursive: true });
+    const db2 = new DatabaseSync(dbPath2);
+    const store2 = new CatalogStore(db2, { backupDir: backupDir2, skipBackup: true });
+
+    try {
+      await store2.updateSettings({
+        openaiApiKey: 'existing-local-openai-key-999',
+        language: 'en',
+      });
+
+      // Restore the secret-free bundle into the target database
+      await store2.importSnapshotBundle(bundle);
+
+      // Verify general settings updated to bundle values
+      const restoredSettings = store2.getSettings();
+      assert.equal(restoredSettings.language, 'zh');
+      assert.equal(restoredSettings.timezone, 'Asia/Shanghai');
+
+      // Verify existing local API key was NOT erased or overwritten
+      assert.equal(restoredSettings.openaiApiKey, 'existing-local-openai-key-999');
+    } finally {
+      db2.close();
+      fs.rmSync(tempDir2, { recursive: true, force: true });
+    }
+  });
 });
+

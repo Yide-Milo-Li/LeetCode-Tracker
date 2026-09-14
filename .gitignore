@@ -213,3 +213,8 @@ coverage/
 /backups/
 /exports/
 /data/
+
+# Desktop Tauri build artifacts and binaries
+src-tauri/target/
+src-tauri/binaries/
+*.exe

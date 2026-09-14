@@ -65,20 +65,15 @@ const API_BASE =
     ? `${window.location.origin}/api/v1`
     : '/api/v1';
 
-/** HTTP failure with a stable code; network failures remain distinguishable and retryable. */
-export class ApiError extends Error {
-  public status: number;
-  public code: string;
-  /** Preserve HTTP metadata while remaining compatible with Node's native type stripping. */
-  constructor(status: number, code: string, message: string) {
-    super(message);
-    this.status = status;
-    this.code = code;
-  }
-}
+import { isTauri, invokeTauriApi, ApiError, exportDataFile } from './platform/index.ts';
+export { ApiError } from './platform/index.ts';
 
 /** Request typed local API data without discarding server validation/conflict codes. */
 export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  if (isTauri()) {
+    return invokeTauriApi<T>(path, options);
+  }
+
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
@@ -453,12 +448,30 @@ export const exportApi = {
     return `${API_BASE}/export/obsidian-zip?scope=${scope}&lang=${lang}`;
   },
 
+  async exportObsidianZip(scope: 'all' | 'practiced' = 'all', lang: 'en' | 'zh' = 'en'): Promise<void> {
+    const filename = `leetcode-tracker-obsidian-${scope}-${lang}.zip`;
+    const apiPath = `/export/obsidian-zip?scope=${scope}&lang=${lang}`;
+    await exportDataFile(apiPath, filename);
+  },
+
   getNotionCsvUrl(table: 'summary' | 'history'): string {
     return `${API_BASE}/export/notion-csv?table=${table}`;
   },
 
+  async exportNotionCsv(table: 'summary' | 'history'): Promise<void> {
+    const filename = `leetcode-tracker-notion-${table}.csv`;
+    const apiPath = `/export/notion-csv?table=${table}`;
+    await exportDataFile(apiPath, filename);
+  },
+
   getSingleMarkdownUrl(frontendId: string, lang: 'en' | 'zh' = 'en'): string {
     return `${API_BASE}/export/markdown/${encodeURIComponent(frontendId)}?lang=${lang}`;
+  },
+
+  async exportSingleMarkdown(frontendId: string, lang: 'en' | 'zh' = 'en'): Promise<void> {
+    const filename = `leetcode-${frontendId}-${lang}.md`;
+    const apiPath = `/export/markdown/${encodeURIComponent(frontendId)}?lang=${lang}`;
+    await exportDataFile(apiPath, filename);
   },
 };
 
@@ -469,6 +482,11 @@ export const bundleApi = {
 
   exportBundle(): Promise<SnapshotBundle> {
     return request<SnapshotBundle>('/bundle/export');
+  },
+
+  async exportBundleFile(): Promise<void> {
+    const filename = `leetcode-tracker-snapshot-${new Date().toISOString().slice(0, 10)}.json`;
+    await exportDataFile('/bundle/export', filename);
   },
 
   importBundle(

@@ -7,16 +7,30 @@ import * as path from 'node:path';
 import { snapshotBundleSchema, type SnapshotBundle } from '../../contracts/src/notes.ts';
 import type { BackupManager } from './backup.ts';
 
+const KNOWN_SECRET_KEYS = new Set([
+  'gemini_api_key',
+  'openai_api_key',
+  'deepseek_api_key',
+]);
+
+/** Determine if a settings key contains sensitive provider credentials. */
+export function isSecretSetting(key: string): boolean {
+  return KNOWN_SECRET_KEYS.has(key) || key.endsWith('_api_key') || key.endsWith('_secret') || key.endsWith('_token');
+}
+
 /**
  * Export all personal user data, strategies, assignments, practice records,
  * notes, progress snapshots, and plans into a single portable SnapshotBundle.
+ * Excludes sensitive credentials (API keys/secrets) by default.
  */
 export function exportSnapshotBundle(db: DatabaseSync): SnapshotBundle {
-  // 1. Settings
+  // 1. Settings (exclude provider API keys and confidential tokens)
   const settingsRows = db.prepare('SELECT key, value FROM settings').all() as Array<{ key: string; value: string }>;
   const settings: Record<string, string> = {};
   for (const row of settingsRows) {
-    settings[row.key] = row.value;
+    if (!isSecretSetting(row.key)) {
+      settings[row.key] = row.value;
+    }
   }
 
   // 2. Strategies & Strategy Versions
@@ -117,7 +131,18 @@ export async function importSnapshotBundle(
   const safetyBackupPath = path.join(backupDir, `safety-pre-bundle-restore-${timestamp}.sqlite`);
   await backupManager.createBackup(db, safetyBackupPath);
 
-  // 2. Atomic transaction replacement
+  // 2. Capture existing local secrets to prevent accidental credential wiping
+  const existingSecretRows = db
+    .prepare('SELECT key, value FROM settings')
+    .all() as Array<{ key: string; value: string }>;
+  const preservedSecrets = new Map<string, string>();
+  for (const row of existingSecretRows) {
+    if (isSecretSetting(row.key) && row.value && row.value.trim().length > 0) {
+      preservedSecrets.set(row.key, row.value);
+    }
+  }
+
+  // 3. Atomic transaction replacement
   db.exec('BEGIN IMMEDIATE');
   try {
     // Delete existing user-mutable tables (preserves problems and tags catalog)
@@ -141,6 +166,12 @@ export async function importSnapshotBundle(
     const insertSetting = db.prepare('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)');
     for (const [key, value] of Object.entries(bundle.settings)) {
       insertSetting.run(key, String(value), timestamp);
+    }
+    // Re-apply preserved local secrets that were not present in the portable bundle
+    for (const [key, value] of preservedSecrets) {
+      if (!bundle.settings[key] || String(bundle.settings[key]).trim().length === 0) {
+        insertSetting.run(key, value, timestamp);
+      }
     }
 
     // Restore Strategies

@@ -25,6 +25,7 @@ export interface AppOptions {
   geminiAssistant?: IGeminiAssistant;
   staticRoot?: string;
   disableStatic?: boolean;
+  sessionSecret?: string;
 }
 
 /**
@@ -59,6 +60,20 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     },
   });
 
+  // In desktop mode, enforce cryptographic session secret verification for all endpoints
+  if (options.sessionSecret) {
+    const requiredSecret = options.sessionSecret;
+    app.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
+      const token = request.headers['x-desktop-session-token'];
+      if (token !== requiredSecret) {
+        return reply.status(401).send({
+          error: 'UNAUTHORIZED_SESSION',
+          message: 'Invalid or missing desktop session token.',
+        });
+      }
+    });
+  }
+
   // Middleware: enforce loopback host & origin for mutating requests
   app.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
     const method = request.method;
@@ -80,6 +95,15 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         });
       }
     }
+  });
+
+  // Health check endpoint for host orchestrator/desktop shell readiness probe
+  app.get('/api/v1/health', async () => {
+    return {
+      status: 'ok',
+      version: '0.1.0',
+      timestamp: new Date().toISOString(),
+    };
   });
 
   // Register all modular API v1 routes

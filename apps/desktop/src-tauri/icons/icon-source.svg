@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#1e293b" />
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24" />
+      <stop offset="100%" stop-color="#f59e0b" />
+    </linearGradient>
+    <linearGradient id="bracketGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#0284c7" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background rounded card -->
+  <rect x="16" y="16" width="480" height="480" rx="100" ry="100" fill="url(#bgGrad)" stroke="#334155" stroke-width="8" />
+
+  <!-- Code bracket left: < -->
+  <path d="M 175 160 L 95 256 L 175 352" fill="none" stroke="url(#bracketGrad)" stroke-width="36" stroke-linecap="round" stroke-linejoin="round" />
+
+  <!-- Code bracket right: > -->
+  <path d="M 337 160 L 417 256 L 337 352" fill="none" stroke="url(#bracketGrad)" stroke-width="36" stroke-linecap="round" stroke-linejoin="round" />
+
+  <!-- Center lightning / spark icon -->
+  <polygon points="275,130 205,260 255,260 235,382 315,245 265,245" fill="url(#accentGrad)" stroke="#d97706" stroke-width="4" stroke-linejoin="round" />
+</svg>
