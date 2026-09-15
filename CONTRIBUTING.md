@@ -1,5 +1,7 @@
 # Contributing
 
+Release versions must agree across workspace package manifests, npm lockfile, the API health response, and Tauri/Cargo metadata. For native changes, also run the Rust checks and Windows build in the [desktop guide](docs/desktop.md). Keep release assets and private evidence out of Git; attach installer/checksum assets to the matching release tag.
+
 Read the [documentation index](docs/README.md), [requirements](docs/requirements.md), and [current status](docs/status.md) before proposing changes.
 
 ## Workflow
@@ -10,7 +12,7 @@ Read the [documentation index](docs/README.md), [requirements](docs/requirements
 4. Record checks actually run, their outcomes, and checks that were not run.
 5. Inspect the staged diff for unrelated work, generated artifacts, credentials, and personal data before committing.
 
-Use `npm install`, `npm run check`, `npm test` and `npm run docs:check` with Node.js 24. Tests use synthetic data. Users supply their own compatible database with appropriate usage rights; no dataset is included.
+Use `npm ci`, `npm run check`, `npm test` and `npm run docs:check` with Node.js 24. Tests use synthetic data. Users supply JSONL metadata with appropriate usage rights; the application creates its database; no dataset is included.
 
 ## Code and documentation
 

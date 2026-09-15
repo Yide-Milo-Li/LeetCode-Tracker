@@ -1,6 +1,14 @@
 # Roadmap
 
-## Implemented Milestones (v0.1.0)
+Release 1.0.0 adds Windows desktop packaging. Implemented features and historical benchmark observations below are distinct from the open acceptance work listed here. See [current status](status.md).
+
+## Desktop distribution: implemented and remaining
+
+- Implemented: Tauri host, private Node 24.15.0, authenticated IPC bridge, native export authorization, sidecar lifecycle/retry, and unsigned Windows x64 installer.
+- Remaining: complete SQLite migration and custom paths, clean-machine installation/upgrade/downgrade, real WebView2/native-dialog acceptance, performance measurements, signing and automatic updates.
+- macOS/Linux/ARM64 native packages and mobile UI are not part of Release 1.0.
+
+## Implemented milestones carried into v1.0.0
 
 1. **BYOD JSON Lines Ingestion (Phases 1–2)**:
    - High-performance JSONL parser with preflight duplicate detection, field mutation tracking, and atomic SQLite commits.
@@ -31,7 +39,7 @@
 9. **Topic Insights & Adaptive Review (Phase 16)**:
    - Sample-gated topic analytics, weak-topic sprint prioritization, and duration-based spaced repetition.
 10. **Multi-Provider AI Abstraction (Phase 17)**:
-    - Unified assistant supporting Google Gemini (`@google/genai`), OpenAI (native fetch), and DeepSeek (native fetch) with custom Base URLs and sub-0.2ms local deterministic fallbacks.
+    - Unified assistant supporting Google Gemini (`@google/genai`), OpenAI (native fetch), and DeepSeek (native fetch) with custom Base URLs and local deterministic planning fallbacks without a latency guarantee.
 11. **Custom Theme Palettes & Accessibility (Phase 18)**:
     - 10 curated developer theme palettes, High Contrast mode toggle, and pure CSS variable architecture.
 12. **Open Source Readiness (Phase 19)**:

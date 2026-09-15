@@ -42,3 +42,42 @@ jobs:
 
       - name: Check formatting and whitespace
         run: git diff --check
+
+  desktop-windows:
+    name: Windows desktop boundaries and installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.15.0'
+          cache: 'npm'
+      - name: Install locked JavaScript dependencies
+        run: npm ci
+      - name: Prepare official private runtime
+        run: npm run desktop:prepare-runtime
+      - name: Verify isolated bundle with private Node
+        shell: pwsh
+        run: |
+          $env:DESKTOP_TEST_NODE = (Resolve-Path apps/desktop/src-tauri/binaries/node-x86_64-pc-windows-msvc.exe).Path
+          npm run test:desktop
+          exit $LASTEXITCODE
+      - name: Set up Rust and checking components
+        run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+      # Cargo embeds frontend assets; prepare them before native checks.
+      - name: Build frontend
+        run: npm run build
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check
+      - name: Test process ownership and native boundaries
+        run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
+      - name: Lint native host
+        run: cargo clippy --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets -- -D warnings
+      - name: Build unsigned Windows installer
+        run: npm run desktop:build
+      # This artifact is for CI review; this workflow never publishes a Release.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-desktop-unsigned
+          path: apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error

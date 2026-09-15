@@ -1,6 +1,6 @@
 [package]
 name = "leetcode-tracker-desktop"
-version = "0.1.0"
+version = "1.0.0"
 description = "LeetCode Tracker Desktop Application"
 authors = ["LeetCode Tracker Team"]
 edition = "2021"
@@ -16,15 +16,17 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-dialog = "2"
-tauri-plugin-shell = "2"
+tempfile = "3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "blocking"] }
 tokio = { version = "1", features = ["full"] }
 rand = "0.8"
 windows-sys = { version = "0.59", features = [
     "Win32_System_JobObjects",
     "Win32_System_Threading",
     "Win32_Foundation",
-    "Win32_Security"
+    "Win32_Security",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging"
 ] }

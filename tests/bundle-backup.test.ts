@@ -194,6 +194,17 @@ describe('Snapshot Bundle Export & Import', () => {
     assert.equal(records.items[0].notes, 'Safe original record');
   });
 
+  it('ignores non-empty credentials in legacy bundles, including when the destination key is unset', async () => {
+    store.updateSettings({ geminiApiKey: 'destination-synthetic-key', openaiApiKey: '' });
+    const bundle = store.exportSnapshotBundle();
+    // Older exporters included keys. Importing them is not consent to replace local credentials.
+    bundle.settings.gemini_api_key = 'legacy-synthetic-key';
+    bundle.settings.openai_api_key = 'legacy-openai-synthetic-key';
+    await store.importSnapshotBundle(bundle);
+    assert.equal(store.getSettings().geminiApiKey, 'destination-synthetic-key');
+    assert.equal(store.getSettings().openaiApiKey, null);
+  });
+
   it('excludes provider API keys from exported bundle and preserves local credentials on restore', async () => {
     // 1. Configure settings with API keys
     await store.updateSettings({
@@ -244,4 +255,3 @@ describe('Snapshot Bundle Export & Import', () => {
     }
   });
 });
-

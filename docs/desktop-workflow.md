@@ -1,8 +1,10 @@
 # Desktop workflow guide
 
-## Three places to work
+The same desktop UI runs in the Windows 1.0.0 app and source-mode browsers. Native mode shows recoverable startup status, uses native dialogs for exports, and opens allowed external links in the system browser. See [installation and runtime behavior](desktop.md).
 
-Today is the homepage. Problems is the local catalog. Progress contains Records and Statistics, with Records selected by default. Settings remains at the sidebar bottom. The sidebar starts as a 64px icon rail; use Expand sidebar for 216px labelled navigation. This browser remembers the choice. Hover or focus icons for their names; Escape dismisses a tooltip. Row actions, reset, refresh and pagination use labelled icons, while saves and destructive actions retain text.
+## Four places to work
+
+Today is the homepage. Problems is the local catalog. Notes provides problem Markdown editing, practice timelines, and export. Progress contains Records and Statistics, with Records selected by default. Settings remains at the sidebar bottom. The sidebar starts as a 64px icon rail; use Expand sidebar for 216px labelled navigation. This browser remembers the choice. Hover or focus icons for their names; Escape dismisses a tooltip. Row actions, reset, refresh and pagination use labelled icons, while saves and destructive actions retain text.
 
 Today shows one locally selected encouragement below its heading. The library contains 240 paired English/Chinese lines, with 60 for each period: morning (06:00–11:00), daytime (11:00–17:00), evening (17:00–22:00), and night (22:00–06:00). Selection follows the saved timezone, or the browser timezone until configured. Night keeps the same line across midnight; changing language translates the same line. No extra AI request is made. Plan details exposes timezone and version metadata.
 
@@ -41,7 +43,7 @@ Historical records use the same evidence rules as all other practice; they do no
 
 **Import problems** accepts UTF-8 JSONL through upload/drop or paste. Preview shows valid records, differences, duplicates and line errors. Confirm imports the valid subset atomically. The result retains error details, and import history is paginated. Changing input invalidates an earlier preview; an unconfirmed submission keeps its preview frozen for retry.
 
-**Import progress** accepts pasted progress text. Gemini supplies editable candidates, while the local server matches problems and validates meaning and time. Review differences, confirm each eligible conflict separately, then confirm the batch. Unmatched, contradictory or ambiguous records cannot be authorized into valid data merely by checking a box. Incoming snapshot totals replace stored totals rather than accumulating synthetic submissions.
+**Import progress** accepts pasted progress text. The selected AI provider supplies editable candidates, while the local server matches problems and validates meaning and time. Review differences, confirm each eligible conflict separately, then confirm the batch. Unmatched, contradictory or ambiguous records cannot be authorized into valid data merely by checking a box. Incoming snapshot totals replace stored totals rather than accumulating synthetic submissions.
 
 The current snapshot browser and both import histories are collapsed by default below their import flows. Expand the labelled disclosure to browse them. Snapshot details expose correction, explicit revocation and version audit. These are user-imported observations, not automatic platform synchronization or a real submission history.
 

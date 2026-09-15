@@ -9,6 +9,7 @@
 export class ApiError extends Error {
   public status: number;
   public code: string;
+  /** Preserve server conflict metadata so retries can retain their operation identity. */
   constructor(status: number, code: string, message: string) {
     super(message);
     this.status = status;
@@ -32,12 +33,29 @@ interface TauriApiResponse {
   headers: Record<string, string>;
 }
 
+/** Normalize API paths for both browser downloads and the authenticated native bridge. */
+function apiPath(path: string): string {
+  return path.startsWith('/api/v1/') ? path : `/api/v1${path.startsWith('/') ? '' : '/'}${path}`;
+}
+
+/** Cancel waiting without assuming an already dispatched write was rolled back on the server. */
+function awaitResponse<T>(promise: Promise<T>, signal?: AbortSignal | null): Promise<T> {
+  if (!signal) return promise;
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+    signal.addEventListener('abort', abort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+    if (signal.aborted) abort();
+  });
+}
+
 /**
  * Dispatches an API request through the Tauri native IPC command 'api_request'.
  * Injects session security on the Rust side, validates loopback paths, and maintains
  * full error code and status parity with standard HTTP requests.
  */
 export async function invokeTauriApi<T>(path: string, options: RequestInit = {}): Promise<T> {
+  options.signal?.throwIfAborted();
   const tauri = (window as unknown as {
     __TAURI_INTERNALS__: { invoke: <R>(cmd: string, args?: unknown) => Promise<R> };
   }).__TAURI_INTERNALS__;
@@ -45,18 +63,18 @@ export async function invokeTauriApi<T>(path: string, options: RequestInit = {})
   const method = (options.method || 'GET').toUpperCase();
   const headers: Record<string, string> = {
     ...(options.body === undefined ? {} : { 'Content-Type': 'application/json' }),
-    ...((options.headers as Record<string, string>) || {}),
+    ...Object.fromEntries(new Headers(options.headers).entries()),
   };
   const body = typeof options.body === 'string' ? options.body : undefined;
-  const fullPath = path.startsWith('/api/v1') ? path : `/api/v1${path.startsWith('/') ? '' : '/'}${path}`;
+  const fullPath = apiPath(path);
 
   try {
-    const response = await tauri.invoke<TauriApiResponse>('api_request', {
+    const response = await awaitResponse(tauri.invoke<TauriApiResponse>('api_request', {
       method,
       path: fullPath,
       headers,
       body,
-    });
+    }), options.signal);
 
     if (response.status < 200 || response.status >= 300) {
       let errorMsg = `HTTP ${response.status}`;
@@ -77,6 +95,7 @@ export async function invokeTauriApi<T>(path: string, options: RequestInit = {})
       return response.body as unknown as T;
     }
   } catch (err) {
+    if (options.signal?.aborted) throw options.signal.reason;
     if (err instanceof ApiError) throw err;
     throw new ApiError(500, 'DESKTOP_IPC_ERROR', err instanceof Error ? err.message : String(err));
   }
@@ -105,17 +124,14 @@ export async function exportDataFile(apiPath: string, defaultFilename: string): 
       __TAURI_INTERNALS__: { invoke: <R>(cmd: string, args?: unknown) => Promise<R> };
     }).__TAURI_INTERNALS__;
 
-    // Use Tauri dialog plugin if available, or invoke export directly
-    const savePath = prompt(`Save as (desktop file path):`, defaultFilename);
-    if (!savePath) return;
-
+    // Rust owns the native dialog and the resulting path; the renderer supplies no destination.
     await tauri.invoke('export_data_file', {
-      apiPath,
-      destinationPath: savePath,
+      apiPath: apiPath.startsWith('/api/v1/') ? apiPath : `/api/v1${apiPath}`,
+      defaultFilename,
     });
   } else if (typeof window !== 'undefined') {
     const link = document.createElement('a');
-    link.href = apiPath;
+    link.href = apiPath.startsWith('/api/v1/') ? apiPath : `/api/v1${apiPath}`;
     link.download = defaultFilename;
     document.body.appendChild(link);
     link.click();
@@ -131,16 +147,17 @@ export function initDesktopPlatform(): void {
 
   // Intercept external problem and documentation links to open in system default browser
   document.addEventListener('click', (e) => {
+    if (e.defaultPrevented) return;
     const anchor = (e.target as HTMLElement).closest('a');
     if (anchor && anchor.href) {
       const href = anchor.href;
-      if (
-        href.startsWith('https://leetcode.com') ||
-        href.startsWith('https://leetcode.cn') ||
-        href.startsWith('https://github.com')
-      ) {
+      const destination = new URL(href);
+      if (['https:', 'http:'].includes(destination.protocol) && destination.origin !== window.location.origin) {
         e.preventDefault();
-        void openExternalUrl(href);
+        void openExternalUrl(href).catch(() => {
+          // Native validation remains authoritative; show a failure instead of an unhandled rejection.
+          window.alert('Unable to open this link / 无法打开此链接');
+        });
       }
     }
   });

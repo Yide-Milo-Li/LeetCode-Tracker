@@ -49,9 +49,34 @@ afterEach(() => {
   cleanup();
   mock.restoreAll();
   lastCopiedText = '';
+  Reflect.deleteProperty(dom.window, '__TAURI_INTERNALS__');
 });
 
 describe('NotesWorkspace Component', () => {
+  it('routes a visible desktop export action through native IPC without navigating', async () => {
+    mock.method(api, 'listNotes', async () => ({ items: [], total: 0 }));
+    const commands: Array<{ command: string; args: any }> = [];
+    Object.assign(dom.window, { __TAURI_INTERNALS__: {
+      invoke: async (command: string, args: any) => {
+        commands.push({ command, args });
+        return false; // A user cancelling the native dialog must leave this page usable.
+      },
+    } });
+    await act(async () => { render(<NotesWorkspace lang="en" />); });
+    const link = screen.getByRole('link', { name: /Obsidian/i });
+    let defaultPrevented = false;
+    link.addEventListener('click', (event) => {
+      queueMicrotask(() => { defaultPrevented = event.defaultPrevented; });
+    });
+    await act(async () => { fireEvent.click(link); });
+    assert.equal(defaultPrevented, true);
+    assert.equal(commands.length, 1);
+    assert.equal(commands[0].command, 'export_data_file');
+    assert.equal(commands[0].args.apiPath, '/api/v1/export/obsidian-zip?scope=all&lang=en');
+    assert.equal('destinationPath' in commands[0].args, false);
+    assert.equal(screen.queryByRole('alert'), null);
+  });
+
   it('renders master-detail layout and fetches note content on selection', async () => {
     const mockSummaries = [
       {

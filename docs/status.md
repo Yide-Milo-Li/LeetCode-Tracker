@@ -1,9 +1,22 @@
 # Implementation status
 
+## Release 1.0.0 — current baseline (2026-09-14)
+
+The Windows x64 Tauri distribution packages a private Node runtime and the shared React/Fastify/SQLite application. Audit repairs cover URL execution, native exports and atomic saves, graceful process shutdown, bounded startup/retry, and preservation of local provider keys. Versions are aligned at 1.0.0.
+
+Local verification: **312 JavaScript/Web/sidecar tests (216 + 95 + 1) and 6 Rust tests passed**, together with TypeScript, documentation links, Rust fmt/clippy and Windows packaging. The standalone bundle test uses the private Node 24.15.0 binary in an isolated temporary directory. Remote CI status is available separately in [GitHub Actions](https://github.com/Yide-Milo-Li/LeetCode-Tracker/actions).
+
+The unsigned installer and checksums belong to [Release 1.0](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.0.0); see [release notes](releases/1.0.0.md). Complete SQLite migration/custom paths, clean-system installation/upgrade, the native WebView2/dialog matrix, and performance acceptance remain open. Live-provider availability was not tested. Publication is not a claim that these gates passed.
+
+## Historical phase evidence
+
+The following sections retain their original phase scope and test counts. They do not override the current release baseline or establish a whole-history credential audit.
+
+
 ## Open source readiness and engineering closeout
 
-The repository has completed engineering closure in preparation for public release on GitHub:
-- Zero secrets or private keys in Git history, validated by comprehensive commit auditing.
+The Phase 19 development snapshot recorded these readiness activities:
+- Prior work reported a credential review. This release does not claim a comprehensive proof that Git history contains no secrets.
 - Complete community governance templates: `.github/ISSUE_TEMPLATE/feature_request.md`, `.github/ISSUE_TEMPLATE/bug_report.md`, `.github/ISSUE_TEMPLATE/config.yml`, and `.github/pull_request_template.md`.
 - Sanitized `.env.example` environment template with all configurable server and AI provider options.
 - The offline test suite passes **297 tests**: 206 domain/storage/API tests and 91 web DOM tests, with zero failures, zero skips, and zero external network calls.

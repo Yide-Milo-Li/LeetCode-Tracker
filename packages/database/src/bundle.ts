@@ -131,18 +131,8 @@ export async function importSnapshotBundle(
   const safetyBackupPath = path.join(backupDir, `safety-pre-bundle-restore-${timestamp}.sqlite`);
   await backupManager.createBackup(db, safetyBackupPath);
 
-  // 2. Capture existing local secrets to prevent accidental credential wiping
-  const existingSecretRows = db
-    .prepare('SELECT key, value FROM settings')
-    .all() as Array<{ key: string; value: string }>;
-  const preservedSecrets = new Map<string, string>();
-  for (const row of existingSecretRows) {
-    if (isSecretSetting(row.key) && row.value && row.value.trim().length > 0) {
-      preservedSecrets.set(row.key, row.value);
-    }
-  }
-
-  // 3. Atomic transaction replacement
+  // Settings are merged, not deleted: ignoring incoming secrets preserves even unset local keys.
+  // 2. Atomic transaction replacement
   db.exec('BEGIN IMMEDIATE');
   try {
     // Delete existing user-mutable tables (preserves problems and tags catalog)
@@ -165,13 +155,7 @@ export async function importSnapshotBundle(
     // Restore Settings
     const insertSetting = db.prepare('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)');
     for (const [key, value] of Object.entries(bundle.settings)) {
-      insertSetting.run(key, String(value), timestamp);
-    }
-    // Re-apply preserved local secrets that were not present in the portable bundle
-    for (const [key, value] of preservedSecrets) {
-      if (!bundle.settings[key] || String(bundle.settings[key]).trim().length === 0) {
-        insertSetting.run(key, value, timestamp);
-      }
+      if (!isSecretSetting(key)) insertSetting.run(key, String(value), timestamp);
     }
 
     // Restore Strategies

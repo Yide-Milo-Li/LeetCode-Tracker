@@ -101,7 +101,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   app.get('/api/v1/health', async () => {
     return {
       status: 'ok',
-      version: '0.1.0',
+      version: '1.0.0',
       timestamp: new Date().toISOString(),
     };
   });

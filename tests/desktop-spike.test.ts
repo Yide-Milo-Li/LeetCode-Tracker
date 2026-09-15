@@ -33,9 +33,11 @@ async function launchTestServer(options: {
   sessionSecret: string;
   nonce: string;
 }): Promise<ServerHandle> {
-  const child = spawn(process.execPath, [bundledServerPath], {
+  const executable = process.env.DESKTOP_TEST_NODE || process.execPath;
+  const child = spawn(executable, [path.join(path.dirname(options.dbPath), 'desktop-server.mjs')], {
     stdio: ['pipe', 'pipe', 'pipe'],
-    cwd: repoRoot,
+    cwd: path.dirname(options.dbPath),
+    env: Object.fromEntries(Object.entries(process.env).filter(([key]) => ['systemroot', 'windir', 'temp', 'tmp'].includes(key.toLowerCase()))),
   });
 
   child.stderr?.pipe(process.stderr);
@@ -47,6 +49,7 @@ async function launchTestServer(options: {
 
   // Send initialization configuration
   const payload = JSON.stringify({
+    protocolVersion: 1,
     port: 0,
     dbPath: options.dbPath,
     backupDir: options.backupDir,
@@ -126,10 +129,12 @@ test('Desktop bundled server lifecycle, session auth, and data persistence', asy
   assert.ok(fs.existsSync(bundledServerPath), 'Bundled server file must exist');
 
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'desktop-spike-test-'));
+  // The bundle resolves dependencies from this clean directory, not the repository's node_modules.
+  fs.copyFileSync(bundledServerPath, path.join(tempDir, 'desktop-server.mjs'));
   const dbPath = path.join(tempDir, 'spike.sqlite');
   const backupDir = path.join(tempDir, 'backups');
-  const sessionSecret = 'secret-token-spike-xyz';
-  const nonce = 'nonce-round-1';
+  const sessionSecret = 'synthetic-session-token-spike-xyz-123456789';
+  const nonce = 'synthetic-nonce-round-1';
 
   let server: ServerHandle | undefined;
 
@@ -261,14 +266,14 @@ test('Desktop bundled server lifecycle, session auth, and data persistence', asy
     const server2 = await launchTestServer({
       dbPath,
       backupDir,
-      sessionSecret: 'another-session-secret-999',
-      nonce: 'nonce-round-2',
+      sessionSecret: 'another-synthetic-session-secret-999-123456789',
+      nonce: 'synthetic-nonce-round-2',
     });
 
     try {
       const stats2Res = await fetch(`http://127.0.0.1:${server2.port}/api/v1/catalog/stats`, {
         headers: {
-          'x-desktop-session-token': 'another-session-secret-999',
+          'x-desktop-session-token': 'another-synthetic-session-secret-999-123456789',
         },
       });
       assert.equal(stats2Res.status, 200);
@@ -277,7 +282,7 @@ test('Desktop bundled server lifecycle, session auth, and data persistence', asy
 
       const getNote2Res = await fetch(`http://127.0.0.1:${server2.port}/api/v1/notes/1`, {
         headers: {
-          'x-desktop-session-token': 'another-session-secret-999',
+          'x-desktop-session-token': 'another-synthetic-session-secret-999-123456789',
         },
       });
       assert.equal(getNote2Res.status, 200);

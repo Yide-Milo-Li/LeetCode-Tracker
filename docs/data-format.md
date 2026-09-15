@@ -1,6 +1,6 @@
 # Database format and JSONL ingestion
 
-This repository adopts a pure **Bring-Your-Own-Data (BYOD)** architecture. It distributes no problem dataset and never collects platform activity. Optional server-side Gemini formatting and recommendations use the configured provider. Users supply their own problem sets using **JSON Lines (`.jsonl`)** text, which the system validates, normalizes, and stores into a local SQLite database.
+This repository adopts a pure **Bring-Your-Own-Data (BYOD)** architecture. It distributes no problem dataset and never collects platform activity. Optional server-side AI formatting and recommendations use the selected Gemini, OpenAI, or DeepSeek provider. Users supply their own problem sets using **JSON Lines (`.jsonl`)** text, which the system validates, normalizes, and stores into a local SQLite database.
 
 ---
 
@@ -101,7 +101,7 @@ The local SQLite catalog schema is defined in [schema.ts](../packages/database/s
 - **`import_history`**: Audit log recording ingestion timestamps, lines processed, inserted/updated/unchanged/duplicate counts, and error counts.
 - **`catalog_meta`**: Key-value metadata storing monotonic `catalog_revision`, `practice_revision`, `planning_revision`, `review_baseline`, and `last_imported_at`.
 - **`settings`**: User preferences table storing `language` ('en' | 'zh'), `theme` ('light' | 'dark' | 'system'), and `timezone` (string | null).
-- **`schema_version`**: Tracks applied database schema version (currently v8).
+- **`schema_version`**: Tracks applied database schema version (currently v9).
 
 ---
 
@@ -128,9 +128,9 @@ Today's immediate completion saves the actual timestamp first; the optional meta
 
 ---
 
-## 5. Gemini AI format assistant
+## 5. AI format assistant
 
-- **Model**: The server-configured model/fallback cascade uses the existing `@google/genai` adapter. The desktop import workspace exposes read-only configuration status. This refactor verifies injected responses, not live model availability.
-- **Server-Side Execution**: Credentials remain strictly on the server in `.env`; no API key is exposed to the browser.
+- **Model**: Settings selects Gemini, OpenAI, or DeepSeek. Gemini uses `@google/genai`; OpenAI and DeepSeek use native fetch with locally validated output. See [provider configuration](llm-providers.md) for supported presets and fallback behavior. Tests use injected responses, not live model availability.
+- **Server-Side Execution**: Requests run in Fastify. Keys can be configured in Settings and persist in local SQLite; source mode also supports environment defaults. UI masking is not encryption. Portable bundles omit keys, while raw database backups may contain them.
 - **Rate & Concurrency Controls**: Serialized mutex lock (at most 1 concurrent AI parse call), 64 KiB input limit (up to 200 candidate problems), and 60s abort timeout.
 - **Structured Output Schema**: Extracts `frontendId`, `title`, `lastSubmitted`, `lastResult`, and `submissions`. If the year is omitted in raw text, falls back to the user-specified `batchYear`.

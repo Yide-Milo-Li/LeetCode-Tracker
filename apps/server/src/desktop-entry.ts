@@ -7,6 +7,7 @@
  * on all /api/v1 requests, and signals readiness through structured stdout protocol messages.
  */
 import { DatabaseSync } from 'node:sqlite';
+import { z } from 'zod';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as readline from 'node:readline';
@@ -19,6 +20,8 @@ import { acquireDatabaseLease } from '../../../packages/database/src/lease.ts';
  * Configuration payload received over the private initialization stream.
  */
 export interface DesktopConfig {
+  /** Version of the private host/sidecar protocol. */
+  protocolVersion: 1;
   /** Target loopback port. Defaults to 0 (ephemeral OS-allocated port). */
   port?: number;
   /** Absolute path to the SQLite database file in the user data directory. */
@@ -28,58 +31,51 @@ export interface DesktopConfig {
   /** Cryptographic session secret required for authenticating requests. */
   sessionSecret: string;
   /** Handshake token matched by the desktop host upon startup. */
-  nonce?: string;
+  nonce: string;
 }
 
 /**
  * Main desktop server lifecycle orchestrator.
  */
 export async function startDesktopServer(): Promise<void> {
-  // Support inline configuration via environment variables for testing/direct execution
-  let config: DesktopConfig;
-  let rl: readline.Interface | undefined;
-
-  if (process.env.DESKTOP_CONFIG_JSON) {
-    config = JSON.parse(process.env.DESKTOP_CONFIG_JSON) as DesktopConfig;
-  } else if (process.env.DB_PATH && process.env.SESSION_SECRET) {
-    config = {
-      port: process.env.PORT ? parseInt(process.env.PORT, 10) : 0,
-      dbPath: path.resolve(process.env.DB_PATH),
-      backupDir: process.env.BACKUP_DIR ? path.resolve(process.env.BACKUP_DIR) : path.join(path.dirname(process.env.DB_PATH), 'backups'),
-      sessionSecret: process.env.SESSION_SECRET,
-      nonce: process.env.NONCE,
-    };
-  } else {
-    // Single shared readline interface for the entire process lifetime
-    rl = readline.createInterface({
-      input: process.stdin,
-      crlfDelay: Infinity,
-    });
-
-    config = await new Promise<DesktopConfig>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('Timeout waiting for desktop initialization payload on stdin.'));
-      }, 15000);
-
-      rl!.once('line', (line: string) => {
-        clearTimeout(timeout);
+  // Production startup accepts only the private control stream, never ambient test/environment config.
+  const schema = z.object({
+    protocolVersion: z.literal(1),
+    port: z.number().int().min(0).max(65535).default(0),
+    dbPath: z.string().refine(path.isAbsolute),
+    backupDir: z.string().refine(path.isAbsolute),
+    sessionSecret: z.string().min(32).max(256),
+    nonce: z.string().min(16).max(256),
+  }).strict();
+  const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+  let stopRequested = false;
+  let shutdown: (() => Promise<void>) | undefined;
+  let configured = false;
+  const config = await new Promise<z.infer<typeof schema>>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Desktop initialization timed out')), 15000);
+    rl.on('line', (line) => {
+      if (configured) {
         try {
-          const parsed = JSON.parse(line.trim()) as DesktopConfig;
-          if (!parsed.dbPath || !parsed.sessionSecret) {
-            throw new Error('Invalid desktop config: dbPath and sessionSecret are required.');
+          if (JSON.parse(line).type === 'shutdown') {
+            stopRequested = true;
+            void shutdown?.();
           }
-          resolve(parsed);
-        } catch (err) {
-          reject(err);
-        }
-      });
-
-      rl!.once('error', (err: Error) => {
-        clearTimeout(timeout);
-        reject(err);
-      });
+        } catch { /* Unknown control messages cannot trigger application work. */ }
+        return;
+      }
+      clearTimeout(timer);
+      configured = true;
+      try { resolve(schema.parse(JSON.parse(line))); }
+      catch { reject(new Error('Invalid desktop initialization payload')); }
     });
-  }
+    rl.on('close', () => {
+      clearTimeout(timer);
+      stopRequested = true;
+      if (!configured) reject(new Error('Desktop control stream closed'));
+      void shutdown?.();
+    });
+    rl.on('error', () => { clearTimeout(timer); reject(new Error('Desktop control stream failed')); });
+  });
 
   // Ensure parent directories exist
   const dbDir = path.dirname(config.dbPath);
@@ -115,6 +111,7 @@ export async function startDesktopServer(): Promise<void> {
     // Emit structured ready message on stdout
     const readyMessage = JSON.stringify({
       type: 'ready',
+      protocolVersion: 1,
       port: actualPort,
       nonce: config.nonce,
     });
@@ -142,23 +139,9 @@ export async function startDesktopServer(): Promise<void> {
       }
     };
 
-    // If we have an active readline stream, listen for commands or pipe end
-    if (rl) {
-      rl.on('line', (line: string) => {
-        try {
-          const msg = JSON.parse(line.trim());
-          if (msg.type === 'shutdown') {
-            void gracefulShutdown('stdin command');
-          }
-        } catch {
-          // Ignore unparseable control messages
-        }
-      });
-
-      rl.on('close', () => {
-        void gracefulShutdown('stdin close');
-      });
-    }
+    // A close/shutdown received while SQLite was opening must not be lost.
+    shutdown = () => gracefulShutdown('control stream');
+    if (stopRequested) await shutdown();
 
     process.on('SIGINT', () => void gracefulShutdown('SIGINT'));
     process.on('SIGTERM', () => void gracefulShutdown('SIGTERM'));

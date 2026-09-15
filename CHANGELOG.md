@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.0.0] - 2026-09-14
+
+### Added
+- Windows x64 Tauri application and per-user NSIS installer with private Node.js 24.15.0, shared React UI, Fastify API, and SQLite v9.
+- Native save dialogs for Markdown, CSV, ZIP, and snapshot exports; recoverable startup UI and sidecar liveness monitoring.
+- Default isolated bundled-server tests and Windows CI for the private runtime, Rust checks, and unsigned installer artifacts.
+- Synthetic catalog generation for promotional assets without a private backup dependency.
+
+### Fixed
+- Upgrade `@fastify/static` from 8.x to 10.1.3 in both manifests, eliminating the reported dependency advisories; verify encoded-path guard bypass and static-serving compatibility with regression tests.
+- Keep planning replay/review tests within a future writable date instead of failing when fixed September 2026 dates become historical.
+- External URL handling now validates parsed HTTPS hosts and uses the Windows URL handler without a shell.
+- All Settings/Notes export actions use the authenticated native bridge. The renderer cannot supply a destination path; failed downloads preserve existing files.
+- Normal close waits for sidecar shutdown before the deadline; startup validates the versioned nonce handshake and drains output pipes.
+- Snapshot imports ignore incoming API keys and preserve local keys, including unset credentials.
+
+### Verification and limitations
+- Local automated checks: 312 JavaScript/Web/sidecar tests and 6 Rust tests, plus typecheck, documentation, formatting, clippy, and installer build.
+- The installer is unsigned. Full SQLite migration/custom data selection, clean-machine install/upgrade/downgrade, native-dialog interaction, full WebView2 acceptance, and performance targets remain pending.
+- See [Release 1.0 notes](docs/releases/1.0.0.md). Historical sections below describe earlier development snapshots, not previously published GitHub releases.
+
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -8,7 +30,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [0.1.0] - 2026-09-13
 
-### Initial Open Source Release
+### Initial open-source development snapshot
 
 #### Added
 - **10 Curated Desktop Theme Palettes & High Contrast (Phase 18)**:

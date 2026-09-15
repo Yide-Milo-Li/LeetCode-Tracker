@@ -1,1 +1,6 @@
-{"name":"@leetcode-tracker/domain","private":true,"type":"module","version":"0.1.0"}
+{
+  "name": "@leetcode-tracker/domain",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0"
+}

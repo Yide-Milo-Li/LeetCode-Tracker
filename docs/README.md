@@ -1,8 +1,10 @@
 # Documentation index
 
+[Release 1.0 notes](releases/1.0.0.md) · [Windows installation and native runtime](desktop.md) · [Current verification and limitations](status.md)
+
 Users provide their own JSONL problem metadata with appropriate usage rights. The application creates its own SQLite database. Catalog import and progress import are separate implemented workflows; the repository contains no dataset.
 
-All maintained documentation is English. The implemented desktop interface supports Chinese and English, with three main destinations: Today, Problems and Progress.
+All maintained documentation is English. The implemented desktop interface supports Chinese and English, with four main destinations: Today, Problems, Progress and Notes, plus Settings. Release 1.0.0 adds a Windows x64 Tauri installer while retaining browser source mode.
 
 ## Architecture & System Design
 

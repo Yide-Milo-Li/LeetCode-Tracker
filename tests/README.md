@@ -1,5 +1,9 @@
 # Testing boundaries
 
+## Release 1.0.0 verification baseline
+
+The current local suite passes **312 JavaScript/Web/sidecar tests (216 backend/platform + 95 Web DOM + 1 isolated bundle) and 6 Rust tests**. Older phase counts below are historical. Typecheck, docs, Rust fmt/clippy and Windows packaging were also checked. Remote CI and real native acceptance are separate; see [current status](../docs/status.md) and [release notes](../docs/releases/1.0.0.md).
+
 Run `npm test` for 289 offline synthetic tests: 201 storage/domain/API tests and 88 rendered React DOM tests. `npm run test:web` runs the 88 web component tests separately. `npm run check` includes TypeScript and TSX test files (`tsc --noEmit`). Tests use in-memory or temporary databases and never require private data, credentials, remote services, or `apps/web/dist`.
 
 Coverage includes:
@@ -74,3 +78,12 @@ The default suite explicitly includes sample-gated topic analytics, fixed/adapti
 ## Multi-provider AI audit
 
 `server-settings-llm.test.ts` and `llm-audit.test.ts` verify independent settings, real-assistant hot reload, blank key isolation, JSON request contracts, typed failures, fallback chains, empty-chain restart persistence, deadline enforcement and provider provenance. Desktop component coverage includes drafts, remasking and explicit empty chains. See [provider configuration](../docs/llm-providers.md) for limitations. Run `node --import tsx scripts/verify-phase17-browser.ts` after building for isolated synthetic Chrome settings acceptance.
+
+## Native desktop regression boundaries
+
+`npm test` includes transport/export contract tests, bundle secret-preservation tests, social-catalog seeding, and a fresh standalone sidecar test. The latter copies the backend bundle into a temporary directory with no repository dependencies; set `DESKTOP_TEST_NODE` to the prepared private Node executable on Windows. The Windows CI job does this explicitly. Rust tests cover parsed URL boundaries, atomic export failure/replacement, ready-handshake validation, noisy pipes, startup/shutdown deadlines, and a delayed write during shutdown. See [desktop build commands](../docs/desktop.md).
+
+These checks are synthetic automation, not native save-dialog interaction, clean-VM installation, complete data migration, or the WebView2 UI acceptance matrix. A configured CI job is not evidence of a successful remote run.
+
+
+The static-serving security suite reproduces the encoded-separator guard bypass against the old plugin, verifies the upgraded dependency rejects it, and checks SPA fallback, unknown API routes, conditional/HEAD requests, root containment, and static-disabled native mode.

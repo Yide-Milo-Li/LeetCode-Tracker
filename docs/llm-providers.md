@@ -1,6 +1,8 @@
 # AI provider configuration
 
-Settings supports Gemini, OpenAI and DeepSeek. OpenAI offers only GPT-5.6 Luna (`gpt-5.6-luna`); DeepSeek offers only DeepSeek V4.1 Flash (`deepseek-flash`). These two providers have no custom-model or fallback-model controls. Gemini retains its existing choices. Each provider keeps an independent API key, model and fallback chain in the existing SQLite settings table. OpenAI and DeepSeek also support an optional HTTP(S) API base URL; requests append `/chat/completions`. No OpenAI SDK or schema migration was added.
+In the installed Windows app, configure providers in Settings. The host supplies startup paths/session state through a private stream and removes inherited provider API keys; it does not load a checkout `.env`. Environment defaults below describe source mode. AI requests send task-relevant metadata and user instructions or progress text to the configured endpoint.
+
+Settings supports Gemini, OpenAI and DeepSeek. OpenAI offers only GPT-5.6 Luna (`gpt-5.6-luna`); DeepSeek offers only DeepSeek V4.1 Flash (`deepseek-flash`). These two providers have no custom-model or fallback-model controls. Gemini retains its existing choices. Each provider keeps its own settings in SQLite; fallback-model configuration is exposed only for Gemini. OpenAI and DeepSeek also support an optional HTTP(S) API base URL; requests append `/chat/completions`. No OpenAI SDK or schema migration was added.
 
 Choose a provider, edit its configuration and save to activate it. Switching the displayed provider preserves other drafts and remasks keys. Configuration changes apply immediately; in-flight requests retain their original adapter. Save and probe controls remain unavailable until settings load successfully and while a form action is pending.
 

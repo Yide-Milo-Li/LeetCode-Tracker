@@ -1,3 +1,4 @@
+import { ExportLink } from './ExportLink.tsx';
 /**
  * Independent Notes Workspace providing Master-Detail browsing,
  * deep solution editing, practice history timeline, and Obsidian/Notion knowledge export.
@@ -266,24 +267,28 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
         description={t.notesWorkspaceDesc}
         actions={
           <div style={{ display: 'flex', gap: '8px' }}>
-            <a
-              href={api.getObsidianZipUrl('all', lang)}
+            <ExportLink
+                lang={lang}
+                onExport={() => api.exportObsidianZip('all', lang)}
+                href={api.getObsidianZipUrl('all', lang)}
               className="btn btn-secondary btn-sm"
               title="Download 4,000+ Obsidian markdown skeleton"
               style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
             >
               <Archive size={14} />
               <span>{t.exportObsidianVault}</span>
-            </a>
-            <a
-              href={api.getNotionCsvUrl('summary')}
+            </ExportLink>
+            <ExportLink
+                lang={lang}
+                onExport={() => api.exportNotionCsv('summary')}
+                href={api.getNotionCsvUrl('summary')}
               className="btn btn-secondary btn-sm"
               title="Download Notion Problems Summary CSV"
               style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
             >
               <Download size={14} />
               <span>{zh ? 'Notion 题库表' : 'Notion CSV'}</span>
-            </a>
+            </ExportLink>
           </div>
         }
       />
@@ -674,15 +679,17 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
                     customNote={noteContent}
                   />
 
-                  <a
-                    href={api.getSingleMarkdownUrl(selectedSummary.questionFrontendId, lang)}
+                  <ExportLink
+                lang={lang}
+                onExport={() => api.exportSingleMarkdown(selectedSummary.questionFrontendId, lang)}
+                href={api.getSingleMarkdownUrl(selectedSummary.questionFrontendId, lang)}
                     className="btn btn-secondary btn-sm"
                     title={t.exportSingleMarkdown}
                     style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                   >
                     <Download size={13} />
                     <span>.md</span>
-                  </a>
+                  </ExportLink>
                 </div>
               </div>
 

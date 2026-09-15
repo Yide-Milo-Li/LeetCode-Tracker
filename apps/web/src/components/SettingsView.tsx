@@ -1,3 +1,4 @@
+import { ExportLink } from './ExportLink.tsx';
 /** Application preferences only; catalog and progress imports live in their respective workspaces. */
 import React, { useEffect, useRef, useState } from 'react';
 import { Eye, EyeOff, Copy, Check, ClipboardPaste, Download, Upload, Archive, Database, AlertTriangle } from 'lucide-react';
@@ -969,14 +970,16 @@ export function SettingsView({
             </p>
 
             <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
-              <a
+              <ExportLink
+                lang={lang}
+                onExport={() => api.exportBundleFile()}
                 href={api.getBundleExportUrl()}
                 className="btn btn-primary btn-sm"
                 download
               >
                 <Download size={14} />
                 <span>{t.exportJsonBundle}</span>
-              </a>
+              </ExportLink>
 
               <button
                 type="button"
@@ -1068,32 +1071,38 @@ export function SettingsView({
             </p>
 
             <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-              <a
+              <ExportLink
+                lang={lang}
+                onExport={() => api.exportObsidianZip('all', lang)}
                 href={api.getObsidianZipUrl('all', lang)}
                 className="btn btn-secondary btn-sm"
                 title={t.exportObsidianTitle}
               >
                 <Archive size={14} />
                 <span>{t.exportObsidianVault}</span>
-              </a>
+              </ExportLink>
 
-              <a
+              <ExportLink
+                lang={lang}
+                onExport={() => api.exportNotionCsv('summary')}
                 href={api.getNotionCsvUrl('summary')}
                 className="btn btn-secondary btn-sm"
                 title={t.exportNotionSummaryTitle}
               >
                 <Download size={14} />
                 <span>{t.exportNotionSummary}</span>
-              </a>
+              </ExportLink>
 
-              <a
+              <ExportLink
+                lang={lang}
+                onExport={() => api.exportNotionCsv('history')}
                 href={api.getNotionCsvUrl('history')}
                 className="btn btn-secondary btn-sm"
                 title={t.exportNotionHistoryTitle}
               >
                 <Download size={14} />
                 <span>{t.exportNotionHistory}</span>
-              </a>
+              </ExportLink>
             </div>
           </div>
         </div>

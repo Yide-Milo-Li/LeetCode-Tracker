@@ -478,13 +478,14 @@ describe('Recommendation & Planning API Endpoints', () => {
 
   it('handles idempotent replay on replace and override commit', async () => {
     const { app } = await createTestApp();
+    const { dateStr, weekday } = getFutureDate(2);
 
-    // Assign strategy to Monday (2026-09-14 = weekday 1)
+    // Keep the test within the writable planning window as the calendar advances.
     await app.inject({
       method: 'POST',
       url: '/api/v1/strategies',
       payload: {
-        name: 'Monday Strategy',
+        name: 'Replay Strategy',
         rules: {
           dailyCount: 2,
           difficulty: { Easy: 50, Medium: 50, Hard: 0 },
@@ -494,7 +495,7 @@ describe('Recommendation & Planning API Endpoints', () => {
           reviewPercent: null,
           preference: '',
         },
-        weekdays: [1],
+        weekdays: [weekday],
       },
     });
 
@@ -502,8 +503,9 @@ describe('Recommendation & Planning API Endpoints', () => {
     let res = await app.inject({
       method: 'POST',
       url: '/api/v1/daily-plans/ensure',
-      payload: { date: '2026-09-14' },
+      payload: { date: dateStr },
     });
+    assert.equal(res.statusCode, 200, res.body);
     const plan = res.json().plan;
     assert.equal(plan.version, 1);
 
@@ -543,7 +545,7 @@ describe('Recommendation & Planning API Endpoints', () => {
       method: 'POST',
       url: '/api/v1/daily-plan-overrides/preview',
       payload: {
-        date: '2026-09-14',
+        date: dateStr,
         rules: {
           dailyCount: 2,
           difficulty: { Easy: 100, Medium: 0, Hard: 0 },
@@ -665,6 +667,7 @@ describe('Recommendation & Planning API Endpoints', () => {
 
   it('preserves slot kind strictly when replacing items', async () => {
     const { app, store } = await createTestApp();
+    const { dateStr, weekday } = getFutureDate(2);
 
     // Problem 1 (Two Sum, Easy) is solved, making it eligible for review
     store.createPracticeRecord({
@@ -690,16 +693,17 @@ describe('Recommendation & Planning API Endpoints', () => {
           reviewPercent: 100,
           preference: '',
         },
-        weekdays: [2], // Tuesday (2026-09-15)
+        weekdays: [weekday],
       },
     });
 
-    // Ensure plan for 2026-09-15 (Tuesday = weekday 2)
+    // The old solved record remains review-eligible, while the plan date stays writable.
     let res = await app.inject({
       method: 'POST',
       url: '/api/v1/daily-plans/ensure',
-      payload: { date: '2026-09-15' },
+      payload: { date: dateStr },
     });
+    assert.equal(res.statusCode, 200, res.body);
     const plan = res.json().plan;
     assert.equal(plan.items.length, 1);
     const reviewSlot = plan.items[0];

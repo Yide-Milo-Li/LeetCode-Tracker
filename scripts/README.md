@@ -6,13 +6,13 @@ The local workbench accepts user-supplied JSONL through its web UI. It creates i
 
 Run `npm run build` then `npm start` from the repository root with Node.js 24.15 or later in the 24.x series. The service listens on `127.0.0.1:3000`; `PORT` and `DB_PATH` override the port and database path. Backups remain under `.local/backups` relative to the working directory. Run `npm run dev` alongside the local API for frontend development.
 
-For one-click Windows desktop startup, run `start.bat` from the repository root, or execute `scripts/start-desktop.ps1` (or `npm run desktop`). The launcher probes port 3000 to avoid lease collisions, ensures built assets exist, starts Fastify, and opens the default browser.
+For one-click Windows source-mode startup, run `start.bat` from the repository root, or execute `scripts/start-desktop.ps1` (or `npm run desktop`). The launcher probes port 3000 to avoid lease collisions, ensures built assets exist, starts Fastify, and opens the default browser. The native Windows 1.0.0 installer is separate: `npm run desktop:build` packages the Tauri app, while `npm run desktop:dev` starts the native development host. See the [desktop guide](../docs/desktop.md).
 
 `npm run docs:check` validates maintained Markdown titles and local links without modifying files. See [tests](../tests/README.md) for isolated verification commands.
 
 ## Backup policy
 
-Startup verifies schema compatibility and awaits a pre-migration snapshot before upgrading older schemas to v8. Before any catalog-changing import, it creates `pre-import-latest.sqlite` and, if absent, the first snapshot for that UTC date as `daily-YYYY-MM-DD.sqlite`. The latest 14 distinct daily snapshots are retained. Migration snapshots and pre-restore safety snapshots are retained separately. A failed required snapshot aborts migration or import; unchanged-only imports preserve the existing pre-change snapshot.
+Startup verifies schema compatibility and awaits a pre-migration snapshot before upgrading older schemas to v9. Before any catalog-changing import, it creates `pre-import-latest.sqlite` and, if absent, the first snapshot for that UTC date as `daily-YYYY-MM-DD.sqlite`. The latest 14 distinct daily snapshots are retained. Migration snapshots and pre-restore safety snapshots are retained separately. A failed required snapshot aborts migration or import; unchanged-only imports preserve the existing pre-change snapshot.
 
 ## Offline restore
 
@@ -22,7 +22,7 @@ Stop the server and close other database clients, then run:
 npm run restore -- <backup-file.sqlite> [target-db.sqlite]
 ```
 
-The default target is `.local/tracker.sqlite`. Supported sources have valid schema v3, v4, v5, v6, v7, or v8. Unsupported or structurally incomplete sources are rejected before changing the target. An existing target must be readable and pass validation to produce its safety snapshot; if it cannot, restore into a new target path and retain the original for investigation.
+The default target is `.local/tracker.sqlite`. Supported sources have valid schema v3, v4, v5, v6, v7, v8, or v9. Unsupported or structurally incomplete sources are rejected before changing the target. An existing target must be readable and pass validation to produce its safety snapshot; if it cannot, restore into a new target path and retain the original for investigation.
 
 The command uses SQLite snapshots for both source and destination, so committed WAL data is included. It preserves the current destination as `<target>.pre-restore-<unique-id>.sqlite`, restores the selected snapshot, and verifies the result. A failed replacement triggers a rollback attempt; the safety snapshot remains available. Do not manually delete WAL or SHM files to perform recovery.
 
@@ -43,3 +43,7 @@ The matrix verifies persisted language/theme after a full document reload, check
 ## Phase 16 offline verification
 
 `npm run benchmark:phase16` uses synthetic 4,046-problem catalogs and 10k/50k-record in-memory stores. Run it without concurrent tests for meaningful timing. `npm run verify:phase16` requires a built frontend and local Chrome, then uses a separate profile, loopback server and mocked model. Both save ignored evidence under `.local/evidence/phase16/`; neither reads private data nor calls a live provider.
+
+## Chinese promotional assets
+
+`npm run assets:social-zh` seeds an isolated in-memory store with 4,046 fictional problems from `social-catalog.ts`, plus synthetic practice and notes. It requires a built frontend and local Chrome. It does not read the private JSONL backup or call live providers. Running it replaces images under `docs/assets/social-zh/`; the catalog regression test verifies seed compatibility without regenerating images.
