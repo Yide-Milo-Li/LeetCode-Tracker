@@ -17,7 +17,7 @@ The desktop shell packages the shared React user interface, the Fastify `/api/v1
 - **Administrator Rights**: **Not required**. The installer uses a per-user installation scope.
 
 ### 1.2 Installation Steps
-1. Download `LeetCode Tracker_1.0.0_x64-setup.exe` and its checksum from the release page.
+1. Download `LeetCode-Tracker_1.0.0_x64-setup.exe` and its checksum from the release page.
 2. Run the installer. You can select the destination directory (defaults to `%LOCALAPPDATA%\Programs\LeetCode Tracker`).
 3. Launch **LeetCode Tracker** from the desktop shortcut or Start Menu.
 4. On first launch, the application creates a clean local database and guides you to import your self-provided JSONL problem catalog.

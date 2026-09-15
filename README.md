@@ -18,7 +18,7 @@ Release 1.0 packages the React interface, Fastify API, SQLite engine, and a priv
 
 ## Download and start
 
-1. Open [Release 1.0](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.0.0) and download **LeetCode Tracker_1.0.0_x64-setup.exe**. The release also includes `SHA256SUMS.txt`.
+1. Open [Release 1.0](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.0.0) and download **LeetCode-Tracker_1.0.0_x64-setup.exe**. The release also includes `SHA256SUMS.txt`.
 2. Run the per-user Windows x64 installer, then launch LeetCode Tracker from the Start Menu.
 3. Open **Problems → Import problems**, upload or paste your JSON Lines catalog, review the preview, and confirm the import.
 4. Open **Today → Study schedule** to choose your days, daily counts, difficulty quotas, and review options.
