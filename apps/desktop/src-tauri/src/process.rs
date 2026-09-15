@@ -1,10 +1,20 @@
 //! Owned sidecar processes: bounded startup, drained pipes and graceful shutdown before forced exit.
 use std::io::{BufRead, BufReader, Read, Write};
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
 pub type ReadyReceiver = Receiver<Result<String, String>>;
+
+/// Preserve resolved resource identity while avoiding verbatim paths Node cannot use as entrypoints.
+pub fn node_command(executable: &Path, script: &Path) -> Command {
+    // Tauri canonicalizes Windows paths to \\?\ form. Simplify only when Win32 semantics are equivalent;
+    // do not strip prefixes blindly or fall back to searching PATH or the working directory.
+    let mut command = Command::new(dunce::simplified(executable));
+    command.arg(dunce::simplified(script));
+    command
+}
 
 /// The OS closes this handle after crashes; ordinary exits retain it until the child has drained.
 #[cfg(windows)]
@@ -171,6 +181,47 @@ pub fn wait_ready(receiver: ReadyReceiver, nonce: &str, timeout: Duration) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Exercise the real bundled backend through the same Windows path and Job handling as Tauri.
+    #[cfg(windows)]
+    #[test]
+    fn canonical_resource_paths_start_the_private_bundle() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let runtime = root
+            .join("binaries/node-x86_64-pc-windows-msvc.exe")
+            .canonicalize()
+            .unwrap();
+        let temporary = tempfile::tempdir().unwrap();
+        let install = temporary.path().join("安装目录 with spaces");
+        std::fs::create_dir(&install).unwrap();
+        let script = install.join("desktop-server.mjs");
+        std::fs::copy(root.join("../../server/dist/desktop-server.mjs"), &script).unwrap();
+        // Tauri resource_dir canonicalizes the executable and returns a verbatim Windows path.
+        let script = script.canonicalize().unwrap();
+        let mut command = node_command(&runtime, &script);
+        command.current_dir(&install);
+        command.env_remove("NODE_OPTIONS").env_remove("NODE_PATH");
+        let (mut child, ready) = ManagedChild::spawn(&mut command).unwrap();
+        let nonce = "synthetic-resource-nonce-1234567890";
+        let token = "synthetic-resource-token-1234567890";
+        child
+            .send(&serde_json::json!({"protocolVersion":1,"port":0,
+            "dbPath":install.join("test.sqlite"),"backupDir":install.join("backups"),
+            "sessionSecret":token,"nonce":nonce}))
+            .unwrap();
+        let port = wait_ready(ready, nonce, Duration::from_secs(10)).unwrap();
+        let response = reqwest::blocking::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(3))
+            .build()
+            .unwrap()
+            .get(format!("http://127.0.0.1:{port}/api/v1/health"))
+            .header("x-desktop-session-token", token)
+            .send()
+            .unwrap();
+        assert!(response.status().is_success());
+        assert!(child.shutdown(Duration::from_secs(5)).unwrap());
+    }
 
     /// Spawn only synthetic local Node programs, never the user's application or database.
     fn node(script: &str) -> (ManagedChild, ReadyReceiver) {

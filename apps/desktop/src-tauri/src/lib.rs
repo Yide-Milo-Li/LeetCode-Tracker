@@ -7,7 +7,6 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -121,8 +120,8 @@ fn start_service(app: &AppHandle) -> Result<(), String> {
     std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
     let token = random_secret();
     let nonce = random_secret();
-    let mut command = Command::new(node);
-    command.arg(script).current_dir(&data_dir);
+    let mut command = process::node_command(&node, &script);
+    command.current_dir(&data_dir);
     // Keep OS settings, but do not inherit executable injection, credentials or test configuration.
     for key in [
         "NODE_OPTIONS",

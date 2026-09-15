@@ -1916,6 +1916,7 @@ dependencies = [
 name = "leetcode-tracker-desktop"
 version = "1.0.0"
 dependencies = [
+ "dunce",
  "rand",
  "reqwest 0.12.28",
  "serde",

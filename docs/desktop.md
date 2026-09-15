@@ -2,6 +2,10 @@
 
 LeetCode Tracker provides a native Windows 11 x64 desktop application distributed as an NSIS standalone installer (`-setup.exe`).
 
+### Known 1.0.0 startup failure
+
+The published 1.0.0 host can fail before readiness because Tauri returns a canonical Windows `\\?\` resource path that the bundled Node runtime cannot use as a script entrypoint. Reinstalling the same artifact does not fix this. The current unreleased host simplifies those paths safely before spawning Node; it does not reset the database or require manual deletion of lock/WAL files. The regression uses the real bundle and a canonical path containing spaces and Chinese characters.
+
 Release 1.0.0 is an unsigned Windows x64 distribution; download it from [Release 1.0](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.0.0). Automated boundary tests and local packaging do not establish clean-machine installation, upgrade compatibility, Windows 10 compatibility, or the full WebView2 acceptance matrix; those checks remain pending. See the [release notes](releases/1.0.0.md).
 
 The desktop shell packages the shared React user interface, the Fastify `/api/v1` service, and the native SQLite storage engine alongside a private, bundled Node.js 24 runtime. Users can run the application with **zero requirement** to install Node.js, npm, Git, or Rust on their machine.
