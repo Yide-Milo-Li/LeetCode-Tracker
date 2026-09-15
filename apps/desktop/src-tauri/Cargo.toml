@@ -1,6 +1,6 @@
 [package]
 name = "leetcode-tracker-desktop"
-version = "1.0.0"
+version = "1.0.1"
 description = "LeetCode Tracker Desktop Application"
 authors = ["LeetCode Tracker Team"]
 edition = "2021"

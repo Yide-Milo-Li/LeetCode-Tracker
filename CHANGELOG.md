@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [1.0.1] - 2026-09-14
 
 - Fix Windows desktop startup when Tauri supplies canonical `\\?\` resource paths. The host safely simplifies the private Node executable and entrypoint paths without changing resource selection or searching PATH.
 - Add a Rust integration regression using the actual private Node runtime, bundled backend, Windows Job ownership, and a canonical installation path containing spaces and Chinese characters. It checks readiness, authenticated health, and graceful shutdown.

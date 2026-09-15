@@ -1,8 +1,8 @@
 # Testing boundaries
 
-## Release 1.0.0 verification baseline
+## Release 1.0.1 verification baseline
 
-The current local suite passes **312 JavaScript/Web/sidecar tests (216 backend/platform + 95 Web DOM + 1 isolated bundle) and 6 Rust tests**. Older phase counts below are historical. Typecheck, docs, Rust fmt/clippy and Windows packaging were also checked. Remote CI and real native acceptance are separate; see [current status](../docs/status.md) and [release notes](../docs/releases/1.0.0.md).
+The current local suite passes **312 JavaScript/Web/sidecar tests (216 backend/platform + 95 Web DOM + 1 isolated bundle) and 7 Rust tests**. Older phase counts below are historical. Typecheck, docs, Rust fmt/clippy and Windows packaging were also checked. Remote CI and real native acceptance are separate; see [current status](../docs/status.md) and [release notes](../docs/releases/1.0.1.md).
 
 Run `npm test` for 289 offline synthetic tests: 201 storage/domain/API tests and 88 rendered React DOM tests. `npm run test:web` runs the 88 web component tests separately. `npm run check` includes TypeScript and TSX test files (`tsc --noEmit`). Tests use in-memory or temporary databases and never require private data, credentials, remote services, or `apps/web/dist`.
 

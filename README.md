@@ -5,26 +5,26 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.0.0"><img src="https://img.shields.io/badge/release-1.0.0-blue?style=flat-square" alt="Release 1.0.0"></a>
+  <a href="https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.0.1"><img src="https://img.shields.io/badge/release-1.0.1-blue?style=flat-square" alt="Release 1.0.1"></a>
   <a href="docs/desktop.md"><img src="https://img.shields.io/badge/desktop-Windows%20x64-455a64?style=flat-square" alt="Windows x64"></a>
-  <a href="tests/README.md"><img src="https://img.shields.io/badge/tests-312%20JS%20%2B%206%20Rust-brightgreen?style=flat-square" alt="312 JavaScript and 6 Rust tests"></a>
+  <a href="tests/README.md"><img src="https://img.shields.io/badge/tests-312%20JS%20%2B%207%20Rust-brightgreen?style=flat-square" alt="312 JavaScript and 7 Rust tests"></a>
   <a href="docs/architecture.md"><img src="https://img.shields.io/badge/sqlite-schema%20v9-003b57?style=flat-square" alt="SQLite schema v9"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT License"></a>
 </p>
 
 A local-first desktop workbench for algorithm practice: bring your own JSONL catalog, plan a weekly routine, record practice, review progress, and keep problem notes together. The interface supports English and Simplified Chinese, desktop windows at 1024px and above, ten theme palettes, and keyboard navigation.
 
-Release 1.0 packages the React interface, Fastify API, SQLite engine, and a private Node.js 24 runtime in a Tauri Windows application. **End users do not need to install Node.js, npm, Git, or Rust.** The single download is an installer; the installed application contains several runtime files.
+Release 1.0.1 packages the React interface, Fastify API, SQLite engine, and a private Node.js 24 runtime in a Tauri Windows application. **End users do not need to install Node.js, npm, Git, or Rust.** The single download is an installer; the installed application contains several runtime files.
 
 ## Download and start
 
-1. Open [Release 1.0](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.0.0) and download **LeetCode-Tracker_1.0.0_x64-setup.exe**. The release also includes `SHA256SUMS.txt`.
+1. Open [Release 1.0.1](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.0.1) and download **LeetCode-Tracker_1.0.1_x64-setup.exe**. The release also includes `SHA256SUMS.txt`.
 2. Run the per-user Windows x64 installer, then launch LeetCode Tracker from the Start Menu.
 3. Open **Problems → Import problems**, upload or paste your JSON Lines catalog, review the preview, and confirm the import.
 4. Open **Today → Study schedule** to choose your days, daily counts, difficulty quotas, and review options.
 5. Optionally configure an AI provider under **Settings**. Catalog browsing, manual practice, notes, statistics, and local planning remain available without an API key.
 
-The installer is **unsigned**. Microsoft WebView2 is required; if it is missing, the installer downloads its bootstrapper, which requires internet access. Windows 11 x64 is the primary target; clean-machine installation, Windows 10 compatibility, and upgrade/downgrade acceptance have not completed the full verification matrix. See [installation, data paths, and troubleshooting](docs/desktop.md) and [1.0 release notes](docs/releases/1.0.0.md).
+The installer is **unsigned**. Microsoft WebView2 is required; if it is missing, the installer downloads its bootstrapper, which requires internet access. Windows 11 x64 is the primary target; clean-machine installation, Windows 10 compatibility, and upgrade/downgrade acceptance have not completed the full verification matrix. See [installation, data paths, and troubleshooting](docs/desktop.md) and [1.0.1 release notes](docs/releases/1.0.1.md).
 
 ### Bring your own catalog
 
@@ -109,11 +109,11 @@ flowchart LR
 
 The host validates the startup handshake, owns the sidecar process through a Windows Job Object, and waits for graceful shutdown before enforcing its deadline. Browser source mode uses HTTP directly. See [architecture](docs/architecture.md).
 
-The current local verification passed **312 JavaScript/Web/sidecar tests and 6 Rust tests**, TypeScript checking, documentation links, Rust formatting/clippy, and Windows installer packaging. These are automated/local results. They do not establish clean-VM installation, complete native UI/upgrade acceptance, live-provider availability, or performance guarantees. [Status](docs/status.md) separates current evidence from historical phase results; [CI](https://github.com/Yide-Milo-Li/LeetCode-Tracker/actions) reports remote runs independently.
+The current local verification passed **312 JavaScript/Web/sidecar tests and 7 Rust tests**, TypeScript checking, documentation links, Rust formatting/clippy, and Windows installer packaging. These are automated/local results. They do not establish clean-VM installation, complete native UI/upgrade acceptance, live-provider availability, or performance guarantees. [Status](docs/status.md) separates current evidence from historical phase results; [CI](https://github.com/Yide-Milo-Li/LeetCode-Tracker/actions) reports remote runs independently.
 
 ## Documentation
 
-- [Documentation index](docs/README.md) · [Desktop installation](docs/desktop.md) · [Release 1.0 notes](docs/releases/1.0.0.md)
+- [Documentation index](docs/README.md) · [Desktop installation](docs/desktop.md) · [Release 1.0.1 notes](docs/releases/1.0.1.md)
 - [Data format](docs/data-format.md) · [AI providers](docs/llm-providers.md) · [Topic insights](docs/topic-practice-insights.md)
 - [Architecture](docs/architecture.md) · [Applications](apps/README.md) · [Shared packages](packages/README.md)
 - [Tests](tests/README.md) · [Scripts](scripts/README.md) · [Roadmap](docs/roadmap.md)

@@ -1,6 +1,6 @@
 # Documentation index
 
-[Release 1.0 notes](releases/1.0.0.md) · [Windows installation and native runtime](desktop.md) · [Current verification and limitations](status.md)
+[Release 1.0.1 notes](releases/1.0.1.md) · [Windows installation and native runtime](desktop.md) · [Current verification and limitations](status.md)
 
 Users provide their own JSONL problem metadata with appropriate usage rights. The application creates its own SQLite database. Catalog import and progress import are separate implemented workflows; the repository contains no dataset.
 

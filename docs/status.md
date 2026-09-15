@@ -1,10 +1,10 @@
 # Implementation status
 
-## Unreleased Windows startup repair
+## Release 1.0.1 — Windows startup repair
 
-A user-reported 1.0.0 startup failure was reproduced: canonical Windows resource paths from Tauri reach Node with a verbatim prefix, causing Node to exit before its ready message. The unreleased repair safely simplifies only equivalent Win32 paths at command construction. A new native process integration test exercises the real bundle/private runtime under a canonical path with spaces and Chinese characters; all seven Rust tests pass. The published 1.0.0 asset remains the original artifact until a separate patched release is made.
+A user-reported 1.0.0 startup failure was reproduced: canonical Windows resource paths from Tauri reach Node with a verbatim prefix, causing Node to exit before its ready message. The 1.0.1 repair safely simplifies only equivalent Win32 paths at command construction. A new native process integration test exercises the real bundle/private runtime under a canonical path with spaces and Chinese characters; all seven Rust tests pass. The 1.0.0 artifact remains unchanged for historical integrity; use the 1.0.1 installer.
 
-## Release 1.0.0 — current baseline (2026-09-14)
+## Release 1.0.0 — historical baseline (2026-09-14)
 
 The Windows x64 Tauri distribution packages a private Node runtime and the shared React/Fastify/SQLite application. Audit repairs cover URL execution, native exports and atomic saves, graceful process shutdown, bounded startup/retry, and preservation of local provider keys. Versions are aligned at 1.0.0.
 
