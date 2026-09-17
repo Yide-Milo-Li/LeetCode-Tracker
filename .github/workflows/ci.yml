@@ -180,8 +180,14 @@ jobs:
           node --import tsx scripts/verify-migration-transfer.ts export .local/evidence/phase21/windows-migration.json
       - name: Build test-only Tauri app with embedded driver permissions
         run: npm --prefix apps/desktop run tauri -- build --target aarch64-apple-darwin --features desktop-e2e --config src-tauri/tauri.macos.conf.json --config src-tauri/tauri.e2e.conf.json --ci
+      - name: Verify test application bundle exists
+        run: |
+          ls -la "apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/"
+          chmod +x "apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/LeetCode Tracker.app/Contents/MacOS/leetcode-tracker-desktop"
       - name: Run real WKWebView migration flow
         working-directory: tests/desktop
+        env:
+          TAURI_APP_PATH: ${{ github.workspace }}/apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/LeetCode Tracker.app/Contents/MacOS/leetcode-tracker-desktop
         run: npx wdio run wdio.conf.mjs
       - uses: actions/upload-artifact@v4
         with:
