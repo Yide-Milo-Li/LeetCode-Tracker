@@ -33,7 +33,7 @@ test('every export uses a versioned API path and leaves destination authorizatio
     '/api/v1/export/obsidian-zip?scope=all&lang=en',
     '/api/v1/export/notion-csv?table=history',
     '/api/v1/export/markdown/123?lang=en',
-    '/api/v1/bundle/export',
+    '/api/v1/bundle/export?version=2',
   ]);
 });
 

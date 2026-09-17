@@ -819,7 +819,7 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
                     >
                       <Save size={13} />
                       <span>{savingNote ? t.savingNote : t.saveNote}</span>
-                      <span style={{ fontSize: '0.6875rem', opacity: 0.75 }}>(Ctrl+S)</span>
+                      <span style={{ fontSize: '0.6875rem', opacity: 0.75 }}>{/Mac/.test(navigator.platform) ? '(⌘S)' : '(Ctrl+S)'}</span>
                     </button>
                   </div>
                 </div>

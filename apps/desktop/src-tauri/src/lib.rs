@@ -87,7 +87,11 @@ fn resources(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
     #[cfg(debug_assertions)]
     {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let node = root.join("binaries/node-x86_64-pc-windows-msvc.exe");
+        let node = root.join(if cfg!(target_os = "macos") {
+            "binaries/node-aarch64-apple-darwin"
+        } else {
+            "binaries/node-x86_64-pc-windows-msvc.exe"
+        });
         let script = root.join("../../server/dist/desktop-server.mjs");
         if node.is_file() && script.is_file() {
             return Ok((
@@ -100,7 +104,7 @@ fn resources(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
     let node = exe
         .parent()
         .ok_or("Missing application directory")?
-        .join("node.exe");
+        .join(if cfg!(windows) { "node.exe" } else { "node" });
     let script = app
         .path()
         .resource_dir()
@@ -255,8 +259,14 @@ async fn api_request(
         "DELETE" => reqwest::Method::DELETE,
         _ => return Err("Unsupported method".into()),
     };
-    if body.as_ref().is_some_and(|b| b.len() > 15 * 1024 * 1024) {
-        return Err("Request exceeds 15 MiB".into());
+    let limit = if url.path() == "/api/v1/bundle/import" {
+        64
+    } else {
+        15
+    } * 1024
+        * 1024;
+    if body.as_ref().is_some_and(|b| b.len() > limit) {
+        return Err("Request exceeds endpoint size limit".into());
     }
     let mut request = client()?
         .request(method, url)
@@ -336,7 +346,7 @@ async fn export_data_file(
     Ok(true)
 }
 
-/// ShellExecuteW receives a URL as data; cmd.exe is never involved.
+/// Open an allowlisted URL as OS data, never as shell code.
 #[tauri::command]
 fn open_external(url: String) -> Result<(), String> {
     let url = security::external_url(&url)?;
@@ -362,7 +372,19 @@ fn open_external(url: String) -> Result<(), String> {
         }
         Ok(())
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        let status = std::process::Command::new("/usr/bin/open")
+            .arg(url.as_str())
+            .status()
+            .map_err(|_| "Could not open external URL")?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err("macOS could not open the URL".into())
+        }
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         let _ = url;
         Err("This desktop release supports Windows only".into())
@@ -371,7 +393,12 @@ fn open_external(url: String) -> Result<(), String> {
 
 /// Initialize the host and delay final exit until sidecar writes finish or the deadline expires.
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(feature = "desktop-e2e")]
+    let builder = builder
+        .plugin(tauri_plugin_wdio::init())
+        .plugin(tauri_plugin_wdio_webdriver::init());
+    builder
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.unminimize();
@@ -382,6 +409,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(DesktopState::default())
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            app.set_menu(tauri::menu::Menu::default(app.handle())?)?;
             begin_startup(app.handle().clone());
             Ok(())
         })
@@ -395,6 +424,28 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("Could not initialize the desktop window")
         .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            match &event {
+                tauri::RunEvent::WindowEvent {
+                    label,
+                    event: tauri::WindowEvent::CloseRequested { api, .. },
+                    ..
+                } => {
+                    if !app.state::<DesktopState>().exiting.load(Ordering::SeqCst) {
+                        api.prevent_close();
+                        if let Some(window) = app.get_webview_window(label) {
+                            let _ = window.hide();
+                        }
+                    }
+                }
+                tauri::RunEvent::Reopen { .. } => {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                }
+                _ => {}
+            }
             if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
                 let state = app.state::<DesktopState>();
                 // The explicit app.exit below must not re-enter graceful shutdown.

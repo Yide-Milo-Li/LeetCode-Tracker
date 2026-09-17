@@ -4,19 +4,12 @@
  */
 import type { DatabaseSync } from 'node:sqlite';
 import * as path from 'node:path';
-import { snapshotBundleSchema, type SnapshotBundle } from '../../contracts/src/notes.ts';
+import { snapshotBundleSchema, type SnapshotBundleV1 as SnapshotBundle } from '../../contracts/src/notes.ts';
+import { importMigrationBundle } from './migration-bundle.ts';
+import { isSecretSetting } from './secrets.ts';
+export { isSecretSetting } from './secrets.ts';
 import type { BackupManager } from './backup.ts';
 
-const KNOWN_SECRET_KEYS = new Set([
-  'gemini_api_key',
-  'openai_api_key',
-  'deepseek_api_key',
-]);
-
-/** Determine if a settings key contains sensitive provider credentials. */
-export function isSecretSetting(key: string): boolean {
-  return KNOWN_SECRET_KEYS.has(key) || key.endsWith('_api_key') || key.endsWith('_secret') || key.endsWith('_token');
-}
 
 /**
  * Export all personal user data, strategies, assignments, practice records,
@@ -111,6 +104,8 @@ export interface BundleRestoreResult {
   restoredRecords: number;
   restoredNotes: number;
   restoredStrategies: number;
+  restoredProblems?: number;
+  formatVersion?: 1 | 2;
 }
 
 /**
@@ -125,6 +120,7 @@ export async function importSnapshotBundle(
 ): Promise<BundleRestoreResult> {
   // Validate schema
   const bundle = snapshotBundleSchema.parse(rawBundle);
+  if (bundle.version === 2) return importMigrationBundle(db, backupManager, bundle, backupDir);
 
   // 1. Create safety snapshot before any write
   const timestamp = Date.now();

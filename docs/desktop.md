@@ -1,6 +1,6 @@
 # Desktop Application & Distribution Guide
 
-LeetCode Tracker provides a native Windows 11 x64 desktop application distributed as an NSIS standalone installer (`-setup.exe`).
+LeetCode Tracker provides a native Windows 11 x64 desktop application and an Apple Silicon macOS 14+ internal build. Windows uses an NSIS standalone installer (`-setup.exe`); macOS uses an ad-hoc signed `.app`/`.dmg` package during Phase 21.
 
 ### Known 1.0.0 startup failure
 
@@ -9,6 +9,14 @@ The published 1.0.0 host can fail before readiness because Tauri returns a canon
 Release 1.0.1 is an unsigned Windows x64 distribution; download it from [Release 1.0.1](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.0.1). Automated boundary tests and local packaging do not establish clean-machine installation, upgrade compatibility, Windows 10 compatibility, or the full WebView2 acceptance matrix; those checks remain pending. See the [release notes](releases/1.0.1.md).
 
 The desktop shell packages the shared React user interface, the Fastify `/api/v1` service, and the native SQLite storage engine alongside a private, bundled Node.js 24 runtime. Users can run the application with **zero requirement** to install Node.js, npm, Git, or Rust on their machine.
+
+### 1.3 Apple Silicon macOS internal build
+
+- **Target**: Apple Silicon (`aarch64-apple-darwin`), macOS 14 or newer. Intel Macs, Universal binaries, Linux, mobile layouts, notarization, and App Store distribution are outside this phase.
+- **Package**: The internal artifact contains an ad-hoc signed `.app` and `.dmg`. It is not notarized or published as a public Release. macOS may require the user to approve the first launch in Privacy & Security because the package is not notarized.
+- **Build**: On an Apple Silicon runner or Mac with the Rust toolchain, run `npm run desktop:build:mac`. The command downloads and SHA-256 verifies the pinned private Node 24.15.0 Darwin ARM64 runtime before bundling it.
+- **Data path**: SQLite and safety backups live in the Tauri application data directory, outside the read-only `.app` or mounted DMG. The macOS data directory is normally `~/Library/Application Support/com.leetcodetracker.desktop/`.
+- **Lifecycle**: Closing the red window button hides the app; selecting it again from the Dock restores the window. `Cmd+Q` exits the host and sidecar. These behaviors are covered by the native test build; real Mac installation and Gatekeeper behavior still require manual acceptance.
 
 ---
 
@@ -82,12 +90,15 @@ To eliminate orphan background processes if the desktop window crashes or is clo
 
 ### 3.2 Backup, Restore, and Credential Protection
 - **Full Database Backups**: Automatic transactional SQLite snapshots are saved to the `backups/` directory before schema migrations and bulk data imports.
-- **Portable Snapshot Bundles**: The application supports exporting and importing portable JSON Snapshot Bundles (`.json`).
+- **Portable Snapshot Bundles**: The application supports exporting and importing portable JSON Snapshot Bundles (`.json`). Settings provides one **Export Complete Migration** / **Import Migration** entry for moving a profile between Windows and macOS.
+  - **Complete v2 migration**: Bundle v2 includes the local problem catalog, tags, practice records and operation history, imported progress history, notes, strategies and versions, weekly assignments, daily plans and versions, review state, statistics inputs, and non-sensitive settings. It replaces the target business profile after a preview and confirmation; it does not merge two profiles.
+  - **Cross-platform workflow**: Export v2 on the old device, copy the JSON file to the new device, choose Import Migration, review the source/count summary, and confirm replacement. The same file format works Windows → macOS and macOS → Windows.
   - **Secret Exclusion**: Provider API keys (Gemini, OpenAI, DeepSeek) are **automatically omitted** from exported bundles to avoid accidental credential leakage.
   - **Local Secret Preservation**: Importing a snapshot bundle updates settings and records without overwriting or clearing existing local API keys.
   - **Untrusted Imports**: Incoming key fields are ignored even when nonempty; an unset local key stays unset.
-- API keys remain in the local SQLite settings store without operating-system credential encryption. Raw SQLite backups can contain them. Portable bundles exclude keys and are not a full-fidelity SQLite migration mechanism.
-- Custom data-directory selection, complete SQLite migration, and upgrade/downgrade acceptance remain unfinished phase requirements.
+- **Safety and limits**: The target database is backed up before replacement; malformed, unknown-version, broken-reference, oversized (>64 MiB), backup, or write failures leave the original profile in place. Restore blocks concurrent profile writes and clears stale planning/preview state after success.
+- API keys remain in the local SQLite settings store without operating-system credential encryption. Raw SQLite backups can contain them. Portable bundles exclude keys by design.
+- v1 snapshot imports remain available for backward compatibility but are labelled partial restore. v2 is the complete migration format. API keys must be configured again on the target device when they were not already present.
 
 ---
 
@@ -131,3 +142,8 @@ The Windows CI job prepares the pinned private runtime, runs isolated sidecar an
 
 The completed installer will be generated at:
 `apps/desktop/src-tauri/target/release/bundle/nsis/LeetCode Tracker_1.0.1_x64-setup.exe`
+
+The Apple Silicon internal DMG is generated at:
+`apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/`
+
+The native WebdriverIO runner is deliberately isolated under `tests/desktop/` and is used only with the test-only Tauri configuration. It is not included in the distributable app.

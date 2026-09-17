@@ -4,6 +4,12 @@
 
 A user-reported 1.0.0 startup failure was reproduced: canonical Windows resource paths from Tauri reach Node with a verbatim prefix, causing Node to exit before its ready message. The 1.0.1 repair safely simplifies only equivalent Win32 paths at command construction. A new native process integration test exercises the real bundle/private runtime under a canonical path with spaces and Chinese characters; all seven Rust tests pass. The 1.0.0 artifact remains unchanged for historical integrity; use the 1.0.1 installer.
 
+## Phase 21 — macOS Apple Silicon port and complete device migration
+
+The current implementation branch adds an Apple Silicon (`aarch64-apple-darwin`) macOS 14+ Tauri configuration, a pinned private Node 24.15.0 Darwin runtime, macOS URL/window lifecycle handling, and separate Windows/macOS bundle commands. Windows x64 NSIS remains supported. Snapshot Bundle v2 now exports and restores the full schema-v9 business profile, including the catalog, saved practice progress and history, notes, plans, review state, and non-sensitive settings; API keys are excluded and target keys are preserved. Settings exposes one complete migration entry with preview and replacement confirmation. Legacy v1 import remains available as partial restore.
+
+Local evidence completed on Windows: TypeScript check, full JavaScript/Web/sidecar suite, Vite production and e2e-mode builds, migration transfer export/restore with all 22 tables, Rust format/test/clippy, and a Windows x64 NSIS installer build. Root `npm audit` reports zero known vulnerabilities. GitHub Actions now defines `macos-14` package and isolated WKWebView/WebdriverIO jobs, but those remote jobs have not run in this workspace. A physical Mac has not been used; Gatekeeper, first-launch approval, native dialogs, Dock reopen, and real Windows ↔ macOS user-data transfer remain manual acceptance gates. No public Release or notarized package was produced.
+
 ## Release 1.0.0 — historical baseline (2026-09-14)
 
 The Windows x64 Tauri distribution packages a private Node runtime and the shared React/Fastify/SQLite application. Audit repairs cover URL execution, native exports and atomic saves, graceful process shutdown, bounded startup/retry, and preservation of local provider keys. Versions are aligned at 1.0.0.

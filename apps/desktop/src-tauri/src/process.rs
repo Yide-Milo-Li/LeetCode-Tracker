@@ -182,13 +182,17 @@ pub fn wait_ready(receiver: ReadyReceiver, nonce: &str, timeout: Duration) -> Re
 mod tests {
     use super::*;
 
-    /// Exercise the real bundled backend through the same Windows path and Job handling as Tauri.
-    #[cfg(windows)]
+    /// Exercise the pinned private runtime under canonical Unicode paths on both supported hosts.
+    #[cfg(any(windows, target_os = "macos"))]
     #[test]
     fn canonical_resource_paths_start_the_private_bundle() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
         let runtime = root
-            .join("binaries/node-x86_64-pc-windows-msvc.exe")
+            .join(if cfg!(windows) {
+                "binaries/node-x86_64-pc-windows-msvc.exe"
+            } else {
+                "binaries/node-aarch64-apple-darwin"
+            })
             .canonicalize()
             .unwrap();
         let temporary = tempfile::tempdir().unwrap();

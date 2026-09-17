@@ -2,6 +2,7 @@
  * Contracts and schemas for problem notes, knowledge base exports, and snapshot bundles.
  */
 import { z } from 'zod';
+import { snapshotBundleV2Schema } from './migration.ts';
 
 /** Canonical problem note stored in SQLite. */
 export const problemNoteSchema = z.object({
@@ -62,7 +63,7 @@ export const exportKnowledgeQuerySchema = z.object({
 export type ExportKnowledgeQuery = z.infer<typeof exportKnowledgeQuerySchema>;
 
 /** Portable snapshot bundle schema for full database migration. */
-export const snapshotBundleSchema = z.object({
+export const snapshotBundleV1Schema = z.object({
   format: z.literal('leetcode-tracker-snapshot'),
   version: z.literal(1),
   exportedAt: z.number().int().nonnegative(),
@@ -145,6 +146,8 @@ export const snapshotBundleSchema = z.object({
   ).optional(),
 }).strict();
 
+export type SnapshotBundleV1 = z.infer<typeof snapshotBundleV1Schema>;
+export const snapshotBundleSchema = z.discriminatedUnion('version', [snapshotBundleV1Schema, snapshotBundleV2Schema]);
 export type SnapshotBundle = z.infer<typeof snapshotBundleSchema>;
 
 /**

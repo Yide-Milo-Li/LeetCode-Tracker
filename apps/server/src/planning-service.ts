@@ -50,6 +50,15 @@ export class PlanningService {
   private readonly pendingEnsures = new Map<string, Promise<EnsureResult>>();
   private readonly timeoutMs: number;
   private readonly activeOverridePreviews = new Map<string, OverridePreview>();
+  /** Monotonically invalidates provider work that started before a profile restore. */
+  private transientEpoch = 0;
+
+  /** Restore runs only after active requests settle; old previews must not target the new profile. */
+  public clearTransientState(): void {
+    this.transientEpoch += 1;
+    this.activeOverridePreviews.clear();
+    this.pendingEnsures.clear();
+  }
 
   constructor(store: CatalogStore, gemini: IGeminiAssistant, timeoutMs = 60000) {
     this.timeoutMs = Math.min(timeoutMs, 60000);
@@ -219,6 +228,7 @@ export class PlanningService {
   private async generateDailyPlan(targetDate: string, userTimezone: string, operationId?: string): Promise<EnsureResult> {
     const now = Date.now();
     const deadline = now + this.timeoutMs;
+    const epoch = this.transientEpoch;
     // Capture before reading any inputs; a later mutation must invalidate this work.
     const stamp = this.planning.stamp();
     // Compute weekday (0=Sun .. 6=Sat) for targetDate in target timezone
@@ -330,6 +340,9 @@ export class PlanningService {
     };
 
     const opId = operationId ?? randomUUID();
+    if (this.transientEpoch !== epoch) {
+      throw new PlanningError('STALE_DATA', 'Profile changed while the daily plan was being generated; retry', 409);
+    }
     const committed = await this.planning.commit(
       plan,
       stamp,

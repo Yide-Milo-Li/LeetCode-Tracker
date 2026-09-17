@@ -217,4 +217,6 @@ coverage/
 # Desktop Tauri build artifacts and binaries
 src-tauri/target/
 src-tauri/binaries/
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/binaries/
 *.exe

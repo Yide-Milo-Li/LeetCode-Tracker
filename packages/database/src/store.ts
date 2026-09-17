@@ -36,12 +36,14 @@ import {
   type TimePrecision,
 } from '../../contracts/src/practice.ts';
 import { BackupManager } from './backup.ts';
+import { exportMigrationBundle } from './migration-bundle.ts';
+import type { SnapshotBundleV2 } from '../../contracts/src/migration.ts';
 import { PlanningStore } from './planning-store.ts';
 import type {
   ProblemNote,
   ProblemNoteSummary,
   ProblemNoteListQuery,
-  SnapshotBundle,
+  SnapshotBundleV1 as SnapshotBundle,
 } from '../../contracts/src/notes.ts';
 import {
   getProblemNote,
@@ -155,7 +157,7 @@ export class CatalogStore {
     if (version !== null && version < CURRENT_SCHEMA_VERSION && manager) {
       await manager.performMigrationBackup(db, version, CURRENT_SCHEMA_VERSION);
     }
-    const store = new CatalogStore(db, { skipBackup: true });
+    const store = new CatalogStore(db, { ...options, skipBackup: true });
     store.backupManager = manager;
     return store;
   }
@@ -689,10 +691,17 @@ export class CatalogStore {
     return exportSnapshotBundle(this.db);
   }
 
+  /** Export catalog and all saved business history for another device. */
+  public exportMigrationBundle(): SnapshotBundleV2 {
+    return exportMigrationBundle(this.db, '1.0.1');
+  }
+
   /** Atomically restore database state from a SnapshotBundle with automatic safety backup. */
   public async importSnapshotBundle(bundle: unknown): Promise<BundleRestoreResult> {
     const mgr = this.backupManager ?? new BackupManager(this.options.backupDir ?? './backups');
-    return importSnapshotBundle(this.db, mgr, bundle, this.options.backupDir ?? './backups');
+    const run = this.writeQueue.then(() => importSnapshotBundle(this.db, mgr, bundle, this.options.backupDir ?? './backups'));
+    this.writeQueue = run.then(() => {}, () => {});
+    return run;
   }
 
   /** Generate full Obsidian knowledge base ZIP archive buffer. */

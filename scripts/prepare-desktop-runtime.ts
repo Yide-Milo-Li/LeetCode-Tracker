@@ -1,79 +1,71 @@
-/**
- * Prepares the private Node.js 24 runtime sidecar executable for Tauri desktop distribution.
- * Ensures the binary is placed at apps/desktop/src-tauri/binaries/node-x86_64-pc-windows-msvc.exe
- * with cryptographic SHA-256 integrity verification against official Node.js distribution hashes.
- */
+/** Prepare pinned official Node sidecars without falling back to another CPU. */
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import * as crypto from 'node:crypto';
+import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-const EXPECTED_NODE_VERSION = 'v24.15.0';
-const EXPECTED_SHA256 = '3331e1ffe19874215472217c5e94f5a0c6d8e18c4ac7111d3937aa0ad5e9b4a5';
-const DOWNLOAD_URL = `https://nodejs.org/dist/${EXPECTED_NODE_VERSION}/win-x64/node.exe`;
+export const NODE_VERSION = '24.15.0';
+export const RUNTIMES = {
+  'x86_64-pc-windows-msvc': {
+    file: 'win-x64/node.exe',
+    sha256: '3331e1ffe19874215472217c5e94f5a0c6d8e18c4ac7111d3937aa0ad5e9b4a5',
+    output: 'node-x86_64-pc-windows-msvc.exe',
+  },
+  'aarch64-apple-darwin': {
+    file: `node-v${NODE_VERSION}-darwin-arm64.tar.gz`,
+    sha256: '372331b969779ab5d15b949884fc6eaf88d5afe87bde8ba881d6400b9100ffc4',
+    output: 'node-aarch64-apple-darwin',
+  },
+} as const;
+export type RuntimeTarget = keyof typeof RUNTIMES;
 
-const repoRoot = path.resolve(import.meta.dirname, '..');
-const targetDir = path.join(repoRoot, 'apps/desktop/src-tauri/binaries');
-const targetFile = path.join(targetDir, 'node-x86_64-pc-windows-msvc.exe');
-
-/**
- * Compute the SHA-256 digest of a file.
- */
-function computeFileSha256(filePath: string): string {
-  const fileBuffer = fs.readFileSync(filePath);
-  return crypto.createHash('sha256').update(fileBuffer).digest('hex');
+/** Select only supported native targets or an explicit supported target. */
+export function runtimeTarget(explicit?: string, platform: string = process.platform, arch: string = process.arch): RuntimeTarget {
+  const target = explicit ?? (platform === 'win32' && arch === 'x64' ? 'x86_64-pc-windows-msvc'
+    : platform === 'darwin' && arch === 'arm64' ? 'aarch64-apple-darwin' : 'unsupported');
+  if (!Object.hasOwn(RUNTIMES, target)) throw new Error(`Unsupported desktop runtime target: ${target}`);
+  return target as RuntimeTarget;
 }
 
-/**
- * Main runtime preparation workflow.
- */
-async function prepareDesktopRuntime(): Promise<void> {
-  console.log(`[Runtime] Preparing private Node.js ${EXPECTED_NODE_VERSION} runtime sidecar...`);
-
-  if (!fs.existsSync(targetDir)) {
-    fs.mkdirSync(targetDir, { recursive: true });
-  }
-
-  // 1. Check if the target binary is already present and matches expected SHA-256
-  if (fs.existsSync(targetFile)) {
-    const existingHash = computeFileSha256(targetFile);
-    if (existingHash === EXPECTED_SHA256) {
-      console.log(`✓ Existing sidecar binary verified (${EXPECTED_SHA256}): ${targetFile}`);
-      return;
-    }
-    console.warn(`[Runtime] Target binary exists but hash mismatch (${existingHash}). Re-acquiring...`);
-  }
-
-  // 2. Check if local host Node executable matches expected version and hash
-  if (process.version === EXPECTED_NODE_VERSION && process.platform === 'win32' && process.arch === 'x64') {
-    const localHash = computeFileSha256(process.execPath);
-    if (localHash === EXPECTED_SHA256) {
-      console.log(`[Runtime] Copying verified host Node.js binary from ${process.execPath}...`);
-      fs.copyFileSync(process.execPath, targetFile);
-      console.log(`✓ Copied and verified host binary to: ${targetFile}`);
-      return;
-    }
-  }
-
-  // 3. Download official binary from nodejs.org
-  console.log(`[Runtime] Downloading official binary from ${DOWNLOAD_URL}...`);
-  const response = await fetch(DOWNLOAD_URL);
-  if (!response.ok) {
-    throw new Error(`Failed to download Node.js binary: HTTP ${response.status} ${response.statusText}`);
-  }
-
-  const arrayBuffer = await response.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
-  const downloadedHash = crypto.createHash('sha256').update(buffer).digest('hex');
-
-  if (downloadedHash !== EXPECTED_SHA256) {
-    throw new Error(`SHA-256 checksum verification failed! Expected: ${EXPECTED_SHA256}, Actual: ${downloadedHash}`);
-  }
-
-  fs.writeFileSync(targetFile, buffer);
-  console.log(`✓ Downloaded and verified official Node.js sidecar to: ${targetFile}`);
+/** Hash the official archive or extracted binary for integrity/cache comparison. */
+export function sha256(data: Uint8Array): string {
+  return createHash('sha256').update(data).digest('hex');
 }
 
-prepareDesktopRuntime().catch((err) => {
-  console.error('Fatal error preparing desktop runtime:', err);
-  process.exit(1);
-});
+/** Verify before extracting the single fixed Node entry; never reuse an unchecked binary. */
+export async function prepareDesktopRuntime(target: RuntimeTarget): Promise<void> {
+  const root = path.resolve(import.meta.dirname, '..');
+  const spec = RUNTIMES[target];
+  const cache = path.join(root, '.local/runtime-cache', target);
+  const out = path.join(root, 'apps/desktop/src-tauri/binaries', spec.output);
+  fs.mkdirSync(cache, { recursive: true });
+  fs.mkdirSync(path.dirname(out), { recursive: true });
+  const archive = path.join(cache, path.basename(spec.file));
+  let data = fs.existsSync(archive) ? fs.readFileSync(archive) : undefined;
+  if (!data || sha256(data) !== spec.sha256) {
+    const response = await fetch(`https://nodejs.org/dist/v${NODE_VERSION}/${spec.file}`, { signal: AbortSignal.timeout(120000) });
+    if (!response.ok) throw new Error(`Node download failed: HTTP ${response.status}`);
+    data = Buffer.from(await response.arrayBuffer());
+    if (sha256(data) !== spec.sha256) throw new Error('Official Node SHA-256 mismatch');
+    fs.writeFileSync(archive, data);
+  }
+  let binary = data;
+  if (target === 'aarch64-apple-darwin') {
+    // One known archive entry, verified above; no shell or untrusted extraction paths.
+    // Run from the cache directory so MSYS tar on Windows never parses a drive letter as a remote host.
+    binary = execFileSync('tar', ['-xOf', path.basename(archive), `node-v${NODE_VERSION}-darwin-arm64/bin/node`], {
+      cwd: cache,
+      maxBuffer: 150 * 1024 * 1024,
+    });
+  }
+  if (!fs.existsSync(out) || sha256(fs.readFileSync(out)) !== sha256(binary)) fs.writeFileSync(out, binary);
+  if (process.platform !== 'win32') fs.chmodSync(out, 0o755);
+  console.log(`Verified Node ${NODE_VERSION}: ${target}, binary SHA-256 ${sha256(binary)}`);
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const args = process.argv.slice(2);
+  if (args.length && (args.length !== 2 || args[0] !== '--target')) throw new Error('Usage: prepare-desktop-runtime.ts [--target TARGET]');
+  await prepareDesktopRuntime(runtimeTarget(args[1]));
+}

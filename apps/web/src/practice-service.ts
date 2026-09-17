@@ -5,6 +5,18 @@ const pending = new Map<string, CreatePracticeRecordInput>();
 const inFlight = new Map<string, Promise<PracticeRecord>>();
 const prefix = 'leetcode-practice-intent:';
 
+/** A restored profile must not replay an unfinished operation from the previous database. */
+export function clearPracticeIntents(): void {
+  pending.clear();
+  inFlight.clear();
+  try {
+    for (let i = window.sessionStorage.length - 1; i >= 0; i--) {
+      const key = window.sessionStorage.key(i);
+      if (key?.startsWith(prefix)) window.sessionStorage.removeItem(key);
+    }
+  } catch { /* Reload still discards in-memory drafts when storage is unavailable. */ }
+}
+
 /** Recover an unresolved intent across page reload; storage denial still preserves in-memory safety. */
 export function getPracticeIntent(key: string): CreatePracticeRecordInput | undefined {
   if (pending.has(key)) return pending.get(key);

@@ -255,7 +255,8 @@ describe('Recommendation & Planning API Endpoints', () => {
   it('replaces single item and all unfinished items while preserving completed items', async () => {
     const { app, store } = await createTestApp();
 
-    // Assign strategy to Wednesday (2026-09-16 = weekday 3)
+    // Use the current UTC day so the fixture never becomes an invalid historical generation.
+    const { dateStr, weekday } = getFutureDate(0);
     await app.inject({
       method: 'POST',
       url: '/api/v1/strategies',
@@ -270,7 +271,7 @@ describe('Recommendation & Planning API Endpoints', () => {
           reviewPercent: null,
           preference: '',
         },
-        weekdays: [3],
+        weekdays: [weekday],
       },
     });
 
@@ -278,7 +279,7 @@ describe('Recommendation & Planning API Endpoints', () => {
     let res = await app.inject({
       method: 'POST',
       url: '/api/v1/daily-plans/ensure',
-      payload: { date: '2026-09-16' },
+      payload: { date: dateStr },
     });
     const initialPlan = res.json().plan;
     assert.equal(initialPlan.version, 1);
@@ -310,7 +311,7 @@ describe('Recommendation & Planning API Endpoints', () => {
     const practiceTime = new Date().toISOString();
     await new Promise(r => setTimeout(r, 20));
     const item1 = v2Plan.items[1];
-    store.createPracticeRecord({
+    await store.createPracticeRecord({
       questionFrontendId: item1.problem.questionFrontendId,
       completed: true,
       practicedAt: practiceTime,
@@ -319,7 +320,7 @@ describe('Recommendation & Planning API Endpoints', () => {
     });
 
     // Verify item[1] is now marked completed
-    res = await app.inject({ method: 'GET', url: `/api/v1/daily-plans?date=2026-09-16` });
+    res = await app.inject({ method: 'GET', url: `/api/v1/daily-plans?date=${dateStr}` });
     const refreshed = res.json().items[0];
     const completedItem = refreshed.items.find((i: any) => i.id === item1.id);
     assert.equal(completedItem.completed, true);

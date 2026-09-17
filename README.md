@@ -6,15 +6,15 @@
 
 <p align="center">
   <a href="https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.0.1"><img src="https://img.shields.io/badge/release-1.0.1-blue?style=flat-square" alt="Release 1.0.1"></a>
-  <a href="docs/desktop.md"><img src="https://img.shields.io/badge/desktop-Windows%20x64-455a64?style=flat-square" alt="Windows x64"></a>
-  <a href="tests/README.md"><img src="https://img.shields.io/badge/tests-312%20JS%20%2B%207%20Rust-brightgreen?style=flat-square" alt="312 JavaScript and 7 Rust tests"></a>
+  <a href="docs/desktop.md"><img src="https://img.shields.io/badge/desktop-Windows%20x64%20%2B%20macOS%20ARM64-455a64?style=flat-square" alt="Windows x64 and macOS ARM64"></a>
+  <a href="tests/README.md"><img src="https://img.shields.io/badge/tests-317%20JS%20%2B%207%20Rust-brightgreen?style=flat-square" alt="317 JavaScript and 7 Rust tests"></a>
   <a href="docs/architecture.md"><img src="https://img.shields.io/badge/sqlite-schema%20v9-003b57?style=flat-square" alt="SQLite schema v9"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT License"></a>
 </p>
 
 A local-first desktop workbench for algorithm practice: bring your own JSONL catalog, plan a weekly routine, record practice, review progress, and keep problem notes together. The interface supports English and Simplified Chinese, desktop windows at 1024px and above, ten theme palettes, and keyboard navigation.
 
-Release 1.0.1 packages the React interface, Fastify API, SQLite engine, and a private Node.js 24 runtime in a Tauri Windows application. **End users do not need to install Node.js, npm, Git, or Rust.** The single download is an installer; the installed application contains several runtime files.
+Release 1.0.1 packages the React interface, Fastify API, SQLite engine, and a private Node.js 24 runtime in a Tauri Windows application. Phase 21 adds an Apple Silicon macOS 14+ internal `.app`/`.dmg` build with the same local-first data model. **End users do not need to install Node.js, npm, Git, or Rust.**
 
 ## Download and start
 
@@ -76,7 +76,7 @@ See the [workflow guide](docs/desktop-workflow.md) for input guards and context-
 - The installed desktop profile stores SQLite and backups under `%LOCALAPPDATA%\com.leetcodetracker.desktop\`. It does not automatically adopt a source checkout's `.local` database.
 - API keys are stored in local SQLite settings without operating-system credential encryption. Raw database backups can contain keys; keep them private.
 - AI features send task-relevant inputs to the selected provider or configured gateway. These can include candidate problem metadata, strategy/override text, or pasted progress text. AI-assisted progress import requires a working provider and has no deterministic formatting fallback.
-- Portable bundles exclude keys and are not a complete SQLite migration mechanism. Custom data-directory selection and a full desktop SQLite migration flow remain unfinished.
+- Portable Snapshot Bundle v2 is the complete one-time Windows ↔ macOS migration path for the catalog, saved practice progress, history, notes, plans, review state, and non-sensitive settings. It excludes provider keys, preserves keys already configured on the target, validates references before writing, and replaces the target business profile only after confirmation. Legacy v1 bundles remain partial restore files.
 
 Read [AI provider behavior](docs/llm-providers.md) and the [security policy](SECURITY.md) before configuring a provider or sharing exports.
 
@@ -94,7 +94,7 @@ npm start
 
 Open [the local workbench](http://127.0.0.1:3000). On Windows, `start.bat` / `npm run desktop` are source-mode launch helpers, not the native installer. Source mode supports optional `.env` configuration; the packaged host supplies its own database path, port, and private session credentials. Configure installed-app providers in Settings.
 
-For a native build, install the Windows Rust/MSVC toolchain and run `npm run desktop:build`. The [desktop guide](docs/desktop.md) lists prerequisites, outputs, and checks.
+For a native Windows build, install the Rust/MSVC toolchain and run `npm run desktop:build`. On Apple Silicon macOS 14+, run `npm run desktop:build:mac` for the internal ad-hoc `.app`/`.dmg` package. The [desktop guide](docs/desktop.md) lists prerequisites, outputs, migration steps, and checks. Public Release, notarization, and real-device Mac acceptance are not part of Phase 21.
 
 ## Architecture and verification
 
@@ -109,7 +109,7 @@ flowchart LR
 
 The host validates the startup handshake, owns the sidecar process through a Windows Job Object, and waits for graceful shutdown before enforcing its deadline. Browser source mode uses HTTP directly. See [architecture](docs/architecture.md).
 
-The current local verification passed **312 JavaScript/Web/sidecar tests and 7 Rust tests**, TypeScript checking, documentation links, Rust formatting/clippy, and Windows installer packaging. These are automated/local results. They do not establish clean-VM installation, complete native UI/upgrade acceptance, live-provider availability, or performance guarantees. [Status](docs/status.md) separates current evidence from historical phase results; [CI](https://github.com/Yide-Milo-Li/LeetCode-Tracker/actions) reports remote runs independently.
+The current local verification passed **317 JavaScript/Web/sidecar tests and 7 Rust tests**, TypeScript checking, documentation links, Rust formatting/clippy, and Windows installer packaging. These are automated/local results. They do not establish clean-VM installation, complete native UI/upgrade acceptance, live-provider availability, or performance guarantees. [Status](docs/status.md) separates current evidence from historical phase results; [CI](https://github.com/Yide-Milo-Li/LeetCode-Tracker/actions) reports remote runs independently.
 
 ## Documentation
 

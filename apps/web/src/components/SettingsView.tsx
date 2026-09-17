@@ -4,6 +4,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Eye, EyeOff, Copy, Check, ClipboardPaste, Download, Upload, Archive, Database, AlertTriangle } from 'lucide-react';
 import { fixedProviderModels, type ThemePalette } from '../../../../packages/contracts/src/sync.ts';
 import { api } from '../api.ts';
+import { snapshotBundleSchema, type SnapshotBundle } from '../../../../packages/contracts/src/notes.ts';
+import { MAX_BUNDLE_BYTES } from '../../../../packages/contracts/src/migration.ts';
+import { clearPracticeIntents } from '../practice-service.ts';
 import { translations, type Language } from '../i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
 import { PageHeader, Feedback, Field, InfoPopover } from './ui.tsx';
@@ -241,7 +244,7 @@ export function SettingsView({
   const [importingBundle, setImportingBundle] = useState(false);
   const [bundleSuccess, setBundleSuccess] = useState('');
   const [bundleError, setBundleError] = useState('');
-  const [pendingBundle, setPendingBundle] = useState<unknown | null>(null);
+  const [pendingBundle, setPendingBundle] = useState<SnapshotBundle | null>(null);
   const bundleFileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -427,14 +430,20 @@ export function SettingsView({
     setBundleError('');
     setBundleSuccess('');
 
+    setPendingBundle(null);
+    if (file.size > MAX_BUNDLE_BYTES) {
+      setBundleError(zh ? '迁移文件不能超过 64 MiB。' : 'Migration files must not exceed 64 MiB.');
+      e.target.value = '';
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       try {
         const text = String(reader.result);
-        const parsed = JSON.parse(text);
+        const parsed = snapshotBundleSchema.parse(JSON.parse(text));
         setPendingBundle(parsed);
       } catch {
-        setBundleError(zh ? '无效的 JSON 文件格式。' : 'Invalid JSON file format.');
+        setBundleError(zh ? '无效或不支持的迁移文件。' : 'Invalid or unsupported migration file.');
       }
     };
     reader.onerror = () => {
@@ -460,6 +469,9 @@ export function SettingsView({
             : `Restore complete! Restored ${res.result.restoredRecords} records and ${res.result.restoredNotes} notes. Pre-restore safety backup created at: ${res.result.safetyBackupPath}`
         );
         workspace.notifyMutation();
+        clearPracticeIntents();
+        // Reload drops every old workspace draft and reapplies the imported language/theme/settings.
+        window.location.reload();
       } else {
         setBundleError(zh ? '还原失败。' : 'Restore failed.');
       }
@@ -963,10 +975,11 @@ export function SettingsView({
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600 }}>
               <Database size={18} />
-              <span>{zh ? '全量数据备份与还原（JSON Snapshot Bundle）' : 'Full Data Backup & Restore (JSON Snapshot Bundle)'}</span>
+              <span>{zh ? '跨设备完整迁移' : 'Complete Device Migration'}</span>
             </div>
             <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--text-muted)' }}>
-              {t.exportJsonBundleDesc}
+              {zh ? '一个文件包含题库、做题进度、笔记、学习计划和设置，可在 Windows 与 Mac 间双向导入。API Key 不会导出，请在新设备重新填写。'
+                : 'One file contains your catalog, progress, notes, study plans and settings. Import it on Windows or Mac. API keys are excluded; configure them on the new device.'}
             </p>
 
             <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -978,7 +991,7 @@ export function SettingsView({
                 download
               >
                 <Download size={14} />
-                <span>{t.exportJsonBundle}</span>
+                <span>{zh ? '导出完整迁移包' : 'Export Complete Migration'}</span>
               </ExportLink>
 
               <button
@@ -988,7 +1001,7 @@ export function SettingsView({
                 disabled={importingBundle}
               >
                 <Upload size={14} />
-                <span>{importingBundle ? (zh ? '正在还原…' : 'Restoring…') : t.importJsonBundle}</span>
+                <span>{importingBundle ? (zh ? '正在还原…' : 'Restoring…') : zh ? '导入迁移包' : 'Import Migration'}</span>
               </button>
 
               <input
@@ -1001,7 +1014,7 @@ export function SettingsView({
             </div>
 
             {/* Pending restore confirmation prompt */}
-            {Boolean(pendingBundle) && (
+            {pendingBundle && (
               <div
                 style={{
                   padding: '12px 14px',
@@ -1016,12 +1029,17 @@ export function SettingsView({
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600, color: 'var(--text-primary)' }}>
                   <AlertTriangle size={16} />
-                  <span>{zh ? '确认无损还原备份？' : 'Confirm Backup Restoration?'}</span>
+                  <span>{zh ? '确认替换当前设备的数据？' : 'Replace This Device’s Data?'}</span>
                 </div>
+                <p style={{ margin: 0 }}>
+                  {pendingBundle.version === 2
+                    ? `${zh ? '完整迁移' : 'Complete migration'} · v${pendingBundle.appVersion} · ${pendingBundle.tables.problems.length} ${zh ? '题目' : 'problems'} · ${pendingBundle.tables.practice_records.length} ${zh ? '练习记录' : 'practice records'} · ${pendingBundle.tables.progress_snapshots.length} ${zh ? '进度记录' : 'progress snapshots'} · ${pendingBundle.tables.problem_notes.length} ${zh ? '笔记' : 'notes'}`
+                    : zh ? '旧版 v1：仅部分恢复，不包含题库或完整历史。请先确保本机已有对应题库。' : 'Legacy v1: partial restore only; no catalog or complete history. The matching catalog must already exist.'}
+                </p>
                 <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
                   {zh
-                    ? '导入备份将更新系统配置、策略与做题记录。系统已自动在后台为您创建当前数据库的安全快照。'
-                    : 'Restoring will merge/update settings, strategies, and practice records. An automated safety backup will be created before writing.'}
+                    ? '这不是合并操作。确认后会先备份当前数据库，再替换相应数据；失败将保留原库。目标设备已有 API Key 保留。请先保存未完成编辑，成功后页面会重新加载。'
+                    : 'This replaces data; it does not merge devices. A safety backup is created before writing, and failed restores preserve the original database. Local API keys remain. Save unfinished edits first; the app reloads after success.'}
                 </p>
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <button

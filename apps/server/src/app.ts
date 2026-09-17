@@ -13,6 +13,7 @@ import { resolveAssistantSettings } from './llm/settings.ts';
 import { GeminiAssistant, type IGeminiAssistant } from './gemini.ts';
 import { PlanningService } from './planning-service.ts';
 import { AsyncLock } from './async-lock.ts';
+import { registerMigrationGate } from './migration-gate.ts';
 import {
   registerAllRoutes,
   type ActivePreview,
@@ -107,6 +108,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   });
 
   // Register all modular API v1 routes
+  registerMigrationGate(app);
   registerAllRoutes(app, {
     store,
     gemini,

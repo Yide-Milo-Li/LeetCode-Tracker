@@ -2,9 +2,9 @@
 
 ## Release 1.0.1 verification baseline
 
-The current local suite passes **312 JavaScript/Web/sidecar tests (216 backend/platform + 95 Web DOM + 1 isolated bundle) and 7 Rust tests**. Older phase counts below are historical. Typecheck, docs, Rust fmt/clippy and Windows packaging were also checked. Remote CI and real native acceptance are separate; see [current status](../docs/status.md) and [release notes](../docs/releases/1.0.1.md).
+The current local suite passes **317 JavaScript/Web/sidecar tests (221 backend/platform + 95 Web DOM + 1 isolated bundle) and 7 Rust tests**. Older phase counts below are historical. Typecheck, docs, Rust fmt/clippy and Windows packaging were also checked. Remote CI and real native acceptance are separate; see [current status](../docs/status.md) and [release notes](../docs/releases/1.0.1.md).
 
-Run `npm test` for 289 offline synthetic tests: 201 storage/domain/API tests and 88 rendered React DOM tests. `npm run test:web` runs the 88 web component tests separately. `npm run check` includes TypeScript and TSX test files (`tsc --noEmit`). Tests use in-memory or temporary databases and never require private data, credentials, remote services, or `apps/web/dist`.
+Run `npm test` for the current complete local suite. `npm run test:web` runs the 95 rendered web component tests separately. The older 289-test breakdown below is historical. `npm run check` includes TypeScript and TSX test files (`tsc --noEmit`). Tests use in-memory or temporary databases and never require private data, credentials, remote services, or `apps/web/dist`.
 
 Coverage includes:
 
@@ -19,6 +19,10 @@ Coverage includes:
 - Dashboard domain statistics: unique solved problems, weekly solved count (Monday-based), yesterday-fallback streak calculations, yearly activity aggregation, 30-day activity trends, tag & difficulty distributions, pending-date deduplication, and zero-write resilience on read operations.
 - React DOM tests: preview races, clear during failure, frozen commit inputs, visible request errors, retry recovery, out-of-order catalog filters, daily plan controller synchronization, heatmap roving tabIndex keyboard navigation, and slide-over history drawer filtering/pagination/ESC close.
 - Refactor regressions: matching and conflicting practice receipts committed by a second store during a mocked backup window; baseline candidate selection for supplementary Unicode IDs; progress import history timestamps in both languages across configured timezones and the UTC fallback.
+
+## Complete cross-device migration coverage
+
+Phase 21 adds synthetic Snapshot Bundle v2 tests for all 22 schema-v9 business tables. They verify Windows/macOS-shaped export and restore into an empty profile, API-key exclusion and target-key preservation, invalid version/missing-table/reference rejection, size and schema boundaries, backup failure isolation, transactional write rollback, API v1/v2 compatibility, and concurrent restore/write rejection. The isolated `tests/desktop/` WebdriverIO package and Tauri permissions are installed only by the macOS native CI job; they are not part of the ordinary application dependency set.
 
 ## Live Gemini API validation
 
