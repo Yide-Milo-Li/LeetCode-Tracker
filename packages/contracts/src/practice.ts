@@ -18,6 +18,10 @@ export type PracticeRecordStatus = z.infer<typeof practiceRecordStatusSchema>;
 export const timePrecisionSchema = z.enum(['datetime', 'date']);
 export type TimePrecision = z.infer<typeof timePrecisionSchema>;
 
+/** Lightweight structured outcome feedback for practice records. */
+export const practiceOutcomeSchema = z.enum(['independent', 'assisted', 'unsolved']);
+export type PracticeOutcome = z.infer<typeof practiceOutcomeSchema>;
+
 /** Canonical manual practice record stored in the database. */
 export const practiceRecordSchema = z.object({
   id: nonBlank(100),
@@ -30,6 +34,7 @@ export const practiceRecordSchema = z.object({
   notes: z.string().max(2000).nullable(),
   durationMinutes: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).nullable().default(null),
   sourceTimezone: timeZoneSchema.nullable().default(null),
+  outcome: practiceOutcomeSchema.nullable().default(null),
   revision: z.number().int().positive().default(1),
   status: practiceRecordStatusSchema,
   createdAt: z.number().int().nonnegative(),
@@ -49,7 +54,13 @@ export const createPracticeRecordSchema = z.object({
   durationMinutes: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).nullable().optional(),
   operationId: nonBlank(100).optional(),
   sourceTimezone: timeZoneSchema.nullable().optional(),
-}).refine(v => isEventTime(v.practicedAt, v.timePrecision ?? (v.practicedAt.includes('T') ? 'datetime' : 'date')), 'Invalid event date, precision or UTC offset');
+  outcome: practiceOutcomeSchema.nullable().optional(),
+}).refine(v => isEventTime(v.practicedAt, v.timePrecision ?? (v.practicedAt.includes('T') ? 'datetime' : 'date')), 'Invalid event date, precision or UTC offset')
+  .refine(v => {
+    if (v.completed && v.outcome === 'unsolved') return false;
+    if (!v.completed && v.outcome !== null && v.outcome !== undefined && v.outcome !== 'unsolved') return false;
+    return true;
+  }, { message: 'Incompatible outcome for completed status' });
 
 export type CreatePracticeRecordInput = z.infer<typeof createPracticeRecordSchema>;
 
@@ -62,9 +73,17 @@ export const updatePracticeRecordSchema = z.object({
   durationMinutes: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).nullable().optional(),
   expectedRevision: z.number().int().positive().optional(),
   sourceTimezone: timeZoneSchema.nullable().optional(),
+  outcome: practiceOutcomeSchema.nullable().optional(),
 }).refine(
-  data => data.completed !== undefined || data.practicedAt !== undefined || data.timePrecision !== undefined || data.notes !== undefined || data.durationMinutes !== undefined || data.sourceTimezone !== undefined,
+  data => data.completed !== undefined || data.practicedAt !== undefined || data.timePrecision !== undefined || data.notes !== undefined || data.durationMinutes !== undefined || data.sourceTimezone !== undefined || data.outcome !== undefined,
   { message: 'At least one field must be provided to update' }
+).refine(
+  data => {
+    if (data.completed === true && data.outcome === 'unsolved') return false;
+    if (data.completed === false && data.outcome !== null && data.outcome !== undefined && data.outcome !== 'unsolved') return false;
+    return true;
+  },
+  { message: 'Incompatible outcome for completed status' }
 );
 
 export type UpdatePracticeRecordInput = z.infer<typeof updatePracticeRecordSchema>;

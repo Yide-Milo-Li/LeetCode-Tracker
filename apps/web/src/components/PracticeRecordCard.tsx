@@ -91,6 +91,24 @@ export function PracticeRecordCard({
               : 'Not recorded'
             : `${record.durationMinutes} ${zh ? '分钟' : 'min'}`}
         </dd>
+        <dt>{zh ? '练习反馈' : 'Feedback'}</dt>
+        <dd>
+          {record.outcome === 'independent'
+            ? zh
+              ? '独立完成'
+              : 'Solved independently'
+            : record.outcome === 'assisted'
+              ? zh
+                ? '借助提示或题解完成'
+                : 'Solved with assistance / hints'
+              : record.outcome === 'unsolved'
+                ? zh
+                  ? '尝试后未解决'
+                  : 'Attempted, unsolved'
+                : zh
+                  ? '未记录'
+                  : 'Not recorded'}
+        </dd>
         <dt>{zh ? '备注' : 'Notes'}</dt>
         <dd className="preserve-lines">{record.notes || '—'}</dd>
         <dt>ID</dt>

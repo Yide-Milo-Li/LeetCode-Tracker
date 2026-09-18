@@ -15,8 +15,12 @@ export function registerBundleRoutes(app: FastifyInstance, context: RouteContext
   /** GET /api/v1/bundle/export: Export complete snapshot bundle JSON */
   app.get('/api/v1/bundle/export', async (request: FastifyRequest, reply: FastifyReply) => {
     const version = (request.query as {version?: string}).version ?? '1';
-    if (!['1', '2'].includes(version)) return reply.code(400).send({error: 'INVALID_BUNDLE_VERSION'});
-    const bundle = version === '2' ? store.exportMigrationBundle() : store.exportSnapshotBundle();
+    if (!['1', '2', '3'].includes(version)) return reply.code(400).send({error: 'INVALID_BUNDLE_VERSION'});
+    const bundle = version === '3'
+      ? store.exportMigrationBundle(3)
+      : version === '2'
+        ? store.exportMigrationBundle(2)
+        : store.exportSnapshotBundle();
     const filename = `leetcode-tracker-snapshot-${new Date().toISOString().slice(0, 10)}.json`;
 
     return reply
@@ -36,7 +40,7 @@ export function registerBundleRoutes(app: FastifyInstance, context: RouteContext
       });
     }
 
-    if (parseRes.data.version === 2) {
+    if (parseRes.data.version === 2 || parseRes.data.version === 3) {
       try { validateMigrationBundle(parseRes.data); }
       catch { return reply.code(400).send({error: 'INVALID_BUNDLE_FORMAT', message: 'Invalid migration data or references.'}); }
     }

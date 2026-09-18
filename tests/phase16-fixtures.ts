@@ -14,7 +14,7 @@ export function record(id: string, questionId: string, day = '2026-09-12', durat
     const at = day + 'T10:00:00Z';
     return { id, questionId, questionFrontendId: questionId, problemTitle: 'Synthetic ' + questionId, completed: true,
         practicedAt: at, timePrecision: 'datetime', notes: null, durationMinutes, sourceTimezone: 'UTC',
-        revision: 1, status: 'active', createdAt: Date.parse(at), updatedAt: Date.parse(at), revokedAt: null };
+        revision: 1, status: 'active', createdAt: Date.parse(at), updatedAt: Date.parse(at), revokedAt: null, outcome: null };
 }
 /** Build post-baseline success evidence with no submission-ledger inference. */
 export function event(day: string, durationMinutes: number | null = null): Evidence {

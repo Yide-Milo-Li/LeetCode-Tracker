@@ -100,8 +100,10 @@ export function TodayProblemRow({
             </button>
           ) : null}
           {!!item.explanation?.focusTagSlugs.length && <InfoPopover
-            label={t.focusSessionBadge}
-            content={<p>{t.focusWeakTagsDesc} {item.explanation.focusTagSlugs.map(slug=>item.problem.topicTags.find(t=>t.slug===slug)?.name??slug).join(', ')}</p>} />}
+            label={item.explanation.role === 'exploration' ? (zh ? '探索' : 'Explore') : t.focusSessionBadge}
+            content={<p>{item.explanation.evidenceSummary?.reasonText
+              ? (zh ? item.explanation.evidenceSummary.reasonText.zh : item.explanation.evidenceSummary.reasonText.en)
+              : `${t.focusWeakTagsDesc} ${item.explanation.focusTagSlugs.map(slug=>item.problem.topicTags.find(t=>t.slug===slug)?.name??slug).join(', ')}`}</p>} />}
           {item.explanation?.review && <InfoPopover
             label={t.adaptiveReviewBadge}
             content={<p>{zh

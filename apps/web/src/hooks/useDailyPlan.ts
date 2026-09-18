@@ -20,8 +20,12 @@ export interface UseDailyPlanReturn {
   replacingItemId: string | null;
   /** Indicates batch replacement of all unfinished items is in flight. */
   replacingBatch: boolean;
+  /** Indicates problem append action is in flight. */
+  appending: boolean;
   /** Trigger a background check/refresh of today's plan. */
   refresh: () => Promise<void>;
+  /** Append one question to today's plan. */
+  appendOne: () => Promise<void>;
   /** Replace a single problem in today's plan while preserving slot properties. */
   replaceOne: (item: PlanItem) => Promise<void>;
   /** Replace all unfinished problems in today's plan. */
@@ -43,6 +47,7 @@ export function useDailyPlan(): UseDailyPlanReturn {
   const [error, setError] = useState<string | null>(null);
   const [replacingItemId, setReplacingItemId] = useState<string | null>(null);
   const [replacingBatch, setReplacingBatch] = useState(false);
+  const [appending, setAppending] = useState(false);
 
   const changeRevision = useRef(0);
   const refreshInFlight = useRef(false);
@@ -136,6 +141,22 @@ export function useDailyPlan(): UseDailyPlanReturn {
     }
   }, [ensureResult]);
 
+  const appendOne = useCallback(async () => {
+    if (!ensureResult?.plan || appending) return;
+    setAppending(true);
+    changeRevision.current++;
+    try {
+      const updated = await api.appendPlanItem(ensureResult.plan.id, {
+        expectedVersion: ensureResult.plan.version,
+      });
+      setEnsureResult({ status: 'ready', plan: updated });
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to append problem.');
+    } finally {
+      setAppending(false);
+    }
+  }, [ensureResult, appending]);
+
   const onOverrideCommitted = useCallback((newPlan: DailyPlan) => {
     changeRevision.current++;
     setEnsureResult({ status: 'ready', plan: newPlan });
@@ -188,7 +209,9 @@ export function useDailyPlan(): UseDailyPlanReturn {
     error,
     replacingItemId,
     replacingBatch,
+    appending,
     refresh,
+    appendOne,
     replaceOne,
     replaceAllUnfinished,
     onOverrideCommitted,

@@ -17,6 +17,7 @@ export {
   matches,
   candidates,
   select,
+  nextDifficultyForAppend,
   type Selection,
 } from './recommendations.ts';
 
@@ -38,3 +39,10 @@ export {
   focusTopics,
   type TagMasteryInput,
 } from './mastery.ts';
+
+// Knowledge profile multi-signal analysis
+export {
+  calculateKnowledgeProfile,
+  PROFILE_ANALYSIS_VERSION,
+  type KnowledgeProfileInput,
+} from './knowledge-profile.ts';

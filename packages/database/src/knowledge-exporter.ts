@@ -25,7 +25,13 @@ export interface ProblemExportData {
   reviewStage: number | null;
 }
 
-import { formatProblemFilename, formatObsidianCallout, formatNotionCard } from '../../contracts/src/notes.ts';
+import {
+  formatProblemFilename,
+  formatObsidianCallout,
+  formatNotionCard,
+  hasMeaningfulNoteContent,
+  NOTE_TEMPLATES,
+} from '../../contracts/src/notes.ts';
 export { formatProblemFilename, formatObsidianCallout, formatNotionCard };
 
 /**
@@ -91,61 +97,17 @@ ${rows.join('\n')}`;
 
   // 4. Deep note section
   let deepNote = '';
-  if (data.customNote && data.customNote.trim().length > 0) {
+  if (hasMeaningfulNoteContent(data.customNote)) {
     const noteHeading = isZh ? '## 📝 解题复盘与深度笔记' : '## 📝 Solution & Reflection';
     deepNote = `---
 
 ${noteHeading}
 
-${data.customNote.trim()}`;
-  } else if (isZh) {
-    deepNote = `---
-
-## 💡 核心思路
-- 
-
----
-
-## ⏱️ 复杂度分析
-- 时间复杂度: $O(N)$
-- 空间复杂度: $O(1)$
-
----
-
-## 💻 最佳实现
-\`\`\`python
-class Solution:
-    pass
-\`\`\`
-
----
-
-## ⚠️ 避坑与边界情况
-- `;
+${data.customNote!.trim()}`;
   } else {
     deepNote = `---
 
-## 💡 Key Idea & Approach
-- 
-
----
-
-## ⏱️ Complexity Analysis
-- Time Complexity: $O(N)$
-- Space Complexity: $O(1)$
-
----
-
-## 💻 Clean Implementation
-\`\`\`python
-class Solution:
-    pass
-\`\`\`
-
----
-
-## ⚠️ Edge Cases & Traps
-- `;
+${NOTE_TEMPLATES[lang].trim()}`;
   }
 
   const diffLabel = isZh ? '难度' : 'Difficulty';
@@ -365,7 +327,8 @@ export function generateNotionCsvs(db: DatabaseSync): {
     }
     const status = p.hasAccepted === 1 ? 'Solved' : p.totalPractices > 0 ? 'Attempted' : 'Not Started';
     const tagsStr = (tagMap.get(p.questionId) ?? []).join(', ');
-    const noteText = (p.customNote || p.latestNotes || '').trim();
+    const effectiveCustomNote = hasMeaningfulNoteContent(p.customNote) ? p.customNote : null;
+    const noteText = (effectiveCustomNote || p.latestNotes || '').trim();
 
     return [
       escapeCsv(`${p.frontendId}. ${p.title}`),
@@ -511,7 +474,6 @@ export function generateKnowledgeZip(
     whereSql = `WHERE (
       EXISTS (SELECT 1 FROM practice_records pr WHERE pr.question_id = p.question_id AND pr.status = 'active')
       OR EXISTS (SELECT 1 FROM progress_snapshots ps WHERE ps.question_id = p.question_id AND ps.status = 'active')
-      OR n.content IS NOT NULL
     )`;
   }
 
@@ -597,6 +559,19 @@ export function generateKnowledgeZip(
 
   const entries: Array<{ name: string; content: string }> = [];
 
+  // Active practice records or progress snapshots define whether a problem is practiced
+  const practicedSet = new Set<string>();
+  const activePracticedRows = db
+    .prepare(
+      `SELECT question_id AS qid FROM practice_records WHERE status = 'active'
+       UNION
+       SELECT question_id AS qid FROM progress_snapshots WHERE status = 'active'`
+    )
+    .all() as Array<{ qid: string }>;
+  for (const row of activePracticedRows) {
+    practicedSet.add(row.qid);
+  }
+
   let practicedCount = 0;
   for (const p of problems) {
     let reviewStage: number | null = null;
@@ -610,7 +585,7 @@ export function generateKnowledgeZip(
     }
 
     const problemPractices = practiceMap.get(p.questionId) ?? [];
-    if (problemPractices.length > 0 || (p.customNote && p.customNote.trim().length > 0)) {
+    if (practicedSet.has(p.questionId)) {
       practicedCount++;
     }
 

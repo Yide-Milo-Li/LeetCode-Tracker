@@ -37,7 +37,7 @@ import {
 } from '../../contracts/src/practice.ts';
 import { BackupManager } from './backup.ts';
 import { exportMigrationBundle } from './migration-bundle.ts';
-import type { SnapshotBundleV2 } from '../../contracts/src/migration.ts';
+import type { SnapshotBundleV2, SnapshotBundleV3 } from '../../contracts/src/migration.ts';
 import { PlanningStore } from './planning-store.ts';
 import type {
   ProblemNote,
@@ -49,6 +49,7 @@ import {
   getProblemNote,
   upsertProblemNote,
   listProblemNoteSummaries,
+  registerNotesFunctions,
 } from './notes-store.ts';
 import {
   exportSnapshotBundle,
@@ -145,6 +146,7 @@ export class CatalogStore {
     }
     this.options = options;
     this.db = db;
+    registerNotesFunctions(db);
     this.initOrMigrateSchema();
     this.planning = new PlanningStore(db, this);
   }
@@ -353,6 +355,7 @@ export class CatalogStore {
       validated.notes ?? null,
       validated.durationMinutes ?? null,
       validated.sourceTimezone ?? null,
+      validated.outcome ?? null,
     ]);
     const problem = this.getProblem(validated.questionFrontendId, 'frontendId');
     if (!problem) {
@@ -692,8 +695,8 @@ export class CatalogStore {
   }
 
   /** Export catalog and all saved business history for another device. */
-  public exportMigrationBundle(): SnapshotBundleV2 {
-    return exportMigrationBundle(this.db, '1.0.1');
+  public exportMigrationBundle(versionOrOptions: 2 | 3 | { formatVersion?: 2 | 3 } = 3): SnapshotBundleV2 | SnapshotBundleV3 {
+    return exportMigrationBundle(this.db, '1.0.1', versionOrOptions);
   }
 
   /** Atomically restore database state from a SnapshotBundle with automatic safety backup. */

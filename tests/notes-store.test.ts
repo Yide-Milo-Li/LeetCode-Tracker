@@ -34,10 +34,9 @@ describe('Notes Store & Schema v9', () => {
     await store.importJsonl(jsonl);
   });
 
-  it('initializes schema to version 9 and creates problem_notes table', () => {
+  it('initializes schema and creates problem_notes table', () => {
     const row = db.prepare('SELECT version FROM schema_version').get() as { version: number };
     assert.equal(row.version, CURRENT_SCHEMA_VERSION);
-    assert.equal(row.version, 9);
 
     // Verify problem_notes table exists
     const tableRow = db
@@ -94,11 +93,11 @@ describe('Notes Store & Schema v9', () => {
     store.upsertProblemNote('1', 'Hash map solution notes');
     store.upsertProblemNote('3', 'Sliding window set notes');
 
-    // Test scope: practiced (#1 has practice & note, #3 has note)
+    // Test scope: practiced strictly reflects active practice (#1 has practice, #3 has only note)
     const practiced = store.listProblemNotes({ scope: 'practiced' });
-    assert.equal(practiced.total, 2);
-    const practicedIds = practiced.items.map((i) => i.questionFrontendId).sort();
-    assert.deepEqual(practicedIds, ['1', '3']);
+    assert.equal(practiced.total, 1);
+    const practicedIds = practiced.items.map((i) => i.questionFrontendId);
+    assert.deepEqual(practicedIds, ['1']);
 
     // Test scope: all
     const all = store.listProblemNotes({ scope: 'all' });
@@ -215,8 +214,8 @@ describe('Notes Store & Schema v9', () => {
     assert.ok(mdDefaultTemplate.includes('---'));
     assert.ok(mdDefaultTemplate.includes('## 💡 核心思路'));
     assert.ok(mdDefaultTemplate.includes('## ⏱️ 复杂度分析'));
-    assert.ok(mdDefaultTemplate.includes('- 时间复杂度: $O(N)$'));
-    assert.ok(mdDefaultTemplate.includes('- 空间复杂度: $O(1)$'));
+    assert.ok(mdDefaultTemplate.includes('- 时间复杂度:'));
+    assert.ok(mdDefaultTemplate.includes('- 空间复杂度:'));
     assert.ok(mdDefaultTemplate.includes('## 💻 最佳实现'));
     assert.ok(mdDefaultTemplate.includes('## ⚠️ 避坑与边界情况'));
   });
@@ -267,5 +266,70 @@ describe('Notes Store & Schema v9', () => {
     assert.ok(zipZh.length > 100);
     assert.equal(zipZh[0], 0x50);
     assert.equal(zipZh[1], 0x4b);
+  });
+
+  it('correctly classifies historical empty templates and blank notes as having no custom note', () => {
+    const historicalEmptyTemplate = `## 💡 Key Idea & Approach\n- \n\n---\n\n## ⏱️ Complexity Analysis\n- Time Complexity: $O(N)$\n- Space Complexity: $O(1)$\n\n---\n\n## 💻 Clean Implementation\n\`\`\`python\nclass Solution:\n    pass\n\`\`\`\n\n---\n\n## ⚠️ Edge Cases & Traps\n- \n`;
+
+    // Save historical template on #2 and blank on #4
+    store.upsertProblemNote('2', historicalEmptyTemplate);
+    store.upsertProblemNote('4', '   \n\t  ');
+
+    // Save real note on #1
+    store.upsertProblemNote('1', 'Two pointers technique');
+
+    // Query hasNote: 'true' -> only #1
+    const withNotes = store.listProblemNotes({ scope: 'all', hasNote: 'true' });
+    assert.equal(withNotes.total, 1);
+    assert.equal(withNotes.items[0].questionFrontendId, '1');
+    assert.equal(withNotes.items[0].hasCustomNote, true);
+    assert.ok(withNotes.items[0].customNoteUpdatedAt !== null);
+
+    // Query hasNote: 'false' -> #2, #3, #4
+    const withoutNotes = store.listProblemNotes({ scope: 'all', hasNote: 'false' });
+    assert.equal(withoutNotes.total, 3);
+    const withoutNotesIds = withoutNotes.items.map((i) => i.questionFrontendId).sort();
+    assert.deepEqual(withoutNotesIds, ['2', '3', '4']);
+
+    // For #2, hasCustomNote is false and customNoteUpdatedAt is null in summary, but raw note is preserved
+    const summary2 = withoutNotes.items.find((i) => i.questionFrontendId === '2');
+    assert.ok(summary2);
+    assert.equal(summary2.hasCustomNote, false);
+    assert.equal(summary2.customNoteUpdatedAt, null);
+
+    const raw2 = store.getProblemNote('2');
+    assert.ok(raw2);
+    assert.equal(raw2.content, historicalEmptyTemplate);
+
+    // Neither #2 nor #4 enters scope: 'practiced'
+    const practiced = store.listProblemNotes({ scope: 'practiced' });
+    assert.equal(practiced.total, 0);
+
+    // Note priority ordering: problems with real notes come first
+    const allOrdered = store.listProblemNotes({ scope: 'all' });
+    assert.equal(allOrdered.items[0].questionFrontendId, '1');
+  });
+
+  it('supports proactive clearing of existing notes without deleting problem data', () => {
+    // Add real note
+    store.upsertProblemNote('1', 'Valid binary search notes');
+    const initial = store.listProblemNotes({ scope: 'all', hasNote: 'true' });
+    assert.equal(initial.total, 1);
+
+    // Proactively clear the note to empty string
+    store.upsertProblemNote('1', '');
+    const afterClear = store.listProblemNotes({ scope: 'all', hasNote: 'true' });
+    assert.equal(afterClear.total, 0);
+
+    const withoutNotes = store.listProblemNotes({ scope: 'all', hasNote: 'false' });
+    const summary1 = withoutNotes.items.find((i) => i.questionFrontendId === '1');
+    assert.ok(summary1);
+    assert.equal(summary1.hasCustomNote, false);
+    assert.equal(summary1.customNoteUpdatedAt, null);
+
+    // Raw note in database has content: ''
+    const rawNote = store.getProblemNote('1');
+    assert.ok(rawNote);
+    assert.equal(rawNote.content, '');
   });
 });

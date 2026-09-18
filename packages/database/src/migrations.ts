@@ -7,6 +7,7 @@ import { CURRENT_SCHEMA_VERSION, inspectCatalogSchema } from './schema.ts';
 import { createPlanningSchema } from './planning-schema.ts';
 import { createPracticeMetadataSchema } from './practice-schema.ts';
 import { createNotesSchema } from './notes-schema.ts';
+import { createOutcomeSchema } from './outcome-schema.ts';
 
 /** Configure recommended pragmas for resilience, concurrency, and integrity. */
 export function configurePragmas(db: DatabaseSync): void {
@@ -327,6 +328,7 @@ export function initOrMigrateSchema(db: DatabaseSync): void {
     }
     createPracticeMetadataSchema(db);
     createNotesSchema(db);
+    createOutcomeSchema(db);
     inspectCatalogSchema(db);
     db.exec('COMMIT');
   } catch (error) {

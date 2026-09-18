@@ -79,7 +79,7 @@ export function getPracticeRecord(db: DatabaseSync, id: string): PracticeRecord 
       `
     SELECT
       pr.id, pr.question_id, pr.completed, pr.practiced_at, pr.time_precision, pr.notes,
-      pr.status, pr.created_at, pr.updated_at, pr.revoked_at, pr.duration_minutes, pr.source_timezone, pr.revision,
+      pr.status, pr.created_at, pr.updated_at, pr.revoked_at, pr.duration_minutes, pr.source_timezone, pr.outcome, pr.revision,
       p.frontend_question_id, p.title as problem_title
     FROM practice_records pr
     JOIN problems p ON pr.question_id = p.question_id
@@ -97,6 +97,7 @@ export function getPracticeRecord(db: DatabaseSync, id: string): PracticeRecord 
         notes: string | null;
         duration_minutes: number | null;
         source_timezone: string | null;
+        outcome: 'independent' | 'assisted' | 'unsolved' | null;
         revision: number;
         status: 'active' | 'revoked';
         created_at: number;
@@ -120,6 +121,7 @@ export function getPracticeRecord(db: DatabaseSync, id: string): PracticeRecord 
     notes: row.notes,
     durationMinutes: row.duration_minutes,
     sourceTimezone: row.source_timezone,
+    outcome: row.outcome,
     revision: row.revision,
     status: row.status,
     createdAt: row.created_at,
@@ -177,7 +179,7 @@ export function queryPracticeRecords(
       `
     SELECT
       pr.id, pr.question_id, pr.completed, pr.practiced_at, pr.time_precision, pr.notes,
-      pr.status, pr.created_at, pr.updated_at, pr.revoked_at, pr.duration_minutes, pr.source_timezone, pr.revision,
+      pr.status, pr.created_at, pr.updated_at, pr.revoked_at, pr.duration_minutes, pr.source_timezone, pr.outcome, pr.revision,
       p.frontend_question_id, p.title as problem_title
     FROM practice_records pr
     JOIN problems p ON pr.question_id = p.question_id
@@ -195,6 +197,7 @@ export function queryPracticeRecords(
     notes: string | null;
     duration_minutes: number | null;
     source_timezone: string | null;
+    outcome: 'independent' | 'assisted' | 'unsolved' | null;
     revision: number;
     status: 'active' | 'revoked';
     created_at: number;
@@ -219,6 +222,7 @@ export function queryPracticeRecords(
       notes: r.notes,
       durationMinutes: r.duration_minutes,
       sourceTimezone: r.source_timezone,
+      outcome: r.outcome,
       revision: r.revision,
       status: r.status,
       createdAt: r.created_at,
@@ -284,6 +288,10 @@ export function insertPracticeRecordTransaction(
       validated.durationMinutes ?? null,
       id
     );
+    db.prepare('UPDATE practice_records SET outcome=? WHERE id=?').run(
+      validated.outcome ?? null,
+      id
+    );
 
     if (validated.operationId) {
       db.prepare(
@@ -331,6 +339,19 @@ export function updatePracticeRecordTransaction(
       ? validated.durationMinutes
       : existing.durationMinutes;
 
+  const finalCompleted = validated.completed !== undefined ? validated.completed : existing.completed;
+  let finalOutcome = validated.outcome !== undefined ? validated.outcome : existing.outcome;
+  if (validated.completed !== undefined && validated.outcome === undefined) {
+    if (finalCompleted && finalOutcome === 'unsolved') finalOutcome = null;
+    if (!finalCompleted && (finalOutcome === 'independent' || finalOutcome === 'assisted')) finalOutcome = null;
+  }
+  if (finalCompleted && finalOutcome === 'unsolved') {
+    throw new Error('Incompatible outcome for completed status');
+  }
+  if (!finalCompleted && finalOutcome !== null && finalOutcome !== 'unsolved') {
+    throw new Error('Incompatible outcome for completed status');
+  }
+
   db.exec('BEGIN IMMEDIATE;');
   try {
     db.prepare(
@@ -340,10 +361,10 @@ export function updatePracticeRecordTransaction(
         practiced_at = ?,
         time_precision = ?,
         notes = ?,
-        updated_at = ?, duration_minutes = ?, revision = revision + 1
+        updated_at = ?, duration_minutes = ?, outcome = ?, revision = revision + 1
       WHERE id = ? AND status = 'active'
     `
-    ).run(completed, practicedAt, timePrecision, notes, now, durationMinutes, id);
+    ).run(completed, practicedAt, timePrecision, notes, now, durationMinutes, finalOutcome, id);
 
     if (validated.sourceTimezone !== undefined) {
       db.prepare('UPDATE practice_records SET source_timezone=? WHERE id=?').run(

@@ -3,13 +3,14 @@
  */
 import React from 'react';
 import { TopicInsights } from './TopicInsights.tsx';
-import type { DashboardResponse, TagMasteryReport } from '../api.ts';
+import type { DashboardResponse, TagMasteryReport, KnowledgeProfileReport } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
 
 interface DashboardDistributionsProps {
   data: DashboardResponse | null;
   lang: Language;
   masteryReport?: TagMasteryReport | null;
+  profileReport?: KnowledgeProfileReport | null;
   onNavigateToStrategies?: () => void;
 }
 
@@ -20,6 +21,7 @@ export const DashboardDistributions: React.FC<DashboardDistributionsProps> = ({
   data,
   lang,
   masteryReport,
+  profileReport,
   onNavigateToStrategies,
 }) => {
   const t = translations[lang];
@@ -82,7 +84,7 @@ export const DashboardDistributions: React.FC<DashboardDistributionsProps> = ({
         </div>
       </div>
 
-      {masteryReport && <TopicInsights report={masteryReport} lang={lang} onConfigure={onNavigateToStrategies} />}
+      {masteryReport && <TopicInsights report={masteryReport} profileReport={profileReport} lang={lang} onConfigure={onNavigateToStrategies} />}
     </>
   );
 };

@@ -24,6 +24,23 @@ Adaptive review uses completed manual durations only: Easy 30, Medium 45 and Har
 
 The fixed ladder remains 1, 3, 7, 14 and 30 days. A stage-two review with a seven-day base becomes three days after a threshold-reaching due success; the next smooth due success advances to fourteen days. First-success/baseline rules retain existing behavior. Fixed mode remains the default.
 
+## Knowledge Profile and adaptive topic recommendations
+
+`GET /api/v1/knowledge-profile` provides a multi-signal, sample-gated report (`profile-v1`) that evaluates evidence by `topic × difficulty` over a sliding 30-calendar-day window without computing composite mastery scores.
+
+- **Outcome signals**: Integrates lightweight practice feedback (`independent`, `assisted`, `unsolved`, `unrecorded`).
+- **Conservative outcome priority**: Multiple practices on the same problem and date conservatively resolve to `unsolved > assisted > independent`.
+- **Decay weighting**: Applies an exponential half-life weighting of $2^{-\Delta \text{days} / 14}$, making recent practice outcomes more influential than older attempts.
+- **Sample sufficiency gates**: Feedback conclusions require at least 3 distinct problems, 2 distinct practice days, and 3 recorded outcomes. Duration trends independently require at least 3 samples across 2 distinct problems.
+- **Difficulty independence**: Easy stability does not mask Medium difficulty challenges; each difficulty tier is evaluated and reported independently.
+- **Evaluation tiers**:
+  - `needs_reinforcement`: At least 50% weighted assisted/unsolved feedback, or at least 50% long-duration samples.
+  - `recently_stable`: Feedback is sufficient, independent solve share is at least 80%, with zero long-duration and zero overdue samples.
+  - `developing`: Samples are accumulating but have not satisfied stability or reinforcement criteria.
+  - `insufficient_evidence`: Fewer than 3 problems or 2 practice days.
+
+When `focusWeakTags` is enabled, candidate selection allocates 80% towards reinforcement topics needing attention and 20% towards exploring less-practiced topics, strictly within the strategy's hard constraints (quotas, difficulty mix, and tag limits). Generated plan items store versioned explanations (`adaptive-v1`) citing transparent local facts rather than subjective scores.
+
 ## Planning, history and model boundaries
 
 Generation, replacement and temporary overrides share a request-local candidate context. Adaptive projections never overwrite the fixed `problem_review_state` cache. No database migration is required.

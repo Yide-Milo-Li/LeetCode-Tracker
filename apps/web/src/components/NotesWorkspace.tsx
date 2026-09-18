@@ -20,57 +20,12 @@ import {
   api,
   type ProblemNoteSummary,
   type PracticeRecord,
+  NOTE_TEMPLATES,
+  hasMeaningfulNoteContent,
 } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
 import { PageHeader, Feedback, Field, Pagination } from './ui.tsx';
 import { QuickCopyButtons } from './QuickCopyButtons.tsx';
-
-const NOTE_TEMPLATES = {
-  en: `## 💡 Key Idea & Approach
-- 
-
----
-
-## ⏱️ Complexity Analysis
-- Time Complexity: $O(N)$
-- Space Complexity: $O(1)$
-
----
-
-## 💻 Clean Implementation
-\`\`\`python
-class Solution:
-    pass
-\`\`\`
-
----
-
-## ⚠️ Edge Cases & Traps
-- 
-`,
-  zh: `## 💡 核心思路
-- 
-
----
-
-## ⏱️ 复杂度分析
-- 时间复杂度: $O(N)$
-- 空间复杂度: $O(1)$
-
----
-
-## 💻 最佳实现
-\`\`\`python
-class Solution:
-    pass
-\`\`\`
-
----
-
-## ⚠️ 避坑与边界情况
-- 
-`,
-};
 
 export interface NotesWorkspaceProps {
   lang: Language;
@@ -105,7 +60,9 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
 
   const [selectedSummary, setSelectedSummary] = useState<ProblemNoteSummary | null>(null);
   const [noteContent, setNoteContent] = useState('');
+  const [savedContent, setSavedContent] = useState('');
   const [loadingNote, setLoadingNote] = useState(false);
+  const [noteLoadError, setNoteLoadError] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState('');
@@ -115,7 +72,17 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
   const [loadingPractices, setLoadingPractices] = useState(false);
   const [showTimeline, setShowTimeline] = useState(false);
 
-  // Load problem notes list
+  // Retain selected summary or update from current items if present
+  useEffect(() => {
+    if (selectedId) {
+      const matched = items.find((it) => it.questionFrontendId === selectedId);
+      if (matched) {
+        setSelectedSummary(matched);
+      }
+    }
+  }, [items, selectedId]);
+
+  // Load problem notes list with pagination clamping
   const loadList = useCallback(() => {
     let active = true;
     setLoadingList(true);
@@ -132,6 +99,10 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
         if (!active) return;
         setItems(res.items);
         setTotal(res.total);
+        const maxPage = Math.max(1, Math.ceil(res.total / limit));
+        if (page > maxPage) {
+          setPage(maxPage);
+        }
         if (!selectedId && res.items.length > 0) {
           setSelectedId(res.items[0].questionFrontendId);
         }
@@ -146,45 +117,42 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
     return () => {
       active = false;
     };
-  }, [scope, search, difficulty, hasNote, page, selectedId]);
+  }, [scope, search, difficulty, hasNote, page, limit, selectedId]);
 
   useEffect(() => {
     loadList();
   }, [loadList]);
 
-  // Handle pre-selected problem or change of selectedId
+  // Fetch problem note content and practice records (strictly decoupled from items and lang)
   useEffect(() => {
     if (!selectedId) {
       setSelectedSummary(null);
       setNoteContent('');
+      setSavedContent('');
       setPractices([]);
+      setNoteLoadError(false);
       return;
-    }
-
-    // Find summary in current list or fetch
-    const matched = items.find((it) => it.questionFrontendId === selectedId);
-    if (matched) {
-      setSelectedSummary(matched);
     }
 
     let active = true;
     setLoadingNote(true);
     setSaveSuccess(false);
     setSaveError('');
+    setNoteLoadError(false);
 
     // Fetch note content
     api
       .getNote(selectedId)
       .then((res) => {
         if (!active) return;
-        if (res.note && res.note.content.trim().length > 0) {
-          setNoteContent(res.note.content);
-        } else {
-          setNoteContent(NOTE_TEMPLATES[lang]);
-        }
+        const content = res.note?.content ?? '';
+        setNoteContent(content);
+        setSavedContent(content);
       })
       .catch(() => {
-        if (active) setNoteContent(NOTE_TEMPLATES[lang]);
+        if (active) {
+          setNoteLoadError(true);
+        }
       })
       .finally(() => {
         if (active) setLoadingNote(false);
@@ -208,55 +176,103 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
     return () => {
       active = false;
     };
-  }, [selectedId, items, lang]);
+  }, [selectedId]);
 
-  // Adapt untouched default template when language changes without overwriting user notes
-  useEffect(() => {
-    if (noteContent === NOTE_TEMPLATES.en && lang === 'zh') {
-      setNoteContent(NOTE_TEMPLATES.zh);
-    } else if (noteContent === NOTE_TEMPLATES.zh && lang === 'en') {
-      setNoteContent(NOTE_TEMPLATES.en);
-    }
-  }, [lang, noteContent]);
+  // Manual retry handler for note loading failures
+  const handleRetryLoad = useCallback(() => {
+    if (!selectedId) return;
+    setLoadingNote(true);
+    setNoteLoadError(false);
+    api
+      .getNote(selectedId)
+      .then((res) => {
+        const content = res.note?.content ?? '';
+        setNoteContent(content);
+        setSavedContent(content);
+      })
+      .catch(() => {
+        setNoteLoadError(true);
+      })
+      .finally(() => {
+        setLoadingNote(false);
+      });
+  }, [selectedId]);
+
+  // Meaningful note validity check & save eligibility
+  const isModified = noteContent !== savedContent;
+  const isBlank = noteContent.trim().length === 0;
+  const hasMeaningful = hasMeaningfulNoteContent(noteContent);
+  const canSave =
+    !loadingNote &&
+    !savingNote &&
+    !noteLoadError &&
+    isModified &&
+    (isBlank ? savedContent.trim().length > 0 : hasMeaningful);
 
   // Save note handler
   async function handleSaveNote() {
-    if (!selectedId) return;
+    if (!selectedId || !canSave) return;
+    const targetId = selectedId;
+    const targetContent = noteContent;
     setSavingNote(true);
     setSaveSuccess(false);
     setSaveError('');
 
     try {
-      await api.upsertNote(selectedId, noteContent);
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 2500);
+      await api.upsertNote(targetId, targetContent);
+      if (selectedId === targetId) {
+        setSavedContent(targetContent);
+        setSaveSuccess(true);
+        setTimeout(() => setSaveSuccess(false), 2500);
 
-      // Update local list item status
-      setItems((prev) =>
-        prev.map((it) =>
-          it.questionFrontendId === selectedId
-            ? { ...it, hasCustomNote: true, customNoteUpdatedAt: Date.now() }
-            : it
-        )
-      );
+        const isMeaningful = hasMeaningfulNoteContent(targetContent);
+        setSelectedSummary((prev) =>
+          prev && prev.questionFrontendId === targetId
+            ? {
+                ...prev,
+                hasCustomNote: isMeaningful,
+                customNoteUpdatedAt: isMeaningful ? Date.now() : null,
+              }
+            : prev
+        );
+
+        setItems((prev) =>
+          prev.map((it) =>
+            it.questionFrontendId === targetId
+              ? {
+                  ...it,
+                  hasCustomNote: isMeaningful,
+                  customNoteUpdatedAt: isMeaningful ? Date.now() : null,
+                }
+              : it
+          )
+        );
+      }
+      loadList();
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : String(err));
+      if (selectedId === targetId) {
+        setSaveError(err instanceof Error ? err.message : String(err));
+      }
     } finally {
-      setSavingNote(false);
+      if (selectedId === targetId) {
+        setSavingNote(false);
+      }
     }
   }
 
   // Ctrl+S / Cmd+S shortcut to save
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
-        void handleSaveNote();
+        if (canSave) {
+          void handleSaveNote();
+        }
       }
     }
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleSaveNote]);
+  }, [canSave, handleSaveNote]);
 
   const totalPages = Math.max(1, Math.ceil(total / limit));
 
@@ -786,7 +802,7 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
 
               {/* Long-form Note Editor */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
                   <div
                     style={{
                       fontSize: '0.875rem',
@@ -794,18 +810,56 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
                       color: 'var(--text-secondary)',
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '6px',
+                      gap: '8px',
                     }}
                   >
                     <BookOpen size={15} />
                     <span>{t.solutionReflectionTitle}</span>
+
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => setNoteContent(NOTE_TEMPLATES[lang])}
+                      disabled={noteContent.trim().length > 0}
+                      title={t.insertTemplateTitle}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        fontSize: '0.75rem',
+                        padding: '3px 8px',
+                      }}
+                    >
+                      <FileText size={12} />
+                      <span>{t.insertTemplate}</span>
+                    </button>
+
+                    {noteContent.trim().length > 0 && !hasMeaningfulNoteContent(noteContent) && (
+                      <span
+                        title={t.unfilledTemplateTooltip}
+                        style={{
+                          fontSize: '0.6875rem',
+                          backgroundColor: 'var(--warning-bg, rgba(234, 179, 8, 0.15))',
+                          color: 'var(--warning, #eab308)',
+                          padding: '2px 8px',
+                          borderRadius: '4px',
+                          fontWeight: 500,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          border: '1px solid var(--warning, #eab308)',
+                        }}
+                      >
+                        ⚠️ {t.unfilledTemplateNotice}
+                      </span>
+                    )}
                   </div>
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     {saveSuccess && (
                       <span style={{ color: 'var(--primary)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
                         <Check size={13} />
-                        <span>{t.noteSaved}</span>
+                        <span>{noteContent.trim().length === 0 ? t.noteClearedSuccess : t.noteSaved}</span>
                       </span>
                     )}
                     {saveError && <span style={{ color: 'var(--danger)', fontSize: '0.75rem' }}>{saveError}</span>}
@@ -814,8 +868,17 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
                       type="button"
                       className="btn btn-primary btn-sm"
                       onClick={handleSaveNote}
-                      disabled={savingNote}
+                      disabled={!canSave}
                       style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                      title={
+                        !canSave
+                          ? !isModified
+                            ? zh ? '内容未修改' : 'No changes to save'
+                            : isBlank
+                            ? t.emptyNoteSaveDisabled
+                            : t.unfilledTemplateNotice
+                          : undefined
+                      }
                     >
                       <Save size={13} />
                       <span>{savingNote ? t.savingNote : t.saveNote}</span>
@@ -824,11 +887,37 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
                   </div>
                 </div>
 
+                {noteLoadError && (
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '8px 12px',
+                      backgroundColor: 'var(--danger-bg, rgba(239, 68, 68, 0.1))',
+                      color: 'var(--danger, #ef4444)',
+                      borderRadius: '6px',
+                      fontSize: '0.8125rem',
+                      border: '1px solid var(--danger, #ef4444)',
+                    }}
+                  >
+                    <span>{t.loadNoteError}</span>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={handleRetryLoad}
+                      style={{ fontSize: '0.75rem', padding: '2px 8px' }}
+                    >
+                      {t.retry}
+                    </button>
+                  </div>
+                )}
+
                 <textarea
                   rows={16}
                   value={noteContent}
                   onChange={(e) => setNoteContent(e.target.value)}
-                  placeholder="Write your comprehensive solution, approach, and edge cases here..."
+                  placeholder={t.noteEditorPlaceholder}
                   style={{
                     width: '100%',
                     padding: '12px 14px',

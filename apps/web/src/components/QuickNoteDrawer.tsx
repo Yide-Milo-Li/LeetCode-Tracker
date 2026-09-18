@@ -3,7 +3,7 @@
  */
 import React, { useEffect, useState } from 'react';
 import { X, ExternalLink, BookOpen, Clock, AlertCircle } from 'lucide-react';
-import { api, type ProblemNote } from '../api.ts';
+import { api, type ProblemNote, hasMeaningfulNoteContent } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
 import { QuickCopyButtons } from './QuickCopyButtons.tsx';
 
@@ -215,6 +215,24 @@ export function QuickNoteDrawer({
                   fontFamily: 'inherit',
                 }}
               >
+                {!hasMeaningfulNoteContent(note.content) && (
+                  <div
+                    style={{
+                      marginBottom: '10px',
+                      padding: '4px 8px',
+                      backgroundColor: 'var(--warning-bg, rgba(234, 179, 8, 0.15))',
+                      color: 'var(--warning, #eab308)',
+                      borderRadius: '4px',
+                      fontSize: '0.75rem',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      border: '1px solid var(--warning, #eab308)',
+                    }}
+                  >
+                    ⚠️ {t.unfilledTemplateNotice}
+                  </div>
+                )}
                 {note.content}
               </div>
             ) : (

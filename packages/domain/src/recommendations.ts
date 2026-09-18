@@ -5,6 +5,7 @@
 import {
   difficulties,
   PlanningError,
+  resolveReviewSettings,
   type Rules,
   type Difficulty,
   type Evidence,
@@ -251,7 +252,48 @@ export interface Selection {
 }
 
 /**
- * Select daily quotas while preserving completed items; 100% review forbids new-item backfill.
+ * Determines the next difficulty to append based on cumulative deficit:
+ * chooses the difficulty with maximum (N + 1) * ratio - count(d).
+ * Ties are broken deterministically in order: Easy > Medium > Hard.
+ * Zero-proportion difficulties are strictly excluded.
+ *
+ * @param difficultyRatio Proportion percentages for Easy, Medium, Hard (summing to 100).
+ * @param currentItems Currently arranged problems in the plan.
+ * @returns The next difficulty to select.
+ */
+export function nextDifficultyForAppend(
+  difficultyRatio: Record<Difficulty, number>,
+  currentItems: { problem: { difficulty: Difficulty } }[]
+): Difficulty {
+  const n = currentItems.length;
+  const currentCounts: Record<Difficulty, number> = { Easy: 0, Medium: 0, Hard: 0 };
+  for (const item of currentItems) {
+    currentCounts[item.problem.difficulty]++;
+  }
+
+  let bestDiff: Difficulty | null = null;
+  let bestScore = -Infinity;
+
+  for (const d of difficulties) {
+    const ratio = difficultyRatio[d];
+    if (ratio <= 0) continue; // Zero ratio difficulties do not participate
+    const score = (n + 1) * (ratio / 100) - currentCounts[d];
+    // Strict > ensures tie break preserves order Easy > Medium > Hard
+    if (score > bestScore + 1e-9) {
+      bestScore = score;
+      bestDiff = d;
+    }
+  }
+
+  if (!bestDiff) {
+    throw new PlanningError('INVALID_DIFFICULTY_RATIO', 'No difficulty has positive ratio', 400);
+  }
+  return bestDiff;
+}
+
+/**
+ * Select daily quotas while preserving completed items.
+ * Enforces strict integer quotas without cross-kind substitution between review and new problems.
  */
 export function select(
   pool: Candidate[],
@@ -261,15 +303,29 @@ export function select(
   const limits = quotas(rules);
   const selected: Candidate[] = [];
   const notices: Bilingual[] = [];
-  const reviewOnly = rules.reviewEnabled && rules.reviewPercent === 100;
 
-  const reviewTargetCount = Math.round(
-    (rules.dailyCount * (rules.reviewEnabled ? rules.reviewPercent ?? 0 : 0)) / 100
-  );
+  const { reviewMode, targetReviewCount } = resolveReviewSettings(rules);
   const reviewTargets = allocate(
-    reviewTargetCount,
+    targetReviewCount,
     difficulties.map((d) => limits[d])
   );
+
+  const totalKeptReview = retained.filter(item => item.kind === 'review').length;
+  if (totalKeptReview > targetReviewCount) {
+    throw new PlanningError(
+      'COMPLETED_QUOTA',
+      `Completed review items (${totalKeptReview}) exceed the review quota (${targetReviewCount})`
+    );
+  }
+
+  const targetFreshCount = rules.dailyCount - targetReviewCount;
+  const totalKeptFresh = retained.filter(item => item.kind === 'new').length;
+  if (totalKeptFresh > targetFreshCount) {
+    throw new PlanningError(
+      'COMPLETED_QUOTA',
+      `Completed new items (${totalKeptFresh}) exceed the new item quota (${targetFreshCount})`
+    );
+  }
 
   for (let i = 0; i < difficulties.length; i++) {
     const difficulty = difficulties[i];
@@ -284,38 +340,39 @@ export function select(
 
     const remainingSlotCount = limits[difficulty] - kept.length;
     const keptReviewCount = kept.filter((item) => item.kind === 'review').length;
-    const targetReviewCount = Math.min(
+    const targetDifficultyReviewCount = Math.min(
       remainingSlotCount,
       Math.max(0, reviewTargets[i] - keptReviewCount)
     );
+    const targetDifficultyFreshCount = remainingSlotCount - targetDifficultyReviewCount;
 
     const reviews = pool.filter((p) => p.difficulty === difficulty && p.kind === 'review');
-    // All-review is an explicit kind constraint, even when too few reviews are due.
-    const fresh = reviewOnly ? [] : pool.filter((p) => p.difficulty === difficulty && p.kind === 'new');
+    const fresh = reviewMode === 'all' ? [] : pool.filter((p) => p.difficulty === difficulty && p.kind === 'new');
 
-    const chosen = [
-      ...reviews.slice(0, targetReviewCount),
-      ...fresh.slice(0, remainingSlotCount - targetReviewCount),
-    ];
+    const chosenReviews = reviews.slice(0, targetDifficultyReviewCount);
+    const chosenFresh = fresh.slice(0, targetDifficultyFreshCount);
 
-    // If reviews or fresh were short, backfill from remaining unselected items of the same difficulty
-    const usedQuestionIds = new Set(chosen.map((p) => p.questionId));
-    const backfillCandidates = [...fresh, ...reviews].filter(
-      (p) => !usedQuestionIds.has(p.questionId)
-    );
-    const deficit = Math.max(0, remainingSlotCount - chosen.length);
-    chosen.push(...backfillCandidates.slice(0, deficit));
+    const chosen = [...chosenReviews, ...chosenFresh];
 
-    // Emit notice if review share had to be adjusted within this difficulty
-    const actualReviewCount = chosen.filter((p) => p.kind === 'review').length;
-    if (actualReviewCount !== targetReviewCount) {
+    // Emit notice if review quota was short within this difficulty (no cross-kind substitution)
+    if (chosenReviews.length < targetDifficultyReviewCount) {
+      const deficit = targetDifficultyReviewCount - chosenReviews.length;
       notices.push({
-        en: `${difficulty}: review share adjusted within the difficulty.`,
-        zh: `${difficulty}：复习占比已在同难度内调整。`,
+        en: `${difficulty}: review quota deficit of ${deficit} problem(s).`,
+        zh: `${difficulty}：缺少 ${deficit} 道复习题。`,
       });
     }
 
-    // Emit notice if hard filters caused a total shortage in this difficulty
+    // Emit notice if fresh problem quota was short within this difficulty (no cross-kind substitution)
+    if (chosenFresh.length < targetDifficultyFreshCount) {
+      const deficit = targetDifficultyFreshCount - chosenFresh.length;
+      notices.push({
+        en: `${difficulty}: fresh problem deficit of ${deficit} problem(s).`,
+        zh: `${difficulty}：缺少 ${deficit} 道新题。`,
+      });
+    }
+
+    // Emit notice if hard filters or shortages caused a total shortage in this difficulty
     if (chosen.length < remainingSlotCount) {
       const shortage = remainingSlotCount - chosen.length;
       notices.push({

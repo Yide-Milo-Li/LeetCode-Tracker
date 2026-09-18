@@ -175,6 +175,184 @@ describe('NotesWorkspace Component', () => {
     assert.equal(called.frontendId, '1');
     assert.equal(called.content, '## Updated Content\nNew edge cases.');
   });
+
+  it('starts blank for problem without note, disables save until meaningful content is entered', async () => {
+    mock.method(api, 'listNotes', async () => ({
+      items: [
+        {
+          questionId: '2',
+          questionFrontendId: '2',
+          title: 'Add Two Numbers',
+          titleSlug: 'add-two-numbers',
+          url: 'https://leetcode.com/problems/add-two-numbers/',
+          difficulty: 'Medium' as const,
+          tags: ['Linked List'],
+          isPaidOnly: false,
+          totalPractices: 0,
+          hasAccepted: false,
+          hasCustomNote: false,
+          customNoteUpdatedAt: null,
+          reviewStage: null,
+          latestPracticeNotes: null,
+        },
+      ],
+      total: 1,
+    }));
+
+    mock.method(api, 'getNote', async () => ({ note: null }));
+    mock.method(api, 'getPracticeRecords', async () => ({ total: 0, page: 1, limit: 100, items: [] }));
+
+    let upsertCalled = false;
+    mock.method(api, 'upsertNote', async () => {
+      upsertCalled = true;
+      return { note: { questionFrontendId: '2', content: '', updatedAt: Date.now() } };
+    });
+
+    await act(async () => {
+      render(<NotesWorkspace lang="en" />);
+    });
+
+    const textarea = screen.getByPlaceholderText(/Write your comprehensive solution/i) as HTMLTextAreaElement;
+    assert.equal(textarea.value, '');
+
+    const insertBtn = screen.getByRole('button', { name: /insert template/i }) as HTMLButtonElement;
+    assert.equal(insertBtn.disabled, false);
+
+    const saveBtn = screen.getByRole('button', { name: /save note/i }) as HTMLButtonElement;
+    assert.equal(saveBtn.disabled, true);
+
+    // Shortcut Ctrl+S while disabled should not trigger upsert
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 's', ctrlKey: true });
+    });
+    assert.equal(upsertCalled, false);
+
+    // Click Insert Template
+    await act(async () => {
+      fireEvent.click(insertBtn);
+    });
+    assert.ok(textarea.value.includes('Key Idea & Approach'));
+    assert.equal(insertBtn.disabled, true);
+    assert.equal(saveBtn.disabled, true);
+    assert.ok(screen.getByText(/Template Unedited/i));
+
+    // Add meaningful reflection
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: textarea.value + '\nUse dummy head node to simplify carry handling.' } });
+    });
+    assert.equal(saveBtn.disabled, false);
+    assert.equal(screen.queryByText(/Template Unedited/i), null);
+
+    // Save should now work
+    await act(async () => {
+      fireEvent.click(saveBtn);
+    });
+    assert.equal(upsertCalled, true);
+  });
+
+  it('supports proactive clearing of existing note and updates custom note status', async () => {
+    let currentCustomNote = true;
+    mock.method(api, 'listNotes', async () => ({
+      items: [
+        {
+          questionId: '1',
+          questionFrontendId: '1',
+          title: 'Two Sum',
+          titleSlug: 'two-sum',
+          url: 'https://leetcode.com/problems/two-sum/',
+          difficulty: 'Easy' as const,
+          tags: ['Array'],
+          isPaidOnly: false,
+          totalPractices: 1,
+          hasAccepted: true,
+          hasCustomNote: currentCustomNote,
+          customNoteUpdatedAt: Date.now(),
+          reviewStage: 1,
+          latestPracticeNotes: 'AC',
+        },
+      ],
+      total: 1,
+    }));
+
+    mock.method(api, 'getNote', async () => ({
+      note: { questionFrontendId: '1', content: 'Existing reflections', updatedAt: Date.now() },
+    }));
+    mock.method(api, 'getPracticeRecords', async () => ({ total: 0, page: 1, limit: 100, items: [] }));
+
+    let savedContent: string | null = null;
+    mock.method(api, 'upsertNote', async (id: string, content: string) => {
+      savedContent = content;
+      currentCustomNote = false;
+      return { note: { questionFrontendId: id, content, updatedAt: Date.now() } };
+    });
+
+    await act(async () => {
+      render(<NotesWorkspace lang="en" />);
+    });
+
+    const textarea = screen.getByPlaceholderText(/Write your comprehensive solution/i) as HTMLTextAreaElement;
+    assert.equal(textarea.value, 'Existing reflections');
+
+    const saveBtn = screen.getByRole('button', { name: /save note/i }) as HTMLButtonElement;
+    assert.equal(saveBtn.disabled, true); // untouched
+
+    // Clear content
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: '' } });
+    });
+
+    // Save should now be enabled because user is proactively clearing an existing note
+    assert.equal(saveBtn.disabled, false);
+
+    await act(async () => {
+      fireEvent.click(saveBtn);
+    });
+
+    assert.equal(savedContent, '');
+    assert.ok(screen.getByText(/Note cleared successfully/i));
+  });
+
+  it('preserves user draft when language changes', async () => {
+    mock.method(api, 'listNotes', async () => ({
+      items: [
+        {
+          questionId: '1',
+          questionFrontendId: '1',
+          title: 'Two Sum',
+          titleSlug: 'two-sum',
+          url: 'https://leetcode.com/problems/two-sum/',
+          difficulty: 'Easy' as const,
+          tags: ['Array'],
+          isPaidOnly: false,
+          totalPractices: 1,
+          hasAccepted: true,
+          hasCustomNote: false,
+          customNoteUpdatedAt: null,
+          reviewStage: null,
+          latestPracticeNotes: null,
+        },
+      ],
+      total: 1,
+    }));
+    mock.method(api, 'getNote', async () => ({ note: null }));
+    mock.method(api, 'getPracticeRecords', async () => ({ total: 0, page: 1, limit: 100, items: [] }));
+
+    const { rerender } = render(<NotesWorkspace lang="en" />);
+    await act(async () => {});
+
+    const textarea = screen.getByPlaceholderText(/Write your comprehensive solution/i) as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: 'My custom in-progress draft' } });
+    });
+
+    // Re-render with Chinese language
+    await act(async () => {
+      rerender(<NotesWorkspace lang="zh" />);
+    });
+
+    // Draft must NOT be overwritten
+    assert.equal(textarea.value, 'My custom in-progress draft');
+  });
 });
 
 describe('QuickCopyButtons Component', () => {
@@ -282,5 +460,45 @@ describe('QuickNoteDrawer Component', () => {
 
     assert.equal(workspaceTarget, '1');
     assert.equal(closed, true);
+  });
+
+  it('displays unfilled template notice and falls back to practice log in QuickCopyButtons', async () => {
+    mock.method(api, 'getNote', async () => ({
+      note: {
+        questionFrontendId: '1',
+        content: `## 💡 Key Idea & Approach\n- \n\n---\n\n## ⏱️ Complexity Analysis\n- \n\n---\n\n## 💻 Clean Implementation\n\`\`\`python\n\`\`\`\n\n---\n\n## ⚠️ Edge Cases & Traps\n- `,
+        updatedAt: Date.now(),
+      },
+    }));
+
+    await act(async () => {
+      render(
+        <QuickNoteDrawer
+          lang="en"
+          problem={{
+            frontendId: '1',
+            title: 'Two Sum',
+            url: 'https://leetcode.com/problems/two-sum/',
+            difficulty: 'Easy',
+            tags: ['Array'],
+            slug: 'two-sum',
+          }}
+          latestPracticeNotes="Practice log reflection: Hash map O(N)"
+          onClose={() => {}}
+          onOpenWorkspace={() => {}}
+        />
+      );
+    });
+
+    // Unfilled template badge shown
+    assert.ok(screen.getByText(/Template Unedited/i));
+
+    // When copying Notion card, it should fall back to practice notes instead of blank template
+    const notionBtn = screen.getByRole('button', { name: /Copy for Notion/i });
+    await act(async () => {
+      fireEvent.click(notionBtn);
+    });
+
+    assert.ok(lastCopiedText.includes('Practice log reflection: Hash map O(N)'));
   });
 });

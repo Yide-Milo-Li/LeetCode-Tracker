@@ -23,7 +23,9 @@ export function fallbackPlanContent(problems: CatalogProblem[] = [], _rules: Rul
     const tagNames = p.topicTags.slice(0, 2).map((t: { name: string }) => t.name).join(' / ');
     const tagStr = focusTags ? ` (${focusTags})` : (tagNames ? ` (${tagNames})` : '');
 
-    if (candidate.isFocusTopic) {
+    if (candidate.explanation?.evidenceSummary?.reasonText) {
+      reasons[p.questionId] = candidate.explanation.evidenceSummary.reasonText;
+    } else if (candidate.isFocusTopic) {
       reasons[p.questionId] = {
         en: `Selected ${p.difficulty} problem targeting weak topic${tagStr} for targeted practice.`,
         zh: `精选薄弱专题${p.difficulty === 'Easy' ? '简单' : p.difficulty === 'Medium' ? '中等' : '困难'}题目${tagStr}，针对性巩固突破。`,
@@ -59,12 +61,18 @@ export function fallbackPlanContent(problems: CatalogProblem[] = [], _rules: Rul
  * @param knownTags Known tag slugs from catalog.
  * @returns Rule patch and unresolved requests.
  */
-export function fallbackOverridePrompt(prompt: string, _baseRules: Rules | null, knownTags: string[]): OverridePromptResult {
+export function fallbackOverridePrompt(
+  prompt: string,
+  _baseRules: Rules | null = null,
+  knownTags: string[] = [],
+): OverridePromptResult {
   const patch: RulePatch = {};
   const unresolved: string[] = [];
   const lower = prompt.toLowerCase();
 
-  const countMatch = lower.match(/(\d+)\s*(?:题|problems?|questions?|count)/i) ?? lower.match(/(?:做|加|选|刷)\s*(\d+)/i);
+  const countMatch =
+    lower.match(/(\d+)\s*(?:题|道|problems?|questions?|count)/i) ??
+    lower.match(/(?:做|加|选|刷)\s*(\d+)/i);
   if (countMatch) {
     const num = parseInt(countMatch[1], 10);
     if (num > 0) patch.dailyCount = num;
@@ -80,14 +88,53 @@ export function fallbackOverridePrompt(prompt: string, _baseRules: Rules | null,
     patch.difficulty = { Easy: 50, Medium: 50, Hard: 0 };
   }
 
-  if (lower.includes('不要复习') || lower.includes('关复习') || lower.includes('no review') || lower.includes('without review')) {
+  if (
+    lower.includes('不要复习') ||
+    lower.includes('关复习') ||
+    lower.includes('不复习') ||
+    lower.includes('仅新题') ||
+    lower.includes('全新题') ||
+    lower.includes('no review') ||
+    lower.includes('without review') ||
+    lower.includes('new only')
+  ) {
     patch.reviewEnabled = false;
     patch.reviewPercent = null;
+    patch.reviewMode = 'none';
+    patch.reviewCount = 0;
+  } else if (lower.includes('全部复习') || lower.includes('全复习') || lower.includes('all review')) {
+    patch.reviewEnabled = true;
+    patch.reviewPercent = 100;
+    patch.reviewMode = 'all';
+    patch.reviewCount = null;
   } else if (lower.includes('复习') || lower.includes('review')) {
+    const countReviewMatch = lower.match(/(?:其中)?复习\s*(\d+)\s*(?:题)?/i)
+      ?? lower.match(/(\d+)\s*(?:题)?复习/i)
+      ?? lower.match(/review\s*(\d+)/i)
+      ?? lower.match(/(\d+)\s*review/i);
     const reviewPctMatch = lower.match(/(\d+)\s*%/);
-    if (reviewPctMatch) {
+
+    if (countReviewMatch && (!reviewPctMatch || !lower.includes(reviewPctMatch[0]))) {
+      const rCount = parseInt(countReviewMatch[1], 10);
+      if (rCount > 0) {
+        patch.reviewMode = 'partial';
+        patch.reviewCount = rCount;
+        patch.reviewEnabled = true;
+        const total = patch.dailyCount ?? _baseRules?.dailyCount;
+        if (total) patch.reviewPercent = (rCount / total) * 100;
+      }
+    } else if (reviewPctMatch) {
+      const pct = Math.min(100, Math.max(1, parseInt(reviewPctMatch[1], 10)));
       patch.reviewEnabled = true;
-      patch.reviewPercent = Math.min(100, Math.max(1, parseInt(reviewPctMatch[1], 10)));
+      patch.reviewPercent = pct;
+      if (pct === 100) {
+        patch.reviewMode = 'all';
+        patch.reviewCount = null;
+      } else {
+        patch.reviewMode = 'partial';
+        const total = patch.dailyCount ?? _baseRules?.dailyCount;
+        if (total) patch.reviewCount = Math.round((total * pct) / 100);
+      }
     }
   }
 

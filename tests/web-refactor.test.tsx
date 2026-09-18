@@ -79,6 +79,7 @@ function record(input: Partial<PracticeRecord> = {}): PracticeRecord {
     createdAt: Date.now(),
     updatedAt: Date.now(),
     revokedAt: null,
+    outcome: null,
     ...input,
   };
 }
@@ -562,6 +563,7 @@ it('detail failure keeps the completed record and draft; retry patches the same 
   assert.deepEqual(patches.mock.calls[1].arguments[1], {
     durationMinutes: null,
     notes: 'Remember the boundary.',
+    outcome: null,
     expectedRevision: 1,
   });
 });
@@ -716,7 +718,7 @@ it('unified record edit starts with details and only patches fields actually cha
   fireEvent.click(toggle);
   fireEvent.change(screen.getByLabelText('Notes (optional)'), { target: { value: 'Metadata only' } });
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save record' })); });
-  assert.deepEqual(patches.mock.calls[0].arguments, [saved.id, { durationMinutes: null, notes: 'Metadata only', expectedRevision: 1 }]);
+  assert.deepEqual(patches.mock.calls[0].arguments, [saved.id, { durationMinutes: null, notes: 'Metadata only', outcome: null, expectedRevision: 1 }]);
 });
 
 /** Collapsing is presentation only; cancel discards drafts while save preserves intentional corrections. */
@@ -738,7 +740,7 @@ it('unified record edit retains collapsed corrections and cancel performs no wri
   fireEvent.click(screen.getByRole('button', { name: /Change completion or time/ }));
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save record' })); });
   assert.deepEqual(patches.mock.calls[0].arguments, [saved.id, {
-    durationMinutes: null, notes: null, completed: false, expectedRevision: 1,
+    durationMinutes: null, notes: null, outcome: null, completed: false, expectedRevision: 1,
   }]);
 });
 

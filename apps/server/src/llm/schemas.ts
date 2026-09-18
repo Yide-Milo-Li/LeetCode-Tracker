@@ -81,6 +81,8 @@ export const overrideResponseSchema = {
     premium: { type: Type.BOOLEAN },
     reviewEnabled: { type: Type.BOOLEAN },
     reviewPercent: { type: Type.NUMBER },
+    reviewMode: { type: Type.STRING },
+    reviewCount: { type: Type.INTEGER },
     preference: { type: Type.STRING },
     unresolved: {
       type: Type.ARRAY,

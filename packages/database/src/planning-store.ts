@@ -3,7 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import type { CatalogStore } from './store.ts';
 import { strategyInputSchema, PlanningError, type Strategy, type StrategyInput, type DailyPlan, type Evidence, type RevisionStamp, type ReviewState, type Rules } from '../../contracts/src/recommendations.ts';
-import { evidenceAfter, projectReviewStates, calculateTagMastery } from '../../domain/src/index.ts';
+import { evidenceAfter, projectReviewStates, calculateTagMastery, calculateKnowledgeProfile } from '../../domain/src/index.ts';
 import type { CatalogProblem } from '../../contracts/src/sync.ts';
 
 /** Persist strategy revisions and plan snapshots while computing completion from valid sources. */
@@ -147,6 +147,12 @@ export class PlanningStore {
   masteryReport(zone:string,now:number) {
     const {raw,fixed}=this.analysisContext(zone,now);
     return calculateTagMastery({...raw,now,userZone:zone,reviewStates:fixed});
+  }
+
+  /** Compute multi-signal Knowledge Profile aggregating topic × difficulty evidence. */
+  knowledgeProfileReport(zone: string, now: number) {
+    const { raw, fixed } = this.analysisContext(zone, now);
+    return calculateKnowledgeProfile({ ...raw, now, userZone: zone, reviewStates: fixed, revision: this.stamp() });
   }
 
   /** Reconcile completion without mutating a historical version's event timestamps. */

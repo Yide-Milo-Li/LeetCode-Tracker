@@ -98,6 +98,7 @@ it('unresolved prompts require an explicit manual preview before confirmation', 
     async (input: Parameters<typeof api.previewDailyPlanOverride>[0]) => ({
       ...result,
       unresolved: input.rules ? [] : result.unresolved,
+      changed: input.rules ? ['dailyCount'] : result.changed,
     }),
   );
   await act(async () => {

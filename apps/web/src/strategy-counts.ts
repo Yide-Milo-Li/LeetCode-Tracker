@@ -1,9 +1,9 @@
 /** Count-based editor state over the existing percentage-based strategy contract. */
-import { difficulties, type Difficulty, type Rules } from '../../../packages/contracts/src/recommendations.ts';
+import { difficulties, type Difficulty, type ReviewMode, type Rules } from '../../../packages/contracts/src/recommendations.ts';
 import { allocate } from '../../../packages/domain/src/index.ts';
 
 export type CountInput = number | '';
-export type ReviewMode = 'none' | 'partial' | 'all' | null;
+export type { ReviewMode };
 export interface DifficultyDraft {
   values: Record<Difficulty, CountInput>;
   automatic: Difficulty | null;
@@ -22,11 +22,13 @@ export function difficultyCounts(rules: Rules): Record<Difficulty, number> {
 
 /** Return the review target, before shortages are applied by the planner. */
 export function reviewCountForRules(rules: Rules): number {
+  if (typeof rules.reviewCount === 'number') return rules.reviewCount;
   return rules.reviewEnabled ? Math.round(rules.dailyCount * (rules.reviewPercent ?? 0) / 100) : 0;
 }
 
 /** Keep legacy non-100% rules in partial mode even when their rounded target equals the total. */
 export function reviewModeForRules(rules: Rules): ReviewMode {
+  if (rules.reviewMode) return rules.reviewMode;
   return !rules.reviewEnabled ? 'none' : rules.reviewPercent === 100 ? 'all' : 'partial';
 }
 
@@ -71,13 +73,13 @@ export function percentagesForCounts(total: number, values: Record<Difficulty, C
 }
 
 /** Preserve a legacy review ratio only while its total, mode and displayed target are unchanged. */
-export function unchangedReview(total: CountInput, mode: ReviewMode, count: CountInput, previous?: Rules): boolean {
+export function unchangedReview(total: CountInput, mode: ReviewMode | null, count: CountInput, previous?: Rules): boolean {
   return !!previous && total === previous.dailyCount && mode === reviewModeForRules(previous) &&
     (mode !== 'partial' || count === reviewCountForRules(previous));
 }
 
 /** Validate before conversion so invalid drafts cannot be sanitized into valid creation requests. */
-export function reviewPercentForCount(total: number, mode: ReviewMode, count: CountInput, previous?: Rules): number | null {
+export function reviewPercentForCount(total: number, mode: ReviewMode | null, count: CountInput, previous?: Rules): number | null {
   if (!isCount(total) || total <= 0 || mode === null) throw new Error('Choose a valid review mode and total');
   if (unchangedReview(total, mode, count, previous)) return previous!.reviewPercent;
   if (mode === 'none') return null;

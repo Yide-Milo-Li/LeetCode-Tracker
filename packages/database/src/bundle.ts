@@ -105,7 +105,7 @@ export interface BundleRestoreResult {
   restoredNotes: number;
   restoredStrategies: number;
   restoredProblems?: number;
-  formatVersion?: 1 | 2;
+  formatVersion?: 1 | 2 | 3;
 }
 
 /**
@@ -120,7 +120,7 @@ export async function importSnapshotBundle(
 ): Promise<BundleRestoreResult> {
   // Validate schema
   const bundle = snapshotBundleSchema.parse(rawBundle);
-  if (bundle.version === 2) return importMigrationBundle(db, backupManager, bundle, backupDir);
+  if (bundle.version === 2 || bundle.version === 3) return importMigrationBundle(db, backupManager, bundle, backupDir);
 
   // 1. Create safety snapshot before any write
   const timestamp = Date.now();

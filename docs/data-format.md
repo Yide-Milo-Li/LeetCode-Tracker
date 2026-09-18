@@ -101,11 +101,16 @@ The local SQLite catalog schema is defined in [schema.ts](../packages/database/s
 - **`import_history`**: Audit log recording ingestion timestamps, lines processed, inserted/updated/unchanged/duplicate counts, and error counts.
 - **`catalog_meta`**: Key-value metadata storing monotonic `catalog_revision`, `practice_revision`, `planning_revision`, `review_baseline`, and `last_imported_at`.
 - **`settings`**: User preferences table storing `language` ('en' | 'zh'), `theme` ('light' | 'dark' | 'system'), and `timezone` (string | null).
-- **`schema_version`**: Tracks applied database schema version (currently v9).
+- **`schema_version`**: Tracks applied database schema version (currently v10).
+- **`practice_records`**: Stores individual practice attempts, including optional `outcome` ('independent' | 'assisted' | 'unsolved' | null) with index `idx_practice_records_outcome`.
 
 ---
 
 ## 4. Manual practice records & progress snapshots
+
+Practice records support optional lightweight outcome feedback: `outcome: 'independent' | 'assisted' | 'unsolved' | null`. Independent and assisted outcomes require `completed = true`, while unsolved requires `completed = false`. Switching completion state automatically clears conflicting outcome selections.
+
+Full device migration supports Migration Bundle v3 (`/api/v1/bundle/export?version=3`) preserving the `outcome` column, with backward compatibility for v1 and v2 bundles (which map missing outcomes to `null`).
 
 `durationMinutes` is optional on creation and defaults to `null`; supplied values must be positive safe integers. PATCH omission preserves it and explicit `null` clears it. Migration preserves old durations as unknown and never parses notes. There are no duration rankings or timing aggregates.
 

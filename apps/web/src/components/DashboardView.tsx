@@ -29,7 +29,7 @@ import {
   Tooltip as RechartsTooltip,
   CartesianGrid,
 } from 'recharts';
-import { api, type DashboardResponse, type RecentActivityItem, type YearlyActivityDay, type TagMasteryReport } from '../api.ts';
+import { api, type DashboardResponse, type RecentActivityItem, type YearlyActivityDay, type TagMasteryReport, type KnowledgeProfileReport } from '../api.ts';
 import type { UseDailyPlanReturn } from '../hooks/useDailyPlan.ts';
 import { translations, type Language } from '../i18n.ts';
 import { ActivityHistoryDrawer } from './ActivityHistoryDrawer.tsx';
@@ -72,6 +72,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [masteryError,setMasteryError]=useState(false);
   const [masteryLoading,setMasteryLoading]=useState(true);
   const [masteryReport, setMasteryReport] = useState<TagMasteryReport | null>(null);
+  const [profileReport, setProfileReport] = useState<KnowledgeProfileReport | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -87,7 +88,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         if (active) setSourceError(String(err.message));
       });
 
-    setMasteryReport(null);setMasteryError(false);setMasteryLoading(true);
+    setMasteryReport(null);
+    setProfileReport(null);
+    setMasteryError(false);
+    setMasteryLoading(true);
+
     api
       .getMasteryReport()
       .then((report) => {
@@ -95,6 +100,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       })
       .catch(() => {if(active)setMasteryError(true);})
       .finally(()=>{if(active)setMasteryLoading(false);});
+
+    api
+      .getKnowledgeProfile()
+      .then((profile) => {
+        if (active) setProfileReport(profile);
+      })
+      .catch(() => {});
 
     return () => {
       active = false;
@@ -499,6 +511,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         data={data}
         lang={lang}
         masteryReport={masteryReport}
+        profileReport={profileReport}
         onNavigateToStrategies={onNavigateToStrategies}
       />
 

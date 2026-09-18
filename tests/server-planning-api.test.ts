@@ -367,12 +367,14 @@ describe('Recommendation & Planning API Endpoints', () => {
   it('previews prompt overrides, flags completed quota issues, and commits overrides', async () => {
     const { app, store } = await createTestApp();
 
-    // Assign strategy to Thursday (2026-09-17 = weekday 4)
+    const { dateStr, weekday } = getFutureDate(0);
+
+    // Assign strategy to today's weekday
     await app.inject({
       method: 'POST',
       url: '/api/v1/strategies',
       payload: {
-        name: 'Thursday Grind',
+        name: 'Daily Grind',
         rules: {
           dailyCount: 3,
           difficulty: { Easy: 33.33, Medium: 33.33, Hard: 33.34 },
@@ -382,7 +384,7 @@ describe('Recommendation & Planning API Endpoints', () => {
           reviewPercent: null,
           preference: '',
         },
-        weekdays: [4],
+        weekdays: [weekday],
       },
     });
 
@@ -390,7 +392,7 @@ describe('Recommendation & Planning API Endpoints', () => {
     let res = await app.inject({
       method: 'POST',
       url: '/api/v1/daily-plans/ensure',
-      payload: { date: '2026-09-17' },
+      payload: { date: dateStr },
     });
     const plan = res.json().plan;
 
@@ -413,7 +415,7 @@ describe('Recommendation & Planning API Endpoints', () => {
       method: 'POST',
       url: '/api/v1/daily-plan-overrides/preview',
       payload: {
-        date: '2026-09-17',
+        date: dateStr,
         prompt: 'all hard 3 problems',
       },
     });
@@ -442,7 +444,7 @@ describe('Recommendation & Planning API Endpoints', () => {
       method: 'POST',
       url: '/api/v1/daily-plan-overrides/preview',
       payload: {
-        date: '2026-09-17',
+        date: dateStr,
         rules: validPatch,
       },
     });

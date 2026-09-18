@@ -403,7 +403,7 @@ describe('PracticeStore & Progress Ingestion', () => {
     const store = new CatalogStore(db, { skipBackup: true });
 
     assert.equal(inspectCatalogSchema(db), CURRENT_SCHEMA_VERSION);
-    assert.equal(CURRENT_SCHEMA_VERSION, 9);
+    assert.equal(CURRENT_SCHEMA_VERSION, 10);
     assert.equal(store.getPracticeRevision(), 0);
   });
 });

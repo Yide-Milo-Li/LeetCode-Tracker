@@ -226,6 +226,8 @@ export const translations = {
     createTemporaryPlan: "Create Today's Plan",
     encouragementTitle: 'Daily Coach Motivation',
     completedCount: 'Completed',
+    appendOne: 'Add one',
+    appendingProblem: 'Adding problem…',
     replaceOne: 'Replace',
     replaceAllUnfinished: 'Replace Unfinished',
     promptOverride: 'Adjust with AI Prompt',
@@ -304,8 +306,8 @@ export const translations = {
     insightLess: "Show fewer topics",
     insightLoadError: "Topic insights could not be loaded.",
     insightLoading: "Loading topic insights…",
-    focusWeakTags: "Focus on practice topics",
-    focusWeakTagsDesc: "Prioritize up to three evidence-backed topics within your filters and quotas. Earlier-due reviews still come first.",
+    focusWeakTags: "Adaptive topic recommendations",
+    focusWeakTagsDesc: "Prioritize reinforcement for weak topics based on knowledge profile, keeping 20% for topic exploration. Earlier-due reviews still come first.",
     focusSessionBadge: 'Focus Session',
     adaptiveReviewBadge: 'Adaptive Review',
     tagMasteryTitle: "Topic Practice Insights",
@@ -329,6 +331,8 @@ export const translations = {
     candidateCountLabel: 'Eligible Candidates Available',
     confirmOverride: 'Apply to Unfinished Slots',
     overrideWarning: 'Completed problems will remain intact. Unfinished problems will be replaced according to the new rules.',
+    rulesUnchanged: 'Rules unchanged; current recommendations preserved',
+    rulesUnchangedDesc: 'No rule fields were changed; existing recommendations are retained.',
 
     // Phase 5: Dashboard Overview & Activity Insights
     navDashboard: 'Dashboard',
@@ -427,6 +431,17 @@ export const translations = {
     confirmRestoreWarning: 'Warning: This will replace your current settings, strategies, and practice records with the snapshot data. An automatic backup will be created first. Continue?',
     bundleRestoreSuccess: 'Data restored successfully! ({records} records, {notes} notes restored)',
     bundleRestoreFailed: 'Restore failed: {error}',
+
+    // Phase 23: Note Content Validity & Practiced Scope Decoupling
+    insertTemplate: 'Insert Template',
+    insertTemplateTitle: 'Insert solution note skeleton template',
+    unfilledTemplateNotice: 'Template Unedited',
+    unfilledTemplateTooltip: 'This note contains an unedited template structure and is not counted as a custom note.',
+    noteEditorPlaceholder: 'Write your comprehensive solution, approach, and edge cases here, or click "Insert Template" to start with a structured outline...',
+    retryLoadNote: 'Retry loading note',
+    loadNoteError: 'Failed to load note. Click to retry.',
+    noteClearedSuccess: 'Note cleared successfully.',
+    emptyNoteSaveDisabled: 'Cannot save an empty or unedited note template.',
   },
   zh: {
     retry: '重试',
@@ -647,6 +662,8 @@ export const translations = {
     createTemporaryPlan: '立即建立今日计划',
     encouragementTitle: '每日寄语',
     completedCount: '已完成',
+    appendOne: '加一题',
+    appendingProblem: '加题中…',
     replaceOne: '换一题',
     replaceAllUnfinished: '换一批未完成',
     promptOverride: 'Prompt 临时调整',
@@ -725,8 +742,8 @@ export const translations = {
     insightLess: "收起专题",
     insightLoadError: "专题分析加载失败。",
     insightLoading: "正在加载专题分析…",
-    focusWeakTags: "优先巩固专题",
-    focusWeakTagsDesc: "在筛选与配额内优先安排最多三个有证据的专题；更早到期的复习仍优先。",
+    focusWeakTags: "自适应专题推荐",
+    focusWeakTagsDesc: "基于知识画像优先强化薄弱专题，保留约 20% 探索新专题；更早到期的复习仍优先。",
     focusSessionBadge: '薄弱突击',
     adaptiveReviewBadge: '自适应复习',
     tagMasteryTitle: "专题练习分析",
@@ -750,6 +767,8 @@ export const translations = {
     candidateCountLabel: '符合条件的题库候选数',
     confirmOverride: '确认应用到今日未完成题目',
     overrideWarning: '已完成的题目将保持不变，仅未完成的题目将按照新规则重新抽取。',
+    rulesUnchanged: '规则未改变，已保留当前推荐',
+    rulesUnchangedDesc: '当前调整未改变任何规则字段，已保留今日已有推荐。',
 
     // Phase 5: Dashboard Overview & Activity Insights
     navDashboard: '总览',
@@ -848,5 +867,16 @@ export const translations = {
     confirmRestoreWarning: '注意：导入将原子性覆盖当前的设置、策略和打卡记录（覆盖前会自动创建一份安全备份）。是否继续？',
     bundleRestoreSuccess: '数据还原成功！（共恢复 {records} 条练习记录，{notes} 篇深度笔记）',
     bundleRestoreFailed: '还原失败：{error}',
+
+    // Phase 23: Note Content Validity & Practiced Scope Decoupling
+    insertTemplate: '插入模板',
+    insertTemplateTitle: '插入题解笔记结构模板',
+    unfilledTemplateNotice: '模板未填写',
+    unfilledTemplateTooltip: '此笔记包含未填写的模板骨架，不计入有效长篇笔记。',
+    noteEditorPlaceholder: '写下解题思路、思考、复杂度分析，或点击“插入模板”使用结构化模板...',
+    retryLoadNote: '重试加载笔记',
+    loadNoteError: '加载笔记失败，点击重试。',
+    noteClearedSuccess: '笔记已清空。',
+    emptyNoteSaveDisabled: '无法保存空白或未填写的笔记模板。',
   },
 };

@@ -30,22 +30,47 @@ export interface PracticeDetailsFieldsProps {
   lang: Language;
   duration: string;
   notes: string;
+  completed?: boolean;
+  outcome?: 'independent' | 'assisted' | 'unsolved' | null;
   setDuration: (s: string) => void;
   setNotes: (s: string) => void;
+  setOutcome?: (o: 'independent' | 'assisted' | 'unsolved' | null) => void;
 }
 
 /**
- * The optional completion details intentionally contain only duration and notes.
+ * The optional completion details contain duration, notes, and practice outcome feedback.
  */
 export function PracticeDetailsFields({
   lang,
   duration,
   notes,
+  completed = true,
+  outcome = null,
   setDuration,
   setNotes,
+  setOutcome,
 }: PracticeDetailsFieldsProps) {
   return (
     <>
+      {setOutcome && (
+        <Field label={lang === 'zh' ? '练习反馈（可选）' : 'Practice feedback (optional)'}>
+          <select
+            value={outcome ?? ''}
+            onChange={(e) => setOutcome(e.target.value ? (e.target.value as any) : null)}
+            aria-label={lang === 'zh' ? '练习反馈' : 'Practice feedback'}
+          >
+            <option value="">{lang === 'zh' ? '未记录' : 'Not recorded'}</option>
+            {completed ? (
+              <>
+                <option value="independent">{lang === 'zh' ? '独立完成' : 'Solved independently'}</option>
+                <option value="assisted">{lang === 'zh' ? '借助提示或题解完成' : 'Solved with assistance / hints'}</option>
+              </>
+            ) : (
+              <option value="unsolved">{lang === 'zh' ? '尝试后未解决' : 'Attempted, unsolved'}</option>
+            )}
+          </select>
+        </Field>
+      )}
       <Field label={lang === 'zh' ? '耗时（分钟，可选）' : 'Duration (minutes, optional)'}>
         <input
           type="number"
@@ -115,11 +140,26 @@ export function PracticeEditor({
   const [completed, setCompleted] = useState(
     draft?.completed ?? record?.completed ?? recovered?.completed ?? true,
   );
+  const [outcome, setOutcome] = useState<'independent' | 'assisted' | 'unsolved' | null>(
+    draft?.outcome ?? record?.outcome ?? null,
+  );
+
+  function handleCompletedChange(nextCompleted: boolean) {
+    setCompleted(nextCompleted);
+    if (nextCompleted && outcome === 'unsolved') {
+      setOutcome(null);
+    } else if (!nextCompleted && (outcome === 'independent' || outcome === 'assisted')) {
+      setOutcome(null);
+    }
+  }
+
   const [duration, setDuration] = useState(
     draft?.duration ?? String(record?.durationMinutes ?? recovered?.durationMinutes ?? ''),
   );
   const [notes, setNotes] = useState(draft?.notes ?? record?.notes ?? recovered?.notes ?? '');
-  const correctionChanged = Boolean(record && (timeEdited || completed !== record.completed));
+  const correctionChanged = Boolean(
+    record && (timeEdited || completed !== record.completed || outcome !== record.outcome),
+  );
   const [saving, setSaving] = useState(false);
   const [uncertain, setUncertain] = useState(Boolean(recovered));
   const [error, setError] = useState('');
@@ -173,7 +213,11 @@ export function PracticeEditor({
     setSaving(true);
     setError('');
     try {
-      const metadata = { durationMinutes: durationValue(duration), notes: notes.trim() || null };
+      const metadata = {
+        durationMinutes: durationValue(duration),
+        notes: notes.trim() || null,
+        outcome,
+      };
       // Expanding the editor is not a data change. Metadata-only saves must never rewrite
       // original timestamp precision, timezone, or completion evidence.
       const temporal = detailsOnly
@@ -219,7 +263,7 @@ export function PracticeEditor({
             ? {
                 mode: detailsOnly ? 'enrich' : 'detail',
                 record,
-                draft: { duration, notes, completed, time, precision, zone, timeEdited, correctionOpen },
+                draft: { duration, notes, completed, time, precision, zone, timeEdited, correctionOpen, outcome },
               }
             : { mode: 'manual', problem: selected },
         });
@@ -296,9 +340,18 @@ export function PracticeEditor({
             )}
           </div>
           <fieldset disabled={saving || uncertain}>
-            {record && <PracticeDetailsFields
-              lang={lang} duration={duration} notes={notes} setDuration={setDuration} setNotes={setNotes}
-            />}
+            {record && (
+              <PracticeDetailsFields
+                lang={lang}
+                completed={completed}
+                duration={duration}
+                notes={notes}
+                outcome={outcome}
+                setDuration={setDuration}
+                setNotes={setNotes}
+                setOutcome={setOutcome}
+              />
+            )}
             {record && !detailsOnly && (
               <button type="button" className="record-correction-toggle" aria-expanded={correctionOpen}
                 aria-controls={correctionId} onClick={() => setCorrectionOpen(open => !open)}>
@@ -314,7 +367,7 @@ export function PracticeEditor({
                     <Field label={zh ? '本次结果' : 'Practice result'}>
                       <select
                         value={String(completed)}
-                        onChange={(e) => setCompleted(e.target.value === 'true')}
+                        onChange={(e) => handleCompletedChange(e.target.value === 'true')}
                       >
                         <option value="true">{zh ? '完成' : 'Completed'}</option>
                         <option value="false">{zh ? '未完成' : 'Not completed'}</option>
@@ -373,13 +426,18 @@ export function PracticeEditor({
                 </>
               )}
             </div>
-            {!record && <PracticeDetailsFields
-              lang={lang}
-              duration={duration}
-              notes={notes}
-              setDuration={setDuration}
-              setNotes={setNotes}
-            />}
+            {!record && (
+              <PracticeDetailsFields
+                lang={lang}
+                completed={completed}
+                duration={duration}
+                notes={notes}
+                outcome={outcome}
+                setDuration={setDuration}
+                setNotes={setNotes}
+                setOutcome={setOutcome}
+              />
+            )}
           </fieldset>
         </>
       )}

@@ -219,14 +219,14 @@ describe('Domain Scheduling Algorithms', () => {
     assert.equal(stateProg.dueDate, '2026-09-13');
   });
 
-  it('selects candidates according to quotas and rebalances reviews within difficulty', () => {
+  it('selects candidates according to strict quotas without cross-kind substitution', () => {
     const rules: Rules = {
       dailyCount: 3,
       difficulty: { Easy: 100, Medium: 0, Hard: 0 },
       tags: [],
       premium: false,
       reviewEnabled: true,
-      reviewPercent: 66, // 3 * 0.66 = 1.98 -> 2 reviews
+      reviewPercent: 66, // 3 * 0.66 = 1.98 -> 2 reviews, 1 new
       preference: '',
     };
 
@@ -239,11 +239,11 @@ describe('Domain Scheduling Algorithms', () => {
     ];
 
     const result = select(pool, rules);
-    assert.equal(result.selected.length, 3);
-    // Review was target 2, but only 1 available, so it adjusted within Easy
+    // Strict quotas: target 2 reviews (only 1 available), target 1 new (1 selected). Total 2.
+    assert.equal(result.selected.length, 2);
     assert.equal(result.selected.filter(p => p.kind === 'review').length, 1);
-    assert.equal(result.selected.filter(p => p.kind === 'new').length, 2);
-    assert.ok(result.notices.some(n => n.en.includes('review share adjusted')));
+    assert.equal(result.selected.filter(p => p.kind === 'new').length, 1);
+    assert.ok(result.notices.some(n => n.en.includes('review quota deficit')));
   });
 
   it('prioritizes review candidates by overdue status: earlier due date first, known due date before null, and reviews before new', () => {
@@ -510,6 +510,6 @@ it('all-review selection never backfills with new problems', () => {
   assert.deepEqual(result.selected.map(p => p.questionId), ['review']);
   assert.ok(result.notices.some(n => n.en.includes('2 slots unavailable')));
   assert.equal(select(pool.slice(1), rules).selected.length, 0);
-  assert.equal(select(pool, { ...rules, reviewPercent: 50 }).selected.length, 3,
-    'Partial review retains the existing shortage fallback');
+  assert.equal(select(pool, { ...rules, reviewPercent: 50 }).selected.length, 2,
+    'Partial review leaves review deficit without cross-kind substitution');
 });

@@ -10,11 +10,13 @@ import {
   ALGORITHM_VERSION,
   candidates,
   calculateTagMastery,
+  calculateKnowledgeProfile,
   projectReviewStates,
   focusTopics,
   reorderCandidates,
   quotas,
   select,
+  nextDifficultyForAppend,
 } from '../../../packages/domain/src/index.ts';
 import {
   isCalendarDate,
@@ -22,8 +24,11 @@ import {
   localDate,
 } from '../../../packages/contracts/src/time.ts';
 import {
+  difficulties,
   PlanningError,
   rulesSchema,
+  resolveReviewSettings,
+  normalizeRules,
   type DailyPlan,
   type EnsureResult,
   type OverridePreview,
@@ -204,19 +209,84 @@ export class PlanningService {
       ? projectReviewStates(context.raw.problems,context.events,context.solved,zone,context.baseline,now,true)
       : context.fixed;
     let pool=candidates(context.raw.problems,states,rules,date,seed,excluded);
-    let focused:ReturnType<typeof focusTopics>=[];
-    if(rules.focusWeakTags){
-      const report=calculateTagMastery({...context.raw,now,userZone:zone,reviewStates:context.fixed});
-      const limits=quotas(rules);
-      const available=new Set(pool.filter(p=>limits[p.difficulty]>0 && !(rules.reviewEnabled && rules.reviewPercent===100 && p.kind==='new')).flatMap(p=>p.topicTags.map(t=>t.slug)));
-      focused=focusTopics(report).filter(t=>available.has(t.tagSlug)).slice(0,3);
-      pool=candidates(context.raw.problems,states,rules,date,seed,excluded,focused.map(t=>t.tagSlug));
+    let focused: { slug: string; name: string }[] = [];
+    if (rules.focusWeakTags) {
+      const profile = calculateKnowledgeProfile({ ...context.raw, now, userZone: zone, reviewStates: context.fixed });
+      const limits = quotas(rules);
+      const availableSlugs = new Set(
+        pool
+          .filter(p => limits[p.difficulty] > 0 && !(rules.reviewEnabled && rules.reviewPercent === 100 && p.kind === 'new'))
+          .flatMap(p => p.topicTags.map(t => t.slug))
+      );
+      const tagConstraint = rules.tags.length > 0 ? new Set(rules.tags) : null;
+
+      // 1. Weak topics needing reinforcement
+      const weakTopics = profile.topics
+        .filter(t => t.isWeak && availableSlugs.has(t.tagSlug) && (!tagConstraint || tagConstraint.has(t.tagSlug)))
+        .sort((a, b) => {
+          const aHasAssistance = (['Easy', 'Medium', 'Hard'] as const).some(d => a.difficulties[d].reasons.includes('feedback_assistance'));
+          const bHasAssistance = (['Easy', 'Medium', 'Hard'] as const).some(d => b.difficulties[d].reasons.includes('feedback_assistance'));
+          if (aHasAssistance !== bHasAssistance) return aHasAssistance ? -1 : 1;
+
+          const aBacklog = a.daysSinceLastPractice === null || a.daysSinceLastPractice >= 14;
+          const bBacklog = b.daysSinceLastPractice === null || b.daysSinceLastPractice >= 14;
+          if (aBacklog !== bBacklog) return aBacklog ? -1 : 1;
+
+          const aHasDuration = (['Easy', 'Medium', 'Hard'] as const).some(d => a.difficulties[d].reasons.includes('duration_threshold'));
+          const bHasDuration = (['Easy', 'Medium', 'Hard'] as const).some(d => b.difficulties[d].reasons.includes('duration_threshold'));
+          if (aHasDuration !== bHasDuration) return aHasDuration ? -1 : 1;
+
+          return b.recentProblemCount - a.recentProblemCount || (b.daysSinceLastPractice ?? 0) - (a.daysSinceLastPractice ?? 0) || a.tagSlug.localeCompare(b.tagSlug);
+        });
+
+      focused = weakTopics.slice(0, 3).map(t => ({ slug: t.tagSlug, name: t.tagName }));
+      pool = candidates(context.raw.problems, states, rules, date, seed, excluded, focused.map(t => t.slug));
+
+      // 2. Decorate pool candidates with rich adaptive explanations
+      const asOfDate = localDate(now, zone);
+      const weakTopicMap = new Map(profile.topics.map(t => [t.tagSlug, t]));
+
+      for (const candidate of pool) {
+        if (!candidate.explanation) continue;
+        candidate.explanation.asOfDate = asOfDate;
+
+        const matchedWeakSlug = candidate.matchedWeakTags?.[0];
+        const weakTopic = matchedWeakSlug ? weakTopicMap.get(matchedWeakSlug) : undefined;
+        if (weakTopic) {
+          const diffEvidence = weakTopic.difficulties[candidate.difficulty];
+          const assistedUnsolved = diffEvidence.outcomeCounts.assisted + diffEvidence.outcomeCounts.unsolved;
+          const totalFeedback = diffEvidence.outcomeCounts.independent + assistedUnsolved;
+          candidate.explanation.analysisVersion = 'adaptive-v1';
+          candidate.explanation.targetTopic = { slug: weakTopic.tagSlug, name: weakTopic.tagName };
+          candidate.explanation.role = 'reinforcement';
+          candidate.explanation.evidenceSummary = {
+            distinctProblems: diffEvidence.distinctProblemCount,
+            difficulty: candidate.difficulty,
+            assistedUnsolvedCount: assistedUnsolved,
+            totalFeedbackCount: totalFeedback,
+            daysSinceLastPractice: weakTopic.daysSinceLastPractice,
+            reasonText: {
+              en: `Recent 30 days: ${diffEvidence.distinctProblemCount} ${candidate.difficulty} ${weakTopic.tagName} problems, ${assistedUnsolved}/${totalFeedback || diffEvidence.distinctProblemCount} assisted or unsolved.`,
+              zh: `最近 30 天：你记录了 ${diffEvidence.distinctProblemCount} 道 ${candidate.difficulty} ${weakTopic.tagName} 题，其中 ${assistedUnsolved} 道需要辅助或未解决。`,
+            },
+          };
+        }
+      }
+    } else {
+      const asOfDate = localDate(now, zone);
+      for (const candidate of pool) if (candidate.explanation) candidate.explanation.asOfDate = asOfDate;
     }
-    const asOfDate=localDate(now,zone);
-    for(const candidate of pool)if(candidate.explanation)candidate.explanation.asOfDate=asOfDate;
-    return {pool,focusTagNames:focused.map(t=>t.tagName),notices:rules.focusWeakTags && !focused.length
-      ? [{en:'Insufficient evidence or eligible candidates for topic focus; using the usual selection.',
-          zh:'暂无足够证据或可用候选支持自动专题，已使用常规选题。'}]:[]};
+
+    return {
+      pool,
+      focusTagNames: focused.map(t => t.name),
+      notices: rules.focusWeakTags && !focused.length
+        ? [{
+            en: 'Insufficient evidence or eligible candidates for topic focus; using the usual selection.',
+            zh: '暂无足够证据或可用候选支持自动专题，已使用常规选题。',
+          }]
+        : [],
+    };
   }
 
   /** Preserve prior-version exclusions consistently in preview and commit. */
@@ -240,23 +310,25 @@ export class PlanningService {
       return { status: 'rest', plan: null };
     }
 
-    const context = this.candidateContext(strategy.rules,targetDate,userTimezone,now,
-      targetDate+':'+strategy.id,new Set());
-    const {pool,focusTagNames:weakTagNames}=context;
+    const rules = normalizeRules(strategy.rules);
+
+    const context = this.candidateContext(rules, targetDate, userTimezone, now,
+      targetDate + ':' + strategy.id, new Set());
+    const { pool, focusTagNames: weakTagNames } = context;
 
     let selectionModel = 'local';
     let selectionProvider = this.gemini.getStatus().provider ?? 'gemini';
     let orderedPool = pool;
-    if (strategy.rules.preference?.trim() && this.gemini.selectPlanProblems) {
+    if (rules.preference?.trim() && this.gemini.selectPlanProblems) {
       try {
         const aiPick = await this.gemini.selectPlanProblems({
           candidates: pool,
-          rules: strategy.rules,
+          rules,
           date: targetDate,
           deadline,
         });
         if (aiPick.selectedQuestionIds.length > 0) {
-          orderedPool = reorderCandidates(pool,aiPick.selectedQuestionIds,strategy.rules);
+          orderedPool = reorderCandidates(pool, aiPick.selectedQuestionIds, rules);
           if (orderedPool !== pool) { selectionModel = aiPick.model; selectionProvider = aiPick.provider ?? selectionProvider; }
         }
       } catch {
@@ -264,15 +336,15 @@ export class PlanningService {
       }
     }
 
-    const selection = select(orderedPool, strategy.rules, []);
+    const selection = select(orderedPool, rules, []);
 
-    let rulesForAI = strategy.rules;
-    if (strategy.rules.focusWeakTags && weakTagNames.length > 0) {
+    let rulesForAI = rules;
+    if (rules.focusWeakTags && weakTagNames.length > 0) {
       const focusContext = `Focus Session on Weak Topics: ${weakTagNames.join(', ')}`;
       rulesForAI = {
-        ...strategy.rules,
-        preference: strategy.rules.preference
-          ? `${strategy.rules.preference}. [${focusContext}]`
+        ...rules,
+        preference: rules.preference
+          ? `${rules.preference}. [${focusContext}]`
           : `[${focusContext}]`,
       };
     }
@@ -324,7 +396,7 @@ export class PlanningService {
       version: 1,
       strategyId: strategy.id,
       strategyVersion: strategy.version,
-      rules: strategy.rules,
+      rules,
       items,
       source: generationModel === 'local' ? 'local' : generationProvider,
       model: generationModel === 'local' ? null : generationModel,
@@ -492,6 +564,147 @@ export class PlanningService {
     );
   }
 
+  /**
+   * Append one question to an existing daily plan.
+   * Inherits effective rules, excludes all questions from prior versions of today,
+   * selects target difficulty by cumulative distribution deficiency, adheres strictly
+   * to review mode and quota, and updates dailyCount to max(original, items.length).
+   */
+  public async appendPlanItem(
+    planId: string,
+    options: {
+      expectedVersion: number;
+      operationId: string;
+    }
+  ): Promise<DailyPlan> {
+    const fingerprint = `append:${planId}:${options.expectedVersion}`;
+    const replayed = this.planning.replay(options.operationId, fingerprint);
+    if (replayed) {
+      return replayed;
+    }
+
+    const now = Date.now();
+    const plan = this.planning.planById(planId, now);
+    if (!plan) {
+      throw new PlanningError('PLAN_NOT_FOUND', `Daily plan '${planId}' not found`, 404);
+    }
+    if (plan.version !== options.expectedVersion) {
+      throw new PlanningError('STALE_PLAN', 'Plan has been modified; please reload', 409);
+    }
+    if (plan.items.length >= 50) {
+      throw new PlanningError('MAX_COUNT_REACHED', 'Daily plan has reached maximum limit of 50 problems', 400);
+    }
+
+    const reviewSettings = resolveReviewSettings(plan.rules);
+    const arrangedReviews = plan.items.filter(i => i.kind === 'review').length;
+
+    let targetKind: 'new' | 'review';
+    if (reviewSettings.reviewMode === 'none') {
+      targetKind = 'new';
+    } else if (reviewSettings.reviewMode === 'all') {
+      targetKind = 'review';
+    } else {
+      const R = reviewSettings.reviewCount!;
+      if (arrangedReviews > R) {
+        throw new PlanningError('REVIEW_QUOTA_CONFLICT', 'Actual review questions exceed the review quota; adjust today to resolve', 400);
+      }
+      targetKind = arrangedReviews < R ? 'review' : 'new';
+    }
+
+    const targetDifficulty = nextDifficultyForAppend(plan.rules.difficulty, plan.items);
+
+    const versions = this.planning.versions(plan.id);
+    const excluded = new Set<string>();
+    for (const v of versions) {
+      for (const item of v.items) excluded.add(item.problem.questionId);
+    }
+    for (const item of plan.items) excluded.add(item.problem.questionId);
+
+    const userTimezone = plan.timezone;
+    const context = this.candidateContext(
+      plan.rules,
+      plan.date,
+      userTimezone,
+      now,
+      `${plan.date}:append:${options.operationId}`,
+      excluded
+    );
+
+    const candidate = context.pool.find(
+      p => p.difficulty === targetDifficulty && p.kind === targetKind
+    );
+
+    if (!candidate) {
+      throw new PlanningError('NO_CANDIDATES', 'No eligible candidates found for target difficulty and type; adjust rules to continue', 422);
+    }
+
+    let aiContent = fallbackPlanContent([candidate], plan.rules);
+    if (this.gemini.generatePlanContent) {
+      try {
+        aiContent = await this.gemini.generatePlanContent({
+          problems: [candidate],
+          rules: plan.rules,
+          date: plan.date,
+          deadline: now + this.timeoutMs,
+        });
+      } catch {
+        aiContent = fallbackPlanContent([candidate], plan.rules);
+      }
+    }
+
+    const newItem: PlanItem = {
+      id: randomUUID(),
+      problem: candidate,
+      kind: candidate.kind,
+      addedAt: now,
+      reason: aiContent.reasons[candidate.questionId] ?? {
+        en: candidate.isFocusTopic
+          ? `Selected ${candidate.difficulty} problem targeting weak topic (${candidate.matchedWeakTags?.join(', ') || candidate.difficulty}) for focused breakthrough.`
+          : `Selected ${candidate.difficulty} problem to practice core algorithms.`,
+        zh: candidate.isFocusTopic
+          ? `精选薄弱专题${candidate.difficulty}题目（${candidate.matchedWeakTags?.join('、') || candidate.difficulty}），针对性训练核心算法。`
+          : `精选${candidate.difficulty}难度题目，针对性训练核心算法。`,
+      },
+      evidenceIds: [],
+      completed: false,
+      isFocusTopic: candidate.isFocusTopic,
+      matchedWeakTags: candidate.matchedWeakTags,
+      isAdaptiveReview: candidate.isAdaptiveReview,
+      adaptiveReason: candidate.adaptiveReason,
+      explanation: candidate.explanation,
+    };
+
+    const newItems = [...plan.items, newItem];
+    const newDailyCount = Math.min(50, Math.max(plan.rules.dailyCount, newItems.length));
+    const updatedRules: Rules = {
+      ...plan.rules,
+      dailyCount: newDailyCount,
+      reviewMode: reviewSettings.reviewMode,
+      reviewCount: reviewSettings.reviewCount,
+      reviewPercent: reviewSettings.reviewMode === 'partial' && reviewSettings.reviewCount !== null
+        ? (reviewSettings.reviewCount / newDailyCount) * 100
+        : plan.rules.reviewPercent,
+    };
+
+    const stamp = this.planning.stamp();
+    const newPlan: DailyPlan = {
+      ...plan,
+      version: plan.version + 1,
+      rules: updatedRules,
+      items: newItems,
+      updatedAt: now,
+      action: 'append_one',
+    };
+
+    return this.planning.commit(
+      newPlan,
+      stamp,
+      plan.version,
+      options.operationId,
+      fingerprint
+    );
+  }
+
   // ==========================================
   // Prompt Override Methods
   // ==========================================
@@ -556,7 +769,6 @@ export class PlanningService {
     }
 
     const issues: string[] = [...unresolved];
-    const changed = Object.keys(patch);
 
     // Merge proposed rules
     const proposed: Partial<Rules> = baseRules ? { ...baseRules, ...patch } : patch;
@@ -616,7 +828,79 @@ export class PlanningService {
           issues.push(`Completed ${d} problems (${completed}) exceed the proposed quota (${counts[d]}).`);
         }
       }
+
+      const { targetReviewCount } = resolveReviewSettings({
+        dailyCount: proposed.dailyCount ?? baseRules?.dailyCount ?? 0,
+        reviewEnabled: proposed.reviewEnabled ?? baseRules?.reviewEnabled ?? false,
+        reviewPercent: proposed.reviewPercent ?? baseRules?.reviewPercent ?? null,
+        reviewMode: proposed.reviewMode ?? baseRules?.reviewMode,
+        reviewCount: proposed.reviewCount ?? baseRules?.reviewCount,
+      });
+      const completedReviews = basePlan.items.filter(i => i.completed && i.kind === 'review').length;
+      if (completedReviews > targetReviewCount) {
+        issues.push(`Completed review problems (${completedReviews}) exceed the proposed review quota (${targetReviewCount}).`);
+      }
+      const targetFreshCount = (proposed.dailyCount ?? baseRules?.dailyCount ?? 0) - targetReviewCount;
+      const completedFresh = basePlan.items.filter(i => i.completed && i.kind === 'new').length;
+      if (completedFresh > targetFreshCount) {
+        issues.push(`Completed new problems (${completedFresh}) exceed the proposed new question quota (${targetFreshCount}).`);
+      }
     }
+
+    // Compute canonical differences between baseRules and proposed rules
+    const changedFields: string[] = [];
+    if (baseRules) {
+      if (proposed.dailyCount !== undefined && proposed.dailyCount !== baseRules.dailyCount) {
+        changedFields.push('dailyCount');
+      }
+      if (proposed.difficulty && proposed.dailyCount) {
+        const baseCounts = quotas(baseRules);
+        if (
+          baseCounts.Easy !== counts.Easy ||
+          baseCounts.Medium !== counts.Medium ||
+          baseCounts.Hard !== counts.Hard
+        ) {
+          changedFields.push('difficulty');
+        }
+      }
+      if (proposed.tags !== undefined) {
+        const baseSet = new Set(baseRules.tags);
+        const propSet = new Set(proposed.tags);
+        if (baseSet.size !== propSet.size || [...propSet].some(t => !baseSet.has(t))) {
+          changedFields.push('tags');
+        }
+      }
+      if (proposed.premium !== undefined && Boolean(proposed.premium) !== Boolean(baseRules.premium)) {
+        changedFields.push('premium');
+      }
+      const baseRev = resolveReviewSettings(baseRules);
+      const propRev = resolveReviewSettings({
+        dailyCount: proposed.dailyCount ?? baseRules.dailyCount,
+        reviewEnabled: proposed.reviewEnabled ?? baseRules.reviewEnabled,
+        reviewPercent: proposed.reviewPercent ?? baseRules.reviewPercent,
+        reviewMode: proposed.reviewMode ?? baseRules.reviewMode,
+        reviewCount: proposed.reviewCount ?? baseRules.reviewCount,
+      });
+      if (
+        baseRev.reviewMode !== propRev.reviewMode ||
+        baseRev.targetReviewCount !== propRev.targetReviewCount
+      ) {
+        changedFields.push('reviewMode');
+        if (propRev.reviewMode === 'partial') changedFields.push('reviewCount');
+        if (baseRules.reviewEnabled !== proposed.reviewEnabled && proposed.reviewEnabled !== undefined) changedFields.push('reviewEnabled');
+        if (baseRules.reviewPercent !== proposed.reviewPercent && proposed.reviewPercent !== undefined) changedFields.push('reviewPercent');
+      }
+      if (proposed.preference !== undefined && (baseRules.preference ?? '').trim() !== proposed.preference.trim()) {
+        changedFields.push('preference');
+      }
+      if (proposed.focusWeakTags !== undefined && Boolean(proposed.focusWeakTags) !== Boolean(baseRules.focusWeakTags)) {
+        changedFields.push('focusWeakTags');
+      }
+      if (proposed.adaptiveReviewEnabled !== undefined && Boolean(proposed.adaptiveReviewEnabled) !== Boolean(baseRules.adaptiveReviewEnabled)) {
+        changedFields.push('adaptiveReviewEnabled');
+      }
+    }
+    const changed = baseRules ? [...new Set(changedFields)] : Object.keys(patch);
 
     // Calculate candidate pool count safely without null pointer/undefined errors
     let candidateCount = 0;
@@ -686,7 +970,20 @@ export class PlanningService {
       throw new PlanningError('STALE_PLAN', 'Plan changed since preview was generated; reload and retry', 409);
     }
 
-    const effectiveRules = rulesSchema.parse({
+    if (basePlan && preview.changed.length === 0) {
+      const committed = await this.planning.commit(
+        basePlan,
+        preview.revision,
+        options.expectedVersion,
+        options.operationId,
+        fingerprint,
+        false
+      );
+      this.activeOverridePreviews.delete(previewId);
+      return committed;
+    }
+
+    const effectiveRules = normalizeRules(rulesSchema.parse({
       tags: [],
       premium: false,
       reviewEnabled: false,
@@ -694,7 +991,7 @@ export class PlanningService {
       preference: '',
       ...(preview.base ?? {}),
       ...preview.rules,
-    });
+    }));
 
     this.planning.validateTags(effectiveRules);
 

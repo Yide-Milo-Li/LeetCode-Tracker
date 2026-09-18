@@ -71,6 +71,16 @@ Newly generated plans record algorithm version `phase4-v2` for the strict all-re
 
 Existing strategies display the planner's actual rounded counts. Saving without changing their counts preserves the original stored percentages, including legacy review targets that round to zero. Invalid rules and weekday conflicts reject the entire save without creating a strategy or changing assignments. These flows are validated with synthetic local data; this does not imply live-provider verification or publication.
 
+## Problem notes and solution reflections
+
+The Notes Workspace provides master-detail browsing and editing for problem reflections, complexity notes, code snippets, and knowledge base exports.
+
+- **Scope independence**: A problem's inclusion in "Practiced Only" (`scope=practiced`) strictly requires active practice logs or valid progress snapshots; writing or having notes never alters practice categorization.
+- **Default blank editing & on-demand templates**: New problem notes open completely blank with instructional placeholders. Clicking **Insert Template** inserts a language-specific skeleton outline without default complexity answers or placeholder code. The action is enabled only when the editor is empty, and switching language never replaces or overwrites in-progress drafts.
+- **Content validity & non-blocking notices**: Notes are evaluated by `hasMeaningfulNoteContent`. Blank text or unedited template skeletons (including historical default complexity or `pass` placeholders) are classified as without custom notes (`hasCustomNote: false`). An unedited skeleton displays a non-blocking `Template Unedited` notice until genuine reflections, code, or modified complexity are added.
+- **Save protection & proactive clearing**: Saving is disabled for untouched notes and blank or unedited new templates. Existing notes can be proactively cleared to an empty string and saved, updating the status to "Without Custom Note" while safely retaining all problem catalog data and practice records.
+- **Card and export fallbacks**: Obsidian and Notion quick-copy cards and knowledge exports check for meaningful note content; unfilled templates automatically fall back to recent practice log notes.
+
 ## Desktop launcher
 
 For Windows desktop usage without manual terminal commands:

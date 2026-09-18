@@ -27,6 +27,7 @@ export interface PracticeDraft {
   timeEdited: boolean;
   /** Restore the unified editor disclosure without discarding collapsed corrections. */
   correctionOpen?: boolean;
+  outcome?: 'independent' | 'assisted' | 'unsolved' | null;
 }
 export interface PracticeOutcome {
   error?: string;

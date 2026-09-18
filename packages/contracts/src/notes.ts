@@ -2,7 +2,7 @@
  * Contracts and schemas for problem notes, knowledge base exports, and snapshot bundles.
  */
 import { z } from 'zod';
-import { snapshotBundleV2Schema } from './migration.ts';
+import { snapshotBundleV2Schema, snapshotBundleV3Schema } from './migration.ts';
 
 /** Canonical problem note stored in SQLite. */
 export const problemNoteSchema = z.object({
@@ -147,8 +147,144 @@ export const snapshotBundleV1Schema = z.object({
 }).strict();
 
 export type SnapshotBundleV1 = z.infer<typeof snapshotBundleV1Schema>;
-export const snapshotBundleSchema = z.discriminatedUnion('version', [snapshotBundleV1Schema, snapshotBundleV2Schema]);
+export const snapshotBundleSchema = z.discriminatedUnion('version', [snapshotBundleV1Schema, snapshotBundleV2Schema, snapshotBundleV3Schema]);
 export type SnapshotBundle = z.infer<typeof snapshotBundleSchema>;
+
+
+/**
+ * Default structural note templates for bilingual practice.
+ * Omits default complexity answers and placeholder implementations so that empty templates are blank skeletons.
+ */
+export const NOTE_TEMPLATES = {
+  en: `## 💡 Key Idea & Approach
+-
+
+---
+
+## ⏱️ Complexity Analysis
+- Time Complexity:
+- Space Complexity:
+
+---
+
+## 💻 Clean Implementation
+\`\`\`python
+
+\`\`\`
+
+---
+
+## ⚠️ Edge Cases & Traps
+-
+`,
+  zh: `## 💡 核心思路
+-
+
+---
+
+## ⏱️ 复杂度分析
+- 时间复杂度:
+- 空间复杂度:
+
+---
+
+## 💻 最佳实现
+\`\`\`python
+
+\`\`\`
+
+---
+
+## ⚠️ 避坑与边界情况
+-
+`,
+} as const;
+
+/**
+ * Determine whether a problem note string contains meaningful user notes,
+ * distinguishing genuine reflections, complexity notes, or code from blank notes
+ * and unedited template skeletons (both legacy and current).
+ *
+ * Contract:
+ * - Empty, whitespace-only, or unedited templates -> false
+ * - Only built-in template skeleton / placeholders -> false
+ * - Any genuine user reflections, complexity edits, code, or short notes -> true
+ * - Conservative: Ambiguous non-empty content not strictly matching known placeholders defaults to true.
+ */
+export function hasMeaningfulNoteContent(content: string | null | undefined): boolean {
+  if (!content) return false;
+  const trimmed = content.trim();
+  if (trimmed.length === 0) return false;
+
+  // Normalize line breaks
+  const lines = trimmed.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  const meaningfulLines: string[] = [];
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (line.length === 0) continue;
+
+    // 1. Check known template headings
+    if (
+      line === '## 💡 Key Idea & Approach' ||
+      line === '## 💡 核心思路' ||
+      line === '## ⏱️ Complexity Analysis' ||
+      line === '## ⏱️ 复杂度分析' ||
+      line === '## 💻 Clean Implementation' ||
+      line === '## 💻 最佳实现' ||
+      line === '## ⚠️ Edge Cases & Traps' ||
+      line === '## ⚠️ 避坑与边界情况' ||
+      line === '## 📝 解题复盘与深度笔记' ||
+      line === '## 📝 Solution & Reflection'
+    ) {
+      continue;
+    }
+
+    // 2. Horizontal divider lines (e.g. ---, ***, ___, - - -)
+    if (/^(?:[-*_]\s*){3,}$/.test(line)) {
+      continue;
+    }
+
+    // 3. Code block fences (``` or ```python)
+    if (/^```(?:python|py|ts|js|java|cpp|c|go|rust)?$/i.test(line)) {
+      continue;
+    }
+
+    // 4. Empty bullet points (e.g. "-" or "*" or "+")
+    if (/^[-*+]$/.test(line)) {
+      continue;
+    }
+
+    // 5. Python starter placeholder lines inside template
+    if (line === 'class Solution:' || line === 'pass') {
+      continue;
+    }
+
+    // 6. Known default complexity lines (both new blank and historical default)
+    // Matches:
+    // - Time Complexity:
+    // - Time Complexity: $O(N)$
+    // - Space Complexity:
+    // - Space Complexity: $O(1)$
+    // - 时间复杂度:
+    // - 时间复杂度: $O(N)$
+    // - 空间复杂度:
+    // - 空间复杂度: $O(1)$
+    if (
+      /^[-*]?\s*Time Complexity:\s*(?:\$O\(N\)\$)?\s*$/i.test(line) ||
+      /^[-*]?\s*Space Complexity:\s*(?:\$O\(1\)\$)?\s*$/i.test(line) ||
+      /^[-*]?\s*时间复杂度:\s*(?:\$O\(N\)\$)?\s*$/i.test(line) ||
+      /^[-*]?\s*空间复杂度:\s*(?:\$O\(1\)\$)?\s*$/i.test(line)
+    ) {
+      continue;
+    }
+
+    // Any line not matching known built-in placeholders is genuine user content
+    meaningfulLines.push(line);
+  }
+
+  return meaningfulLines.length > 0;
+}
 
 /**
  * Format a zero-padded filename for deterministic alphabetical ordering in Obsidian.
@@ -163,6 +299,7 @@ export function formatProblemFilename(frontendId: string, slug: string): string 
 /**
  * Format single problem as an Obsidian Callout card for clipboard copying.
  * Adapts labels and statuses according to the requested language ('en' | 'zh').
+ * If customNote has no meaningful content, falls back to practice log notes.
  */
 export function formatObsidianCallout(
   problem: { frontendId: string; title: string; url: string; difficulty: string; tags: string[]; slug: string },
@@ -171,7 +308,9 @@ export function formatObsidianCallout(
   lang: 'en' | 'zh' = 'en'
 ): string {
   const isZh = lang === 'zh';
-  const noteContent = customNote || record?.notes;
+  const effectiveCustomNote = hasMeaningfulNoteContent(customNote) ? customNote!.trim() : null;
+  const recordNotes = record?.notes && record.notes.trim().length > 0 ? record.notes.trim() : null;
+  const noteContent = effectiveCustomNote || recordNotes;
   const tagList = problem.tags.map((t) => `#leetcode/${t.toLowerCase().replace(/\s+/g, '-')}`).join(' ');
   const link = formatProblemFilename(problem.frontendId, problem.slug).replace(/\.md$/, '');
 
@@ -197,8 +336,8 @@ export function formatObsidianCallout(
 > - **${tagsLabel}**: ${tagList || '#leetcode'}
 > - **${linkLabel}**: [[${link}]]
 ${
-  noteContent && noteContent.trim().length > 0
-    ? `> \n> **${notesHeading}**:\n> ${noteContent.trim().replace(/\r?\n/g, '\n> ')}`
+  noteContent && noteContent.length > 0
+    ? `> \n> **${notesHeading}**:\n> ${noteContent.replace(/\r?\n/g, '\n> ')}`
     : ''
 }`;
 }
@@ -206,6 +345,7 @@ ${
 /**
  * Format single problem as a Notion Rich Block card for clipboard copying.
  * Adapts labels and statuses according to the requested language ('en' | 'zh').
+ * If customNote has no meaningful content, falls back to practice log notes.
  */
 export function formatNotionCard(
   problem: { frontendId: string; title: string; url: string; difficulty: string; tags: string[] },
@@ -214,7 +354,9 @@ export function formatNotionCard(
   lang: 'en' | 'zh' = 'en'
 ): string {
   const isZh = lang === 'zh';
-  const noteContent = customNote || record?.notes;
+  const effectiveCustomNote = hasMeaningfulNoteContent(customNote) ? customNote!.trim() : null;
+  const recordNotes = record?.notes && record.notes.trim().length > 0 ? record.notes.trim() : null;
+  const noteContent = effectiveCustomNote || recordNotes;
   const tagList = problem.tags.join(', ');
   const durationStr = record?.durationMinutes
     ? (isZh ? `${record.durationMinutes} 分钟` : `${record.durationMinutes} min`)
@@ -235,8 +377,8 @@ export function formatNotionCard(
 > 📅 **${dateLabel}**: ${dateStr} · ⏱️ **${durLabel}**: ${durationStr} · 🏆 **${statusLabel}**: ${statusStr}
 > 🏷️ **${tagsLabel}**: ${tagList || noneStr}
 ${
-  noteContent && noteContent.trim().length > 0
-    ? `> \n> 💡 **${notesHeading}**:\n> ${noteContent.trim().replace(/\r?\n/g, '\n> ')}`
+  noteContent && noteContent.length > 0
+    ? `> \n> 💡 **${notesHeading}**:\n> ${noteContent.replace(/\r?\n/g, '\n> ')}`
     : ''
 }`;
 }

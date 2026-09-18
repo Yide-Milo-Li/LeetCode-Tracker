@@ -15,6 +15,7 @@ import type {
   ImportHistoryItem,
   ImportPreview,
   ImportSummary,
+  KnowledgeProfileReport,
   OverridePreview,
   PracticeQueryInput,
   PracticeRecord,
@@ -372,6 +373,10 @@ const planningApi = {
     return planningMutation(`/daily-plans/${planId}/replace`, options);
   },
 
+  appendPlanItem(planId: string, options: { expectedVersion: number }): Promise<DailyPlan> {
+    return planningMutation(`/daily-plans/${planId}/append`, options);
+  },
+
   previewDailyPlanOverride(options: { prompt?: string; rules?: RulePatch; date?: string }): Promise<OverridePreview> {
     return request<OverridePreview>('/daily-plan-overrides/preview', {
       method: 'POST',
@@ -412,6 +417,10 @@ const dashboardApi = {
 
   getMasteryReport(): Promise<TagMasteryReport> {
     return request<TagMasteryReport>('/mastery');
+  },
+
+  getKnowledgeProfile(): Promise<KnowledgeProfileReport> {
+    return request<KnowledgeProfileReport>('/knowledge-profile');
   },
 };
 

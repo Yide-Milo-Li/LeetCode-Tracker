@@ -3,6 +3,7 @@
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
+  appendPlanItemSchema,
   ensureDailyPlanSchema,
   overrideCommitSchema,
   overrideRequestSchema,
@@ -114,6 +115,22 @@ export function registerPlanningRoutes(app: FastifyInstance, context: RouteConte
     }
     try {
       const updated = await writeLock.run(() => planningService.replacePlanItems(id, parsed.data));
+      return reply.status(200).send(updated);
+    } catch (err) {
+      if (err instanceof PlanningError) return reply.status(err.status).send({ error: err.code, message: err.message });
+      return reply.status(500).send({ error: 'INTERNAL_ERROR', message: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  /** POST /api/v1/daily-plans/:id/append: Append one question to today's plan */
+  app.post('/api/v1/daily-plans/:id/append', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { id } = request.params as { id: string };
+    const parsed = appendPlanItemSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'INVALID_INPUT', issues: parsed.error.issues });
+    }
+    try {
+      const updated = await writeLock.run(() => planningService.appendPlanItem(id, parsed.data));
       return reply.status(200).send(updated);
     } catch (err) {
       if (err instanceof PlanningError) return reply.status(err.status).send({ error: err.code, message: err.message });

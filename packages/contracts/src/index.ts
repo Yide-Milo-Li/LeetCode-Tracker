@@ -8,3 +8,4 @@ export * from './time.ts';
 export * from './dashboard.ts';
 export * from './notes.ts';
 export * from './mastery.ts';
+export * from './knowledge-profile.ts';

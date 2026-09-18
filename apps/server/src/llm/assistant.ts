@@ -539,6 +539,8 @@ Possible fields:
 - difficulty: object with keys "Easy", "Medium", "Hard" (exact casing) representing integer percentage values summing to 100 (e.g. {"Easy": 0, "Medium": 0, "Hard": 100} or {"Easy": 50, "Medium": 50, "Hard": 0})
 - tags: array of tag slugs. Only use slugs from the provided known tag slugs list.
 - premium: boolean
+- reviewMode: string ("none", "partial", or "all")
+- reviewCount: positive integer (exact review question count desired in partial mode, e.g. "其中复习 1 题")
 - reviewEnabled: boolean (false if user requests no review, zero review, or only new problems; true if user requests reviews)
 - reviewPercent: number between 1 and 100
 - preference: string description of soft preference
@@ -629,10 +631,17 @@ Return ONLY valid JSON conforming to the schema.`;
         }
 
         if (typeof parsed.premium === 'boolean') patch.premium = parsed.premium;
+        if (parsed.reviewMode === 'none' || parsed.reviewMode === 'partial' || parsed.reviewMode === 'all') {
+          patch.reviewMode = parsed.reviewMode;
+        }
+        if (typeof parsed.reviewCount === 'number' && parsed.reviewCount > 0) {
+          patch.reviewCount = Math.round(parsed.reviewCount);
+        }
         if (typeof parsed.reviewEnabled === 'boolean') {
           patch.reviewEnabled = parsed.reviewEnabled;
         } else if (/\b(no\s+review|zero\s+review|skip\s+review|without\s+review)\b/i.test(params.prompt) || /不复习|无需复习|不要复习/.test(params.prompt)) {
           patch.reviewEnabled = false;
+          patch.reviewMode = 'none';
         }
         if (typeof parsed.reviewPercent === 'number' && parsed.reviewPercent > 0 && parsed.reviewPercent <= 100) {
           patch.reviewPercent = parsed.reviewPercent;

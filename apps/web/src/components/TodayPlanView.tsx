@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { RefreshCw, CalendarDays, MoreHorizontal, Coffee, Globe, Sparkles, CheckCircle2 } from 'lucide-react';
+import { RefreshCw, CalendarDays, MoreHorizontal, Coffee, Globe, Sparkles, CheckCircle2, Plus } from 'lucide-react';
 import { api, type DailyPlan, type PlanItem, type Strategy } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
 import { PromptOverrideModal } from './PromptOverrideModal.tsx';
@@ -237,7 +237,25 @@ function TodayPlanViewInner({
             />
             <div className="section-heading">
               <div className="action-row">
-                <button className="btn btn-secondary btn-sm" onClick={() => setOverride(true)}>
+                <button
+                  className="btn btn-primary btn-sm"
+                  disabled={
+                    controller.loading ||
+                    controller.appending ||
+                    controller.replacingBatch ||
+                    Boolean(controller.replacingItemId) ||
+                    saving.size > 0
+                  }
+                  onClick={() => void controller.appendOne()}
+                >
+                  <Plus size={16} />
+                  {zh ? '加一题' : 'Add one'}
+                </button>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  disabled={controller.loading || controller.appending}
+                  onClick={() => setOverride(true)}
+                >
                   {zh ? '调整今天' : 'Adjust today'}
                 </button>
                 <details className="action-menu">

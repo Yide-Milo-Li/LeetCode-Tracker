@@ -2,11 +2,37 @@
  * SQLite storage delegates for long-form problem notes and note summaries.
  */
 import type { DatabaseSync } from 'node:sqlite';
-import { problemNoteListQuerySchema, type ProblemNote, type ProblemNoteListQuery, type ProblemNoteSummary } from '../../contracts/src/notes.ts';
+import {
+  problemNoteListQuerySchema,
+  hasMeaningfulNoteContent,
+  type ProblemNote,
+  type ProblemNoteListQuery,
+  type ProblemNoteSummary,
+} from '../../contracts/src/notes.ts';
+
+const registeredConnections = new WeakSet<DatabaseSync>();
+
+/**
+ * Ensure the deterministic SQLite scalar function `has_meaningful_note` is registered on this connection.
+ * Evaluates whether a problem note contains genuine reflections, complexity analysis, or implementation code.
+ */
+export function registerNotesFunctions(db: DatabaseSync): void {
+  if (registeredConnections.has(db)) return;
+  try {
+    db.function('has_meaningful_note', { deterministic: true }, (content: unknown) => {
+      if (typeof content !== 'string') return 0;
+      return hasMeaningfulNoteContent(content) ? 1 : 0;
+    });
+    registeredConnections.add(db);
+  } catch {
+    // Function may already be defined on this connection
+  }
+}
 
 /**
  * Retrieve a problem's long-form note by frontend question ID.
  * Returns null if no note has been created yet.
+ * Preserves exact stored content and timestamp even if content is an unfilled template skeleton.
  */
 export function getProblemNote(db: DatabaseSync, questionFrontendId: string): ProblemNote | null {
   const row = db
@@ -59,16 +85,19 @@ export function listProblemNoteSummaries(
   db: DatabaseSync,
   rawQuery: Partial<ProblemNoteListQuery> = {}
 ): { items: ProblemNoteSummary[]; total: number } {
+  // Ensure connection-level scalar function is registered before query execution
+  registerNotesFunctions(db);
+
   const query = problemNoteListQuerySchema.parse(rawQuery);
   const params: (string | number)[] = [];
   const whereClauses: string[] = [];
 
-  // Filter by scope: 'practiced' (has manual practice or accepted snapshot) vs 'all'
+  // Filter by scope: 'practiced' strictly requires active manual practice or active import snapshot.
+  // Mere existence of notes does not classify a problem as practiced.
   if (query.scope === 'practiced') {
     whereClauses.push(`(
       EXISTS (SELECT 1 FROM practice_records pr WHERE pr.question_id = p.question_id AND pr.status = 'active')
       OR EXISTS (SELECT 1 FROM progress_snapshots ps WHERE ps.question_id = p.question_id AND ps.status = 'active')
-      OR n.content IS NOT NULL
     )`);
   }
 
@@ -89,11 +118,11 @@ export function listProblemNoteSummaries(
     params.push(query.difficulty);
   }
 
-  // Filter by whether a custom long-form note exists
+  // Filter by whether a custom long-form note with meaningful content exists
   if (query.hasNote === 'true') {
-    whereClauses.push('n.content IS NOT NULL AND LENGTH(TRIM(n.content)) > 0');
+    whereClauses.push('has_meaningful_note(n.content) = 1');
   } else if (query.hasNote === 'false') {
-    whereClauses.push('(n.content IS NULL OR LENGTH(TRIM(n.content)) = 0)');
+    whereClauses.push('has_meaningful_note(n.content) = 0');
   }
 
   // Filter by topic tag
@@ -152,7 +181,7 @@ export function listProblemNoteSummaries(
        LEFT JOIN problem_notes n ON n.question_id = p.question_id
        ${whereSql}
        ORDER BY
-         CASE WHEN n.content IS NOT NULL THEN 0 ELSE 1 END,
+         CASE WHEN has_meaningful_note(n.content) = 1 THEN 0 ELSE 1 END,
          CAST(p.frontend_question_id AS INTEGER) ASC,
          p.frontend_question_id ASC
        LIMIT ? OFFSET ?`
@@ -206,6 +235,8 @@ export function listProblemNoteSummaries(
       }
     }
 
+    const hasMeaningful = hasMeaningfulNoteContent(r.customNote);
+
     return {
       questionId: r.questionId,
       questionFrontendId: r.questionFrontendId,
@@ -214,8 +245,8 @@ export function listProblemNoteSummaries(
       difficulty: r.difficulty,
       tags: tagMap.get(r.questionId) ?? [],
       url: r.url,
-      hasCustomNote: Boolean(r.customNote && r.customNote.trim().length > 0),
-      customNoteUpdatedAt: r.customNoteUpdatedAt,
+      hasCustomNote: hasMeaningful,
+      customNoteUpdatedAt: hasMeaningful ? r.customNoteUpdatedAt : null,
       lastPracticedAt: r.lastPracticedAt,
       totalPractices: r.totalPractices,
       hasAccepted: r.hasAccepted === 1,

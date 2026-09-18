@@ -283,6 +283,7 @@ it('logs practice sessions and revokes past practice records in PracticeLogModal
     createdAt: 100,
     updatedAt: 100,
     revokedAt: null,
+    outcome: null,
   };
 
   mock.method(api, 'getPracticeRecords', async () => ({

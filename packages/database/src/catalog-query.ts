@@ -648,7 +648,7 @@ export function getDashboardRawDataRecords(
       id, question_id as questionId, completed, practiced_at as practicedAt,
       time_precision as timePrecision, source_timezone as sourceTimezone,
       notes, duration_minutes as durationMinutes, revision, status, created_at as createdAt,
-      updated_at as updatedAt, revoked_at as revokedAt
+      updated_at as updatedAt, revoked_at as revokedAt, outcome
     FROM practice_records
     WHERE status = 'active'
     ORDER BY practiced_at DESC
