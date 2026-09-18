@@ -52,6 +52,134 @@ afterEach(() => {
   Reflect.deleteProperty(dom.window, '__TAURI_INTERNALS__');
 });
 
+/** Control response order explicitly so races do not depend on timers or network speed. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+
+/** Provide two synthetic problems for cross-selection editor lifecycle regressions. */
+function mockEditorProblems() {
+  const items = ['A', 'B'].map((name, index) => ({
+    questionId: String(index + 1), questionFrontendId: String(index + 1),
+    title: `Problem ${name}`, titleSlug: name, url: `https://example.com/${name}`,
+    difficulty: 'Easy' as const, tags: [], totalPractices: 1, hasAccepted: true,
+    hasCustomNote: true, customNoteUpdatedAt: 1, lastPracticedAt: null,
+    reviewStage: null, latestPracticeNotes: null,
+  }));
+  const list = mock.method(api, 'listNotes', async () => ({ items, total: items.length }));
+  mock.method(api, 'getPracticeRecords', async () => ({ items: [], total: 0, page: 1, limit: 100 }));
+  mock.method(api, 'getNote', async (id: string) => ({ note: editorNote(id, `${id} original`) }));
+  return list;
+}
+
+/** Build a server-shaped note response without touching a database. */
+function editorNote(id: string, content: string) {
+  return { questionId: id, questionFrontendId: id, content, updatedAt: 1 };
+}
+
+/** Read the active note editor independently of translated placeholder text. */
+function noteEditor() {
+  return document.querySelector('textarea') as HTMLTextAreaElement;
+}
+
+describe('NotesWorkspace request ownership', () => {
+  for (const fails of [false, true]) {
+    it(`ignores stale retry ${fails ? 'failure' : 'success'} after switching and editing another problem`, async () => {
+      mockEditorProblems();
+      const retry = deferred<{ note: ReturnType<typeof editorNote> }>();
+      let firstAttempt = true;
+      mock.method(api, 'getNote', async (id: string) => {
+        if (id === '2') return { note: editorNote(id, 'B original') };
+        if (firstAttempt) { firstAttempt = false; throw new Error('Synthetic initial failure'); }
+        return retry.promise;
+      });
+      await act(async () => { render(<NotesWorkspace lang="en" />); });
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: /retry/i })); });
+      await act(async () => { fireEvent.click(screen.getByText('Problem B')); });
+      await act(async () => { fireEvent.change(noteEditor(), { target: { value: 'B unsaved draft' } }); });
+      await act(async () => {
+        if (fails) retry.reject(new Error('Stale retry error'));
+        else retry.resolve({ note: editorNote('1', 'A retry response') });
+      });
+      assert.equal(noteEditor().value, 'B unsaved draft');
+      assert.ok(!screen.queryByRole('button', { name: /retry/i }), 'A stale failure must not show retry on B');
+      assert.equal((screen.getByRole('button', { name: /save note/i }) as HTMLButtonElement).disabled, false);
+    });
+
+    it(`ignores stale save ${fails ? 'failure' : 'success'} without changing another problem's save state`, async () => {
+      const list = mockEditorProblems();
+      const pending = deferred<{ note: ReturnType<typeof editorNote> }>();
+      mock.method(api, 'upsertNote', () => pending.promise);
+      await act(async () => { render(<NotesWorkspace lang="en" />); });
+      await act(async () => { fireEvent.change(noteEditor(), { target: { value: 'shared draft' } }); });
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: /save note/i })); });
+      await act(async () => { fireEvent.click(screen.getByText('Problem B')); });
+      await act(async () => { fireEvent.change(noteEditor(), { target: { value: 'shared draft' } }); });
+      const listCallsBeforeResponse = list.mock.callCount();
+      await act(async () => {
+        if (fails) pending.reject(new Error('Stale save error'));
+        else pending.resolve({ note: editorNote('1', 'shared draft') });
+      });
+      // Equal text on two different problems must never imply that both were persisted.
+      assert.equal(noteEditor().value, 'shared draft');
+      assert.ok(!screen.queryByText('Stale save error'), 'A stale error must not appear on B');
+      assert.equal((screen.getByRole('button', { name: /save note/i }) as HTMLButtonElement).disabled, false);
+      assert.equal(list.mock.callCount(), listCallsBeforeResponse + (fails ? 0 : 1));
+    });
+  }
+
+  it('preserves edits made during saving and uses the returned server content as the saved baseline', async () => {
+    mockEditorProblems();
+    const pending = deferred<{ note: ReturnType<typeof editorNote> }>();
+    const save = mock.method(api, 'upsertNote', () => pending.promise);
+    await act(async () => { render(<NotesWorkspace lang="en" />); });
+    await act(async () => { fireEvent.change(noteEditor(), { target: { value: 'sent draft' } }); });
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 's', ctrlKey: true });
+      fireEvent.keyDown(window, { key: 's', ctrlKey: true });
+    });
+    assert.equal(save.mock.callCount(), 1, 'Repeated shortcuts in one render must not duplicate writes');
+    await act(async () => { fireEvent.change(noteEditor(), { target: { value: 'newer draft' } }); });
+    await act(async () => { pending.resolve({ note: editorNote('1', 'server content') }); });
+    assert.equal(noteEditor().value, 'newer draft');
+    assert.equal((screen.getByRole('button', { name: /save note/i }) as HTMLButtonElement).disabled, false);
+    await act(async () => { fireEvent.change(noteEditor(), { target: { value: 'server content' } }); });
+    assert.equal((screen.getByRole('button', { name: /save note/i }) as HTMLButtonElement).disabled, true);
+  });
+
+  it('does not accept a previous visit save response after selecting A, B, then A again', async () => {
+    mockEditorProblems();
+    const pending = deferred<{ note: ReturnType<typeof editorNote> }>();
+    mock.method(api, 'upsertNote', () => pending.promise);
+    await act(async () => { render(<NotesWorkspace lang="en" />); });
+    await act(async () => { fireEvent.change(noteEditor(), { target: { value: 'shared draft' } }); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /save note/i })); });
+    await act(async () => { fireEvent.click(screen.getByText('Problem B')); });
+    await act(async () => { fireEvent.click(screen.getByText('Problem A')); });
+    await act(async () => { fireEvent.change(noteEditor(), { target: { value: 'shared draft' } }); });
+    await act(async () => { pending.resolve({ note: editorNote('1', 'shared draft') }); });
+    assert.equal((screen.getByRole('button', { name: /save note/i }) as HTMLButtonElement).disabled, false);
+  });
+
+  it('does not refresh or write again when a save finishes after unmount', async () => {
+    const list = mockEditorProblems();
+    const pending = deferred<{ note: ReturnType<typeof editorNote> }>();
+    const save = mock.method(api, 'upsertNote', () => pending.promise);
+    let unmount!: () => void;
+    await act(async () => { ({ unmount } = render(<NotesWorkspace lang="en" />)); });
+    await act(async () => { fireEvent.change(noteEditor(), { target: { value: 'sent draft' } }); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /save note/i })); });
+    const listCallsBeforeUnmount = list.mock.callCount();
+    await act(async () => { unmount(); });
+    await act(async () => { pending.resolve({ note: editorNote('1', 'sent draft') }); });
+    assert.equal(list.mock.callCount(), listCallsBeforeUnmount);
+    assert.equal(save.mock.callCount(), 1);
+  });
+});
+
 describe('NotesWorkspace Component', () => {
   it('routes a visible desktop export action through native IPC without navigating', async () => {
     mock.method(api, 'listNotes', async () => ({ items: [], total: 0 }));

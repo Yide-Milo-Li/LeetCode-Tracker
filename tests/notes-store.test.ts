@@ -332,4 +332,20 @@ describe('Notes Store & Schema v9', () => {
     assert.ok(rawNote);
     assert.equal(rawNote.content, '');
   });
+
+  it('keeps standalone complexity answers in note filters and Notion exports without marking practice', () => {
+    const english = '- Time Complexity: $O(N)$';
+    const chinese = '- 空间复杂度: $O(1)$';
+    store.upsertProblemNote('1', english);
+    store.upsertProblemNote('2', chinese);
+    const withNotes = store.listProblemNotes({ scope: 'all', hasNote: 'true' });
+    assert.deepEqual(withNotes.items.map((item) => item.questionFrontendId), ['1', '2']);
+    assert.equal(store.listProblemNotes({ scope: 'practiced' }).total, 0);
+    // Export and SQL classification must share the same conservative validity semantics.
+    const csv = generateNotionCsvs(db).problemsSummaryCsv;
+    assert.ok(csv.includes(english));
+    assert.ok(csv.includes(chinese));
+    assert.equal(store.getProblemNote('1')?.content, english);
+    assert.equal(store.getProblemNote('2')?.content, chinese);
+  });
 });

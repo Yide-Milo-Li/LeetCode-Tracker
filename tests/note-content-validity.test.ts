@@ -143,6 +143,29 @@ describe('Note Content Validity: hasMeaningfulNoteContent', () => {
     assert.equal(hasMeaningfulNoteContent('```python\nreturn a + b\n```'), true);
     assert.equal(hasMeaningfulNoteContent('Remember to check left < right'), true);
   });
+
+  it('keeps standalone answers and newly filled default complexities meaningful', () => {
+    for (const [lang, time, space] of [
+      ['en', 'Time Complexity:', 'Space Complexity:'],
+      ['zh', '时间复杂度:', '空间复杂度:'],
+    ] as const) {
+      for (const [label, answer] of [[time, '$O(N)$'], [space, '$O(1)$']]) {
+        assert.equal(hasMeaningfulNoteContent(`- ${label} ${answer}`), true);
+        assert.equal(hasMeaningfulNoteContent(NOTE_TEMPLATES[lang].replace(label, `${label} ${answer}`)), true);
+      }
+      const filled = NOTE_TEMPLATES[lang].replace(time, `${time} $O(N)$`).replace(space, `${space} $O(1)$`);
+      assert.equal(hasMeaningfulNoteContent(filled), true);
+    }
+    // These words are only placeholders inside a recognized template implementation block.
+    assert.equal(hasMeaningfulNoteContent('pass'), true);
+    assert.equal(hasMeaningfulNoteContent('class Solution:'), true);
+  });
+
+  it('recognizes whitespace-normalized legacy templates without discarding edited answers', () => {
+    const spaced = HISTORICAL_EN_TEMPLATE.split('\n').map((line) => `  ${line}  `).join('\r\n');
+    assert.equal(hasMeaningfulNoteContent(spaced), false);
+    assert.equal(hasMeaningfulNoteContent(HISTORICAL_EN_TEMPLATE.replace('$O(N)$', '$O(N log N)$')), true);
+  });
 });
 
 describe('Card / Callout Formatting with Note Fallback', () => {

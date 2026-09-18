@@ -3,7 +3,7 @@ import { ExportLink } from './ExportLink.tsx';
  * Independent Notes Workspace providing Master-Detail browsing,
  * deep solution editing, practice history timeline, and Obsidian/Notion knowledge export.
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Search,
   BookOpen,
@@ -32,6 +32,7 @@ export interface NotesWorkspaceProps {
   initialFrontendId?: string | null;
 }
 
+/** Browse and edit notes while keeping asynchronous responses owned by their selection visit. */
 export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps) {
   const t = translations[lang];
   const zh = lang === 'zh';
@@ -48,6 +49,7 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
   const [items, setItems] = useState<ProblemNoteSummary[]>([]);
   const [total, setTotal] = useState(0);
   const [loadingList, setLoadingList] = useState(true);
+  const [listRevision, setListRevision] = useState(0);
 
   // Selected problem state
   const [selectedId, setSelectedId] = useState<string | null>(initialFrontendId ?? null);
@@ -66,6 +68,16 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
   const [savingNote, setSavingNote] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState('');
+  const [retryRevision, setRetryRevision] = useState(0);
+  const editorSession = useRef({ active: false, saving: false, saveVersion: 0 });
+
+  useEffect(() => {
+    // A -> B -> A creates a new visit too; comparing question IDs alone is insufficient.
+    const session = { active: true, saving: false, saveVersion: 0 };
+    editorSession.current = session;
+    setSavingNote(false);
+    return () => { session.active = false; };
+  }, [selectedId]);
 
   // Selected problem practice timeline
   const [practices, setPractices] = useState<PracticeRecord[]>([]);
@@ -82,7 +94,7 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
     }
   }, [items, selectedId]);
 
-  // Load problem notes list with pagination clamping
+  /** Fetch the current filters and return cancellation for superseded list requests. */
   const loadList = useCallback(() => {
     let active = true;
     setLoadingList(true);
@@ -103,8 +115,8 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
         if (page > maxPage) {
           setPage(maxPage);
         }
-        if (!selectedId && res.items.length > 0) {
-          setSelectedId(res.items[0].questionFrontendId);
+        if (res.items.length > 0) {
+          setSelectedId((current) => current ?? res.items[0].questionFrontendId);
         }
       })
       .catch(() => {
@@ -117,13 +129,13 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
     return () => {
       active = false;
     };
-  }, [scope, search, difficulty, hasNote, page, limit, selectedId]);
+  }, [scope, search, difficulty, hasNote, page, limit]);
 
   useEffect(() => {
-    loadList();
-  }, [loadList]);
+    return loadList();
+  }, [loadList, listRevision]);
 
-  // Fetch problem note content and practice records (strictly decoupled from items and lang)
+  // Initial loads and retries share cancellation, independently of list and language changes.
   useEffect(() => {
     if (!selectedId) {
       setSelectedSummary(null);
@@ -176,26 +188,11 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
     return () => {
       active = false;
     };
-  }, [selectedId]);
+  }, [selectedId, retryRevision]);
 
-  // Manual retry handler for note loading failures
+  /** Retry through the cancellable loading effect rather than a separate unguarded request. */
   const handleRetryLoad = useCallback(() => {
-    if (!selectedId) return;
-    setLoadingNote(true);
-    setNoteLoadError(false);
-    api
-      .getNote(selectedId)
-      .then((res) => {
-        const content = res.note?.content ?? '';
-        setNoteContent(content);
-        setSavedContent(content);
-      })
-      .catch(() => {
-        setNoteLoadError(true);
-      })
-      .finally(() => {
-        setLoadingNote(false);
-      });
+    if (selectedId) setRetryRevision((current) => current + 1);
   }, [selectedId]);
 
   // Meaningful note validity check & save eligibility
@@ -209,9 +206,13 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
     isModified &&
     (isBlank ? savedContent.trim().length > 0 : hasMeaningful);
 
-  // Save note handler
+  /** Persist one snapshot, retaining newer edits and ignoring responses from an obsolete visit. */
   async function handleSaveNote() {
-    if (!selectedId || !canSave) return;
+    const session = editorSession.current;
+    if (!selectedId || !canSave || !session.active || session.saving) return;
+    // Synchronous guard also blocks repeated shortcuts before React commits savingNote.
+    session.saving = true;
+    const saveVersion = ++session.saveVersion;
     const targetId = selectedId;
     const targetContent = noteContent;
     setSavingNote(true);
@@ -219,19 +220,21 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
     setSaveError('');
 
     try {
-      await api.upsertNote(targetId, targetContent);
-      if (selectedId === targetId) {
-        setSavedContent(targetContent);
+      const { note } = await api.upsertNote(targetId, targetContent);
+      if (session.active) {
+        setSavedContent(note.content);
         setSaveSuccess(true);
-        setTimeout(() => setSaveSuccess(false), 2500);
+        setTimeout(() => {
+          if (session.active && session.saveVersion === saveVersion) setSaveSuccess(false);
+        }, 2500);
 
-        const isMeaningful = hasMeaningfulNoteContent(targetContent);
+        const isMeaningful = hasMeaningfulNoteContent(note.content);
         setSelectedSummary((prev) =>
           prev && prev.questionFrontendId === targetId
             ? {
                 ...prev,
                 hasCustomNote: isMeaningful,
-                customNoteUpdatedAt: isMeaningful ? Date.now() : null,
+                customNoteUpdatedAt: isMeaningful ? note.updatedAt : null,
               }
             : prev
         );
@@ -242,19 +245,22 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
               ? {
                   ...it,
                   hasCustomNote: isMeaningful,
-                  customNoteUpdatedAt: isMeaningful ? Date.now() : null,
+                  customNoteUpdatedAt: isMeaningful ? note.updatedAt : null,
                 }
               : it
           )
         );
       }
-      loadList();
+      // A saved note can change list membership even after switching problems. Refresh
+      // the latest filters while mounted, without reloading the current editor draft.
+      if (editorSession.current.active) setListRevision((current) => current + 1);
     } catch (err) {
-      if (selectedId === targetId) {
+      if (session.active) {
         setSaveError(err instanceof Error ? err.message : String(err));
       }
     } finally {
-      if (selectedId === targetId) {
+      session.saving = false;
+      if (session.active) {
         setSavingNote(false);
       }
     }
@@ -262,6 +268,7 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
 
   // Ctrl+S / Cmd+S shortcut to save
   useEffect(() => {
+    /** Route the browser save shortcut through the same eligibility and in-flight guard. */
     function handleKeyDown(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
@@ -820,7 +827,7 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
                       type="button"
                       className="btn btn-secondary btn-sm"
                       onClick={() => setNoteContent(NOTE_TEMPLATES[lang])}
-                      disabled={noteContent.trim().length > 0}
+                      disabled={loadingNote || noteLoadError || noteContent.trim().length > 0}
                       title={t.insertTemplateTitle}
                       style={{
                         display: 'inline-flex',
@@ -915,6 +922,7 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
 
                 <textarea
                   rows={16}
+                  disabled={loadingNote || noteLoadError}
                   value={noteContent}
                   onChange={(e) => setNoteContent(e.target.value)}
                   placeholder={t.noteEditorPlaceholder}

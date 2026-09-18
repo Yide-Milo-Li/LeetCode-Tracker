@@ -200,6 +200,20 @@ export const NOTE_TEMPLATES = {
 `,
 } as const;
 
+/** Normalize only whitespace and line endings when identifying known template skeletons. */
+function normalizeNoteSkeleton(content: string): string {
+  return content.split(/\r\n?|\n/).map((line) => line.trim()).filter(Boolean).join('\n');
+}
+
+// Recognize historical answers only as part of the complete old template. The same
+// answers entered into a blank/current note are user content, not placeholders.
+const legacyNoteSkeletons = new Set(Object.values(NOTE_TEMPLATES).map((template) =>
+  normalizeNoteSkeleton(template
+    .replace(/(Time Complexity:|时间复杂度:)/, '$1 $O(N)$')
+    .replace(/(Space Complexity:|空间复杂度:)/, '$1 $O(1)$')
+    .replace('```python\n\n```', '```python\nclass Solution:\n    pass\n```'))
+));
+
 /**
  * Determine whether a problem note string contains meaningful user notes,
  * distinguishing genuine reflections, complexity notes, or code from blank notes
@@ -216,8 +230,15 @@ export function hasMeaningfulNoteContent(content: string | null | undefined): bo
   const trimmed = content.trim();
   if (trimmed.length === 0) return false;
 
-  // Normalize line breaks
-  const lines = trimmed.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  const normalized = normalizeNoteSkeleton(trimmed);
+  if (legacyNoteSkeletons.has(normalized)) return false;
+
+  // A partial legacy implementation skeleton is recognizable only with its heading
+  // and complete fenced starter block; standalone `pass` remains genuine content.
+  const lines = normalized.replace(
+    /(^|\n)## 💻 (?:Clean Implementation|最佳实现)\n```python\nclass Solution:\npass\n```(?=\n|$)/g,
+    '$1'
+  ).split('\n');
   const meaningfulLines: string[] = [];
 
   for (const rawLine of lines) {
@@ -255,26 +276,12 @@ export function hasMeaningfulNoteContent(content: string | null | undefined): bo
       continue;
     }
 
-    // 5. Python starter placeholder lines inside template
-    if (line === 'class Solution:' || line === 'pass') {
-      continue;
-    }
-
-    // 6. Known default complexity lines (both new blank and historical default)
-    // Matches:
-    // - Time Complexity:
-    // - Time Complexity: $O(N)$
-    // - Space Complexity:
-    // - Space Complexity: $O(1)$
-    // - 时间复杂度:
-    // - 时间复杂度: $O(N)$
-    // - 空间复杂度:
-    // - 空间复杂度: $O(1)$
+    // Empty answer labels are structural; any supplied complexity is meaningful here.
     if (
-      /^[-*]?\s*Time Complexity:\s*(?:\$O\(N\)\$)?\s*$/i.test(line) ||
-      /^[-*]?\s*Space Complexity:\s*(?:\$O\(1\)\$)?\s*$/i.test(line) ||
-      /^[-*]?\s*时间复杂度:\s*(?:\$O\(N\)\$)?\s*$/i.test(line) ||
-      /^[-*]?\s*空间复杂度:\s*(?:\$O\(1\)\$)?\s*$/i.test(line)
+      /^[-*]?\s*Time Complexity:\s*$/i.test(line) ||
+      /^[-*]?\s*Space Complexity:\s*$/i.test(line) ||
+      /^[-*]?\s*时间复杂度:\s*$/i.test(line) ||
+      /^[-*]?\s*空间复杂度:\s*$/i.test(line)
     ) {
       continue;
     }
