@@ -65,7 +65,9 @@ Dialog and drawer entry takes 220ms and exit 160ms. The exiting overlay retains 
 
 In Study schedule, enter the daily total (1–50) and nonnegative whole counts for each difficulty. Enter any two counts to fill the remaining difficulty automatically. The automatic field follows changes to the other two or the total until you edit it yourself. The difficulty sum must equal the total. Overflow highlights the total immediately; invalid or incomplete counts cannot be saved.
 
-Review Mode offers new problems only, some review, and all review. Some review takes a whole count from 1 to the daily total. All review follows the total automatically and never fills a review shortage with new problems. Insufficient eligible reviews produce fewer items and a shortage notice; completed items in an existing plan remain preserved. Partial review retains the existing same-difficulty shortage fallback.
+Review Mode offers new problems only, some review, and all review. Some review saves a fixed whole count from 1 to the daily total, even when that count equals the total. All review follows the total automatically. Neither mode fills a review shortage with new problems, and new slots are not filled with reviews. Insufficient eligible candidates produce fewer items and a shortage notice; completed items in an existing plan count toward the fixed quotas and remain preserved.
+
+Adjust today preserves unsaved text and manual counts during background refresh. A changed plan version invalidates its preview so the draft must be previewed again before applying. Older clients that send only review-enabled and percentage fields are translated into explicit review settings before comparing effective rules; equivalent edits preserve the current recommendation and version.
 
 Newly generated plans record algorithm version `phase4-v2` for the strict all-review behavior. Historical versions remain unchanged.
 

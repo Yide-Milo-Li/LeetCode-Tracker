@@ -70,8 +70,25 @@ export const PromptOverrideModal: React.FC<PromptOverrideModalProps> = ({
   const [preview, setPreview] = useState<OverridePreview | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Synchronize on open or currentPlan update
+  const editingSession = useRef<{ open: boolean; planId: string | null; version: number | null }>({
+    open: false, planId: null, version: null,
+  });
+
+  // Polling returns fresh objects. Only a new editing session resets user-owned drafts;
+  // an actual version change invalidates the preview while preserving those drafts.
   useEffect(() => {
+    const previous = editingSession.current;
+    const planId = currentPlan?.id ?? null;
+    const version = currentPlan?.version ?? null;
+    editingSession.current = { open: isOpen, planId, version };
+    if (isOpen && previous.open && previous.planId === planId) {
+      if (previous.version !== version) {
+        requestVersion.current++;
+        setPreview(null);
+        setLoading(false);
+      }
+      return;
+    }
     requestVersion.current++;
     setPreview(null);
     setLoading(false);

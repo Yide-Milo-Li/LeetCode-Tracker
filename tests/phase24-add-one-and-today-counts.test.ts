@@ -9,7 +9,7 @@
  * 4. Canonical rule comparison in previewDailyPlanOverride and commitDailyPlanOverride (changed: [], idempotent return).
  * 5. Deterministic fallback prompt parser for integer review expressions ("今天 3 题，其中复习 1 题").
  */
-import { describe, it } from 'node:test';
+import { describe, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { CatalogStore } from '../packages/database/src/store.ts';
@@ -337,6 +337,25 @@ describe('Phase 24: PlanningService appendPlanItem()', () => {
     );
   });
 
+  it('rejects an already historical plan before append while permitting a durable retry', async () => {
+    let instant = Date.parse('2026-09-18T12:00:00Z');
+    const clock = mock.method(Date, 'now', () => instant);
+    const { db, store } = await setupTestDb();
+    try {
+      const service = new PlanningService(store, dummyAssistant);
+      const plan = (await service.ensureDailyPlan({ timezone: 'UTC' })).plan!;
+      const request = { expectedVersion: plan.version, operationId: 'before-midnight' };
+      const appended = await service.appendPlanItem(plan.id, request);
+      instant += 86_400_000;
+      await assert.rejects(service.appendPlanItem(plan.id, {
+        expectedVersion: appended.version, operationId: 'after-midnight',
+      }), { code: 'STALE_PLAN' });
+      assert.equal(store.planning.versions(plan.id).length, 2);
+      assert.deepEqual(await service.appendPlanItem(plan.id, request), appended,
+        'Replaying a committed request must not append another question');
+    } finally { db.close(); clock.mock.restore(); }
+  });
+
   it('fails append with 422 NO_CANDIDATES without altering plan version when no eligible candidate exists', async () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
@@ -448,6 +467,68 @@ describe('Phase 24: Unchanged Rules Protection (Preview & Commit)', () => {
       committed.items.map((i) => i.id),
       plan.items.map((i) => i.id),
     );
+  });
+});
+
+describe('Phase 24: legacy review patch compatibility', () => {
+  it('preserves an unchanged legacy review share that rounds to zero', async () => {
+    const db = new DatabaseSync(':memory:');
+    const store = new CatalogStore(db, { skipBackup: true });
+    try {
+      await store.planning.saveStrategy({ name: 'Legacy zero', weekdays: [0, 1, 2, 3, 4, 5, 6], rules: {
+        dailyCount: 2, difficulty: { Easy: 100, Medium: 0, Hard: 0 }, tags: [], premium: false,
+        reviewEnabled: true, reviewPercent: 1, preference: '',
+      } });
+      const service = new PlanningService(store, dummyAssistant);
+      const initial = (await service.ensureDailyPlan({ timezone: 'UTC' })).plan!;
+      // Persist the old wire shape to represent a plan written before explicit review fields existed.
+      const plan = await store.planning.commit({ ...initial, version: initial.version + 1,
+        rules: { ...initial.rules, reviewMode: undefined, reviewCount: undefined, reviewPercent: 1 },
+      }, store.planning.stamp(), initial.version, 'legacy-fixture', 'legacy-fixture');
+      const preview = await service.previewDailyPlanOverride({ date: plan.date,
+        rules: { reviewEnabled: true, reviewPercent: 1 } });
+      assert.deepEqual(preview.issues, []);
+      assert.deepEqual(preview.changed, []);
+      const result = await service.commitDailyPlanOverride(preview.id, { expectedVersion: plan.version, operationId: 'zero-noop' });
+      assert.equal(result.version, plan.version);
+      assert.deepEqual(result.rules, store.planning.planById(plan.id)!.rules);
+      assert.equal(result.rules.reviewMode, undefined);
+      assert.equal(result.rules.reviewPercent, 1);
+    } finally { db.close(); }
+  });
+
+  it('honors old enable/share/disable patches against modern rules and preserves no-op versions', async () => {
+    const db = new DatabaseSync(':memory:');
+    const store = new CatalogStore(db, { skipBackup: true });
+    try {
+      await store.importJsonl(Array.from({ length: 12 }, (_, i) => JSON.stringify({
+        id: `legacy-${i}`, title: `Legacy ${i}`, difficulty: 'Easy', tags: [],
+      })).join('\n'));
+      await store.planning.saveStrategy({ name: 'Modern rules', weekdays: [0, 1, 2, 3, 4, 5, 6], rules: {
+        dailyCount: 2, difficulty: { Easy: 100, Medium: 0, Hard: 0 }, tags: [], premium: false,
+        reviewEnabled: false, reviewPercent: null, reviewMode: 'none', reviewCount: null, preference: '',
+      } });
+      const service = new PlanningService(store, dummyAssistant);
+      let plan = (await service.ensureDailyPlan({ timezone: 'UTC' })).plan!;
+      // A legacy client never sends modern fields; saved modern fields must not win over its intent.
+      for (const [index, patch] of [
+        { reviewEnabled: true, reviewPercent: 50 },
+        { reviewPercent: 100 },
+        { reviewEnabled: false, reviewPercent: null },
+      ].entries()) {
+        const preview = await service.previewDailyPlanOverride({ date: plan.date, rules: patch });
+        assert.deepEqual(preview.issues, []);
+        assert.ok(preview.changed.includes('reviewMode'));
+        plan = await service.commitDailyPlanOverride(preview.id, { expectedVersion: plan.version, operationId: `legacy-${index}` });
+        assert.equal(plan.rules.reviewMode, ['partial', 'all', 'none'][index]);
+        assert.equal(plan.rules.reviewCount, index === 0 ? 1 : null);
+      }
+      const unchanged = await service.previewDailyPlanOverride({ date: plan.date, rules: { reviewEnabled: false, reviewPercent: null } });
+      assert.deepEqual(unchanged.changed, []);
+      const replay = await service.commitDailyPlanOverride(unchanged.id, { expectedVersion: plan.version, operationId: 'legacy-noop' });
+      assert.equal(replay.version, plan.version);
+      assert.equal(replay.updatedAt, plan.updatedAt);
+    } finally { db.close(); }
   });
 });
 

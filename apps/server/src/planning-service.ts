@@ -717,6 +717,23 @@ export class PlanningService {
       patch = { ...patch, ...options.rules };
     }
 
+    // Legacy clients change enabled/share only. Resolve that explicit intent before
+    // merging, otherwise the saved modern mode/count silently overrides their edit.
+    if (patch.reviewMode === undefined && patch.reviewCount === undefined &&
+        (patch.reviewEnabled !== undefined || patch.reviewPercent !== undefined)) {
+      const enabled = patch.reviewEnabled ?? baseRules?.reviewEnabled ?? false;
+      const percent = patch.reviewPercent !== undefined ? patch.reviewPercent : baseRules?.reviewPercent;
+      const total = patch.dailyCount ?? baseRules?.dailyCount;
+      const untouchedLegacy = baseRules && !baseRules.reviewMode && enabled === baseRules.reviewEnabled &&
+        percent === baseRules.reviewPercent && total === baseRules.dailyCount;
+      // An unchanged historical share may round to zero; do not manufacture an invalid partial=0 rule.
+      if (!untouchedLegacy) {
+        patch.reviewMode = !enabled ? 'none' : percent === 100 ? 'all' : 'partial';
+        patch.reviewCount = patch.reviewMode === 'partial' && total !== undefined && percent != null
+          ? Math.round(total * percent / 100) : null;
+      }
+    }
+
     const issues: string[] = [...unresolved];
 
     // Merge proposed rules

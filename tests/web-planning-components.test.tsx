@@ -578,6 +578,59 @@ it('all-review follows the total and mode switching retains the partial draft', 
   assert.equal(create.mock.callCount(), 1);
   assert.equal(create.mock.calls[0].arguments[0].rules.reviewPercent, 100);
   assert.equal(create.mock.calls[0].arguments[0].rules.dailyCount, 5);
+  assert.equal(create.mock.calls[0].arguments[0].rules.reviewMode, 'all');
+  assert.equal(create.mock.calls[0].arguments[0].rules.reviewCount, null);
+});
+
+it('strategy save and reopen preserve partial review even when its count equals the total', async () => {
+  const { create } = await openCountEditor();
+  fireEvent.change(screen.getByLabelText('Strategy Name'), { target: { value: 'Fixed review' } });
+  fireEvent.change(screen.getByLabelText('Daily Question Count'), { target: { value: '2' } });
+  fireEvent.change(screen.getByLabelText('Easy count'), { target: { value: '2' } });
+  fireEvent.change(screen.getByLabelText('Medium count'), { target: { value: '0' } });
+  fireEvent.click(screen.getByLabelText('Some review'));
+  fireEvent.change(screen.getByLabelText('Review count'), { target: { value: '2' } });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save Strategy' })); });
+  const input = create.mock.calls[0].arguments[0];
+  assert.equal(input.rules.reviewMode, 'partial');
+  assert.equal(input.rules.reviewCount, 2);
+  cleanup();
+  const { update } = await openCountEditor({ ...input, id: 'partial', version: 1, deleted: false });
+  assert.equal((screen.getByLabelText('Some review') as HTMLInputElement).checked, true);
+  fireEvent.change(screen.getByLabelText('Daily Question Count'), { target: { value: '3' } });
+  fireEvent.change(screen.getByLabelText('Easy count'), { target: { value: '3' } });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save Strategy' })); });
+  assert.equal(update.mock.calls[0].arguments[1].rules.reviewCount, 2);
+  assert.equal(update.mock.calls[0].arguments[1].rules.reviewMode, 'partial');
+});
+
+it('active-plan polling preserves override drafts and version changes invalidate late previews', async () => {
+  const plan = createMockPlan();
+  const props = { isOpen: true, currentPlan: plan, lang: 'en' as const, onClose: () => {}, onApplied: () => {} };
+  const view = render(<PromptOverrideModal {...props} />);
+  const field = screen.getByPlaceholderText(/dynamic programming questions today/i) as HTMLTextAreaElement;
+  fireEvent.change(field, { target: { value: 'Unsaved instructions' } });
+  fireEvent.change(screen.getByLabelText('Daily count'), { target: { value: '4' } });
+  view.rerender(<PromptOverrideModal {...props} currentPlan={structuredClone(plan)} />);
+  assert.equal(field.value, 'Unsaved instructions');
+  assert.equal((screen.getByLabelText('Daily count') as HTMLInputElement).value, '4');
+
+  let release!: (preview: OverridePreview) => void;
+  mock.method(api, 'previewDailyPlanOverride', () => new Promise<OverridePreview>(resolve => { release = resolve; }));
+  fireEvent.click(screen.getByRole('button', { name: translations.en.parsePrompt }));
+  view.rerender(<PromptOverrideModal {...props} currentPlan={{ ...plan, version: 2 }} />);
+  assert.equal(field.value, 'Unsaved instructions');
+  assert.equal((screen.getByLabelText('Daily count') as HTMLInputElement).value, '4');
+  await act(async () => { release({ id: 'late', date: plan.date, expiresAt: Date.now() + 10000,
+    base: plan.rules, rules: { dailyCount: 3 }, changed: ['dailyCount'], issues: [], unresolved: [],
+    candidateCount: 3, counts: { Easy: 2, Medium: 1, Hard: 0 },
+    revision: { catalog: 1, practice: 1, planning: 1, timezone: 'UTC' }, planVersion: 1 }); });
+  assert.equal((screen.getByRole('button', { name: translations.en.confirmOverride }) as HTMLButtonElement).disabled, true);
+  assert.equal(screen.queryByText(translations.en.overridePreviewTitle), null);
+  assert.equal(field.value, 'Unsaved instructions');
+  view.rerender(<PromptOverrideModal {...props} isOpen={false} />);
+  view.rerender(<PromptOverrideModal {...props} />);
+  assert.equal((screen.getByPlaceholderText(/dynamic programming questions today/i) as HTMLTextAreaElement).value, '');
 });
 
 it('editing a legacy strategy preserves untouched rounded difficulty and review ratios', async () => {

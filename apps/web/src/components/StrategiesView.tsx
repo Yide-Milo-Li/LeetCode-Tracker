@@ -193,6 +193,10 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
           premium,
           reviewEnabled: reviewMode !== 'none',
           reviewPercent: reviewPercentForCount(dailyCount as number, reviewMode, reviewCount, editingStrategy?.rules),
+          // Untouched legacy shares that round to zero remain readable without creating an invalid partial quota.
+          ...(reviewUnchanged && !editingStrategy?.rules.reviewMode && reviewMode === 'partial' && reviewCount === 0
+            ? {}
+            : { reviewMode: reviewMode!, reviewCount: reviewMode === 'partial' ? Number(reviewCount) : null }),
           preference: preference.trim(),
           ...(adaptiveReviewEnabled ? {adaptiveReviewEnabled:true} : editingStrategy?.rules.adaptiveReviewEnabled!==undefined ? {adaptiveReviewEnabled:false}:{}),
           ...(focusWeakTags
