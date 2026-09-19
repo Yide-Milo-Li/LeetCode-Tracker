@@ -485,6 +485,151 @@ describe('NotesWorkspace Component', () => {
   });
 });
 
+describe('NotesWorkspace unsaved changes guard', () => {
+  it('switches directly without prompt when note is clean and unmodified', async () => {
+    mockEditorProblems();
+    await act(async () => {
+      render(<NotesWorkspace lang="en" />);
+    });
+    assert.equal(noteEditor().value, '1 original');
+
+    // Click Problem B
+    await act(async () => {
+      fireEvent.click(screen.getByText('Problem B'));
+    });
+
+    // No modal should be displayed, directly switched to Problem B
+    assert.equal(screen.queryByText(/Unsaved Note Changes/i), null);
+    assert.equal(noteEditor().value, '2 original');
+  });
+
+  it('switches directly without prompt when user only typed whitespace on an empty note', async () => {
+    mockEditorProblems();
+    mock.method(api, 'getNote', async (id: string) => ({
+      note: id === '1' ? null : editorNote(id, `${id} original`),
+    }));
+    await act(async () => {
+      render(<NotesWorkspace lang="zh" />);
+    });
+    assert.equal(noteEditor().value, '');
+
+    // Type spaces into empty note
+    await act(async () => {
+      fireEvent.change(noteEditor(), { target: { value: '   \n  ' } });
+    });
+
+    // Click Problem B
+    await act(async () => {
+      fireEvent.click(screen.getByText('Problem B'));
+    });
+
+    // No modal should be displayed, directly switched to Problem B
+    assert.equal(screen.queryByText(/未保存的笔记修改/i), null);
+    assert.equal(noteEditor().value, '2 original');
+  });
+
+  it('intercepts switch with unsaved modal when note is modified', async () => {
+    mockEditorProblems();
+    await act(async () => {
+      render(<NotesWorkspace lang="zh" />);
+    });
+    assert.equal(noteEditor().value, '1 original');
+
+    // Make an unsaved edit
+    await act(async () => {
+      fireEvent.change(noteEditor(), { target: { value: '1 original with unsaved edits' } });
+    });
+
+    // Click Problem B
+    await act(async () => {
+      fireEvent.click(screen.getByText('Problem B'));
+    });
+
+    // Modal must appear and display target problem
+    assert.ok(screen.getByText(/未保存的笔记修改/i));
+    assert.ok(screen.getByText(/#2 · Problem B/));
+
+    // Note editor must NOT have switched yet
+    assert.equal(noteEditor().value, '1 original with unsaved edits');
+  });
+
+  it('cancels switch and keeps edits when clicking Stay on Note or pressing Escape', async () => {
+    mockEditorProblems();
+    await act(async () => {
+      render(<NotesWorkspace lang="en" />);
+    });
+
+    await act(async () => {
+      fireEvent.change(noteEditor(), { target: { value: 'Important unsaved thoughts' } });
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('Problem B'));
+    });
+
+    assert.ok(screen.getByText(/Unsaved Note Changes/i));
+
+    // Click Stay on Note
+    const stayBtn = screen.getByRole('button', { name: /Stay on Note/i });
+    await act(async () => {
+      fireEvent.click(stayBtn);
+    });
+
+    // Modal dismissed, still on Problem A with draft intact
+    assert.equal(screen.queryByText(/Unsaved Note Changes/i), null);
+    assert.equal(noteEditor().value, 'Important unsaved thoughts');
+  });
+
+  it('discards modifications and switches when clicking Discard Changes & Switch', async () => {
+    mockEditorProblems();
+    await act(async () => {
+      render(<NotesWorkspace lang="en" />);
+    });
+
+    await act(async () => {
+      fireEvent.change(noteEditor(), { target: { value: 'Scratchpad text to abandon' } });
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('Problem B'));
+    });
+
+    assert.ok(screen.getByText(/Unsaved Note Changes/i));
+
+    // Click Discard Changes & Switch
+    const discardBtn = screen.getByRole('button', { name: /Discard Changes & Switch/i });
+    await act(async () => {
+      fireEvent.click(discardBtn);
+    });
+
+    // Modal dismissed, switched to Problem B
+    assert.equal(screen.queryByText(/Unsaved Note Changes/i), null);
+    assert.equal(noteEditor().value, '2 original');
+  });
+
+  it('triggers beforeunload warning when note has unsaved changes', async () => {
+    mockEditorProblems();
+    await act(async () => {
+      render(<NotesWorkspace lang="en" />);
+    });
+
+    // Clean note: beforeunload does not preventDefault
+    const cleanEvent = new dom.window.Event('beforeunload', { cancelable: true });
+    dom.window.dispatchEvent(cleanEvent);
+    assert.equal(cleanEvent.defaultPrevented, false);
+
+    // Make edit
+    await act(async () => {
+      fireEvent.change(noteEditor(), { target: { value: 'Unsaved text' } });
+    });
+
+    // Modified note: beforeunload must preventDefault
+    const dirtyEvent = new dom.window.Event('beforeunload', { cancelable: true });
+    dom.window.dispatchEvent(dirtyEvent);
+    assert.equal(dirtyEvent.defaultPrevented, true);
+  });
+});
+
 describe('QuickCopyButtons Component', () => {
   const sampleProblem = {
     frontendId: '1',

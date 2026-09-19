@@ -449,6 +449,13 @@ export const translations = {
     loadNoteError: 'Failed to load note. Click to retry.',
     noteClearedSuccess: 'Note cleared successfully.',
     emptyNoteSaveDisabled: 'Cannot save an empty or unedited note template.',
+
+    // Phase 30: Unsaved Note Switch Guard
+    unsavedNoteModalTitle: 'Unsaved Note Changes',
+    unsavedNoteModalDesc: 'You have unsaved changes in the current problem note. If you switch to another problem, these modifications will be lost.',
+    unsavedNoteSwitchingTo: 'Target problem:',
+    unsavedNoteStay: 'Stay on Note',
+    unsavedNoteDiscard: 'Discard Changes & Switch',
   },
   zh: {
     retry: '重试',
@@ -892,5 +899,12 @@ export const translations = {
     loadNoteError: '加载笔记失败，点击重试。',
     noteClearedSuccess: '笔记已清空。',
     emptyNoteSaveDisabled: '无法保存空白或未填写的笔记模板。',
+
+    // Phase 30: Unsaved Note Switch Guard
+    unsavedNoteModalTitle: '未保存的笔记修改',
+    unsavedNoteModalDesc: '当前题目的复盘笔记有未保存的修改。如果切换到其他题目，未保存的内容将会丢失。',
+    unsavedNoteSwitchingTo: '目标题目：',
+    unsavedNoteStay: '留在当前笔记',
+    unsavedNoteDiscard: '放弃修改并切换',
   },
 };

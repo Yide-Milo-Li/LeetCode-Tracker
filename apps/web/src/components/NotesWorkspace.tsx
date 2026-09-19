@@ -24,7 +24,7 @@ import {
   hasMeaningfulNoteContent,
 } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
-import { PageHeader, Feedback, Field, Pagination } from './ui.tsx';
+import { PageHeader, Feedback, Field, Pagination, Dialog } from './ui.tsx';
 import { QuickCopyButtons } from './QuickCopyButtons.tsx';
 
 export interface NotesWorkspaceProps {
@@ -54,11 +54,9 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
   // Selected problem state
   const [selectedId, setSelectedId] = useState<string | null>(initialFrontendId ?? null);
 
-  useEffect(() => {
-    if (initialFrontendId) {
-      setSelectedId(initialFrontendId);
-    }
-  }, [initialFrontendId]);
+  // Phase 30: Unsaved note switch guard state
+  const [pendingTargetId, setPendingTargetId] = useState<string | null>(null);
+  const [showUnsavedModal, setShowUnsavedModal] = useState(false);
 
   const [selectedSummary, setSelectedSummary] = useState<ProblemNoteSummary | null>(null);
   const [noteContent, setNoteContent] = useState('');
@@ -206,6 +204,25 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
     isModified &&
     (isBlank ? savedContent.trim().length > 0 : hasMeaningful);
 
+  // Phase 30: Unsaved note modifications check
+  // Clean if note is unchanged, actively saving, or if an empty note only had whitespace typed.
+  const hasUnsavedChanges =
+    !loadingNote &&
+    !savingNote &&
+    isModified &&
+    (savedContent.trim().length > 0 || noteContent.trim().length > 0);
+
+  // Phase 30: Browser beforeunload guard when unsaved changes exist
+  useEffect(() => {
+    if (!hasUnsavedChanges) return;
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges]);
+
   /** Persist one snapshot, retaining newer edits and ignoring responses from an obsolete visit. */
   async function handleSaveNote() {
     const session = editorSession.current;
@@ -280,6 +297,54 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [canSave, handleSaveNote]);
+
+  /**
+   * Request switching to another problem note.
+   * If there are unsaved edits in the current note, intercept with a confirmation dialog.
+   * Otherwise switch directly without prompt.
+   */
+  const handleSelectProblem = useCallback(
+    (targetId: string) => {
+      if (targetId === selectedId) return;
+      if (hasUnsavedChanges) {
+        setPendingTargetId(targetId);
+        setShowUnsavedModal(true);
+      } else {
+        setSelectedId(targetId);
+      }
+    },
+    [selectedId, hasUnsavedChanges],
+  );
+
+  const isInitialMount = useRef(true);
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+    if (initialFrontendId && initialFrontendId !== selectedId) {
+      handleSelectProblem(initialFrontendId);
+    }
+  }, [initialFrontendId, selectedId, handleSelectProblem]);
+
+  /** Discard unsaved modifications and switch to the pending target problem. */
+  const handleDiscardAndSwitch = useCallback(() => {
+    if (!pendingTargetId) return;
+    const target = pendingTargetId;
+    setShowUnsavedModal(false);
+    setPendingTargetId(null);
+    setSelectedId(target);
+  }, [pendingTargetId]);
+
+  /** Cancel switching and stay on the current problem note. */
+  const handleCancelSwitch = useCallback(() => {
+    setShowUnsavedModal(false);
+    setPendingTargetId(null);
+  }, []);
+
+  const pendingTargetSummary = pendingTargetId
+    ? items.find((it) => it.questionFrontendId === pendingTargetId) ?? null
+    : null;
 
   const totalPages = Math.max(1, Math.ceil(total / limit));
 
@@ -522,7 +587,7 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
                   <button
                     key={it.questionId}
                     type="button"
-                    onClick={() => setSelectedId(it.questionFrontendId)}
+                    onClick={() => handleSelectProblem(it.questionFrontendId)}
                     style={{
                       display: 'flex',
                       flexDirection: 'column',
@@ -969,6 +1034,64 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
           )}
         </div>
       </div>
+
+      {/* Phase 30: Unsaved Note Changes Confirmation Dialog */}
+      {showUnsavedModal && (
+        <Dialog
+          title={t.unsavedNoteModalTitle}
+          lang={lang}
+          onClose={handleCancelSwitch}
+          footer={
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', width: '100%' }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={handleCancelSwitch}
+              >
+                {t.unsavedNoteStay}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={handleDiscardAndSwitch}
+                style={{
+                  color: 'var(--danger, #ef4444)',
+                  borderColor: 'var(--danger, #ef4444)',
+                }}
+              >
+                {t.unsavedNoteDiscard}
+              </button>
+            </div>
+          }
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.875rem', lineHeight: 1.5 }}>
+              {t.unsavedNoteModalDesc}
+            </p>
+
+            {pendingTargetId && (
+              <div
+                style={{
+                  padding: '10px 12px',
+                  backgroundColor: 'var(--muted-surface)',
+                  borderRadius: '6px',
+                  fontSize: '0.8125rem',
+                  color: 'var(--text-main)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                }}
+              >
+                <span style={{ color: 'var(--text-muted)' }}>{t.unsavedNoteSwitchingTo}</span>
+                <span style={{ fontWeight: 600 }}>
+                  #{pendingTargetId}
+                  {pendingTargetSummary ? ` · ${pendingTargetSummary.title}` : ''}
+                </span>
+              </div>
+            )}
+          </div>
+        </Dialog>
+      )}
     </div>
   );
 }
