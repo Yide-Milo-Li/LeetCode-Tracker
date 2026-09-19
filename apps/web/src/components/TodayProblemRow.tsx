@@ -81,7 +81,7 @@ export function TodayProblemRow({
             {t[('stat' + item.problem.difficulty) as keyof typeof t]}
           </span>
           {item.kind === 'review' && (
-            <span className="tag-chip">{t.kindReview}</span>
+            <span className="tag-chip tag-chip-review">{t.kindReview}</span>
           )}
           {!!item.explanation?.focusTagSlugs.length && <InfoPopover
             label={item.explanation.role === 'exploration' ? (zh ? '探索' : 'Explore') : t.focusSessionBadge}

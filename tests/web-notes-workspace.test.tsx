@@ -678,6 +678,7 @@ describe('TodayProblemRow note entry consolidation', () => {
     const reviewTag = screen.getByText('复习');
     assert.equal(reviewTag.tagName.toLowerCase(), 'span');
     assert.ok(reviewTag.classList.contains('tag-chip'));
+    assert.ok(reviewTag.classList.contains('tag-chip-review'));
 
     // 2. Verify there are no duplicate notes suffixes or triggers in the metadata tag area
     assert.equal(screen.queryByText(/查看笔记/), null);
@@ -719,6 +720,7 @@ describe('TodayProblemRow note entry consolidation', () => {
     const reviewTag = screen.getByText('Review');
     assert.equal(reviewTag.tagName.toLowerCase(), 'span');
     assert.ok(reviewTag.classList.contains('tag-chip'));
+    assert.ok(reviewTag.classList.contains('tag-chip-review'));
 
     // 2. Verify no Notes suffix text
     assert.equal(screen.queryByText(/\(Notes\)/), null);

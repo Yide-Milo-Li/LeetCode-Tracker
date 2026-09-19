@@ -24,6 +24,9 @@
   --medium-bg: var(--warning-bg);
   --hard: var(--danger);
   --hard-bg: var(--danger-bg);
+  --review: #1d4ed8;
+  --review-bg: rgba(219, 234, 254, 0.85);
+  --review-border: rgba(147, 197, 253, 0.8);
   --focus-ring: rgba(66, 99, 75, 0.22);
   --bg-card: var(--surface);
   --bg-card-muted: var(--muted-surface);
@@ -79,6 +82,9 @@ html.dark {
   --medium-bg: var(--warning-bg);
   --hard: var(--danger);
   --hard-bg: var(--danger-bg);
+  --review: #93c5fd;
+  --review-bg: rgba(59, 130, 246, 0.18);
+  --review-border: rgba(147, 197, 253, 0.35);
   --shadow-md: 0 8px 28px #10140e40;
   --border: var(--border-color);
   --text-primary: var(--text-main);
@@ -1640,6 +1646,12 @@ progress::-moz-progress-bar {
 .badge-primary {
   color: var(--primary);
   background: var(--selected);
+}
+.tag-chip-review {
+  color: var(--review);
+  background: var(--review-bg);
+  border: 1px solid var(--review-border);
+  font-weight: 550;
 }
 .medium,
 .badge-medium,
