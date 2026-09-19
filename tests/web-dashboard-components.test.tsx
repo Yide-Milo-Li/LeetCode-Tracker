@@ -241,6 +241,8 @@ function createMockPlanController(overrides: Partial<UseDailyPlanReturn> = {}): 
     replacingItemId: null,
     replacingBatch: false,
     appending: false,
+    isPlanMutationPending: () => false,
+    clearError: () => {},
     refresh: async () => {},
     appendOne: async () => {},
     replaceOne: async () => {},

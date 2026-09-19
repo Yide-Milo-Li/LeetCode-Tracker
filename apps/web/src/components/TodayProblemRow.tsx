@@ -19,6 +19,7 @@ export interface TodayProblemRowProps {
   rowError?: string;
   replacingBatch: boolean;
   replacingItemId: string | null;
+  isAppending?: boolean;
   onComplete: (item: PlanItem) => void;
   onReplaceOne: (item: PlanItem) => void;
   onOpenQuickNote?: (item: PlanItem) => void;
@@ -35,6 +36,7 @@ export function TodayProblemRow({
   rowError,
   replacingBatch,
   replacingItemId,
+  isAppending = false,
   onComplete,
   onReplaceOne,
   onOpenQuickNote,
@@ -60,7 +62,7 @@ export function TodayProblemRow({
         }
         aria-pressed={item.completed}
         aria-busy={isSaving}
-        disabled={isSaving || replacingBatch || replacingItemId === item.id}
+        disabled={isSaving || replacingBatch || replacingItemId === item.id || isAppending}
         onClick={() => onComplete(item)}
       >
         {isSaving ? (
@@ -167,7 +169,7 @@ export function TodayProblemRow({
           <button
             className="btn-icon"
             aria-label={t.replaceOne}
-            disabled={item.completed || isSaving || replacingBatch || Boolean(replacingItemId)}
+            disabled={item.completed || isSaving || replacingBatch || Boolean(replacingItemId) || isAppending}
             onClick={() => onReplaceOne(item)}
           >
             <RefreshCw size={18} className={replacingItemId === item.id ? 'spin' : ''} />
@@ -177,7 +179,11 @@ export function TodayProblemRow({
           <button
             className="btn-icon"
             aria-label={zh ? '记录练习' : 'Record practice'}
-            onClick={() => workspace.openPractice({ mode: 'manual', problem: item.problem })}
+            disabled={isAppending || isSaving}
+            onClick={() => {
+              if (isAppending || isSaving) return;
+              workspace.openPractice({ mode: 'manual', problem: item.problem });
+            }}
           >
             <Plus size={18} />
           </button>

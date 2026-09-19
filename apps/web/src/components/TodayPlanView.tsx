@@ -72,7 +72,12 @@ function TodayPlanViewInner({
 
   /** The base record succeeds before optional fields open; uncertain retries reuse the original timestamp. */
   async function complete(item: PlanItem) {
-    if (!plan || locks.current.has(item.id)) return;
+    if (
+      !plan ||
+      locks.current.has(item.id) ||
+      controller.appending ||
+      controller.isPlanMutationPending()
+    ) return;
     if (item.completed) {
       workspace.openPractice({ mode: 'evidence', item });
       return;
@@ -131,6 +136,7 @@ function TodayPlanViewInner({
             run: () => {
               setLocalError('');
               setStrategyRetry((value) => value + 1);
+              controller.clearError?.();
               void controller.refresh();
             },
           }}
@@ -242,19 +248,50 @@ function TodayPlanViewInner({
                   disabled={
                     controller.loading ||
                     controller.appending ||
+                    controller.isPlanMutationPending() ||
                     controller.replacingBatch ||
                     Boolean(controller.replacingItemId) ||
                     saving.size > 0
                   }
-                  onClick={() => void controller.appendOne()}
+                  aria-busy={controller.appending}
+                  onClick={() => {
+                    if (
+                      controller.loading ||
+                      controller.appending ||
+                      controller.isPlanMutationPending() ||
+                      saving.size > 0
+                    ) return;
+                    void controller.appendOne();
+                  }}
                 >
-                  <Plus size={16} />
-                  {zh ? '加一题' : 'Add one'}
+                  {controller.appending ? (
+                    <RefreshCw size={16} className="spin" />
+                  ) : (
+                    <Plus size={16} />
+                  )}
+                  {controller.appending
+                    ? zh
+                      ? '加题中…'
+                      : 'Adding…'
+                    : zh
+                      ? '加一题'
+                      : 'Add one'}
                 </button>
                 <button
                   className="btn btn-secondary btn-sm"
-                  disabled={controller.loading || controller.appending}
-                  onClick={() => setOverride(true)}
+                  disabled={
+                    controller.loading ||
+                    controller.appending ||
+                    controller.isPlanMutationPending()
+                  }
+                  onClick={() => {
+                    if (
+                      controller.loading ||
+                      controller.appending ||
+                      controller.isPlanMutationPending()
+                    ) return;
+                    setOverride(true);
+                  }}
                 >
                   {zh ? '调整今天' : 'Adjust today'}
                 </button>
@@ -267,10 +304,19 @@ function TodayPlanViewInner({
                       disabled={
                         controller.replacingBatch ||
                         Boolean(controller.replacingItemId) ||
+                        controller.appending ||
+                        controller.isPlanMutationPending() ||
                         completed === plan.items.length ||
                         saving.size > 0
                       }
-                      onClick={() => void controller.replaceAllUnfinished()}
+                      onClick={() => {
+                        if (
+                          controller.appending ||
+                          controller.isPlanMutationPending() ||
+                          saving.size > 0
+                        ) return;
+                        void controller.replaceAllUnfinished();
+                      }}
                     >
                       {t.replaceAllUnfinished}
                     </button>
@@ -309,8 +355,16 @@ function TodayPlanViewInner({
                 rowError={rowErrors[item.id]}
                 replacingBatch={controller.replacingBatch}
                 replacingItemId={controller.replacingItemId}
+                isAppending={controller.appending || controller.isPlanMutationPending()}
                 onComplete={(target) => void complete(target)}
-                onReplaceOne={(target) => void controller.replaceOne(target)}
+                onReplaceOne={(target) => {
+                  if (
+                    controller.appending ||
+                    controller.isPlanMutationPending() ||
+                    saving.size > 0
+                  ) return;
+                  void controller.replaceOne(target);
+                }}
                 onOpenQuickNote={(target) => setQuickNoteProblem(target)}
               />
             ))}

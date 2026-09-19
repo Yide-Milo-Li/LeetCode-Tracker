@@ -1,5 +1,14 @@
 # Implementation status
 
+## Phase 24 — Add-one localization, response feedback & concurrency mutex
+
+Implemented zero-model local append and comprehensive interaction protection for Today's "Add one" action under `.local/plans/phase-24-add-one-and-today-counts.md`.
+- **Zero-model local append**: `POST /api/v1/daily-plans/:id/append` runs 100% locally on the Fastify server, generating deterministic bilingual explanations from local templates and personal practice evidence with 0 model provider calls and 0 token consumption. Preserves all recommendation intelligence (cumulative difficulty deficiency tracking, strict review quota vs new problem separation, topic reinforcement when weak tags focus is enabled, and exclusion of all problems appearing in prior plan versions of today).
+- **Interactive loading feedback**: The Today "Add one" button displays an inline loading spinner, `aria-busy="true"`, and bilingual feedback ("Adding… / 加题中…"), cleanly restoring on completion or failure.
+- **Synchronous re-entrancy & mutual exclusion**: Synchronous in-memory ref lock prevents double-clicking within the same tick. A concurrency mutex disables conflicting mutations across Today (adjusting today's rules, replacing problems, and practice completion saves) while keeping read-only actions (notes drawer, evidence modal, problem links) fully accessible.
+- **Request lifecycle & error isolation**: Periodic background polling and visibility-change refreshes are coalesced rather than launched concurrently during append. Mutation errors are rendered in the feedback area with retry capability and isolated from background refresh clearing.
+- **Verification evidence**: **382 automated tests (265 backend/domain/storage + 116 Web component + 1 desktop bundled-server) passed with 0 failures**. Synthetic performance benchmark (`scripts/benchmark-phase24-add-one.ts`) with 4,046 problems and 10,000 practice records confirmed 0 model calls across all modes. Headless Chrome browser verification (`scripts/verify-phase24-browser.ts`) verified visual loading states and screenshots across desktop resolutions (1024, 1440, 1920), languages (en, zh), and themes (light, dark) with 0 model calls. Evidence preserved in `.local/evidence/phase24/add-one-local/`.
+
 ## Release 1.0.1 — Windows startup repair
 
 A user-reported 1.0.0 startup failure was reproduced: canonical Windows resource paths from Tauri reach Node with a verbatim prefix, causing Node to exit before its ready message. The 1.0.1 repair safely simplifies only equivalent Win32 paths at command construction. A new native process integration test exercises the real bundle/private runtime under a canonical path with spaces and Chinese characters; all seven Rust tests pass. The 1.0.0 artifact remains unchanged for historical integrity; use the 1.0.1 installer.

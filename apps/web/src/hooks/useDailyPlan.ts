@@ -14,7 +14,7 @@ export interface UseDailyPlanReturn {
   ensureResult: EnsureResult | null;
   /** Active daily plan instance if status is 'ready'. */
   plan: DailyPlan | null;
-  /** Error message if ensuring or loading failed. */
+  /** Error message if ensuring, loading, or mutating failed. */
   error: string | null;
   /** ID of problem item currently being replaced. */
   replacingItemId: string | null;
@@ -22,6 +22,10 @@ export interface UseDailyPlanReturn {
   replacingBatch: boolean;
   /** Indicates problem append action is in flight. */
   appending: boolean;
+  /** Synchronously check if any plan mutation (append, replace, batch replace) is pending. */
+  isPlanMutationPending: () => boolean;
+  /** Clear displayed mutation and refresh errors. */
+  clearError: () => void;
   /** Trigger a background check/refresh of today's plan. */
   refresh: () => Promise<void>;
   /** Append one question to today's plan. */
@@ -44,7 +48,8 @@ export interface UseDailyPlanReturn {
 export function useDailyPlan(): UseDailyPlanReturn {
   const [loading, setLoading] = useState(true);
   const [ensureResult, setEnsureResult] = useState<EnsureResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [mutationError, setMutationError] = useState<string | null>(null);
   const [replacingItemId, setReplacingItemId] = useState<string | null>(null);
   const [replacingBatch, setReplacingBatch] = useState(false);
   const [appending, setAppending] = useState(false);
@@ -52,15 +57,23 @@ export function useDailyPlan(): UseDailyPlanReturn {
   const changeRevision = useRef(0);
   const refreshInFlight = useRef(false);
   const queuedRefresh = useRef(false);
+  const planMutationPending = useRef(false);
+
+  const isPlanMutationPending = useCallback(() => planMutationPending.current, []);
+
+  const clearError = useCallback(() => {
+    setMutationError(null);
+    setRefreshError(null);
+  }, []);
 
   const refresh = useCallback(async () => {
-    if (refreshInFlight.current) {
+    if (refreshInFlight.current || planMutationPending.current) {
       queuedRefresh.current = true;
       return;
     }
     refreshInFlight.current = true;
     const revision = changeRevision.current;
-    setError(null);
+    setRefreshError(null);
     try {
       const result = await api.ensureDailyPlan();
       if (revision === changeRevision.current) {
@@ -68,13 +81,13 @@ export function useDailyPlan(): UseDailyPlanReturn {
       }
     } catch (err: unknown) {
       if (revision === changeRevision.current)
-        setError(err instanceof Error ? err.message : 'Failed to load daily plan.');
+        setRefreshError(err instanceof Error ? err.message : 'Failed to load daily plan.');
     } finally {
       refreshInFlight.current = false;
       setLoading(false);
-      if (queuedRefresh.current) {
+      if (queuedRefresh.current && !planMutationPending.current) {
         queuedRefresh.current = false;
-        refresh();
+        void refresh();
       }
     }
   }, []);
@@ -105,60 +118,103 @@ export function useDailyPlan(): UseDailyPlanReturn {
 
   const replaceOne = useCallback(
     async (item: PlanItem) => {
-      if (!ensureResult?.plan) return;
+      if (!ensureResult?.plan || planMutationPending.current) return;
+      planMutationPending.current = true;
       setReplacingItemId(item.id);
-      changeRevision.current++;
+      setMutationError(null);
+      const currentRevision = ++changeRevision.current;
       try {
         const updated = await api.replacePlanItems(ensureResult.plan.id, {
           mode: 'one',
           itemId: item.id,
           expectedVersion: ensureResult.plan.version,
         });
-        setEnsureResult({ status: 'ready', plan: updated });
+        if (currentRevision === changeRevision.current) {
+          setEnsureResult({ status: 'ready', plan: updated });
+        } else {
+          queuedRefresh.current = true;
+        }
       } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : 'Failed to replace problem.');
+        if (currentRevision === changeRevision.current) {
+          setMutationError(err instanceof Error ? err.message : 'Failed to replace problem.');
+        }
       } finally {
+        changeRevision.current++;
+        planMutationPending.current = false;
         setReplacingItemId(null);
+        if (queuedRefresh.current) {
+          queuedRefresh.current = false;
+          void refresh();
+        }
       }
     },
-    [ensureResult],
+    [ensureResult, refresh],
   );
 
   const replaceAllUnfinished = useCallback(async () => {
-    if (!ensureResult?.plan) return;
+    if (!ensureResult?.plan || planMutationPending.current) return;
+    planMutationPending.current = true;
     setReplacingBatch(true);
-    changeRevision.current++;
+    setMutationError(null);
+    const currentRevision = ++changeRevision.current;
     try {
       const updated = await api.replacePlanItems(ensureResult.plan.id, {
         mode: 'all_unfinished',
         expectedVersion: ensureResult.plan.version,
       });
-      setEnsureResult({ status: 'ready', plan: updated });
+      if (currentRevision === changeRevision.current) {
+        setEnsureResult({ status: 'ready', plan: updated });
+      } else {
+        queuedRefresh.current = true;
+      }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to replace unfinished problems.');
+      if (currentRevision === changeRevision.current) {
+        setMutationError(err instanceof Error ? err.message : 'Failed to replace unfinished problems.');
+      }
     } finally {
+      changeRevision.current++;
+      planMutationPending.current = false;
       setReplacingBatch(false);
+      if (queuedRefresh.current) {
+        queuedRefresh.current = false;
+        void refresh();
+      }
     }
-  }, [ensureResult]);
+  }, [ensureResult, refresh]);
 
   const appendOne = useCallback(async () => {
-    if (!ensureResult?.plan || appending) return;
+    if (!ensureResult?.plan || planMutationPending.current) return;
+    planMutationPending.current = true;
     setAppending(true);
-    changeRevision.current++;
+    setMutationError(null);
+    const currentRevision = ++changeRevision.current;
     try {
       const updated = await api.appendPlanItem(ensureResult.plan.id, {
         expectedVersion: ensureResult.plan.version,
       });
-      setEnsureResult({ status: 'ready', plan: updated });
+      if (currentRevision === changeRevision.current) {
+        setEnsureResult({ status: 'ready', plan: updated });
+      } else {
+        queuedRefresh.current = true;
+      }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to append problem.');
+      if (currentRevision === changeRevision.current) {
+        setMutationError(err instanceof Error ? err.message : 'Failed to append problem.');
+      }
     } finally {
+      changeRevision.current++;
+      planMutationPending.current = false;
       setAppending(false);
+      if (queuedRefresh.current) {
+        queuedRefresh.current = false;
+        void refresh();
+      }
     }
-  }, [ensureResult, appending]);
+  }, [ensureResult, refresh]);
 
   const onOverrideCommitted = useCallback((newPlan: DailyPlan) => {
     changeRevision.current++;
+    setMutationError(null);
     setEnsureResult({ status: 'ready', plan: newPlan });
   }, []);
 
@@ -206,10 +262,12 @@ export function useDailyPlan(): UseDailyPlanReturn {
     loading,
     ensureResult,
     plan: ensureResult?.plan ?? null,
-    error,
+    error: mutationError || refreshError,
     replacingItemId,
     replacingBatch,
     appending,
+    isPlanMutationPending,
+    clearError,
     refresh,
     appendOne,
     replaceOne,

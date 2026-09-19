@@ -506,6 +506,8 @@ export class PlanningService {
    * Inherits effective rules, excludes all questions from prior versions of today,
    * selects target difficulty by cumulative distribution deficiency, adheres strictly
    * to review mode and quota, and updates dailyCount to max(original, items.length).
+   * Generates recommendation explanation entirely via deterministic local fallbacks
+   * without calling external model providers.
    */
   public async appendPlanItem(
     planId: string,
@@ -580,26 +582,16 @@ export class PlanningService {
       throw new PlanningError('NO_CANDIDATES', 'No eligible candidates found for target difficulty and type; adjust rules to continue', 422);
     }
 
-    let aiContent = fallbackPlanContent([candidate], plan.rules);
-    if (this.gemini.generatePlanContent) {
-      try {
-        aiContent = await this.gemini.generatePlanContent({
-          problems: [candidate],
-          rules: plan.rules,
-          date: plan.date,
-          deadline: now + this.timeoutMs,
-        });
-      } catch {
-        aiContent = fallbackPlanContent([candidate], plan.rules);
-      }
-    }
+    // Generate recommendation reason entirely via local deterministic templates.
+    // Avoids external model latency and guarantees zero model token consumption during appends.
+    const localContent = fallbackPlanContent([candidate], plan.rules);
 
     const newItem: PlanItem = {
       id: randomUUID(),
       problem: candidate,
       kind: candidate.kind,
       addedAt: Date.now(),
-      reason: candidate.explanation?.evidenceSummary?.reasonText ?? aiContent.reasons[candidate.questionId] ?? {
+      reason: candidate.explanation?.evidenceSummary?.reasonText ?? localContent.reasons[candidate.questionId] ?? {
         en: candidate.isFocusTopic
           ? `Selected ${candidate.difficulty} problem targeting weak topic (${candidate.matchedWeakTags?.join(', ') || candidate.difficulty}) for focused breakthrough.`
           : `Selected ${candidate.difficulty} problem to practice core algorithms.`,

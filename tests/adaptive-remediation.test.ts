@@ -100,14 +100,15 @@ it('accumulates one-question days across service recreation instead of exploring
   } finally { f.db.close(); clock.mock.restore(); }
 });
 
-it('rejects append when its selected fresh problem becomes solved while provider work is pending', async () => {
+it('rejects append when its selected fresh problem becomes solved before commit', async () => {
   const clock = mock.method(Date, 'now', () => now), f = await fixture({ ...rules, dailyCount: 1 });
   try {
     const plan = (await f.service.ensureDailyPlan()).plan!;
-    f.assistant.generatePlanContent = async p => {
-      await f.store.createPracticeRecord({ questionFrontendId: p.problems[0].questionFrontendId,
+    const originalCommit = f.store.planning.commit.bind(f.store.planning);
+    f.store.planning.commit = async (p, stamp, expectedVersion, operationId, fingerprint, changed, validate) => {
+      await f.store.createPracticeRecord({ questionFrontendId: p.items.at(-1)!.problem.questionFrontendId,
         practicedAt: new Date(now).toISOString(), completed: true });
-      return fallbackPlanContent(p.problems, p.rules);
+      return originalCommit(p, stamp, expectedVersion, operationId, fingerprint, changed, validate);
     };
     await assert.rejects(f.service.appendPlanItem(plan.id, { expectedVersion: 1, operationId: randomUUID() }), { code: 'STALE_DATA' });
     assert.equal(f.store.planning.versions(plan.id).length, 1);
@@ -120,10 +121,11 @@ it('rejects append after restore invalidation or local calendar rollover', async
     const clock = mock.method(Date, 'now', () => instant), f = await fixture({ ...rules, dailyCount: 1 });
     try {
       const plan = (await f.service.ensureDailyPlan()).plan!;
-      f.assistant.generatePlanContent = async p => {
+      const originalCommit = f.store.planning.commit.bind(f.store.planning);
+      f.store.planning.commit = async (p, stamp, expectedVersion, operationId, fingerprint, changed, validate) => {
         if (mutation === 'restore') f.service.clearTransientState();
         else instant += 86_400_000;
-        return fallbackPlanContent(p.problems, p.rules);
+        return originalCommit(p, stamp, expectedVersion, operationId, fingerprint, changed, validate);
       };
       await assert.rejects(f.service.appendPlanItem(plan.id, { expectedVersion: 1, operationId: randomUUID() }),
         { code: mutation === 'restore' ? 'STALE_DATA' : 'STALE_PLAN' });

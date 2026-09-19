@@ -12,6 +12,7 @@ Today shows one locally selected encouragement below its heading. The library co
 | --- | --- |
 | Configure weekly rules | Today → Study schedule |
 | Override only today's rules | Today → Adjust today |
+| Add one problem to today's plan | Today → Add one |
 | Replace one problem | Today → problem row → Replace |
 | Replace unfinished problems or inspect versions | Today → More |
 | Import JSONL problem metadata | Problems → Import problems |
@@ -30,6 +31,14 @@ After saving, the optional dialog offers duration in whole minutes and notes. Sa
 If several problems finish saving together, their optional detail prompts appear in order without replacing the open draft. If you close a pending detail save, its outcome appears in the workspace. A failed save offers **Recover draft**, preserving the submitted fields and original record identity for retry. This recovery is kept in the current application session. Record-edit recovery also retains pending corrections and their expanded or collapsed state.
 
 Click a checked circle to inspect the exact supporting records. Use the single Edit record action to update duration and notes. Expand Change completion or time to correct the completion result, practiced time, precision or timezone. Unchanged completion and time fields are omitted from the update; expanding alone does not rewrite evidence. Collapsing retains pending corrections and marks them as modified. Cancel discards the draft. Revocation remains a separate action. Other manual practices and imported evidence remain; the problem stays completed if another valid basis still qualifies. A failed background refresh shows feedback without undoing an acknowledged save.
+
+## Adding problems to today's plan
+
+Click **Add one** (加一题) in the header to append a single problem to the active daily plan:
+- **Zero model calls**: Problem selection and recommendation explanations run entirely locally on the server using deterministic bilingual templates and personal practice evidence. No external LLM calls or token consumptions occur.
+- **Intelligent candidate selection**: Inherits all active rules (including temporary overrides), targets the difficulty with the greatest cumulative deficiency, strictly respects fixed review counts versus new problem quotas, applies topic reinforcement when focus mode is enabled, and excludes problems from any prior plan version of today.
+- **Response feedback & mutual exclusion**: The button displays an inline loading spinner, `aria-busy="true"`, and bilingual text ("Adding… / 加题中…"). Synchronous in-memory mutex protection prevents double-clicking within the same event loop tick. During append, write operations across Today (adjusting today's rules, replacing problems, or saving completions) are disabled while read-only entries (notes drawer, evidence modal, problem links) remain fully accessible.
+- **Lifecycle & error isolation**: Background periodic polling and visibility-change refreshes are coalesced rather than launched concurrently during append. Failures display non-blocking error feedback with retry action and never wipe out existing plan items or get overwritten by background refreshes.
 
 ## Extra and historical practice
 

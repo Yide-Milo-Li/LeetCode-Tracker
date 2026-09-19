@@ -561,3 +561,137 @@ describe('Phase 24: Fallback Prompt Parsing for Integer Review Expressions', () 
     assert.equal(res.patch.reviewPercent, 100);
   });
 });
+
+describe('Phase 24: Add-one Zero-Model Local Append & Reason Generation', () => {
+  async function seedProblems(
+    store: CatalogStore,
+    problems: { id: string; title: string; difficulty: string; tags: string[] }[],
+  ) {
+    const lines = problems.map((p) =>
+      JSON.stringify({
+        id: p.id,
+        title: p.title,
+        difficulty: p.difficulty,
+        tags: p.tags,
+      }),
+    );
+    await store.importJsonl(lines.join('\n'));
+  }
+
+  it('guarantees zero external model calls during append when model is configured', async () => {
+    const db = new DatabaseSync(':memory:');
+    const store = new CatalogStore(db, { skipBackup: true });
+    try {
+      await seedProblems(store, [
+        { id: 'p1', title: 'Problem 1', difficulty: 'Easy', tags: ['array'] },
+        { id: 'p2', title: 'Problem 2', difficulty: 'Medium', tags: ['array'] },
+        { id: 'p3', title: 'Problem 3', difficulty: 'Easy', tags: ['array'] },
+      ]);
+      await store.planning.saveStrategy({
+        name: 'Strategy 1',
+        rules: {
+          dailyCount: 2,
+          difficulty: { Easy: 50, Medium: 50, Hard: 0 },
+          tags: [],
+          premium: false,
+          reviewMode: 'none',
+          reviewCount: 0,
+          reviewEnabled: false,
+          reviewPercent: null,
+          preference: '',
+        },
+        weekdays: [0, 1, 2, 3, 4, 5, 6],
+      });
+
+      let modelCallCount = 0;
+      const trackingAssistant: any = {
+        getStatus: () => ({ configured: true, model: 'gemini-test', fallbackModels: [] }),
+        formatProgressText: async () => ({ candidates: [], unparsedSnippets: [], model: 'gemini-test' }),
+        generatePlanContent: async (req: any) => {
+          modelCallCount++;
+          return {
+            encouragement: { en: 'Keep going!', zh: '加油！' },
+            reasons: {},
+            model: 'gemini-test',
+          };
+        },
+      };
+
+      const service = new PlanningService(store, trackingAssistant);
+      const initial = await service.ensureDailyPlan({ timezone: 'UTC' });
+      const plan = initial.plan!;
+      assert.equal(plan.items.length, 2);
+
+      // Reset model call counter after initial generation
+      modelCallCount = 0;
+
+      // Append one item
+      const appended = await service.appendPlanItem(plan.id, {
+        expectedVersion: plan.version,
+        operationId: 'op-zero-model-1',
+      });
+
+      assert.equal(appended.items.length, 3);
+      assert.equal(appended.version, 2);
+      assert.equal(modelCallCount, 0, 'appendPlanItem must make zero model calls');
+      // Verify plan-level encouragement, source, and strategyId remain intact
+      assert.deepEqual(appended.encouragement, plan.encouragement);
+      assert.equal(appended.source, plan.source);
+      assert.equal(appended.strategyId, plan.strategyId);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('succeeds and produces valid reason when assistant is unconfigured or throws', async () => {
+    const db = new DatabaseSync(':memory:');
+    const store = new CatalogStore(db, { skipBackup: true });
+    try {
+      await seedProblems(store, [
+        { id: 'p1', title: 'Problem 1', difficulty: 'Easy', tags: ['array'] },
+        { id: 'p2', title: 'Problem 2', difficulty: 'Medium', tags: ['array'] },
+        { id: 'p3', title: 'Problem 3', difficulty: 'Easy', tags: ['array'] },
+      ]);
+      await store.planning.saveStrategy({
+        name: 'Strategy 1',
+        rules: {
+          dailyCount: 2,
+          difficulty: { Easy: 50, Medium: 50, Hard: 0 },
+          tags: [],
+          premium: false,
+          reviewMode: 'none',
+          reviewCount: 0,
+          reviewEnabled: false,
+          reviewPercent: null,
+          preference: '',
+        },
+        weekdays: [0, 1, 2, 3, 4, 5, 6],
+      });
+
+      // Assistant throws if called
+      const throwingAssistant: any = {
+        getStatus: () => ({ configured: false, model: 'local' }),
+        formatProgressText: async () => ({ candidates: [], unparsedSnippets: [], model: 'local' }),
+        generatePlanContent: async () => {
+          throw new Error('Should not be called during append');
+        },
+      };
+
+      const service = new PlanningService(store, throwingAssistant);
+      const initial = await service.ensureDailyPlan({ timezone: 'UTC' });
+      const plan = initial.plan!;
+
+      const appended = await service.appendPlanItem(plan.id, {
+        expectedVersion: plan.version,
+        operationId: 'op-unconfigured-1',
+      });
+
+      assert.equal(appended.items.length, 3);
+      const added = appended.items[appended.items.length - 1];
+      assert.ok(added.reason.en && added.reason.en.length > 0);
+      assert.ok(added.reason.zh && added.reason.zh.length > 0);
+    } finally {
+      db.close();
+    }
+  });
+});

@@ -4,7 +4,7 @@
  * - StrategiesView (weekly schedule, strategy list, create modal with count-based difficulty validation)
  * - PromptOverrideModal (AI preview parsing and commit)
  */
-import { afterEach, it, mock } from 'node:test';
+import { afterEach, beforeEach, describe, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import type { DailyPlan, OverridePreview, Strategy } from '../apps/web/src/api.ts';
@@ -666,6 +666,7 @@ it('auto-fills any two difficulty fields and preserves explicit manual edits', a
   }
 });
 
+
 it('all supported difficulty and review counts round-trip through the real planner and schema', async () => {
   const { percentagesForCounts, difficultyCounts, reviewPercentForCount, reviewCountForRules } = await import('../apps/web/src/strategy-counts.ts');
   const { rulesSchema } = await import('../packages/contracts/src/recommendations.ts');
@@ -681,4 +682,292 @@ it('all supported difficulty and review counts round-trip through the real plann
         tags: [], premium: false, reviewEnabled: true, reviewPercent: reviewPercentForCount(total, 'partial', count), preference: '' }), count);
     }
   }
+});
+
+describe('Phase 24: Add-one UI Loading, Feedback, and Concurrency Mutex', () => {
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<T>((a, b) => {
+      resolve = a;
+      reject = b;
+    });
+    return { promise, resolve, reject };
+  }
+
+  beforeEach(() => {
+    mock.method(api, 'getDashboard', async () => ({
+      dataStatus: { userTimezone: 'UTC' },
+      trend30Days: [],
+      overview: { currentStreak: 0, totalSolved: 0, distinctDays: 0 },
+    } as any));
+  });
+
+  it('displays bilingual loading state (Adding… / 加题中…), spinner, aria-busy and restores on completion', async () => {
+    const basePlan = createMockPlan();
+    mock.method(api, 'ensureDailyPlan', async () => ({ status: 'ready' as const, plan: basePlan }));
+    mock.method(api, 'getStrategies', async () => []);
+
+    // 1. English test
+    let pending = deferred<DailyPlan>();
+    mock.method(api, 'appendPlanItem', async () => pending.promise);
+
+    await act(async () => {
+      render(<TodayPlanView lang="en" onNavigateToSettings={() => {}} />);
+    });
+
+    const addBtn = screen.getByRole('button', { name: 'Add one' }) as HTMLButtonElement;
+    assert.equal(addBtn.disabled, false);
+    assert.notEqual(addBtn.getAttribute('aria-busy'), 'true');
+
+    // Click Add one
+    await act(async () => {
+      fireEvent.click(addBtn);
+    });
+
+    // In-flight assertion
+    assert.equal(addBtn.disabled, true);
+    assert.equal(addBtn.getAttribute('aria-busy'), 'true');
+    assert.ok(addBtn.textContent?.includes('Adding…'));
+    assert.ok(addBtn.querySelector('.spin') !== null);
+
+    // Resolve append
+    const updatedPlan: DailyPlan = {
+      ...basePlan,
+      version: 2,
+      items: [
+        ...basePlan.items,
+        {
+          id: 'item-3',
+          kind: 'new',
+          problem: {
+            questionId: 'p3',
+            questionFrontendId: '200',
+            title: 'Number of Islands',
+            titleSlug: 'number-of-islands',
+            url: 'https://leetcode.com/problems/number-of-islands/',
+            difficulty: 'Medium',
+            isPaidOnly: false,
+            topicTags: [{ id: 'dfs', name: 'DFS', slug: 'depth-first-search' }],
+            source: 'jsonl',
+          },
+          reason: { en: 'New topic practice', zh: '新专题练习' },
+          addedAt: Date.now(),
+          evidenceIds: [],
+          completed: false,
+        },
+      ],
+    };
+
+    await act(async () => {
+      pending.resolve(updatedPlan);
+    });
+
+    // Restored assertion
+    assert.equal(addBtn.disabled, false);
+    assert.notEqual(addBtn.getAttribute('aria-busy'), 'true');
+    assert.ok(addBtn.textContent?.includes('Add one'));
+    assert.equal(addBtn.querySelector('.spin'), null);
+    assert.ok(screen.getByText('200.'));
+    assert.ok(screen.getByText('Number of Islands'));
+
+    cleanup();
+
+    // 2. Chinese test
+    pending = deferred<DailyPlan>();
+    mock.method(api, 'ensureDailyPlan', async () => ({ status: 'ready' as const, plan: basePlan }));
+    await act(async () => {
+      render(<TodayPlanView lang="zh" onNavigateToSettings={() => {}} />);
+    });
+
+    const addBtnZh = screen.getByRole('button', { name: '加一题' }) as HTMLButtonElement;
+    assert.equal(addBtnZh.disabled, false);
+
+    await act(async () => {
+      fireEvent.click(addBtnZh);
+    });
+
+    assert.equal(addBtnZh.disabled, true);
+    assert.equal(addBtnZh.getAttribute('aria-busy'), 'true');
+    assert.ok(addBtnZh.textContent?.includes('加题中…'));
+    assert.ok(addBtnZh.querySelector('.spin') !== null);
+
+    await act(async () => {
+      pending.resolve(updatedPlan);
+    });
+
+    assert.equal(addBtnZh.disabled, false);
+    assert.ok(addBtnZh.textContent?.includes('加一题'));
+  });
+
+  it('prevents double click re-entrancy in the same tick', async () => {
+    const basePlan = createMockPlan();
+    mock.method(api, 'ensureDailyPlan', async () => ({ status: 'ready' as const, plan: basePlan }));
+    mock.method(api, 'getStrategies', async () => []);
+
+    const pending = deferred<DailyPlan>();
+    const appendMock = mock.method(api, 'appendPlanItem', async () => pending.promise);
+
+    await act(async () => {
+      render(<TodayPlanView lang="en" onNavigateToSettings={() => {}} />);
+    });
+
+    const addBtn = screen.getByRole('button', { name: 'Add one' }) as HTMLButtonElement;
+
+    // Simulate rapid double click in same tick
+    await act(async () => {
+      fireEvent.click(addBtn);
+      fireEvent.click(addBtn);
+    });
+
+    assert.equal(appendMock.mock.callCount(), 1, 'Only one appendPlanItem request must be issued');
+
+    await act(async () => {
+      pending.resolve(basePlan);
+    });
+  });
+
+  it('enforces mutual exclusion during append: disables write actions while keeping read-only actions accessible', async () => {
+    const basePlan = createMockPlan();
+    mock.method(api, 'ensureDailyPlan', async () => ({ status: 'ready' as const, plan: basePlan }));
+    mock.method(api, 'getStrategies', async () => []);
+
+    const pending = deferred<DailyPlan>();
+    mock.method(api, 'appendPlanItem', async () => pending.promise);
+
+    await act(async () => {
+      render(<TodayPlanView lang="en" onNavigateToSettings={() => {}} />);
+    });
+
+    const addBtn = screen.getByRole('button', { name: 'Add one' });
+    await act(async () => {
+      fireEvent.click(addBtn);
+    });
+
+    // 1. "Adjust today" button is disabled
+    const adjustBtn = screen.getByRole('button', { name: 'Adjust today' }) as HTMLButtonElement;
+    assert.equal(adjustBtn.disabled, true);
+
+    // 2. Problem row write actions are disabled
+    const completionCircles = screen.getAllByRole('button', { name: /Mark complete:|View completion records:/i });
+    for (const circle of completionCircles) {
+      assert.equal((circle as HTMLButtonElement).disabled, true);
+    }
+
+    const replaceOneButtons = screen.getAllByRole('button', { name: translations.en.replaceOne });
+    for (const replaceBtn of replaceOneButtons) {
+      assert.equal((replaceBtn as HTMLButtonElement).disabled, true);
+    }
+
+    const recordPracticeButtons = screen.getAllByRole('button', { name: /Record practice/i });
+    for (const recordBtn of recordPracticeButtons) {
+      assert.equal((recordBtn as HTMLButtonElement).disabled, true);
+    }
+
+    // 3. Read-only actions remain enabled and accessible
+    const quickNoteButtons = screen.getAllByRole('button', { name: /Quick notes/i });
+    for (const noteBtn of quickNoteButtons) {
+      assert.equal((noteBtn as HTMLButtonElement).disabled, false);
+    }
+
+    const planDetailsBtn = screen.getByRole('button', { name: /Plan details/i }) as HTMLButtonElement;
+    assert.equal(planDetailsBtn.disabled, false);
+
+    await act(async () => {
+      pending.resolve(basePlan);
+    });
+  });
+
+  it('handles append failure gracefully: retains plan and displays feedback with retry', async () => {
+    const basePlan = createMockPlan();
+    mock.method(api, 'ensureDailyPlan', async () => ({ status: 'ready' as const, plan: basePlan }));
+    mock.method(api, 'getStrategies', async () => []);
+
+    const pending = deferred<DailyPlan>();
+    mock.method(api, 'appendPlanItem', async () => pending.promise);
+
+    await act(async () => {
+      render(<TodayPlanView lang="en" onNavigateToSettings={() => {}} />);
+    });
+
+    const addBtn = screen.getByRole('button', { name: 'Add one' });
+    await act(async () => {
+      fireEvent.click(addBtn);
+    });
+
+    // Reject with failure
+    await act(async () => {
+      pending.reject(new Error('No eligible candidates found for target difficulty and type'));
+    });
+
+    // Plan items remain intact
+    assert.ok(screen.getByText('70.'));
+    assert.ok(screen.getByText('198.'));
+
+    // Error feedback is rendered with retry action
+    assert.ok(screen.getByText(/No eligible candidates found/i));
+    const retryBtn = screen.getByRole('button', { name: 'Retry' });
+    assert.ok(retryBtn !== null);
+
+    // Button is restored
+    assert.equal((addBtn as HTMLButtonElement).disabled, false);
+    assert.ok(addBtn.textContent?.includes('Add one'));
+  });
+
+  it('queues background refresh during append without launching redundant request', async () => {
+    const visibility = Object.getOwnPropertyDescriptor(document, 'visibilityState');
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    try {
+      const basePlan = createMockPlan();
+      let ensureCount = 0;
+      mock.method(api, 'ensureDailyPlan', async () => {
+        ensureCount++;
+        return { status: 'ready' as const, plan: basePlan };
+      });
+      mock.method(api, 'getStrategies', async () => []);
+
+      let tick!: () => void;
+      mock.method(globalThis, 'setInterval', (callback: () => void) => {
+        tick = callback;
+        return 1 as any;
+      });
+      mock.method(globalThis, 'clearInterval', () => {});
+
+      const pending = deferred<DailyPlan>();
+      mock.method(api, 'appendPlanItem', async () => pending.promise);
+
+      await act(async () => {
+        render(<TodayPlanView lang="en" onNavigateToSettings={() => {}} />);
+      });
+
+      assert.equal(ensureCount, 1);
+
+      // Start append
+      const addBtn = screen.getByRole('button', { name: 'Add one' });
+      await act(async () => {
+        fireEvent.click(addBtn);
+      });
+
+      // Background interval fires while append is pending
+      await act(async () => {
+        tick();
+        tick();
+      });
+
+      // Ensure count must STILL be 1 because mutation is pending!
+      assert.equal(ensureCount, 1, 'Background refresh must be queued rather than launched concurrently during append');
+
+      // Complete append
+      await act(async () => {
+        pending.resolve({ ...basePlan, version: 2 });
+        await new Promise((r) => setTimeout(r, 20));
+      });
+
+      // Queued refresh now runs
+      assert.equal(ensureCount, 2, 'Queued refresh should execute once append completes');
+    } finally {
+      if (visibility) Object.defineProperty(document, 'visibilityState', visibility);
+      else Reflect.deleteProperty(document, 'visibilityState');
+    }
+  });
 });

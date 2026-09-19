@@ -51,6 +51,8 @@
     "test:live": "node --test tests/live-gemini-verification.test.ts",
     "benchmark:phase16": "node --import tsx scripts/benchmark-phase16.ts",
     "verify:phase16": "node --import tsx scripts/verify-phase16-browser.ts",
+    "benchmark:phase24": "node --import tsx scripts/benchmark-phase24-add-one.ts",
+    "verify:phase24": "node --import tsx scripts/verify-phase24-browser.ts",
     "benchmark": "node --import tsx scripts/benchmark-real-data.ts",
     "verify:real": "node --import tsx scripts/verify-real-data-browser.ts",
     "verify:desktop": "node --import tsx scripts/verify-refactor-browser.ts",
