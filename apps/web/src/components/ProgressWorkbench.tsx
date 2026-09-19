@@ -148,7 +148,7 @@ export function ProgressWorkbench({ lang }: { lang: Language }) {
     <div className="import-workspace">
       <PageHeader
         title={zh ? '导入进度' : 'Import progress'}
-        back={{ label: zh ? '返回进展' : 'Back to progress', run: () => workspace.navigate('records') }}
+        back={{ label: zh ? '返回进展' : 'Back to progress', run: () => workspace.navigate('statistics') }}
       />
       <ol className="workflow-steps">
         {steps.map((label, index) => (

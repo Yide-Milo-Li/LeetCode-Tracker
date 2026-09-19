@@ -96,11 +96,11 @@ it('navigates to Problems on key "2", Progress on key "3", and Today on key "1"'
   });
   assert.equal(window.location.hash, '#problems');
 
-  // Key "3" -> navigate to records
+  // Key "3" -> navigate to statistics (priority Progress view)
   await act(async () => {
     window.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: '3', bubbles: true }));
   });
-  assert.equal(window.location.hash, '#records');
+  assert.equal(window.location.hash, '#statistics');
 
   // Key "1" -> navigate to today
   await act(async () => {
@@ -212,4 +212,39 @@ it('suppresses shortcuts during active IME composition', async () => {
   });
 
   assert.equal(window.location.hash, '');
+});
+
+/**
+ * Regression test for Progress view tab ordering:
+ * Ensures navigating to Progress defaults to the Statistics view (#statistics)
+ * and that the Progress tab bar displays Statistics as the primary tab and Records as the secondary tab.
+ */
+it('prioritizes Statistics view in Progress with Records as the second tab', async () => {
+  await act(async () => {
+    render(<App />);
+  });
+
+  // Navigate to Progress using shortcut '3'
+  await act(async () => {
+    window.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: '3', bubbles: true }));
+  });
+
+  // Hash route must default to #statistics
+  assert.equal(window.location.hash, '#statistics');
+
+  // Verify page tabs order and selection state
+  const tabs = screen.getAllByRole('tab');
+  assert.equal(tabs.length, 2, 'Progress view must render exactly two tabs');
+  assert.equal(tabs[0].id, 'tab-statistics', 'Primary tab must be Statistics');
+  assert.equal(tabs[0].getAttribute('aria-selected'), 'true', 'Statistics tab must be selected by default');
+  assert.equal(tabs[1].id, 'tab-records', 'Secondary tab must be Records');
+  assert.equal(tabs[1].getAttribute('aria-selected'), 'false', 'Records tab must not be selected initially');
+
+  // Switching tabs updates the route hash and selected attribute
+  await act(async () => {
+    fireEvent.click(tabs[1]);
+  });
+  assert.equal(window.location.hash, '#records', 'Clicking secondary tab should route to #records');
+  assert.equal(tabs[0].getAttribute('aria-selected'), 'false');
+  assert.equal(tabs[1].getAttribute('aria-selected'), 'true');
 });

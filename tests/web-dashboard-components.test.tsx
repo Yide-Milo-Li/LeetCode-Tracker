@@ -567,3 +567,4 @@ it('supports heatmap keyboard roving tabIndex and navigation (Arrow keys and Ent
 
   assert.equal(requestedDate, nextDateStr, 'Enter key should open activity drawer for the keyboard-focused date');
 });
+

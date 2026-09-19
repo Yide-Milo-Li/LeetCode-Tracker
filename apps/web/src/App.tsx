@@ -170,7 +170,7 @@ export function App() {
   useKeyboardShortcuts({
     onNavigateToday: () => navigate('today'),
     onNavigateProblems: () => navigate('problems'),
-    onNavigateRecords: () => navigate('records'),
+    onNavigateRecords: () => navigate('statistics'),
     onNavigateNotes: () => navigate('notes'),
     onOpenManualPractice: () => openPractice({ mode: 'manual' }),
     onFocusSearch: focusSearch,
@@ -271,7 +271,7 @@ export function App() {
   const zh = lang === 'zh';
   const progress = ['records', 'statistics', 'progress-import'].includes(view);
   const primary =
-    view === 'schedule' ? 'today' : view === 'catalog-import' ? 'problems' : progress ? 'records' : view;
+    view === 'schedule' ? 'today' : view === 'catalog-import' ? 'problems' : progress ? 'statistics' : view;
   return (
     <WorkspaceContext.Provider value={workspace}>
       <div className="app-shell">
@@ -324,7 +324,7 @@ export function App() {
               [
                 { id: 'today', icon: CalendarDays, label: zh ? '今日' : 'Today', shortcut: '1' },
                 { id: 'problems', icon: BookOpen, label: zh ? '题库' : 'Problems', shortcut: '2' },
-                { id: 'records', icon: ChartNoAxesCombined, label: zh ? '进展' : 'Progress', shortcut: '3' },
+                { id: 'statistics', icon: ChartNoAxesCombined, label: zh ? '进展' : 'Progress', shortcut: '3' },
                 { id: 'notes', icon: BookMarked, label: zh ? '复盘' : 'Notes', shortcut: '4' },
               ] as const
             ).map((item) => {
@@ -470,7 +470,7 @@ export function App() {
                 }
               />
               <div className="page-tabs" role="tablist" aria-label={zh ? '进展视图' : 'Progress views'}>
-                {(['records', 'statistics'] as const).map((tab) => (
+                {(['statistics', 'records'] as const).map((tab) => (
                   <button
                     key={tab}
                     role="tab"
@@ -481,14 +481,14 @@ export function App() {
                     onKeyDown={(e) => {
                       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
                         e.preventDefault();
-                        const next = tab === 'records' ? 'statistics' : 'records';
+                        const next = tab === 'statistics' ? 'records' : 'statistics';
                         navigate(next);
                         setTimeout(() => document.getElementById('tab-' + next)?.focus(), 0);
                       }
                     }}
                     tabIndex={view === tab ? 0 : -1}
                   >
-                    {tab === 'records' ? (zh ? '记录' : 'Records') : zh ? '统计' : 'Statistics'}
+                    {tab === 'statistics' ? (zh ? '统计' : 'Statistics') : zh ? '记录' : 'Records'}
                   </button>
                 ))}
               </div>
