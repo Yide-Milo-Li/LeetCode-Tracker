@@ -23,7 +23,7 @@ describe('macOS native profile migration',()=>{
     },{timeout:45000});
     const fixture=JSON.parse(readFileSync(path.join(evidenceDir,'windows-migration.json'),'utf8'));
     await api('POST','/bundle/import',fixture);
-    const copied=await api('GET','/bundle/export?version=2');
+    const copied=await api('GET','/bundle/export?version=3');
     assert.deepEqual(copied.tables,fixture.tables);
     await browser.refresh();
     const settings=await browser.$('button[aria-label="设置"]');
@@ -39,7 +39,7 @@ describe('macOS native profile migration',()=>{
     assert.match(await (await browser.$('#view-settings')).getText(),/Export Complete Migration/);
     mkdirSync(evidenceDir,{recursive:true});
     await browser.saveScreenshot(path.join(evidenceDir,'macos-settings.png'));
-    const state=await api('GET','/bundle/export?version=2');
+    const state=await api('GET','/bundle/export?version=3');
     assert.equal(state.tables.problems.length,fixture.tables.problems.length);
     assert.deepEqual(state.tables.practice_records,fixture.tables.practice_records);
   });
