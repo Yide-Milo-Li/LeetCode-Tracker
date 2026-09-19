@@ -98,16 +98,21 @@ export function TopicInsights({ report, profileReport, lang, onConfigure }: {
                                             const diff = topic.difficulties[d];
                                             const isStable = diff.evaluation === 'recently_stable';
                                             const isReinforce = diff.evaluation === 'needs_reinforcement';
+                                            const isDeveloping = diff.evaluation === 'developing';
                                             const statusClass = isStable
                                                 ? 'pill-stable'
                                                 : isReinforce
                                                     ? 'pill-reinforce'
-                                                    : 'pill-untested';
+                                                    : isDeveloping
+                                                        ? 'pill-developing'
+                                                        : 'pill-untested';
                                             const statusText = isStable
                                                 ? (zh ? '稳定' : 'Stable')
                                                 : isReinforce
                                                     ? (zh ? '需巩固' : 'Reinforce')
-                                                    : (zh ? '暂无' : 'Untested');
+                                                    : isDeveloping
+                                                        ? (zh ? '积累中' : 'Developing')
+                                                        : (zh ? '暂无' : 'Untested');
                                             const tooltipTitle = `${d}: ${statusText}`;
 
                                             return (
@@ -122,6 +127,11 @@ export function TopicInsights({ report, profileReport, lang, onConfigure }: {
                                                         ) : isReinforce ? (
                                                             <svg className="topic-pill-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                                                                 <path fillRule="evenodd" d="M8 1.5a1 1 0 0 1 .866.5l6.5 11.5A1 1 0 0 1 14.5 15h-13a1 1 0 0 1-.866-1.5l6.5-11.5A1 1 0 0 1 8 1.5zM8 5a.75.75 0 0 0-.75.75v3.5a.75.75 0 0 0 1.5 0v-3.5A.75.75 0 0 0 8 5zm0 7a1 1 0 1 0 0-2 1 1 0 0 0 0 2z" clipRule="evenodd" />
+                                                            </svg>
+                                                        ) : isDeveloping ? (
+                                                            <svg className="topic-pill-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                                                <circle cx="8" cy="8" r="6" />
+                                                                <polyline points="8 5 8 8 10.5 9.5" />
                                                             </svg>
                                                         ) : (
                                                             <svg className="topic-pill-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
@@ -168,6 +178,10 @@ export function TopicInsights({ report, profileReport, lang, onConfigure }: {
                                                     <span className="legend-dot dot-unsolved" aria-hidden="true" />
                                                     <span>{zh ? '未解出' : 'Unsolved'}</span>
                                                 </span>
+                                                <span className="legend-item" title={zh ? '未记录主观反馈（如导入进展）' : 'No subjective outcome recorded'}>
+                                                    <span className="legend-dot dot-unrecorded" aria-hidden="true" />
+                                                    <span>{zh ? '未记反馈' : 'Unrecorded'}</span>
+                                                </span>
                                             </div>
                                         </div>
 
@@ -178,7 +192,8 @@ export function TopicInsights({ report, profileReport, lang, onConfigure }: {
                                                 const ind = diff.outcomeCounts.independent;
                                                 const ast = diff.outcomeCounts.assisted;
                                                 const unk = diff.outcomeCounts.unsolved;
-                                                const totalOutcomes = ind + ast + unk;
+                                                const unr = diff.outcomeCounts.unrecorded;
+                                                const totalOutcomes = ind + ast + unk + unr;
 
                                                 return (
                                                     <div key={d} className="diff-card">
@@ -186,7 +201,8 @@ export function TopicInsights({ report, profileReport, lang, onConfigure }: {
                                                             <strong className={`difficulty ${d.toLowerCase()}`}>{d}</strong>
                                                             {diff.evaluation === 'needs_reinforcement' && <span className="badge badge-warning u-font-size-10px">{zh ? '需巩固' : 'Reinforce'}</span>}
                                                             {diff.evaluation === 'recently_stable' && <span className="badge badge-success u-font-size-10px">{zh ? '稳定' : 'Stable'}</span>}
-                                                            {diff.evaluation !== 'needs_reinforcement' && diff.evaluation !== 'recently_stable' && (
+                                                            {diff.evaluation === 'developing' && <span className="badge badge-primary u-font-size-10px">{zh ? '积累中' : 'Developing'}</span>}
+                                                            {diff.evaluation === 'insufficient_evidence' && (
                                                                 <span className="badge badge-neutral u-font-size-10px">{zh ? '暂无' : 'Untested'}</span>
                                                             )}
                                                         </div>
@@ -197,7 +213,7 @@ export function TopicInsights({ report, profileReport, lang, onConfigure }: {
                                                                     <div
                                                                         className="diff-feedback-bar"
                                                                         role="img"
-                                                                        aria-label={`${d}: ${zh ? `独立 ${ind}, 需提示 ${ast}, 未解 ${unk}` : `Independent ${ind}, Assisted ${ast}, Unsolved ${unk}`}`}
+                                                                        aria-label={`${d}: ${zh ? `独立 ${ind}, 需提示 ${ast}, 未解 ${unk}, 未记 ${unr}` : `Independent ${ind}, Assisted ${ast}, Unsolved ${unk}, Unrecorded ${unr}`}`}
                                                                     >
                                                                         {ind > 0 && (
                                                                             <div
@@ -230,6 +246,17 @@ export function TopicInsights({ report, profileReport, lang, onConfigure }: {
                                                                                 tabIndex={0}
                                                                                 role="img"
                                                                                 aria-label={`${d} ${zh ? '未解' : 'Unsolved'}: ${unk} (${Math.round((unk / totalOutcomes) * 100)}%)`}
+                                                                            />
+                                                                        )}
+                                                                        {unr > 0 && (
+                                                                            <div
+                                                                                className="feedback-seg seg-unrecorded"
+                                                                                style={{ flex: unr }}
+                                                                                data-tooltip={zh ? `未记反馈: ${unr} 题 (${Math.round((unr / totalOutcomes) * 100)}%)` : `Unrecorded: ${unr} (${Math.round((unr / totalOutcomes) * 100)}%)`}
+                                                                                title={zh ? `未记反馈: ${unr} 题 (${Math.round((unr / totalOutcomes) * 100)}%)` : `Unrecorded: ${unr} (${Math.round((unr / totalOutcomes) * 100)}%)`}
+                                                                                tabIndex={0}
+                                                                                role="img"
+                                                                                aria-label={`${d} ${zh ? '未记反馈' : 'Unrecorded'}: ${unr} (${Math.round((unr / totalOutcomes) * 100)}%)`}
                                                                             />
                                                                         )}
                                                                     </div>

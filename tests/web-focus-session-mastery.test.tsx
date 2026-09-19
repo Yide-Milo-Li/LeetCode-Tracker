@@ -267,3 +267,123 @@ it('renders Option 1 semantic micro-pills, shared legend, and hoverable segmente
     assert.equal(enMedSegs[1].getAttribute('data-tooltip'), 'Assisted: 3 (60%)');
     assert.ok(document.body.textContent?.includes('No practice in 30d'));
 });
+
+it('renders developing micro-pill and unrecorded segment for imported progress evidence', async () => {
+    const devProfileReport: KnowledgeProfileReport = {
+        version: 1,
+        generatedAt: now,
+        topics: [
+            {
+                tagSlug: 'dp',
+                tagName: 'Dynamic Programming',
+                totalCatalogProblems: 100,
+                solvedCount: 3,
+                coverageRate: 0.03,
+                recentProblemCount: 3,
+                recentDayCount: 2,
+                overallEvaluation: 'developing',
+                isWeak: false,
+                reinforcementDifficulties: [],
+                lastPracticedAt: '2026-09-18',
+                daysSinceLastPractice: 0,
+                difficulties: {
+                    Easy: {
+                        difficulty: 'Easy',
+                        distinctProblemCount: 3,
+                        practiceDaysCount: 2,
+                        weightedSampleCount: 0,
+                        outcomeCounts: { independent: 0, assisted: 0, unsolved: 0, unrecorded: 3 },
+                        weightedOutcomeShares: { independent: 0, assisted: 0, unsolved: 0 },
+                        durationSampleCount: 0,
+                        avgDurationMinutes: null,
+                        longDurationCount: 0,
+                        longDurationRate: null,
+                        knownDueCount: 0,
+                        dueTodayCount: 0,
+                        overdueCount: 0,
+                        overdueRate: null,
+                        sufficiency: 'accumulating',
+                        evaluation: 'developing',
+                        reasons: ['accumulating_data'],
+                    },
+                    Medium: {
+                        difficulty: 'Medium',
+                        distinctProblemCount: 0,
+                        practiceDaysCount: 0,
+                        weightedSampleCount: 0,
+                        outcomeCounts: { independent: 0, assisted: 0, unsolved: 0, unrecorded: 0 },
+                        weightedOutcomeShares: { independent: 0, assisted: 0, unsolved: 0 },
+                        durationSampleCount: 0,
+                        avgDurationMinutes: null,
+                        longDurationCount: 0,
+                        longDurationRate: null,
+                        knownDueCount: 0,
+                        dueTodayCount: 0,
+                        overdueCount: 0,
+                        overdueRate: null,
+                        sufficiency: 'insufficient',
+                        evaluation: 'insufficient_evidence',
+                        reasons: ['insufficient_evidence'],
+                    },
+                    Hard: {
+                        difficulty: 'Hard',
+                        distinctProblemCount: 0,
+                        practiceDaysCount: 0,
+                        weightedSampleCount: 0,
+                        outcomeCounts: { independent: 0, assisted: 0, unsolved: 0, unrecorded: 0 },
+                        weightedOutcomeShares: { independent: 0, assisted: 0, unsolved: 0 },
+                        durationSampleCount: 0,
+                        avgDurationMinutes: null,
+                        longDurationCount: 0,
+                        longDurationRate: null,
+                        knownDueCount: 0,
+                        dueTodayCount: 0,
+                        overdueCount: 0,
+                        overdueRate: null,
+                        sufficiency: 'insufficient',
+                        evaluation: 'insufficient_evidence',
+                        reasons: ['insufficient_evidence'],
+                    },
+                },
+            },
+        ],
+    };
+
+    const masteryReport = calculateTagMastery({
+        problems: [problem('1', 'Easy', ['dp'])],
+        manualRecords: [record('r1', '1', '2026-09-18')],
+        snapshots: [],
+        now,
+    });
+
+    // Chinese rendering test
+    const zhView = render(<TopicInsights report={masteryReport} profileReport={devProfileReport} lang="zh" />);
+    const zhPills = document.querySelectorAll('.topic-micro-pill');
+    assert.equal(zhPills.length, 3);
+    assert.ok(zhPills[0].classList.contains('pill-developing'));
+    assert.ok(zhPills[0].textContent?.includes('E'));
+    assert.ok(zhPills[0].textContent?.includes('积累中'));
+
+    const zhLegend = document.querySelector('.topic-shared-legend');
+    assert.ok(zhLegend?.textContent?.includes('未记反馈'));
+    assert.ok(document.querySelector('.legend-dot.dot-unrecorded'));
+
+    const zhBars = document.querySelectorAll('.diff-feedback-bar');
+    const zhEasySegs = zhBars[0].querySelectorAll('.feedback-seg');
+    assert.equal(zhEasySegs.length, 1);
+    assert.ok(zhEasySegs[0].classList.contains('seg-unrecorded'));
+    assert.equal(zhEasySegs[0].getAttribute('data-tooltip'), '未记反馈: 3 题 (100%)');
+    assert.ok(document.body.textContent?.includes('3 题 (2 天)'));
+
+    zhView.unmount();
+
+    // English rendering test
+    render(<TopicInsights report={masteryReport} profileReport={devProfileReport} lang="en" />);
+    const enPills = document.querySelectorAll('.topic-micro-pill');
+    assert.ok(enPills[0].textContent?.includes('Developing'));
+    assert.ok(document.querySelector('.topic-shared-legend')?.textContent?.includes('Unrecorded'));
+    const enBars = document.querySelectorAll('.diff-feedback-bar');
+    const enEasySegs = enBars[0].querySelectorAll('.feedback-seg');
+    assert.equal(enEasySegs[0].getAttribute('data-tooltip'), 'Unrecorded: 3 (100%)');
+});
+

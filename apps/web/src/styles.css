@@ -3439,6 +3439,11 @@ input.form-input[aria-invalid="true"] { border-color: var(--danger); outline-col
   background: var(--warning-bg);
   border-color: rgba(130, 86, 31, 0.15);
 }
+.topic-micro-pill.pill-developing {
+  color: var(--primary);
+  background: var(--selected);
+  border-color: color-mix(in srgb, var(--primary) 25%, transparent);
+}
 .topic-micro-pill.pill-untested {
   color: var(--text-muted);
   background: var(--muted-surface);
@@ -3517,6 +3522,7 @@ input.form-input[aria-invalid="true"] { border-color: var(--danger); outline-col
 .legend-dot.dot-independent { background: var(--easy); }
 .legend-dot.dot-assisted { background: var(--warning); }
 .legend-dot.dot-unsolved { background: var(--danger); }
+.legend-dot.dot-unrecorded { background: var(--outline); }
 
 .topic-diff-grid {
   display: grid;
@@ -3582,6 +3588,7 @@ input.form-input[aria-invalid="true"] { border-color: var(--danger); outline-col
 .feedback-seg.seg-independent { background: var(--easy); }
 .feedback-seg.seg-assisted { background: var(--warning); }
 .feedback-seg.seg-unsolved { background: var(--danger); }
+.feedback-seg.seg-unrecorded { background: color-mix(in srgb, var(--outline) 65%, var(--muted-surface)); }
 
 /* Sleek Pure-CSS Floating Tooltip on Hover and Keyboard Focus */
 .feedback-seg::after {
