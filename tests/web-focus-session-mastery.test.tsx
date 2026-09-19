@@ -5,6 +5,7 @@ import { JSDOM } from 'jsdom';
 import { problem, record, now, rules } from './phase16-fixtures.ts';
 import { calculateTagMastery } from '../packages/domain/src/mastery.ts';
 import type { PlanItem, OverridePreview } from '../packages/contracts/src/recommendations.ts';
+import type { KnowledgeProfileReport } from '../packages/contracts/src/knowledge-profile.ts';
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost' });
 Object.assign(globalThis, { window: dom.window, document: dom.window.document, HTMLElement: dom.window.HTMLElement,
     IS_REACT_ACT_ENVIRONMENT: true });
@@ -107,4 +108,162 @@ it('sends explicit false in manual override while absent controls inherit', asyn
     assert.ok(payload);
     assert.equal(payload.rules?.adaptiveReviewEnabled, false);
     assert.equal(Object.hasOwn(payload.rules ?? {}, 'focusWeakTags'), false);
+});
+
+it('renders Option 1 semantic micro-pills, shared legend, and hoverable segmented feedback bars', async () => {
+    const mockProfileReport: KnowledgeProfileReport = {
+        analysisVersion: 'profile-v1',
+        generatedAt: now,
+        asOfDate: '2026-09-18',
+        timezone: 'UTC',
+        windowDays: 30,
+        revision: { catalog: 1, practice: 1, planning: 1, timezone: null },
+        topics: [
+            {
+                tagSlug: 'dp',
+                tagName: 'Dynamic Programming',
+                totalCatalogProblems: 100,
+                solvedCount: 20,
+                coverageRate: 0.2,
+                recentProblemCount: 6,
+                recentDayCount: 5,
+                overallEvaluation: 'needs_reinforcement',
+                isWeak: true,
+                reinforcementDifficulties: ['Medium'],
+                lastPracticedAt: '2026-09-18',
+                daysSinceLastPractice: 0,
+                difficulties: {
+                    Easy: {
+                        difficulty: 'Easy',
+                        distinctProblemCount: 1,
+                        practiceDaysCount: 1,
+                        weightedSampleCount: 1,
+                        outcomeCounts: { independent: 1, assisted: 0, unsolved: 0, unrecorded: 0 },
+                        weightedOutcomeShares: { independent: 1, assisted: 0, unsolved: 0 },
+                        durationSampleCount: 1,
+                        avgDurationMinutes: 14,
+                        longDurationCount: 0,
+                        longDurationRate: 0,
+                        knownDueCount: 1,
+                        dueTodayCount: 0,
+                        overdueCount: 0,
+                        overdueRate: 0,
+                        sufficiency: 'sufficient',
+                        evaluation: 'recently_stable',
+                        reasons: ['recently_stable'],
+                    },
+                    Medium: {
+                        difficulty: 'Medium',
+                        distinctProblemCount: 5,
+                        practiceDaysCount: 4,
+                        weightedSampleCount: 5,
+                        outcomeCounts: { independent: 1, assisted: 3, unsolved: 1, unrecorded: 0 },
+                        weightedOutcomeShares: { independent: 0.2, assisted: 0.6, unsolved: 0.2 },
+                        durationSampleCount: 5,
+                        avgDurationMinutes: 42,
+                        longDurationCount: 3,
+                        longDurationRate: 0.6,
+                        knownDueCount: 5,
+                        dueTodayCount: 2,
+                        overdueCount: 0,
+                        overdueRate: 0,
+                        sufficiency: 'sufficient',
+                        evaluation: 'needs_reinforcement',
+                        reasons: ['feedback_assistance'],
+                    },
+                    Hard: {
+                        difficulty: 'Hard',
+                        distinctProblemCount: 0,
+                        practiceDaysCount: 0,
+                        weightedSampleCount: 0,
+                        outcomeCounts: { independent: 0, assisted: 0, unsolved: 0, unrecorded: 0 },
+                        weightedOutcomeShares: { independent: 0, assisted: 0, unsolved: 0 },
+                        durationSampleCount: 0,
+                        avgDurationMinutes: null,
+                        longDurationCount: 0,
+                        longDurationRate: null,
+                        knownDueCount: 0,
+                        dueTodayCount: 0,
+                        overdueCount: 0,
+                        overdueRate: null,
+                        sufficiency: 'insufficient',
+                        evaluation: 'insufficient_evidence',
+                        reasons: ['insufficient_evidence'],
+                    },
+                },
+            },
+        ],
+    };
+
+    const masteryReport = calculateTagMastery({
+        problems: [
+            problem('1', 'Easy', ['dp']),
+            problem('2', 'Medium', ['dp']),
+        ],
+        manualRecords: [
+            record('r1', '1', '2026-09-18'),
+            record('r2', '2', '2026-09-17'),
+        ],
+        snapshots: [],
+        now,
+    });
+
+    // 1. Verify Chinese rendering
+    const zhView = render(<TopicInsights report={masteryReport} profileReport={mockProfileReport} lang="zh" />);
+    const zhPills = document.querySelectorAll('.topic-micro-pill');
+    assert.equal(zhPills.length, 3);
+    assert.ok(zhPills[0].classList.contains('pill-stable'));
+    assert.ok(zhPills[0].textContent?.includes('E'));
+    assert.ok(zhPills[0].textContent?.includes('稳定'));
+    assert.ok(zhPills[1].classList.contains('pill-reinforce'));
+    assert.ok(zhPills[1].textContent?.includes('M'));
+    assert.ok(zhPills[1].textContent?.includes('需巩固'));
+    assert.ok(zhPills[2].classList.contains('pill-untested'));
+    assert.ok(zhPills[2].textContent?.includes('H'));
+    assert.ok(zhPills[2].textContent?.includes('暂无'));
+
+    // Verify shared legend and segmented bar in Chinese
+    const zhLegend = document.querySelector('.topic-shared-legend');
+    assert.ok(zhLegend);
+    assert.ok(zhLegend.textContent?.includes('独立完成'));
+    assert.ok(zhLegend.textContent?.includes('需提示'));
+    assert.ok(zhLegend.textContent?.includes('未解出'));
+
+    const zhBars = document.querySelectorAll('.diff-feedback-bar');
+    assert.equal(zhBars.length, 3);
+    // Easy bar
+    const zhEasySeg = zhBars[0].querySelectorAll('.feedback-seg');
+    assert.equal(zhEasySeg.length, 1);
+    assert.equal(zhEasySeg[0].getAttribute('data-tooltip'), '独立: 1 题 (100%)');
+    // Medium bar
+    const zhMedSegs = zhBars[1].querySelectorAll('.feedback-seg');
+    assert.equal(zhMedSegs.length, 3);
+    assert.equal(zhMedSegs[0].getAttribute('data-tooltip'), '独立: 1 题 (20%)');
+    assert.equal(zhMedSegs[1].getAttribute('data-tooltip'), '需提示: 3 题 (60%)');
+    assert.equal(zhMedSegs[2].getAttribute('data-tooltip'), '未解: 1 题 (20%)');
+    // Hard empty bar
+    assert.ok(zhBars[2].classList.contains('empty'));
+    assert.ok(document.body.textContent?.includes('近 30 天无练习样本'));
+
+    zhView.unmount();
+
+    // 2. Verify English rendering
+    render(<TopicInsights report={masteryReport} profileReport={mockProfileReport} lang="en" />);
+    const enPills = document.querySelectorAll('.topic-micro-pill');
+    assert.equal(enPills.length, 3);
+    assert.ok(enPills[0].textContent?.includes('Stable'));
+    assert.ok(enPills[1].textContent?.includes('Reinforce'));
+    assert.ok(enPills[2].textContent?.includes('Untested'));
+
+    const enLegend = document.querySelector('.topic-shared-legend');
+    assert.ok(enLegend);
+    assert.ok(enLegend.textContent?.includes('Independent'));
+    assert.ok(enLegend.textContent?.includes('Assisted'));
+    assert.ok(enLegend.textContent?.includes('Unsolved'));
+
+    const enBars = document.querySelectorAll('.diff-feedback-bar');
+    const enMedSegs = enBars[1].querySelectorAll('.feedback-seg');
+    assert.equal(enMedSegs.length, 3);
+    assert.equal(enMedSegs[1].getAttribute('data-tooltip'), 'Assisted: 3 (60%)');
+    assert.ok(document.body.textContent?.includes('No practice in 30d'));
 });
