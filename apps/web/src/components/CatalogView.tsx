@@ -1,5 +1,5 @@
 /** Local catalog discovery, filtering, metadata details and contextual manual recording. */
-import { RotateCcw, Plus, ExternalLink } from 'lucide-react';
+import { RotateCcw, Plus, ExternalLink, Download, Upload } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   api,
@@ -13,6 +13,7 @@ import { translations, type Language } from '../i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
 import { Dialog, Feedback, Field, PageHeader, Pagination, IconButton, Tooltip } from './ui.tsx';
 import { PracticeEditor, PracticeHistory } from './PracticeWorkspace.tsx';
+import { ExportLink } from './ExportLink.tsx';
 
 /** Render only HTTP(S) links from user-provided catalog metadata. */
 function safeUrl(value: string): string | undefined {
@@ -129,9 +130,22 @@ export function CatalogView({
       <PageHeader
         title={zh ? '题库' : 'Problems'}
         actions={
-          <button className="btn btn-primary" onClick={onNavigateSettings}>
-            {zh ? '导入题库' : 'Import problems'}
-          </button>
+          <div className="action-row">
+            <ExportLink
+              lang={lang}
+              onExport={() => api.exportNotionCsv('summary')}
+              href={api.getNotionCsvUrl('summary')}
+              className="btn btn-secondary"
+              title={t.exportNotionSummaryTitle}
+            >
+              <Download size={14} aria-hidden="true" />
+              <span>{zh ? '导出清单' : 'Export catalog'}</span>
+            </ExportLink>
+            <button className="btn btn-primary" onClick={onNavigateSettings}>
+              <Upload size={14} aria-hidden="true" />
+              <span>{zh ? '导入题库' : 'Import problems'}</span>
+            </button>
+          </div>
         }
       />
       {(error || overviewError) && (
@@ -145,21 +159,30 @@ export function CatalogView({
         stats && (
           <div className="catalog-overview">
             <div className="summary-counts">
-              <span>
-                {t.statTotal} <strong>{stats.totalProblems}</strong>
-              </span>
-              <span className="easy-text">
-                {t.statEasy} {stats.easy}
-              </span>
-              <span className="warning-text">
-                {t.statMedium} {stats.medium}
-              </span>
-              <span className="danger-text">
-                {t.statHard} {stats.hard}
-              </span>
-              <span>
-                {t.statSolvedProblems} {practiceStats?.uniqueSolvedProblems ?? '—'}
-              </span>
+              <div className="stats-capsule">
+                <span>{t.statTotal}</span> <strong>{stats.totalProblems}</strong>
+              </div>
+              <div className="stats-capsule">
+                <span className="stats-capsule-dot" style={{ background: 'var(--easy)' }}></span>
+                <span className="easy-text">{t.statEasy}</span> <strong>{stats.easy}</strong>
+              </div>
+              <div className="stats-capsule">
+                <span className="stats-capsule-dot" style={{ background: 'var(--medium)' }}></span>
+                <span className="warning-text">{t.statMedium}</span> <strong>{stats.medium}</strong>
+              </div>
+              <div className="stats-capsule">
+                <span className="stats-capsule-dot" style={{ background: 'var(--hard)' }}></span>
+                <span className="danger-text">{t.statHard}</span> <strong>{stats.hard}</strong>
+              </div>
+              <div className="stats-capsule">
+                <span>{t.statSolvedProblems}</span>
+                <strong style={{ color: 'var(--primary)' }}>{practiceStats?.uniqueSolvedProblems ?? '—'}</strong>
+                {stats.totalProblems > 0 && practiceStats?.uniqueSolvedProblems !== undefined && (
+                  <span className="stats-capsule-progress">
+                    {Math.round(((practiceStats.uniqueSolvedProblems) / stats.totalProblems) * 100)}%
+                  </span>
+                )}
+              </div>
             </div>
             <details>
               <summary>{zh ? '题库概况' : 'Catalog details'}</summary>
@@ -203,22 +226,21 @@ export function CatalogView({
             }}
           />
         </Field>
-        <Field label={zh ? '难度' : 'Difficulty'}>
-          <select
-            value={difficulty ?? ''}
-            onChange={(e) => {
-              setDifficulty((e.target.value as CatalogQuery['difficulty']) || undefined);
-              setPage(1);
-            }}
-          >
-            <option value="">{t.allDifficulties}</option>
-            {(['Easy', 'Medium', 'Hard'] as const).map((diff) => (
-              <option value={diff} key={diff}>
-                {t[('stat' + diff) as keyof typeof t]}
-              </option>
-            ))}
-          </select>
-        </Field>
+        <div className="segmented-pills" role="radiogroup" aria-label={zh ? '难度筛选' : 'Difficulty filter'}>
+          {(['all', 'Easy', 'Medium', 'Hard'] as const).map((diff) => (
+            <button
+              key={diff}
+              type="button"
+              className={'segmented-pill-btn ' + ((diff === 'all' && !difficulty) || difficulty === diff ? 'active' : '')}
+              onClick={() => {
+                setDifficulty(diff === 'all' ? undefined : diff);
+                setPage(1);
+              }}
+            >
+              {diff === 'all' ? t.allDifficulties : t[('stat' + diff) as keyof typeof t]}
+            </button>
+          ))}
+        </div>
         <Field label={zh ? '标签' : 'Tags'}>
           <select
             value={tag}

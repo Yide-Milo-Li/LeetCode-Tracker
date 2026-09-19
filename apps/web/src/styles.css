@@ -41,6 +41,10 @@
   --sidebar-motion: 180ms cubic-bezier(0.2, 0, 0, 1);
   --overlay-enter: 220ms cubic-bezier(0.16, 1, 0.3, 1);
   --overlay-exit: 160ms cubic-bezier(0.4, 0, 1, 1);
+  --spring-tactile: cubic-bezier(0.16, 1, 0.3, 1);
+  --spring-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --spring-snappy: cubic-bezier(0.2, 0.9, 0.3, 1);
+  --shadow-glow: 0 0 0 3px rgba(66, 99, 75, 0.22);
   font-family:
     system-ui,
     -apple-system,
@@ -86,6 +90,7 @@ html.dark {
   --review-bg: rgba(59, 130, 246, 0.18);
   --review-border: rgba(147, 197, 253, 0.35);
   --shadow-md: 0 8px 28px #10140e40;
+  --shadow-glow: 0 0 0 3px rgba(170, 196, 155, 0.28);
   --border: var(--border-color);
   --text-primary: var(--text-main);
   --text-secondary: var(--text-muted);
@@ -675,8 +680,10 @@ textarea::placeholder {
   display: flex;
   flex-direction: column;
   z-index: 10;
-
   overflow-x: hidden;
+  transition:
+    width var(--enter) var(--spring-tactile),
+    padding var(--enter) var(--spring-tactile);
 }
 .sidebar.expanded {
   width: 216px;
@@ -726,9 +733,20 @@ textarea::placeholder {
   border-radius: 8px;
   color: var(--primary);
   flex-shrink: 0;
+  transition: transform var(--fast) var(--spring-bounce);
+}
+.app-brand:hover .brand-mark {
+  transform: scale(1.04) rotate(-2deg);
 }
 .sidebar-toggle {
   color: var(--text-muted);
+  transition: transform var(--fast) var(--spring-tactile);
+}
+.sidebar-toggle:hover {
+  transform: scale(1.04);
+}
+.sidebar-toggle:active {
+  transform: scale(0.92);
 }
 .sidebar-caption {
   margin: 12px 6px 14px;
@@ -752,8 +770,9 @@ textarea::placeholder {
   font-size: 14px;
   color: var(--text-muted);
   transition:
-    background var(--btn-motion),
-    color var(--btn-motion);
+    background var(--fast) ease,
+    color var(--fast) ease,
+    transform var(--fast) var(--spring-tactile);
   white-space: nowrap;
 }
 .sidebar.collapsed .nav-item {
@@ -773,6 +792,24 @@ textarea::placeholder {
 }
 .nav-item:hover {
   background: var(--selected);
+  color: var(--text-main);
+  transform: translateX(2px);
+}
+.nav-item:active {
+  transform: scale(0.96);
+}
+.nav-item svg {
+  transition: transform var(--fast) var(--spring-bounce);
+  flex-shrink: 0;
+}
+.nav-item:hover svg {
+  transform: scale(1.05);
+}
+.sidebar.collapsed .nav-item:hover {
+  transform: scale(1.04);
+}
+.sidebar.collapsed .nav-item:active {
+  transform: scale(0.95);
 }
 .sidebar-bottom {
   margin-top: auto;
@@ -801,7 +838,7 @@ textarea::placeholder {
   max-width: 1568px;
   min-height: 100vh;
   outline: none;
-
+  transition: margin-left var(--enter) var(--spring-tactile);
 }
 .sidebar.expanded ~ .main-content {
   margin-left: 216px;
@@ -852,10 +889,18 @@ textarea::placeholder {
   margin: -3px 0 28px;
 }
 .page-tabs button {
-  padding: 10px 2px 13px;
+  padding: 10px 4px 13px;
   background: none;
   color: var(--text-muted);
   border-bottom: 2px solid transparent;
+  transition: color var(--fast) ease, border-color var(--fast) ease, transform var(--fast) var(--spring-tactile);
+}
+.page-tabs button:hover:not(:disabled) {
+  color: var(--text-main);
+  transform: translateY(-1px);
+}
+.page-tabs button:active:not(:disabled) {
+  transform: scale(0.96);
 }
 .page-tabs button[aria-selected='true'] {
   border-color: var(--primary);
@@ -877,30 +922,42 @@ textarea::placeholder {
   line-height: 1.4;
   white-space: nowrap;
   text-decoration: none;
+  cursor: pointer;
+  user-select: none;
   transition:
-    background var(--fast),
-    border-color var(--fast),
-    color var(--fast);
+    transform var(--fast) var(--spring-tactile),
+    background var(--fast) ease,
+    border-color var(--fast) ease,
+    color var(--fast) ease,
+    box-shadow var(--fast) ease;
 }
-.btn:hover {
+.btn:hover:not(:disabled) {
   text-decoration: none;
+  transform: translateY(-1px);
+}
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
 }
 .btn-primary {
   color: var(--on-primary);
   background: var(--primary);
+  box-shadow: 0 1px 3px rgba(37, 43, 32, 0.08);
 }
 .btn-primary:hover:not(:disabled) {
   background: var(--primary-hover);
+  box-shadow: var(--shadow-md);
 }
 .btn-secondary,
 .btn-outline {
   color: var(--text-main);
   background: var(--surface);
-  border-color: var(--outline);
+  border-color: var(--border-color);
+  box-shadow: 0 1px 2px rgba(37, 43, 32, 0.05);
 }
 .btn-secondary:hover:not(:disabled),
 .btn-outline:hover:not(:disabled) {
   background: var(--muted-surface);
+  border-color: var(--outline);
 }
 .btn-danger {
   color: var(--danger);
@@ -931,20 +988,23 @@ textarea::placeholder {
   background: transparent;
   flex-shrink: 0;
   transition:
-    background var(--btn-motion),
-    color var(--btn-motion),
-    transform var(--btn-motion);
+    background var(--fast) ease,
+    color var(--fast) ease,
+    border-color var(--fast) ease,
+    transform var(--fast) var(--spring-tactile);
 }
-.btn-icon:hover {
+.btn-icon:hover:not(:disabled) {
   background: var(--selected);
   color: var(--primary);
+  transform: translateY(-1px);
 }
 .btn-icon-danger:hover:not(:disabled) {
   background: var(--danger-bg);
   color: var(--danger);
+  transform: translateY(-1px);
 }
 .btn-icon:active:not(:disabled) {
-  transform: scale(0.94);
+  transform: scale(0.92);
 }
 .btn-icon:disabled {
   opacity: 0.45;
@@ -1492,6 +1552,18 @@ progress::-moz-progress-bar {
   height: 32px;
   border: 1px solid var(--outline);
   border-radius: 6px;
+  cursor: pointer;
+  transition:
+    transform var(--fast) var(--spring-tactile),
+    border-color var(--fast) ease,
+    background-color var(--fast) ease;
+}
+.action-menu summary:hover {
+  border-color: var(--primary);
+  transform: translateY(-1px);
+}
+.action-menu summary:active {
+  transform: scale(0.92);
 }
 .action-menu[open] > div {
   position: absolute;
@@ -1512,33 +1584,77 @@ progress::-moz-progress-bar {
   text-align: left;
   border-radius: 5px;
   font-size: 14px;
+  transition:
+    background var(--fast) ease,
+    color var(--fast) ease;
 }
 .action-menu button:hover {
   background: var(--muted-surface);
+  color: var(--primary);
 }
 .today-problems {
-  border-top: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-top: none;
 }
 .today-problem {
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) auto;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
   gap: 18px;
-  padding: 20px 0;
-  border-bottom: 1px solid var(--border-color);
+  padding: 16px 20px;
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 1px 3px rgba(37, 43, 32, 0.04);
+  transition:
+    transform 200ms var(--spring-tactile),
+    border-color 200ms ease,
+    box-shadow 200ms ease,
+    background-color 200ms ease;
+}
+.today-problem:hover {
+  border-color: var(--outline);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+.today-problem.completed {
+  background: var(--canvas);
+  border-color: var(--border-color);
+}
+.today-problem.just-completed {
+  animation: completePulse 600ms var(--spring-bounce);
+}
+@keyframes completePulse {
+  0% { transform: scale(0.98); }
+  50% { transform: scale(1.015); box-shadow: var(--shadow-glow); }
+  100% { transform: scale(1); }
 }
 .completion-circle {
   display: grid;
   place-items: center;
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   padding: 0;
   margin-top: 2px;
   background: none;
   color: var(--outline);
   border-radius: 50%;
+  cursor: pointer;
   transition:
-    color var(--fast),
-    background var(--fast);
+    transform 200ms var(--spring-bounce),
+    color var(--fast) ease,
+    background var(--fast) ease,
+    box-shadow 200ms ease;
+}
+.completion-circle:hover:not(:disabled) {
+  transform: scale(1.04);
+  color: var(--primary);
+  box-shadow: 0 0 0 3px var(--selected);
+}
+.completion-circle:active:not(:disabled) {
+  transform: scale(0.94);
+  transition: transform 80ms ease-out;
 }
 .completion-circle[aria-pressed='true'] {
   color: var(--on-primary);
@@ -1548,9 +1664,6 @@ progress::-moz-progress-bar {
   border-radius: 50%;
   padding: 3px;
   box-sizing: content-box;
-}
-.completion-circle:hover:not(:disabled) {
-  box-shadow: 0 0 0 4px var(--selected);
 }
 .problem-content {
   min-width: 0;
@@ -1589,6 +1702,11 @@ progress::-moz-progress-bar {
   align-content: start;
   gap: 8px 16px;
   padding-top: 2px;
+  opacity: 0.88;
+  transition: opacity var(--fast) ease;
+}
+.today-problem:hover .problem-actions {
+  opacity: 1;
 }
 .problem-actions > a {
   grid-column: 1 / -1;
@@ -1677,18 +1795,121 @@ progress::-moz-progress-bar {
   align-items: flex-end;
   gap: 12px;
   margin-bottom: 20px;
+  flex-wrap: wrap;
 }
 .filter-toolbar .form-field {
-  flex: 1;
+  flex: 1 1 200px;
 }
 .filter-toolbar .form-field:first-child {
-  flex: 1.5;
+  flex: 1.5 1 260px;
 }
 .filter-toolbar select {
   width: 100%;
 }
 .filter-toolbar > button {
   margin-bottom: 0;
+}
+.segmented-pills {
+  display: inline-flex;
+  background: var(--muted-surface);
+  padding: 3px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  gap: 2px;
+  align-self: flex-end;
+}
+.segmented-pill-btn {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    color 140ms ease,
+    transform 140ms var(--spring-tactile),
+    box-shadow 140ms ease;
+  user-select: none;
+  white-space: nowrap;
+}
+.segmented-pill-btn:hover:not(:disabled) {
+  color: var(--text-main);
+  transform: translateY(-1px);
+}
+.segmented-pill-btn:active:not(:disabled) {
+  transform: scale(0.96);
+}
+.segmented-pill-btn.active {
+  background: var(--surface);
+  color: var(--primary);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(37, 43, 32, 0.08);
+}
+.catalog-overview {
+  border-block: 1px solid var(--border-color);
+  padding: 16px 0;
+  margin-bottom: 24px;
+}
+.summary-counts {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+.stats-capsule {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-main);
+  box-shadow: 0 1px 3px rgba(37, 43, 32, 0.04);
+  transition:
+    transform 200ms var(--spring-tactile),
+    border-color 200ms ease,
+    box-shadow 200ms ease;
+}
+.stats-capsule:hover {
+  transform: translateY(-1px);
+  border-color: var(--outline);
+  box-shadow: var(--shadow-sm);
+}
+.stats-capsule-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.stats-capsule-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--selected);
+  color: var(--primary);
+  padding: 1px 7px;
+  border-radius: var(--radius);
+  font-size: 11px;
+  font-weight: 600;
+}
+.catalog-overview > details > summary {
+  font-size: 13px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px 0;
+  transition: color var(--fast) ease;
+}
+.catalog-overview > details > summary:hover {
+  color: var(--primary);
 }
 .table-container {
   width: 100%;
@@ -1722,6 +1943,58 @@ progress::-moz-progress-bar {
 }
 .data-table .text-link {
   white-space: nowrap;
+}
+.problem-table,
+.activity-table {
+  border-collapse: separate;
+  border-spacing: 0 8px;
+  width: 100%;
+}
+.problem-table thead th,
+.activity-table thead th {
+  background: transparent;
+  border-bottom: none;
+  padding: 6px 16px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.problem-table tbody tr,
+.activity-table tbody tr {
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(37, 43, 32, 0.04);
+  transition:
+    transform 200ms var(--spring-tactile),
+    border-color 200ms ease,
+    box-shadow 200ms ease;
+}
+.problem-table tbody tr td,
+.activity-table tbody tr td {
+  border-top: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+  padding: 14px 16px;
+  transition: border-color 200ms ease;
+}
+.problem-table tbody tr td:first-child,
+.activity-table tbody tr td:first-child {
+  border-left: 1px solid var(--border-color);
+  border-top-left-radius: var(--radius-lg);
+  border-bottom-left-radius: var(--radius-lg);
+}
+.problem-table tbody tr td:last-child,
+.activity-table tbody tr td:last-child {
+  border-right: 1px solid var(--border-color);
+  border-top-right-radius: var(--radius-lg);
+  border-bottom-right-radius: var(--radius-lg);
+}
+.problem-table tbody tr:hover,
+.activity-table tbody tr:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+.problem-table tbody tr:hover td,
+.activity-table tbody tr:hover td {
+  border-color: var(--outline);
 }
 .problem-table td:nth-child(2) {
   width: 36%;
@@ -1783,31 +2056,6 @@ progress::-moz-progress-bar {
   min-height: 32px;
   font-size: 13px;
   padding: 4px 22px 4px 7px;
-}
-.catalog-overview {
-  border-block: 1px solid var(--border-color);
-  padding: 18px 0;
-  margin-bottom: 24px;
-}
-.summary-counts {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 16px 28px;
-  font-size: 14px;
-  margin-bottom: 16px;
-}
-.summary-counts strong {
-  font-size: 19px;
-  margin-left: 5px;
-  font-weight: 600;
-}
-.catalog-overview > details > summary {
-  font-size: 13px;
-  color: var(--text-muted);
-}
-.catalog-overview .summary-counts {
-  margin-bottom: 8px;
 }
 /* Import workspaces retain a stable flow, plus separate paginated snapshot/history browsers. */
 .workflow-steps {
@@ -2210,18 +2458,23 @@ progress::-moz-progress-bar {
 .kpi-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 0;
+  gap: 14px;
   margin-bottom: 32px;
 }
 .kpi-card {
-  padding: 10px 20px;
-  border-right: 1px solid var(--border-color);
+  padding: 16px 20px;
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  transition: transform var(--fast) var(--spring-tactile),
+              box-shadow var(--fast) var(--spring-tactile),
+              border-color var(--fast) ease;
 }
-.kpi-card:first-child {
-  padding-left: 0;
-}
-.kpi-card:last-child {
-  border: 0;
+.kpi-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px -2px rgba(0, 0, 0, 0.06);
+  border-color: var(--outline);
 }
 .kpi-header {
   display: flex;
@@ -2229,7 +2482,7 @@ progress::-moz-progress-bar {
   gap: 7px;
   font-size: 12px;
   color: var(--text-muted);
-  min-height: 38px;
+  min-height: 28px;
 }
 .kpi-header svg {
   width: 16px;
@@ -2253,8 +2506,16 @@ progress::-moz-progress-bar {
   padding: 24px;
   background: var(--surface);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
+  border-radius: 14px;
   margin-bottom: 24px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  transition: box-shadow var(--normal) var(--spring-tactile), border-color var(--normal) ease;
+}
+.heatmap-card:hover,
+.trend-card:hover,
+.distribution-card:hover,
+.recent-activity-card:hover {
+  box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.06);
 }
 .heatmap-scroll-area {
   max-width: 100%;
@@ -2279,6 +2540,15 @@ progress::-moz-progress-bar {
   height: 13px;
   border-radius: 3px;
   border: 1px solid color-mix(in srgb, var(--outline) 40%, transparent);
+  transition: transform var(--fast) var(--spring-bounce), outline 100ms ease;
+  cursor: pointer;
+}
+.heatmap-cell:hover,
+.heatmap-cell:focus-visible {
+  transform: scale(1.25);
+  z-index: 2;
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
 }
 .heatmap-cell-0 {
   background: var(--muted-surface);
@@ -2445,6 +2715,19 @@ html.dark .heatmap-cell-3 {
   border-radius: 6px;
   padding: 8px 14px;
   font-size: 14px;
+  transition:
+    background var(--fast) ease,
+    color var(--fast) ease,
+    transform var(--fast) var(--spring-tactile),
+    box-shadow var(--fast) ease;
+}
+.segmented-control button:hover:not(:disabled),
+.nav-tab-btn:hover:not(:disabled) {
+  color: var(--text-main);
+}
+.segmented-control button:active:not(:disabled),
+.nav-tab-btn:active:not(:disabled) {
+  transform: scale(0.96);
 }
 .segmented-control button[aria-pressed='true'],
 .nav-tab-btn.active {
@@ -2888,9 +3171,14 @@ html.dark .heatmap-cell-3 {
 @keyframes checkmark-draw {
   from {
     stroke-dashoffset: 32;
+    transform: scale(0.85);
+  }
+  60% {
+    transform: scale(1.08);
   }
   to {
     stroke-dashoffset: 0;
+    transform: scale(1);
   }
 }
 
@@ -2898,32 +3186,26 @@ html.dark .heatmap-cell-3 {
   0% {
     transform: scale(0.92);
   }
+  60% {
+    transform: scale(1.06);
+  }
   100% {
     transform: scale(1);
   }
 }
 
-/* Micro-interaction: Checkmark and Completion Circle */
-.completion-circle {
-  transition: transform var(--fast) ease-out, border-color var(--fast) ease;
-}
-
-.completion-circle:active:not(:disabled) {
-  transform: scale(0.94);
-  transition: transform var(--btn-motion);
-}
-
 .today-problem.just-completed .completion-circle {
-  animation: pop-in 180ms cubic-bezier(0.2, 0, 0, 1);
+  animation: pop-in 240ms var(--spring-bounce);
 }
 
 .checkmark-icon {
   stroke-dasharray: 32;
   stroke-dashoffset: 0;
+  transition: stroke-dashoffset 240ms var(--spring-tactile);
 }
 
 .today-problem.just-completed .checkmark-icon {
-  animation: checkmark-draw 0.2s cubic-bezier(0.65, 0, 0.45, 1) forwards;
+  animation: checkmark-draw 240ms var(--spring-tactile) forwards;
 }
 
 /* Empty State Icons */
@@ -3365,7 +3647,16 @@ input.form-input[aria-invalid="true"] { border-color: var(--danger); outline-col
   color: var(--text-muted);
   border-radius: calc(var(--radius) - 2px);
   cursor: pointer;
-  transition: background var(--fast), color var(--fast);
+  transition:
+    background var(--fast) ease,
+    color var(--fast) ease,
+    transform var(--fast) var(--spring-tactile);
+}
+.topic-filter-tab:hover:not(:disabled) {
+  color: var(--text-main);
+}
+.topic-filter-tab:active:not(:disabled) {
+  transform: scale(0.96);
 }
 .topic-filter-tab.active {
   background: var(--surface);
@@ -3379,10 +3670,17 @@ input.form-input[aria-invalid="true"] { border-color: var(--danger); outline-col
   border-radius: var(--radius-lg);
   padding: 0.875rem 1rem;
   background: var(--surface);
-  transition: border-color var(--fast);
+  transition:
+    border-color var(--fast) ease,
+    transform var(--fast) var(--spring-tactile),
+    box-shadow var(--fast) ease;
   overflow-wrap: anywhere;
 }
-.topic-insight-row:hover { border-color: var(--outline); }
+.topic-insight-row:hover {
+  border-color: var(--outline);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
 .topic-insight-row-header {
   display: flex;
   align-items: center;
