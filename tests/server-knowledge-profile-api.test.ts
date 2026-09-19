@@ -224,11 +224,13 @@ describe('Server Knowledge Profile API & Adaptive Recommendations', () => {
       const adaptiveItems = plan.items.filter((it) => it.explanation?.analysisVersion === 'adaptive-v1');
       assert.ok(adaptiveItems.length > 0, 'Should have at least one item with adaptive-v1 explanation');
 
-      const bfsItem = adaptiveItems.find((it) => it.explanation?.targetTopic?.slug === 'bfs');
+      // Only Medium has sufficient feedback; an Easy BFS item must remain exploratory.
+      const bfsItem = adaptiveItems.find((it) => it.explanation?.targetTopic?.slug === 'bfs' && it.problem.difficulty === 'Medium');
       assert.ok(bfsItem, 'Should have item targeting BFS');
       assert.equal(bfsItem.explanation?.role, 'reinforcement');
       assert.ok(bfsItem.explanation?.evidenceSummary);
       assert.equal(typeof bfsItem.explanation?.evidenceSummary?.assistedUnsolvedCount, 'number');
+      assert.ok(adaptiveItems.filter(it => it.problem.difficulty === 'Easy').every(it => it.explanation?.role !== 'reinforcement'));
     } finally {
       await app.close();
     }

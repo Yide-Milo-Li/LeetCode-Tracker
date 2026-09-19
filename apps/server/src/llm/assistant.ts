@@ -684,8 +684,13 @@ Return ONLY valid JSON conforming to the schema.`;
     }
 
     const limits = quotas(params.rules);
-    const strata = ['Easy', 'Medium', 'Hard'].flatMap(difficulty => ['new', 'review'].map(kind =>
-      params.candidates.filter(c => c.difficulty === difficulty && ((c as CatalogProblem & { kind?: string }).kind ?? 'new') === kind)
+    // Reserve exploration candidates before truncating the model input. Local
+    // allocation remains authoritative even when the bound forces a local fallback.
+    const roles = params.rules.focusWeakTags ? ['reinforcement', 'exploration', 'routine'] : [null];
+    const strata = ['Easy', 'Medium', 'Hard'].flatMap(difficulty => ['new', 'review'].flatMap(kind =>
+      roles.map(role => params.candidates.filter(c => c.difficulty === difficulty &&
+        ((c as Candidate).kind ?? 'new') === kind &&
+        (role === null || ((c as Candidate).explanation?.role ?? 'routine') === role)))
     ));
     const reserved = strata.flatMap(group => group.slice(0, limits[group[0]?.difficulty] ?? 0));
     if (reserved.length > 30) return { selectedQuestionIds: [], model: 'local' };

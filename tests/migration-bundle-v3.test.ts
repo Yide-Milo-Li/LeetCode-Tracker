@@ -4,7 +4,7 @@
  * roundtrip restoration across devices preserving outcome states,
  * and backward-compatible import of legacy v1 and v2 snapshot bundles.
  */
-import { describe, it } from 'node:test';
+import { describe, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -15,6 +15,7 @@ import { CatalogStore } from '../packages/database/src/store.ts';
 import { buildApp } from '../apps/server/src/app.ts';
 import type { SnapshotBundleV2, SnapshotBundleV3 } from '../packages/contracts/src/migration.ts';
 import type { PracticeOutcome } from '../packages/contracts/src/practice.ts';
+import { api } from '../apps/web/src/api.ts';
 
 function createTempProfile() {
   const dir = mkdtempSync(join(tmpdir(), 'lc-bundle-v3-'));
@@ -32,6 +33,25 @@ function createTempProfile() {
 }
 
 describe('Migration Bundle v3 & Schema v10', () => {
+  it('exports through the actual frontend API and restores feedback on another profile', async () => {
+    const source = createTempProfile(), target = createTempProfile();
+    const app = await buildApp({ store: source.store, disableStatic: true });
+    // Exercise the frontend-selected version rather than hardcoding a v3 route in the test.
+    const transport = mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+      const response = await app.inject(String(input));
+      return new Response(response.body, { status: response.statusCode });
+    });
+    try {
+      await source.store.importJsonl(JSON.stringify({ id: '1', title: 'Synthetic', difficulty: 'Easy' }));
+      await source.store.createPracticeRecord({ questionFrontendId: '1', practicedAt: '2026-09-17', completed: true, outcome: 'assisted' });
+      assert.ok(api.getBundleExportUrl().endsWith('version=3'));
+      const bundle = await api.exportBundle();
+      assert.equal(bundle.version, 3);
+      await target.store.importSnapshotBundle(bundle);
+      assert.equal(target.store.queryPracticeRecords().items[0].outcome, 'assisted');
+    } finally { transport.mock.restore(); await app.close(); source.close(); target.close(); }
+  });
+
   it('exports v3 bundle with outcome column and roundtrips all outcome values to a fresh database', async () => {
     const source = createTempProfile();
     const target = createTempProfile();

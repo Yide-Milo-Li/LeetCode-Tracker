@@ -187,6 +187,35 @@ export class PlanningStore {
     return (this.db.prepare('SELECT payload_json FROM daily_plan_versions WHERE plan_id=? ORDER BY version').all(id) as { payload_json: string }[]).map(r => JSON.parse(r.payload_json));
   }
 
+  /** Recover budget high-water marks from committed versions; reductions and swaps cannot rewind them. */
+  adaptiveHistory(strategyId: string | null, date: string): { nextOrdinal: number; recentExposure: Map<string, number> } {
+    let highWater = 0;
+    const recentExposure = new Map<string, number>();
+    const rows = this.db.prepare('SELECT payload_json FROM daily_plan_versions').all() as { payload_json: string }[];
+    for (const row of rows) {
+      const plan = JSON.parse(row.payload_json) as DailyPlan;
+      if (plan.strategyId !== strategyId) continue;
+      for (const item of plan.items) {
+        const ordinal = item.explanation?.explorationOrdinal;
+        if (item.kind === 'new' && ordinal && Number.isSafeInteger(ordinal)) highWater = Math.max(highWater, ordinal);
+      }
+    }
+    // Latest versions count each currently recommended item once, regardless of retries.
+    const start = new Date(Date.parse(`${date}T12:00:00Z`) - 6 * 86_400_000).toISOString().slice(0, 10);
+    const current = this.db.prepare('SELECT payload_json FROM daily_plans WHERE plan_date BETWEEN ? AND ?').all(start, date) as { payload_json: string }[];
+    for (const row of current) {
+      const plan = JSON.parse(row.payload_json) as DailyPlan;
+      if (plan.strategyId !== strategyId) continue;
+      for (const item of plan.items) {
+        const topic = item.explanation?.targetTopic;
+        if (!topic) continue;
+        const key = `${topic.slug}:${item.problem.difficulty}`;
+        recentExposure.set(key, (recentExposure.get(key) ?? 0) + 1);
+      }
+    }
+    return { nextOrdinal: highWater + 1, recentExposure };
+  }
+
   /** Bind durable retries to their original request rather than only to a caller-supplied UUID. */
   replay(operationId: string, fingerprint: string): DailyPlan | null {
     const row = this.db.prepare('SELECT * FROM planning_operations WHERE id=?').get(operationId) as { fingerprint: string; result_json: string } | undefined;
@@ -196,9 +225,10 @@ export class PlanningStore {
   }
 
   /** Commit a plan version and retry result together after all provider work has finished. */
-  commit(plan: DailyPlan, stamp: RevisionStamp, expectedVersion: number | null, operationId: string, fingerprint: string, changed = true): Promise<DailyPlan> {
+  commit(plan: DailyPlan, stamp: RevisionStamp, expectedVersion: number | null, operationId: string, fingerprint: string, changed = true, validate?: () => void): Promise<DailyPlan> {
     return this.write(() => {
       const replay = this.replay(operationId, fingerprint); if (replay) return replay;
+      validate?.(); // Recheck request lifetime after waiting for the shared backup/write queue.
       this.assertStamp(stamp);
       const current = this.plans().find(p => p.date === plan.date);
       if ((current?.version ?? null) !== expectedVersion) throw new PlanningError('STALE_PLAN', 'Plan changed; reload it');
@@ -206,6 +236,9 @@ export class PlanningStore {
       if (changed) {
         this.db.prepare('INSERT INTO daily_plans VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET version=excluded.version,payload_json=excluded.payload_json').run(plan.id, plan.date, plan.version, json);
         this.db.prepare('INSERT INTO daily_plan_versions VALUES(?,?,?)').run(plan.id, plan.version, json);
+        // Plan history is an input to cumulative adaptive budgets. Concurrent plans
+        // must invalidate each other's snapshots just like a strategy mutation does.
+        this.db.prepare("UPDATE catalog_meta SET value=CAST(value AS INTEGER)+1 WHERE key='planning_revision'").run();
       }
       this.db.prepare('INSERT INTO planning_operations VALUES(?,?,?)').run(operationId, fingerprint, json);
       for (const state of this.reviewStates(plan.timezone, plan.updatedAt)) this.db.prepare('INSERT OR REPLACE INTO problem_review_state VALUES(?,?,?)').run(state.questionId, JSON.stringify(state), stamp.practice);

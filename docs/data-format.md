@@ -139,3 +139,8 @@ Today's immediate completion saves the actual timestamp first; the optional meta
 - **Server-Side Execution**: Requests run in Fastify. Keys can be configured in Settings and persist in local SQLite; source mode also supports environment defaults. UI masking is not encryption. Portable bundles omit keys, while raw database backups may contain them.
 - **Rate & Concurrency Controls**: Serialized mutex lock (at most 1 concurrent AI parse call), 64 KiB input limit (up to 200 candidate problems), and 60s abort timeout.
 - **Structured Output Schema**: Extracts `frontendId`, `title`, `lastSubmitted`, `lastResult`, and `submissions`. If the year is omitted in raw text, falls back to the user-specified `batchYear`.
+
+
+## Device migration export
+
+The Settings export action and frontend bundle API request Snapshot Bundle v3 (schema v10), preserving nullable practice `outcome` feedback together with plan explanations and exploration allocation metadata. Imports continue to accept v1/v2/v3. Explicit legacy v2 exports omit outcomes and should only be used for legacy compatibility; ordinary device migration uses v3.

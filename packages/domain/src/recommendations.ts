@@ -239,7 +239,7 @@ export function reorderCandidates(pool:Candidate[],ids:string[],rules:Rules):Can
   const known=new Set(pool.map(p=>p.questionId));
   if(new Set(ids).size!==ids.length || ids.some(id=>!known.has(id)) || ids.length>Math.min(30,rules.dailyCount))return pool;
   const ranks=new Map(ids.map((id,i)=>[id,i]));
-  const key=(p:Candidate)=>JSON.stringify([p.difficulty,p.kind,p.kind==='review'?p.dueDate:null,!!p.isFocusTopic]);
+  const key=(p:Candidate)=>JSON.stringify([p.difficulty,p.kind,p.kind==='review'?p.dueDate:null,!!p.isFocusTopic,p.explanation?.priorityGroup]);
   const groups=new Map<string,Candidate[]>();
   for(const p of pool){const k=key(p),g=groups.get(k);if(g)g.push(p);else groups.set(k,[p]);}
   for(const group of groups.values())group.sort((a,b)=>(ranks.get(a.questionId)??Infinity)-(ranks.get(b.questionId)??Infinity));
@@ -305,10 +305,6 @@ export function select(
   const notices: Bilingual[] = [];
 
   const { reviewMode, targetReviewCount } = resolveReviewSettings(rules);
-  const reviewTargets = allocate(
-    targetReviewCount,
-    difficulties.map((d) => limits[d])
-  );
 
   const totalKeptReview = retained.filter(item => item.kind === 'review').length;
   if (totalKeptReview > targetReviewCount) {
@@ -327,6 +323,12 @@ export function select(
     );
   }
 
+  // Completed reviews may occupy a different difficulty than a fresh proportional
+  // allocation. Subtract them globally, then allocate only the unfilled capacity.
+  const remainingLimits = difficulties.map(d => limits[d] - retained.filter(i => i.problem.difficulty === d).length);
+  if (remainingLimits.some(n => n < 0)) throw new PlanningError('COMPLETED_QUOTA', 'Completed items exceed a difficulty quota');
+  const reviewTargets = allocate(targetReviewCount - totalKeptReview, remainingLimits);
+
   for (let i = 0; i < difficulties.length; i++) {
     const difficulty = difficulties[i];
     const kept = retained.filter((item) => item.problem.difficulty === difficulty);
@@ -339,10 +341,9 @@ export function select(
     }
 
     const remainingSlotCount = limits[difficulty] - kept.length;
-    const keptReviewCount = kept.filter((item) => item.kind === 'review').length;
     const targetDifficultyReviewCount = Math.min(
       remainingSlotCount,
-      Math.max(0, reviewTargets[i] - keptReviewCount)
+      reviewTargets[i]
     );
     const targetDifficultyFreshCount = remainingSlotCount - targetDifficultyReviewCount;
 

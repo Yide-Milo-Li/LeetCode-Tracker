@@ -221,6 +221,8 @@ export function calculateKnowledgeProfile(input: KnowledgeProfileInput): Knowled
       {
         distinctProblems: Set<string>;
         practiceDays: Set<string>;
+        feedbackProblems: Set<string>;
+        feedbackDays: Set<string>;
         durations: number[];
         timedProblems: Set<string>;
         outcomeCounts: { independent: number; assisted: number; unsolved: number; unrecorded: number };
@@ -249,6 +251,8 @@ export function calculateKnowledgeProfile(input: KnowledgeProfileInput): Knowled
         const createDiffData = () => ({
           distinctProblems: new Set<string>(),
           practiceDays: new Set<string>(),
+          feedbackProblems: new Set<string>(),
+          feedbackDays: new Set<string>(),
           durations: [] as number[],
           timedProblems: new Set<string>(),
           outcomeCounts: { independent: 0, assisted: 0, unsolved: 0, unrecorded: 0 },
@@ -312,6 +316,8 @@ export function calculateKnowledgeProfile(input: KnowledgeProfileInput): Knowled
           }
 
           if (sample.outcome) {
+            diffGroup.feedbackProblems.add(p.questionId);
+            diffGroup.feedbackDays.add(date);
             diffGroup.outcomeCounts[sample.outcome]++;
             const daysAgo = Math.max(0, calendarDaysDiff(date, today));
             const weight = Math.pow(2, -daysAgo / 14);
@@ -361,7 +367,7 @@ export function calculateKnowledgeProfile(input: KnowledgeProfileInput): Knowled
       const recordedOutcomeCount =
         g.outcomeCounts.independent + g.outcomeCounts.assisted + g.outcomeCounts.unsolved;
       const feedbackSufficient =
-        distinctProblemCount >= 3 && practiceDaysCount >= 2 && recordedOutcomeCount >= 3;
+        g.feedbackProblems.size >= 3 && g.feedbackDays.size >= 2 && recordedOutcomeCount >= 3;
 
       let sufficiency: EvidenceSufficiency = 'insufficient';
       if (feedbackSufficient || durationSufficient) {

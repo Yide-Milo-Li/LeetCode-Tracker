@@ -486,16 +486,16 @@ export const exportApi = {
 
 export const bundleApi = {
   getBundleExportUrl(): string {
-    return `${API_BASE}/bundle/export?version=2`;
+    return `${API_BASE}/bundle/export?version=3`;
   },
 
   exportBundle(): Promise<SnapshotBundle> {
-    return request<SnapshotBundle>('/bundle/export?version=2');
+    return request<SnapshotBundle>('/bundle/export?version=3');
   },
 
   async exportBundleFile(): Promise<void> {
     const filename = `leetcode-tracker-snapshot-${new Date().toISOString().slice(0, 10)}.json`;
-    await exportDataFile('/bundle/export?version=2', filename);
+    await exportDataFile('/bundle/export?version=3', filename);
   },
 
   importBundle(

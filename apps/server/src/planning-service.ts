@@ -9,15 +9,14 @@ import type { PlanningStore } from '../../../packages/database/src/planning-stor
 import {
   ALGORITHM_VERSION,
   candidates,
-  calculateTagMastery,
   calculateKnowledgeProfile,
   projectReviewStates,
-  focusTopics,
   reorderCandidates,
   quotas,
   select,
   nextDifficultyForAppend,
 } from '../../../packages/domain/src/index.ts';
+import { rankAdaptiveTopics, selectAdaptiveSlots } from '../../../packages/domain/src/adaptive-topics.ts';
 import {
   isCalendarDate,
   isTimeZone,
@@ -202,91 +201,25 @@ export class PlanningService {
     finally { if (this.pendingEnsures.get(key) === generation) this.pendingEnsures.delete(key); }
   }
 
-  /** Reuse one evidence snapshot for every selection path; topics are a bounded soft preference. */
-  private candidateContext(rules:Rules,date:string,zone:string,now:number,seed:string,excluded:Set<string>) {
-    const context=this.planning.analysisContext(zone,now);
-    const states=rules.adaptiveReviewEnabled
-      ? projectReviewStates(context.raw.problems,context.events,context.solved,zone,context.baseline,now,true)
+  /** Share evidence and committed budget history across every selection path. */
+  private candidateContext(rules: Rules, date: string, zone: string, now: number, seed: string,
+    excluded: Set<string>, strategyId: string | null = null) {
+    const context = this.planning.analysisContext(zone, now);
+    const states = rules.adaptiveReviewEnabled
+      ? projectReviewStates(context.raw.problems, context.events, context.solved, zone, context.baseline, now, true)
       : context.fixed;
-    let pool=candidates(context.raw.problems,states,rules,date,seed,excluded);
-    let focused: { slug: string; name: string }[] = [];
+    let pool = candidates(context.raw.problems, states, rules, date, seed, excluded);
+    const history = rules.focusWeakTags ? this.planning.adaptiveHistory(strategyId, date)
+      : { nextOrdinal: 1, recentExposure: new Map<string, number>() };
     if (rules.focusWeakTags) {
       const profile = calculateKnowledgeProfile({ ...context.raw, now, userZone: zone, reviewStates: context.fixed });
-      const limits = quotas(rules);
-      const availableSlugs = new Set(
-        pool
-          .filter(p => limits[p.difficulty] > 0 && !(rules.reviewEnabled && rules.reviewPercent === 100 && p.kind === 'new'))
-          .flatMap(p => p.topicTags.map(t => t.slug))
-      );
-      const tagConstraint = rules.tags.length > 0 ? new Set(rules.tags) : null;
-
-      // 1. Weak topics needing reinforcement
-      const weakTopics = profile.topics
-        .filter(t => t.isWeak && availableSlugs.has(t.tagSlug) && (!tagConstraint || tagConstraint.has(t.tagSlug)))
-        .sort((a, b) => {
-          const aHasAssistance = (['Easy', 'Medium', 'Hard'] as const).some(d => a.difficulties[d].reasons.includes('feedback_assistance'));
-          const bHasAssistance = (['Easy', 'Medium', 'Hard'] as const).some(d => b.difficulties[d].reasons.includes('feedback_assistance'));
-          if (aHasAssistance !== bHasAssistance) return aHasAssistance ? -1 : 1;
-
-          const aBacklog = a.daysSinceLastPractice === null || a.daysSinceLastPractice >= 14;
-          const bBacklog = b.daysSinceLastPractice === null || b.daysSinceLastPractice >= 14;
-          if (aBacklog !== bBacklog) return aBacklog ? -1 : 1;
-
-          const aHasDuration = (['Easy', 'Medium', 'Hard'] as const).some(d => a.difficulties[d].reasons.includes('duration_threshold'));
-          const bHasDuration = (['Easy', 'Medium', 'Hard'] as const).some(d => b.difficulties[d].reasons.includes('duration_threshold'));
-          if (aHasDuration !== bHasDuration) return aHasDuration ? -1 : 1;
-
-          return b.recentProblemCount - a.recentProblemCount || (b.daysSinceLastPractice ?? 0) - (a.daysSinceLastPractice ?? 0) || a.tagSlug.localeCompare(b.tagSlug);
-        });
-
-      focused = weakTopics.slice(0, 3).map(t => ({ slug: t.tagSlug, name: t.tagName }));
-      pool = candidates(context.raw.problems, states, rules, date, seed, excluded, focused.map(t => t.slug));
-
-      // 2. Decorate pool candidates with rich adaptive explanations
-      const asOfDate = localDate(now, zone);
-      const weakTopicMap = new Map(profile.topics.map(t => [t.tagSlug, t]));
-
-      for (const candidate of pool) {
-        if (!candidate.explanation) continue;
-        candidate.explanation.asOfDate = asOfDate;
-
-        const matchedWeakSlug = candidate.matchedWeakTags?.[0];
-        const weakTopic = matchedWeakSlug ? weakTopicMap.get(matchedWeakSlug) : undefined;
-        if (weakTopic) {
-          const diffEvidence = weakTopic.difficulties[candidate.difficulty];
-          const assistedUnsolved = diffEvidence.outcomeCounts.assisted + diffEvidence.outcomeCounts.unsolved;
-          const totalFeedback = diffEvidence.outcomeCounts.independent + assistedUnsolved;
-          candidate.explanation.analysisVersion = 'adaptive-v1';
-          candidate.explanation.targetTopic = { slug: weakTopic.tagSlug, name: weakTopic.tagName };
-          candidate.explanation.role = 'reinforcement';
-          candidate.explanation.evidenceSummary = {
-            distinctProblems: diffEvidence.distinctProblemCount,
-            difficulty: candidate.difficulty,
-            assistedUnsolvedCount: assistedUnsolved,
-            totalFeedbackCount: totalFeedback,
-            daysSinceLastPractice: weakTopic.daysSinceLastPractice,
-            reasonText: {
-              en: `Recent 30 days: ${diffEvidence.distinctProblemCount} ${candidate.difficulty} ${weakTopic.tagName} problems, ${assistedUnsolved}/${totalFeedback || diffEvidence.distinctProblemCount} assisted or unsolved.`,
-              zh: `最近 30 天：你记录了 ${diffEvidence.distinctProblemCount} 道 ${candidate.difficulty} ${weakTopic.tagName} 题，其中 ${assistedUnsolved} 道需要辅助或未解决。`,
-            },
-          };
-        }
-      }
-    } else {
-      const asOfDate = localDate(now, zone);
-      for (const candidate of pool) if (candidate.explanation) candidate.explanation.asOfDate = asOfDate;
+      pool = rankAdaptiveTopics(pool, profile, rules, history.recentExposure);
     }
-
-    return {
-      pool,
-      focusTagNames: focused.map(t => t.name),
-      notices: rules.focusWeakTags && !focused.length
-        ? [{
-            en: 'Insufficient evidence or eligible candidates for topic focus; using the usual selection.',
-            zh: '暂无足够证据或可用候选支持自动专题，已使用常规选题。',
-          }]
-        : [],
-    };
+    const focusTagNames = [...new Set(pool.filter(p => p.isFocusTopic).map(p => p.explanation!.targetTopic!.name))];
+    return { pool, nextOrdinal: history.nextOrdinal, focusTagNames,
+      notices: rules.focusWeakTags && !focusTagNames.length
+        ? [{ en: 'Insufficient evidence for reinforcement; selecting for coverage within current constraints.',
+             zh: '暂无足够巩固证据；在当前约束内选择题目以补充覆盖。' }] : [] };
   }
 
   /** Preserve prior-version exclusions consistently in preview and commit. */
@@ -313,7 +246,7 @@ export class PlanningService {
     const rules = normalizeRules(strategy.rules);
 
     const context = this.candidateContext(rules, targetDate, userTimezone, now,
-      targetDate + ':' + strategy.id, new Set());
+      targetDate + ':' + strategy.id, new Set(), strategy.id);
     const { pool, focusTagNames: weakTagNames } = context;
 
     let selectionModel = 'local';
@@ -337,6 +270,8 @@ export class PlanningService {
     }
 
     const selection = select(orderedPool, rules, []);
+    if (rules.focusWeakTags) selection.selected = selectAdaptiveSlots(orderedPool,
+      selection.selected.map(p => ({ difficulty: p.difficulty, kind: p.kind })), context.nextOrdinal);
 
     let rulesForAI = rules;
     if (rules.focusWeakTags && weakTagNames.length > 0) {
@@ -371,7 +306,7 @@ export class PlanningService {
       problem: p,
       kind: p.kind,
       addedAt: Date.now(),
-      reason: aiContent.reasons[p.questionId] ?? {
+      reason: p.explanation?.evidenceSummary?.reasonText ?? aiContent.reasons[p.questionId] ?? {
         en: p.isFocusTopic
           ? `Selected ${p.difficulty} problem targeting weak topic (${p.matchedWeakTags?.join(', ') || p.difficulty}) for focused breakthrough.`
           : `Selected ${p.difficulty} problem to practice core algorithms.`,
@@ -488,7 +423,7 @@ export class PlanningService {
     }
 
     const context=this.candidateContext(plan.rules,plan.date,plan.timezone,now,
-      plan.date+':replace:'+plan.version+':'+options.operationId,excludedIds);
+      plan.date+':replace:'+plan.version+':'+options.operationId,excludedIds,plan.strategyId);
     const {pool}=context;
 
     let changed = false;
@@ -499,9 +434,11 @@ export class PlanningService {
       }
 
       // Find candidate strictly matching slot difficulty and kind
-      const candidate = pool.find(
-        p => p.difficulty === item.problem.difficulty && p.kind === item.kind && !excludedIds.has(p.questionId)
-      );
+      const eligible = pool.filter(p => !excludedIds.has(p.questionId));
+      const candidate = plan.rules.focusWeakTags
+        ? selectAdaptiveSlots(eligible, [{ difficulty: item.problem.difficulty, kind: item.kind,
+            ordinal: item.explanation?.explorationOrdinal ?? null }], context.nextOrdinal)[0]
+        : eligible.find(p => p.difficulty === item.problem.difficulty && p.kind === item.kind);
 
       if (candidate) {
         excludedIds.add(candidate.questionId);
@@ -511,7 +448,7 @@ export class PlanningService {
           problem: candidate,
           kind: candidate.kind,
           addedAt: now,
-          reason: {
+          reason: candidate.explanation?.evidenceSummary?.reasonText ?? {
             en: candidate.isFocusTopic
               ? `Replacement problem focusing on weak topic: ${candidate.matchedWeakTags?.join(', ') || candidate.difficulty}.`
               : `Replacement ${candidate.difficulty} problem to continue today's study focus.`,
@@ -584,6 +521,8 @@ export class PlanningService {
     }
 
     const now = Date.now();
+    const stamp = this.planning.stamp();
+    const epoch = this.transientEpoch;
     const plan = this.planning.planById(planId, now);
     if (!plan) {
       throw new PlanningError('PLAN_NOT_FOUND', `Daily plan '${planId}' not found`, 404);
@@ -595,6 +534,8 @@ export class PlanningService {
       throw new PlanningError('MAX_COUNT_REACHED', 'Daily plan has reached maximum limit of 50 problems', 400);
     }
 
+    const analysisDate = localDate(now, plan.timezone);
+    if (plan.date !== analysisDate) throw new PlanningError('STALE_PLAN', 'Only today can be appended; reload the current day', 409);
     const reviewSettings = resolveReviewSettings(plan.rules);
     const arrangedReviews = plan.items.filter(i => i.kind === 'review').length;
 
@@ -627,12 +568,13 @@ export class PlanningService {
       userTimezone,
       now,
       `${plan.date}:append:${options.operationId}`,
-      excluded
+      excluded,
+      plan.strategyId
     );
 
-    const candidate = context.pool.find(
-      p => p.difficulty === targetDifficulty && p.kind === targetKind
-    );
+    const candidate = plan.rules.focusWeakTags
+      ? selectAdaptiveSlots(context.pool, [{ difficulty: targetDifficulty, kind: targetKind }], context.nextOrdinal)[0]
+      : context.pool.find(p => p.difficulty === targetDifficulty && p.kind === targetKind);
 
     if (!candidate) {
       throw new PlanningError('NO_CANDIDATES', 'No eligible candidates found for target difficulty and type; adjust rules to continue', 422);
@@ -656,8 +598,8 @@ export class PlanningService {
       id: randomUUID(),
       problem: candidate,
       kind: candidate.kind,
-      addedAt: now,
-      reason: aiContent.reasons[candidate.questionId] ?? {
+      addedAt: Date.now(),
+      reason: candidate.explanation?.evidenceSummary?.reasonText ?? aiContent.reasons[candidate.questionId] ?? {
         en: candidate.isFocusTopic
           ? `Selected ${candidate.difficulty} problem targeting weak topic (${candidate.matchedWeakTags?.join(', ') || candidate.difficulty}) for focused breakthrough.`
           : `Selected ${candidate.difficulty} problem to practice core algorithms.`,
@@ -686,7 +628,6 @@ export class PlanningService {
         : plan.rules.reviewPercent,
     };
 
-    const stamp = this.planning.stamp();
     const newPlan: DailyPlan = {
       ...plan,
       version: plan.version + 1,
@@ -694,6 +635,9 @@ export class PlanningService {
       items: newItems,
       updatedAt: now,
       action: 'append_one',
+      catalogRevision: stamp.catalog,
+      practiceRevision: stamp.practice,
+      planningRevision: stamp.planning,
     };
 
     return this.planning.commit(
@@ -701,7 +645,12 @@ export class PlanningService {
       stamp,
       plan.version,
       options.operationId,
-      fingerprint
+      fingerprint,
+      true,
+      () => {
+        if (this.transientEpoch !== epoch) throw new PlanningError('STALE_DATA', 'Profile changed during append; retry', 409);
+        if (localDate(Date.now(), plan.timezone) !== analysisDate) throw new PlanningError('STALE_PLAN', 'Calendar date changed during append; reload', 409);
+      }
     );
   }
 
@@ -1008,7 +957,7 @@ export class PlanningService {
     for (const item of retainedItems) excluded.add(item.problem.questionId);
 
     const context=this.candidateContext(effectiveRules,preview.date,userTimezone,now,
-      preview.date+':override:'+options.operationId,excluded);
+      preview.date+':override:'+options.operationId,excluded,basePlan?.strategyId ?? null);
     const {pool}=context;
 
     let selectionModel = 'local';
@@ -1032,6 +981,13 @@ export class PlanningService {
     }
 
     const selection = select(orderedPool, effectiveRules, retainedItems);
+    if (effectiveRules.focusWeakTags) {
+      const reusable = basePlan?.items.filter(i => !i.completed && i.kind === 'new')
+        .map(i => i.explanation?.explorationOrdinal ?? null) ?? [];
+      selection.selected = selectAdaptiveSlots(orderedPool, selection.selected.map(p => ({
+        difficulty: p.difficulty, kind: p.kind, ordinal: p.kind === 'new' ? reusable.shift() : undefined,
+      })), context.nextOrdinal);
+    }
 
     let aiContent = fallbackPlanContent(selection.selected, effectiveRules);
     const contentProvider = this.gemini.getStatus().provider ?? 'gemini';
@@ -1055,7 +1011,7 @@ export class PlanningService {
       problem: p,
       kind: p.kind,
       addedAt: Date.now(),
-      reason: aiContent.reasons[p.questionId] ?? {
+      reason: p.explanation?.evidenceSummary?.reasonText ?? aiContent.reasons[p.questionId] ?? {
         en: `Selected ${p.difficulty} problem under temporary rule override.`,
         zh: `根据今日临时调整规则精选${p.difficulty}题目。`,
       },

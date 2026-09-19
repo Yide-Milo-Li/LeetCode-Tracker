@@ -121,6 +121,10 @@ export interface SelectionExplanation {
   targetTopic?: { slug: string; name: string };
   role?: 'reinforcement' | 'exploration' | 'routine';
   evidenceSummary?: AdaptiveEvidenceSummary;
+  /** Local rank group restricts model reordering; older explanation snapshots omit it. */
+  priorityGroup?: string;
+  /** One-based new-slot budget identity; swaps reuse it and never charge another slot. */
+  explorationOrdinal?: number;
 }
 export interface ReviewState {
   questionId: string;
