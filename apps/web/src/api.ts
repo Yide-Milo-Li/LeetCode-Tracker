@@ -377,6 +377,10 @@ const planningApi = {
     return planningMutation(`/daily-plans/${planId}/append`, options);
   },
 
+  removePlanItem(planId: string, options: { itemId: string; expectedVersion: number }): Promise<DailyPlan> {
+    return planningMutation(`/daily-plans/${planId}/remove-item`, options);
+  },
+
   previewDailyPlanOverride(options: { prompt?: string; rules?: RulePatch; date?: string }): Promise<OverridePreview> {
     return request<OverridePreview>('/daily-plan-overrides/preview', {
       method: 'POST',

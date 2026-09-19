@@ -971,3 +971,216 @@ describe('Phase 24: Add-one UI Loading, Feedback, and Concurrency Mutex', () => 
     }
   });
 });
+
+describe('Phase 26: Today remove plan item UI', () => {
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<T>((a, b) => {
+      resolve = a;
+      reject = b;
+    });
+    return { promise, resolve, reject };
+  }
+
+  beforeEach(() => {
+    mock.method(api, 'getDashboard', async () => ({
+      dataStatus: { userTimezone: 'UTC' },
+      trend30Days: [],
+      overview: { currentStreak: 0, totalSolved: 0, distinctDays: 0 },
+    } as any));
+  });
+
+  it('removes uncompleted problem immediately without confirmation dialog and updates progress', async () => {
+    const basePlan = createMockPlan();
+    mock.method(api, 'ensureDailyPlan', async () => ({ status: 'ready' as const, plan: basePlan }));
+    mock.method(api, 'getStrategies', async () => []);
+
+    const updatedPlan: DailyPlan = {
+      ...basePlan,
+      version: 2,
+      rules: { ...basePlan.rules, dailyCount: 1 },
+      items: [basePlan.items[1]], // only item-2 remains
+    };
+
+    const removeMock = mock.method(api, 'removePlanItem', async () => updatedPlan);
+
+    await act(async () => {
+      render(<TodayPlanView lang="en" onNavigateToSettings={() => {}} />);
+    });
+
+    // Check initial items
+    assert.ok(screen.getByRole('heading', { name: /70\. Climbing Stairs/ }));
+    assert.ok(screen.getByRole('heading', { name: /198\. House Robber/ }));
+
+    // Uncompleted item has remove button
+    const removeBtn = screen.getAllByRole('button', { name: translations.en.removeProblem })[0];
+    assert.equal((removeBtn as HTMLButtonElement).disabled, false);
+
+    // Click remove
+    await act(async () => {
+      fireEvent.click(removeBtn);
+    });
+
+    // Verify removePlanItem was called with expected payload
+    assert.equal(removeMock.mock.callCount(), 1);
+    assert.deepEqual(removeMock.mock.calls[0].arguments, [
+      'plan-2026-03-30',
+      { expectedVersion: 1, itemId: 'item-1' },
+    ]);
+
+    // Verify no confirmation dialog was rendered
+    assert.equal(screen.queryByRole('dialog'), null);
+
+    // Verify DOM updated
+    assert.equal(screen.queryByRole('heading', { name: /70\. Climbing Stairs/ }), null);
+    assert.ok(screen.getByRole('heading', { name: /198\. House Robber/ }));
+  });
+
+  it('prompts confirmation dialog when deleting completed problem and cascadingly revokes on confirm', async () => {
+    const basePlan = createMockPlan();
+    mock.method(api, 'ensureDailyPlan', async () => ({ status: 'ready' as const, plan: basePlan }));
+    mock.method(api, 'getStrategies', async () => []);
+
+    const updatedPlan: DailyPlan = {
+      ...basePlan,
+      version: 2,
+      rules: { ...basePlan.rules, dailyCount: 1 },
+      items: [basePlan.items[0]], // item-2 removed
+    };
+
+    const removeMock = mock.method(api, 'removePlanItem', async () => updatedPlan);
+
+    await act(async () => {
+      render(<TodayPlanView lang="en" onNavigateToSettings={() => {}} />);
+    });
+
+    // Completed item remove button (item-2 is the 2nd item)
+    const removeCompletedBtn = screen.getAllByRole('button', { name: translations.en.removeProblem })[1];
+
+    // Click remove on completed item
+    await act(async () => {
+      fireEvent.click(removeCompletedBtn);
+    });
+
+    // Dialog should be open with warning
+    assert.equal(removeMock.mock.callCount(), 0, 'Should not remove immediately without confirmation');
+    assert.ok(screen.getByText(translations.en.confirmRemoveCompletedTitle));
+    assert.ok(screen.getByText(translations.en.confirmRemoveCompletedMessage));
+
+    // Cancel removal
+    const cancelBtn = screen.getByRole('button', { name: translations.en.cancel });
+    await act(async () => {
+      fireEvent.click(cancelBtn);
+    });
+
+    assert.equal(screen.queryByText(translations.en.confirmRemoveCompletedTitle), null);
+    assert.equal(removeMock.mock.callCount(), 0);
+
+    // Click remove again and confirm
+    await act(async () => {
+      fireEvent.click(removeCompletedBtn);
+    });
+
+    const confirmBtn = screen.getByRole('button', { name: translations.en.confirmRemoveBtn });
+    await act(async () => {
+      fireEvent.click(confirmBtn);
+    });
+
+    assert.equal(removeMock.mock.callCount(), 1);
+    assert.deepEqual(removeMock.mock.calls[0].arguments, [
+      'plan-2026-03-30',
+      { expectedVersion: 1, itemId: 'item-2' },
+    ]);
+
+    // Dialog closed and DOM updated
+    assert.equal(screen.queryByText(translations.en.confirmRemoveCompletedTitle), null);
+    assert.equal(screen.queryByRole('heading', { name: /198\. House Robber/ }), null);
+    assert.ok(screen.getByRole('heading', { name: /70\. Climbing Stairs/ }));
+  });
+
+  it('allows removing the last problem and renders rest day view (今天是休息日) with actions', async () => {
+    const singleItemPlan = createMockPlan({
+      rules: { dailyCount: 1, difficulty: { Easy: 100, Medium: 0, Hard: 0 }, tags: [], premium: false, reviewEnabled: false, reviewPercent: 0, preference: '' },
+      items: [createMockPlan().items[0]],
+    });
+
+    mock.method(api, 'ensureDailyPlan', async () => ({ status: 'ready' as const, plan: singleItemPlan }));
+    mock.method(api, 'getStrategies', async () => []);
+
+    const emptyPlan: DailyPlan = {
+      ...singleItemPlan,
+      version: 2,
+      rules: { ...singleItemPlan.rules, dailyCount: 0 },
+      items: [],
+    };
+
+    const removeMock = mock.method(api, 'removePlanItem', async () => emptyPlan);
+
+    await act(async () => {
+      render(<TodayPlanView lang="zh" onNavigateToSettings={() => {}} />);
+    });
+
+    // Verify remove button is enabled on the single remaining item
+    const removeBtn = screen.getByRole('button', { name: translations.zh.removeProblem }) as HTMLButtonElement;
+    assert.equal(removeBtn.disabled, false);
+
+    // Click remove
+    await act(async () => {
+      fireEvent.click(removeBtn);
+    });
+
+    assert.equal(removeMock.mock.callCount(), 1);
+    assert.deepEqual(removeMock.mock.calls[0].arguments, [
+      'plan-2026-03-30',
+      { expectedVersion: 1, itemId: 'item-1' },
+    ]);
+
+    // DOM should now render the rest day view (今天是休息日)
+    assert.ok(screen.getByRole('heading', { name: translations.zh.restDayTitle }));
+    assert.ok(screen.getByText(translations.zh.allProblemsRemovedRestDesc));
+
+    // And action buttons are present: "加一题" and "调整今天"
+    assert.ok(screen.getByRole('button', { name: '加一题' }));
+    assert.ok(screen.getByRole('button', { name: '调整今天' }));
+  });
+
+  it('disables mutating buttons and shows spinner while removal is pending', async () => {
+    const basePlan = createMockPlan();
+    mock.method(api, 'ensureDailyPlan', async () => ({ status: 'ready' as const, plan: basePlan }));
+    mock.method(api, 'getStrategies', async () => []);
+
+    const pending = deferred<DailyPlan>();
+    mock.method(api, 'removePlanItem', async () => pending.promise);
+
+    await act(async () => {
+      render(<TodayPlanView lang="en" onNavigateToSettings={() => {}} />);
+    });
+
+    const removeBtn = screen.getAllByRole('button', { name: translations.en.removeProblem })[0] as HTMLButtonElement;
+    await act(async () => {
+      fireEvent.click(removeBtn);
+    });
+
+    // In-flight state: remove button disabled with spinner
+    assert.equal(removeBtn.disabled, true);
+    assert.ok(removeBtn.querySelector('.spin') !== null);
+
+    // Global mutex: Add one button is also disabled
+    const addBtn = screen.getByRole('button', { name: 'Add one' }) as HTMLButtonElement;
+    assert.equal(addBtn.disabled, true);
+
+    // Resolve removal
+    await act(async () => {
+      pending.resolve({
+        ...basePlan,
+        version: 2,
+        rules: { ...basePlan.rules, dailyCount: 1 },
+        items: [basePlan.items[1]],
+      });
+    });
+
+    // Completed: Add one restored
+    assert.equal(addBtn.disabled, false);
+  });
+});

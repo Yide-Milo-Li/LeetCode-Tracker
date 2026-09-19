@@ -3,7 +3,7 @@
  * Renders reliable completion circle, topic tags with overflow dropdown, and contextual action links.
  */
 import React from 'react';
-import { Check, Circle, RefreshCw, ExternalLink, Plus, BookMarked } from 'lucide-react';
+import { Check, Circle, RefreshCw, ExternalLink, Plus, BookMarked, Trash2 } from 'lucide-react';
 import type { PlanItem } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
@@ -20,8 +20,11 @@ export interface TodayProblemRowProps {
   replacingBatch: boolean;
   replacingItemId: string | null;
   isAppending?: boolean;
+  canRemove?: boolean;
+  isRemoving?: boolean;
   onComplete: (item: PlanItem) => void;
   onReplaceOne: (item: PlanItem) => void;
+  onRemove?: (item: PlanItem) => void;
   onOpenQuickNote?: (item: PlanItem) => void;
 }
 
@@ -37,8 +40,11 @@ export function TodayProblemRow({
   replacingBatch,
   replacingItemId,
   isAppending = false,
+  canRemove = true,
+  isRemoving = false,
   onComplete,
   onReplaceOne,
+  onRemove,
   onOpenQuickNote,
 }: TodayProblemRowProps) {
   const zh = lang === 'zh';
@@ -186,6 +192,28 @@ export function TodayProblemRow({
             }}
           >
             <Plus size={18} />
+          </button>
+        </Tooltip>
+        <Tooltip text={canRemove === false ? t.cannotRemoveLastProblem : t.removeProblem} position="top">
+          <button
+            className="btn-icon btn-icon-danger"
+            aria-label={canRemove === false ? t.cannotRemoveLastProblem : t.removeProblem}
+            title={canRemove === false ? t.cannotRemoveLastProblem : t.removeProblem}
+            disabled={
+              canRemove === false ||
+              isSaving ||
+              replacingBatch ||
+              Boolean(replacingItemId) ||
+              isAppending ||
+              isRemoving
+            }
+            onClick={() => onRemove?.(item)}
+          >
+            {isRemoving ? (
+              <RefreshCw size={18} className="spin" />
+            ) : (
+              <Trash2 size={18} />
+            )}
           </button>
         </Tooltip>
       </div>

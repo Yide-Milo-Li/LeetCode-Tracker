@@ -201,6 +201,13 @@ export const appendPlanItemSchema = operationSchema.extend({
   expectedVersion: z.number().int().positive(),
 }).strict();
 export type AppendPlanItemInput = z.infer<typeof appendPlanItemSchema>;
+
+export const removePlanItemSchema = operationSchema.extend({
+  expectedVersion: z.number().int().positive(),
+  itemId: z.string().uuid(),
+}).strict();
+export type RemovePlanItemInput = z.infer<typeof removePlanItemSchema>;
+
 export const overrideRequestSchema = z.object({ prompt: z.string().trim().min(1).max(4000).optional(), rules: rulePatchSchema.optional(), unresolved: z.array(z.string().max(500)).max(20).optional(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).strict();
 
 /** Stable public errors provide localized UI messages without leaking provider payloads. */

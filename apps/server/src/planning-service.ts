@@ -646,6 +646,113 @@ export class PlanningService {
     );
   }
 
+  /**
+   * Remove an individual problem from today's plan.
+   *
+   * Verifies plan version match and minimum plan size constraints (must keep at least 1 item).
+   * If the item has existing practice records (completed), revokes them to prevent stale evidence.
+   * Decrements dailyCount by 1 and adjusts partial review count if needed.
+   *
+   * @param planId Daily plan identifier.
+   * @param options Target item, expected version, and operation tracking ID.
+   * @returns Updated DailyPlan snapshot.
+   */
+  public async removePlanItem(
+    planId: string,
+    options: {
+      itemId: string;
+      expectedVersion: number;
+      operationId: string;
+    }
+  ): Promise<DailyPlan> {
+    const fingerprint = `remove:${planId}:${options.expectedVersion}:${options.itemId}`;
+    const replayed = this.planning.replay(options.operationId, fingerprint);
+    if (replayed) {
+      return replayed;
+    }
+
+    const now = Date.now();
+    const epoch = this.transientEpoch;
+    const plan = this.planning.planById(planId, now);
+    if (!plan) {
+      throw new PlanningError('PLAN_NOT_FOUND', `Daily plan '${planId}' not found`, 404);
+    }
+    if (plan.version !== options.expectedVersion) {
+      throw new PlanningError('STALE_PLAN', 'Plan has been modified; please reload', 409);
+    }
+
+    const analysisDate = localDate(now, plan.timezone);
+    if (plan.date !== analysisDate) {
+      throw new PlanningError('STALE_PLAN', 'Only today can be modified; reload the current day / 仅支持修改今日计划，请刷新后重试', 409);
+    }
+
+    const targetIndex = plan.items.findIndex(i => i.id === options.itemId);
+    if (targetIndex === -1) {
+      throw new PlanningError('ITEM_NOT_FOUND', `Problem '${options.itemId}' not found in today's plan`, 404);
+    }
+
+    const targetItem = plan.items[targetIndex];
+
+    // Cascade practice revocation: revoke any manual practice records tied to this problem
+    if (targetItem.evidenceIds?.length) {
+      for (const evidenceId of targetItem.evidenceIds) {
+        if (evidenceId.startsWith('manual:')) {
+          const recordId = evidenceId.slice('manual:'.length);
+          try {
+            await this.store.revokePracticeRecord(recordId);
+          } catch {
+            // Ignore if already revoked or not found
+          }
+        }
+      }
+    }
+
+    const stamp = this.planning.stamp();
+    const newItems = plan.items.filter((_, idx) => idx !== targetIndex);
+    const newDailyCount = Math.max(0, plan.rules.dailyCount - 1);
+    const reviewSettings = resolveReviewSettings(plan.rules);
+    const newReviewCount = reviewSettings.reviewCount !== null
+      ? Math.min(newDailyCount, reviewSettings.reviewCount)
+      : null;
+
+    const updatedRules: Rules = {
+      ...plan.rules,
+      dailyCount: newDailyCount,
+      reviewMode: reviewSettings.reviewMode,
+      reviewCount: newReviewCount,
+      reviewPercent: newDailyCount > 0 && reviewSettings.reviewMode === 'partial' && newReviewCount !== null
+        ? (newReviewCount / newDailyCount) * 100
+        : newDailyCount === 0
+          ? 0
+          : plan.rules.reviewPercent,
+    };
+
+    const newPlan: DailyPlan = {
+      ...plan,
+      version: plan.version + 1,
+      rules: updatedRules,
+      items: newItems,
+      updatedAt: now,
+      action: 'remove_item',
+      catalogRevision: stamp.catalog,
+      practiceRevision: this.planning.stamp().practice,
+      planningRevision: stamp.planning,
+    };
+
+    return this.planning.commit(
+      newPlan,
+      stamp,
+      plan.version,
+      options.operationId,
+      fingerprint,
+      true,
+      () => {
+        if (this.transientEpoch !== epoch) throw new PlanningError('STALE_DATA', 'Profile changed during remove; retry', 409);
+        if (localDate(Date.now(), plan.timezone) !== analysisDate) throw new PlanningError('STALE_PLAN', 'Calendar date changed during remove; reload', 409);
+      }
+    );
+  }
+
   // ==========================================
   // Prompt Override Methods
   // ==========================================

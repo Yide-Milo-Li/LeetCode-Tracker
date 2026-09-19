@@ -939,6 +939,10 @@ textarea::placeholder {
   background: var(--selected);
   color: var(--primary);
 }
+.btn-icon-danger:hover:not(:disabled) {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
 .btn-icon:active:not(:disabled) {
   transform: scale(0.94);
 }
@@ -3477,4 +3481,3 @@ input.form-input[aria-invalid="true"] { border-color: var(--danger); outline-col
 .btn-link:hover {
   color: var(--text-main);
 }
-

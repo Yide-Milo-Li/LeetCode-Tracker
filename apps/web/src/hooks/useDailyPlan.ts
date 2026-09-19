@@ -22,7 +22,9 @@ export interface UseDailyPlanReturn {
   replacingBatch: boolean;
   /** Indicates problem append action is in flight. */
   appending: boolean;
-  /** Synchronously check if any plan mutation (append, replace, batch replace) is pending. */
+  /** ID of the single item currently being removed from the plan. */
+  removingItemId: string | null;
+  /** Synchronously check if any plan mutation (append, replace, batch replace, remove) is pending. */
   isPlanMutationPending: () => boolean;
   /** Clear displayed mutation and refresh errors. */
   clearError: () => void;
@@ -30,6 +32,8 @@ export interface UseDailyPlanReturn {
   refresh: () => Promise<void>;
   /** Append one question to today's plan. */
   appendOne: () => Promise<void>;
+  /** Remove a single question from today's plan. */
+  removeOne: (item: PlanItem) => Promise<void>;
   /** Replace a single problem in today's plan while preserving slot properties. */
   replaceOne: (item: PlanItem) => Promise<void>;
   /** Replace all unfinished problems in today's plan. */
@@ -53,6 +57,7 @@ export function useDailyPlan(): UseDailyPlanReturn {
   const [replacingItemId, setReplacingItemId] = useState<string | null>(null);
   const [replacingBatch, setReplacingBatch] = useState(false);
   const [appending, setAppending] = useState(false);
+  const [removingItemId, setRemovingItemId] = useState<string | null>(null);
 
   const changeRevision = useRef(0);
   const refreshInFlight = useRef(false);
@@ -212,6 +217,40 @@ export function useDailyPlan(): UseDailyPlanReturn {
     }
   }, [ensureResult, refresh]);
 
+  const removeOne = useCallback(
+    async (item: PlanItem) => {
+      if (!ensureResult?.plan || planMutationPending.current) return;
+      planMutationPending.current = true;
+      setRemovingItemId(item.id);
+      setMutationError(null);
+      const currentRevision = ++changeRevision.current;
+      try {
+        const updated = await api.removePlanItem(ensureResult.plan.id, {
+          itemId: item.id,
+          expectedVersion: ensureResult.plan.version,
+        });
+        if (currentRevision === changeRevision.current) {
+          setEnsureResult({ status: 'ready', plan: updated });
+        } else {
+          queuedRefresh.current = true;
+        }
+      } catch (err: unknown) {
+        if (currentRevision === changeRevision.current) {
+          setMutationError(err instanceof Error ? err.message : 'Failed to remove problem.');
+        }
+      } finally {
+        changeRevision.current++;
+        planMutationPending.current = false;
+        setRemovingItemId(null);
+        if (queuedRefresh.current) {
+          queuedRefresh.current = false;
+          void refresh();
+        }
+      }
+    },
+    [ensureResult, refresh],
+  );
+
   const onOverrideCommitted = useCallback((newPlan: DailyPlan) => {
     changeRevision.current++;
     setMutationError(null);
@@ -240,7 +279,6 @@ export function useDailyPlan(): UseDailyPlanReturn {
             plan: {
               ...current.plan,
               items: current.plan.items.map((item) => {
-                if (item.problem.questionId !== record.questionId) return item;
                 const evidenceIds = item.evidenceIds.filter((value) => value !== id);
                 if (
                   record.status === 'active' &&
@@ -266,10 +304,12 @@ export function useDailyPlan(): UseDailyPlanReturn {
     replacingItemId,
     replacingBatch,
     appending,
+    removingItemId,
     isPlanMutationPending,
     clearError,
     refresh,
     appendOne,
+    removeOne,
     replaceOne,
     replaceAllUnfinished,
     onOverrideCommitted,

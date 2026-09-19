@@ -36,6 +36,7 @@ function TodayPlanViewInner({
   const [saving, setSaving] = useState<Set<string>>(new Set());
   const [recentCompletions, setRecentCompletions] = useState<Set<string>>(new Set());
   const [quickNoteProblem, setQuickNoteProblem] = useState<PlanItem | null>(null);
+  const [problemToRemove, setProblemToRemove] = useState<PlanItem | null>(null);
   const completionTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
   useEffect(() => {
     const clearFeedback = () => {
@@ -116,6 +117,52 @@ function TodayPlanViewInner({
       setLocalError(String((err as Error).message));
     }
   }
+
+  /**
+   * Handle problem removal.
+   * Uncompleted problems are removed immediately with single click (no dialog).
+   * Completed problems prompt a confirmation dialog since removal cascades to revoking practice records.
+   */
+  async function handleRemoveItem(target: PlanItem) {
+    if (
+      !plan ||
+      controller.appending ||
+      controller.isPlanMutationPending() ||
+      Boolean(controller.removingItemId) ||
+      saving.size > 0
+    ) return;
+
+    if (target.completed) {
+      setProblemToRemove(target);
+      return;
+    }
+
+    try {
+      await controller.removeOne(target);
+      workspace.notifyMutation();
+    } catch (err) {
+      setRowErrors((old) => ({
+        ...old,
+        [target.id]: err instanceof Error ? err.message : String(err),
+      }));
+    }
+  }
+
+  async function confirmRemoveCompleted() {
+    if (!problemToRemove) return;
+    const target = problemToRemove;
+    try {
+      await controller.removeOne(target);
+      workspace.notifyMutation();
+      setProblemToRemove(null);
+    } catch (err) {
+      setRowErrors((old) => ({
+        ...old,
+        [target.id]: err instanceof Error ? err.message : String(err),
+      }));
+      setProblemToRemove(null);
+    }
+  }
   return (
     <div className="today-view">
       <PageHeader
@@ -184,6 +231,71 @@ function TodayPlanViewInner({
             </button>
             <button className="btn btn-secondary" onClick={() => setOverride(true)}>
               {t.createTemporaryPlan}
+            </button>
+          </div>
+        </section>
+      ) : plan && plan.items.length === 0 ? (
+        <section className="empty-state">
+          <div className="empty-state-icon">
+            <Coffee size={40} className="text-muted" />
+          </div>
+          <h2>{t.restDayTitle}</h2>
+          <p>{t.allProblemsRemovedRestDesc}</p>
+          <div className="action-row">
+            <button
+              className="btn btn-primary"
+              disabled={
+                controller.loading ||
+                controller.appending ||
+                controller.isPlanMutationPending() ||
+                controller.replacingBatch ||
+                Boolean(controller.replacingItemId) ||
+                saving.size > 0
+              }
+              aria-busy={controller.appending}
+              onClick={() => {
+                if (
+                  controller.loading ||
+                  controller.appending ||
+                  controller.isPlanMutationPending() ||
+                  saving.size > 0
+                ) return;
+                void controller.appendOne();
+              }}
+            >
+              {controller.appending ? (
+                <RefreshCw size={16} className="spin" />
+              ) : (
+                <Plus size={16} />
+              )}
+              {controller.appending
+                ? zh
+                  ? '加题中…'
+                  : 'Adding…'
+                : zh
+                  ? '加一题'
+                  : 'Add one'}
+            </button>
+            <button
+              className="btn btn-secondary"
+              disabled={
+                controller.loading ||
+                controller.appending ||
+                controller.isPlanMutationPending()
+              }
+              onClick={() => {
+                if (
+                  controller.loading ||
+                  controller.appending ||
+                  controller.isPlanMutationPending()
+                ) return;
+                setOverride(true);
+              }}
+            >
+              {zh ? '调整今天' : 'Adjust today'}
+            </button>
+            <button className="btn btn-secondary" onClick={showVersions}>
+              {t.planVersions} · v{plan.version}
             </button>
           </div>
         </section>
@@ -356,6 +468,8 @@ function TodayPlanViewInner({
                 replacingBatch={controller.replacingBatch}
                 replacingItemId={controller.replacingItemId}
                 isAppending={controller.appending || controller.isPlanMutationPending()}
+                canRemove={true}
+                isRemoving={controller.removingItemId === item.id}
                 onComplete={(target) => void complete(target)}
                 onReplaceOne={(target) => {
                   if (
@@ -365,6 +479,7 @@ function TodayPlanViewInner({
                   ) return;
                   void controller.replaceOne(target);
                 }}
+                onRemove={(target) => void handleRemoveItem(target)}
                 onOpenQuickNote={(target) => setQuickNoteProblem(target)}
               />
             ))}
@@ -433,6 +548,44 @@ function TodayPlanViewInner({
           workspace.notifyMutation();
         }}
       />
+      {problemToRemove && (
+        <Dialog
+          title={t.confirmRemoveCompletedTitle}
+          onClose={() => setProblemToRemove(null)}
+          lang={lang}
+          footer={
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button
+                className="btn btn-secondary"
+                onClick={() => setProblemToRemove(null)}
+                disabled={Boolean(controller.removingItemId)}
+              >
+                {t.cancel}
+              </button>
+              <button
+                className="btn btn-danger"
+                onClick={() => void confirmRemoveCompleted()}
+                disabled={Boolean(controller.removingItemId)}
+                aria-busy={Boolean(controller.removingItemId)}
+              >
+                {controller.removingItemId ? (
+                  <RefreshCw size={14} className="spin" />
+                ) : null}
+                {t.confirmRemoveBtn}
+              </button>
+            </div>
+          }
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <p style={{ margin: 0, fontSize: '14px', lineHeight: '1.5' }}>
+              {t.confirmRemoveCompletedMessage}
+            </p>
+            <div style={{ padding: '10px 14px', borderRadius: '8px', background: 'var(--muted-surface)', fontSize: '13px', color: 'var(--text-muted)' }}>
+              <strong>{problemToRemove.problem.questionFrontendId}. {problemToRemove.problem.title}</strong>
+            </div>
+          </div>
+        </Dialog>
+      )}
     </div>
   );
 }
