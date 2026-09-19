@@ -666,6 +666,77 @@ it('auto-fills any two difficulty fields and preserves explicit manual edits', a
   }
 });
 
+it('short-circuits and auto-fills 0 for remaining difficulties when any difficulty equals daily total', async () => {
+  const { emptyDifficultyDraft, updateDifficultyDraft } = await import('../apps/web/src/strategy-counts.ts');
+  const { difficulties } = await import('../packages/contracts/src/recommendations.ts');
+
+  // Any single difficulty equaling the total must set the other two to 0 and clear automatic remainder ownership
+  for (const total of [1, 5, 20]) {
+    for (const target of difficulties) {
+      const initial = emptyDifficultyDraft();
+      const updated = updateDifficultyDraft(initial, total, { difficulty: target, value: total });
+      assert.equal(updated.values[target], total);
+      assert.equal(updated.automatic, null);
+      for (const other of difficulties.filter(d => d !== target)) {
+        assert.equal(updated.values[other], 0, `Expected ${other} to be 0 when ${target} equals total ${total}`);
+      }
+    }
+  }
+
+  // Setting total on a draft with existing non-zero values overrides them to 0
+  let draft: import('../apps/web/src/strategy-counts.ts').DifficultyDraft = { values: { Easy: 2, Medium: 2, Hard: 1 }, automatic: null };
+  draft = updateDifficultyDraft(draft, 5, { difficulty: 'Hard', value: 5 });
+  assert.deepEqual(draft.values, { Easy: 0, Medium: 0, Hard: 5 });
+  assert.equal(draft.automatic, null);
+
+  // Updating total count when one difficulty equals new total and others are blank fills them with 0
+  let blankDraft: import('../apps/web/src/strategy-counts.ts').DifficultyDraft = { values: { Easy: 4, Medium: '', Hard: '' }, automatic: null };
+  blankDraft = updateDifficultyDraft(blankDraft, 4);
+  assert.deepEqual(blankDraft.values, { Easy: 4, Medium: 0, Hard: 0 });
+
+  // Value strictly less than total does not trigger short-circuit
+  const partial = updateDifficultyDraft(emptyDifficultyDraft(), 5, { difficulty: 'Easy', value: 4 });
+  assert.equal(partial.values.Easy, 4);
+  assert.equal(partial.values.Medium, '');
+  assert.equal(partial.values.Hard, '');
+
+  // Invalid total or negative/empty count does not trigger short-circuit
+  const invalid = updateDifficultyDraft(emptyDifficultyDraft(), '', { difficulty: 'Easy', value: 5 });
+  assert.equal(invalid.values.Easy, 5);
+  assert.equal(invalid.values.Medium, '');
+  assert.equal(invalid.values.Hard, '');
+});
+
+it('short-circuit auto-fills zero in strategy editor DOM when a difficulty equals daily count', async () => {
+  const { create } = await openCountEditor();
+  const change = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
+
+  change('Strategy Name', 'Short Circuit Strategy');
+  change('Daily Question Count', '5');
+
+  // Select a review mode so the form satisfies isReviewValid
+  fireEvent.click(screen.getByLabelText(translations.en.disableReview));
+
+  // Fill Hard count to 5 (equal to daily count 5)
+  change('Hard count', '5');
+
+  const easyInput = screen.getByLabelText('Easy count') as HTMLInputElement;
+  const medInput = screen.getByLabelText('Medium count') as HTMLInputElement;
+  const hardInput = screen.getByLabelText('Hard count') as HTMLInputElement;
+
+  assert.equal(easyInput.value, '0');
+  assert.equal(medInput.value, '0');
+  assert.equal(hardInput.value, '5');
+  assert.ok(screen.getByText('5 / 5'));
+
+  const save = screen.getByRole('button', { name: 'Save Strategy' }) as HTMLButtonElement;
+  assert.equal(save.disabled, false);
+
+  await act(async () => { fireEvent.click(save); });
+  assert.equal(create.mock.callCount(), 1);
+  assert.equal(create.mock.calls[0].arguments[0].rules.dailyCount, 5);
+  assert.deepEqual(create.mock.calls[0].arguments[0].rules.difficulty, { Easy: 0, Medium: 0, Hard: 100 });
+});
 
 it('all supported difficulty and review counts round-trip through the real planner and schema', async () => {
   const { percentagesForCounts, difficultyCounts, reviewPercentForCount, reviewCountForRules } = await import('../apps/web/src/strategy-counts.ts');

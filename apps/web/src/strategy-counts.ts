@@ -37,7 +37,7 @@ export function isCount(value: CountInput): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 }
 
-/** Recalculate only the system-owned remainder; a manual edit relinquishes that ownership. */
+/** Recalculate difficulty counts and remainder; auto-fills zeros when an input exhausts the total. */
 export function updateDifficultyDraft(
   draft: DifficultyDraft, total: CountInput, edit?: { difficulty: Difficulty; value: CountInput },
 ): DifficultyDraft {
@@ -46,6 +46,23 @@ export function updateDifficultyDraft(
   if (edit) {
     values[edit.difficulty] = edit.value;
     if (automatic === edit.difficulty) automatic = null;
+
+    // Short-circuit: if one difficulty equals the daily total, immediately fill other difficulties with 0.
+    if (isCount(total) && total > 0 && isCount(edit.value) && edit.value === total) {
+      for (const d of difficulties) {
+        if (d !== edit.difficulty) values[d] = 0;
+      }
+      automatic = null;
+    }
+  } else if (isCount(total) && total > 0) {
+    // When updating total, if one difficulty already matches total and others are blank, fill them with 0.
+    const match = difficulties.find(d => values[d] === total);
+    if (match && difficulties.filter(d => d !== match).every(d => values[d] === '')) {
+      for (const d of difficulties) {
+        if (d !== match) values[d] = 0;
+      }
+      automatic = null;
+    }
   }
   const blanks = difficulties.filter(d => values[d] === '');
   // Clearing a manual field is intentional, not a request to immediately refill it.

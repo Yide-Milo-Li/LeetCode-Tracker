@@ -270,8 +270,12 @@ it('renders Option 1 semantic micro-pills, shared legend, and hoverable segmente
 
 it('renders developing micro-pill and unrecorded segment for imported progress evidence', async () => {
     const devProfileReport: KnowledgeProfileReport = {
-        version: 1,
+        analysisVersion: 'profile-v1',
         generatedAt: now,
+        asOfDate: '2026-09-18',
+        timezone: 'UTC',
+        windowDays: 30,
+        revision: { catalog: 1, practice: 1, planning: 1, timezone: null },
         topics: [
             {
                 tagSlug: 'dp',
@@ -386,4 +390,3 @@ it('renders developing micro-pill and unrecorded segment for imported progress e
     const enEasySegs = enBars[0].querySelectorAll('.feedback-seg');
     assert.equal(enEasySegs[0].getAttribute('data-tooltip'), 'Unrecorded: 3 (100%)');
 });
-
