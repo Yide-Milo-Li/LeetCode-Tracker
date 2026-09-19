@@ -7,6 +7,7 @@
 import { afterEach, it, describe, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
+import type { PlanItem } from '../apps/web/src/api.ts';
 
 // Configure virtual DOM environment before React renders
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/' });
@@ -44,6 +45,7 @@ const { api } = await import('../apps/web/src/api.ts');
 const { NotesWorkspace } = await import('../apps/web/src/components/NotesWorkspace.tsx');
 const { QuickCopyButtons } = await import('../apps/web/src/components/QuickCopyButtons.tsx');
 const { QuickNoteDrawer } = await import('../apps/web/src/components/QuickNoteDrawer.tsx');
+const { TodayProblemRow } = await import('../apps/web/src/components/TodayProblemRow.tsx');
 
 afterEach(() => {
   cleanup();
@@ -630,3 +632,132 @@ describe('QuickNoteDrawer Component', () => {
     assert.ok(lastCopiedText.includes('Practice log reflection: Hash map O(N)'));
   });
 });
+
+describe('TodayProblemRow note entry consolidation', () => {
+  const reviewItem: PlanItem = {
+    id: 'item-review-1',
+    kind: 'review',
+    reason: { en: 'Scheduled review', zh: '计划复习' },
+    addedAt: 1000,
+    evidenceIds: [],
+    completed: false,
+    problem: {
+      questionId: 'p1',
+      questionFrontendId: '387',
+      title: 'First Unique Character in a String',
+      titleSlug: 'first-unique-character-in-a-string',
+      url: 'https://leetcode.com/problems/first-unique-character-in-a-string/',
+      difficulty: 'Easy',
+      isPaidOnly: false,
+      topicTags: [{ id: 'string', name: 'String', slug: 'string' }],
+      source: 'jsonl',
+    },
+  };
+
+  it('renders review problem with static Review tag-chip and single quick notes action button in zh', async () => {
+    let triggeredItem: PlanItem | null = null;
+
+    await act(async () => {
+      render(
+        <TodayProblemRow
+          item={reviewItem}
+          lang="zh"
+          isSaving={false}
+          replacingBatch={false}
+          replacingItemId={null}
+          onComplete={() => {}}
+          onReplaceOne={() => {}}
+          onOpenQuickNote={(item) => {
+            triggeredItem = item;
+          }}
+        />
+      );
+    });
+
+    // 1. Verify "复习" is rendered as a static tag-chip span, not an interactive button
+    const reviewTag = screen.getByText('复习');
+    assert.equal(reviewTag.tagName.toLowerCase(), 'span');
+    assert.ok(reviewTag.classList.contains('tag-chip'));
+
+    // 2. Verify there are no duplicate notes suffixes or triggers in the metadata tag area
+    assert.equal(screen.queryByText(/查看笔记/), null);
+    assert.equal(screen.queryByText(/Notes/), null);
+    assert.equal(document.querySelector('.review-note-trigger'), null);
+
+    // 3. Verify the action bar has exactly ONE quick note button
+    const quickNoteButtons = screen.getAllByRole('button', { name: /速查往期笔记/i });
+    assert.equal(quickNoteButtons.length, 1);
+
+    // 4. Click the single quick note action button and verify onOpenQuickNote is triggered
+    await act(async () => {
+      fireEvent.click(quickNoteButtons[0]);
+    });
+    assert.equal(triggeredItem, reviewItem);
+  });
+
+  it('renders review problem with static Review tag-chip and single quick notes action button in en', async () => {
+    let triggeredItem: PlanItem | null = null;
+
+    await act(async () => {
+      render(
+        <TodayProblemRow
+          item={reviewItem}
+          lang="en"
+          isSaving={false}
+          replacingBatch={false}
+          replacingItemId={null}
+          onComplete={() => {}}
+          onReplaceOne={() => {}}
+          onOpenQuickNote={(item) => {
+            triggeredItem = item;
+          }}
+        />
+      );
+    });
+
+    // 1. Verify "Review" is rendered as a static tag-chip span
+    const reviewTag = screen.getByText('Review');
+    assert.equal(reviewTag.tagName.toLowerCase(), 'span');
+    assert.ok(reviewTag.classList.contains('tag-chip'));
+
+    // 2. Verify no Notes suffix text
+    assert.equal(screen.queryByText(/\(Notes\)/), null);
+
+    // 3. Verify exactly ONE quick notes action button
+    const quickNoteButtons = screen.getAllByRole('button', { name: /Quick notes/i });
+    assert.equal(quickNoteButtons.length, 1);
+
+    // 4. Click triggers onOpenQuickNote
+    await act(async () => {
+      fireEvent.click(quickNoteButtons[0]);
+    });
+    assert.equal(triggeredItem, reviewItem);
+  });
+
+  it('renders non-review problem without review tag while retaining quick notes action button', async () => {
+    const newItem: PlanItem = {
+      ...reviewItem,
+      id: 'item-new-1',
+      kind: 'new',
+    };
+
+    await act(async () => {
+      render(
+        <TodayProblemRow
+          item={newItem}
+          lang="zh"
+          isSaving={false}
+          replacingBatch={false}
+          replacingItemId={null}
+          onComplete={() => {}}
+          onReplaceOne={() => {}}
+        />
+      );
+    });
+
+    assert.equal(screen.queryByText('复习'), null);
+    assert.equal(screen.queryByText('Review'), null);
+    assert.equal(screen.getAllByRole('button', { name: /速查往期笔记/i }).length, 1);
+  });
+});
+

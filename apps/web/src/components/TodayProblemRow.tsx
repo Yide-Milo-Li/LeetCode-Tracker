@@ -80,25 +80,9 @@ export function TodayProblemRow({
           <span className={'difficulty ' + item.problem.difficulty.toLowerCase()}>
             {t[('stat' + item.problem.difficulty) as keyof typeof t]}
           </span>
-          {item.kind === 'review' ? (
-            <button
-              type="button"
-              className="tag-chip review-note-trigger"
-              style={{
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '4px',
-                border: '1px solid transparent',
-              }}
-              title={zh ? '查看往期解题笔记' : 'View past notes'}
-              onClick={() => onOpenQuickNote?.(item)}
-            >
-              <BookMarked size={12} />
-              <span>{t.kindReview}</span>
-              <span style={{ fontSize: '0.6875rem', opacity: 0.8 }}>({zh ? '查看笔记' : 'Notes'})</span>
-            </button>
-          ) : null}
+          {item.kind === 'review' && (
+            <span className="tag-chip">{t.kindReview}</span>
+          )}
           {!!item.explanation?.focusTagSlugs.length && <InfoPopover
             label={item.explanation.role === 'exploration' ? (zh ? '探索' : 'Explore') : t.focusSessionBadge}
             content={<p>{item.explanation.evidenceSummary?.reasonText
