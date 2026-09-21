@@ -15,6 +15,15 @@ import {
   Clock,
   Archive,
   Layers,
+  Code,
+  Bold,
+  Italic,
+  Heading,
+  List,
+  CheckSquare,
+  ChevronDown,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import {
   api,
@@ -26,6 +35,151 @@ import {
 import { translations, type Language } from '../i18n.ts';
 import { PageHeader, Feedback, Field, Pagination, Dialog } from './ui.tsx';
 import { QuickCopyButtons } from './QuickCopyButtons.tsx';
+
+/**
+ * Inline formatting renderer supporting backtick inline code, bold, italic, and LaTeX math.
+ */
+function renderInlineMarkdown(text: string): React.ReactNode {
+  const parts = text.split(/(\$[^\$]+\$|`[^`]+`|\*\*[^\*]+\*\*|\*[^\*]+\*)/g);
+  return parts.map((part, index) => {
+    if (part.startsWith('$') && part.endsWith('$') && part.length > 2) {
+      return (
+        <span
+          key={index}
+          style={{
+            fontFamily: 'KaTeX_Main, "Times New Roman", serif',
+            fontStyle: 'italic',
+            padding: '0 2px',
+            color: 'var(--primary)',
+            fontWeight: 500,
+          }}
+        >
+          {part.slice(1, -1)}
+        </span>
+      );
+    }
+    if (part.startsWith('`') && part.endsWith('`') && part.length > 2) {
+      return <code key={index}>{part.slice(1, -1)}</code>;
+    }
+    if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
+      return <strong key={index}>{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith('*') && part.endsWith('*') && part.length > 2) {
+      return <em key={index}>{part.slice(1, -1)}</em>;
+    }
+    return part;
+  });
+}
+
+/**
+ * Safely parse markdown content into structured React elements with code blocks,
+ * lists, task checkboxes, blockquotes, headings, and math formulas without third-party HTML parsers.
+ */
+function MarkdownPreview({ content, lang }: { content: string; lang: Language }) {
+  const t = translations[lang];
+  if (!content || content.trim().length === 0) {
+    return (
+      <div className="notes-preview-pane" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+          {t.previewEmptyNote}
+        </div>
+      </div>
+    );
+  }
+
+  const lines = content.split(/\r?\n/);
+  const elements: React.ReactNode[] = [];
+  let inCodeBlock = false;
+  let codeLang = '';
+  let codeBuffer: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (line.trim().startsWith('```')) {
+      if (!inCodeBlock) {
+        inCodeBlock = true;
+        codeLang = line.trim().slice(3).trim();
+        codeBuffer = [];
+      } else {
+        inCodeBlock = false;
+        elements.push(
+          <div key={`code-${i}`} style={{ position: 'relative', marginBottom: '10px' }}>
+            {codeLang && (
+              <span
+                style={{
+                  position: 'absolute',
+                  top: '6px',
+                  right: '10px',
+                  fontSize: '11px',
+                  color: 'var(--text-muted)',
+                  textTransform: 'uppercase',
+                  fontFamily: 'monospace',
+                }}
+              >
+                {codeLang}
+              </span>
+            )}
+            <pre>
+              <code>{codeBuffer.join('\n')}</code>
+            </pre>
+          </div>
+        );
+        codeBuffer = [];
+      }
+      continue;
+    }
+
+    if (inCodeBlock) {
+      codeBuffer.push(line);
+      continue;
+    }
+
+    if (line.startsWith('### ')) {
+      elements.push(<h3 key={`h3-${i}`}>{renderInlineMarkdown(line.slice(4))}</h3>);
+    } else if (line.startsWith('## ')) {
+      elements.push(<h2 key={`h2-${i}`}>{renderInlineMarkdown(line.slice(3))}</h2>);
+    } else if (line.startsWith('# ')) {
+      elements.push(<h1 key={`h1-${i}`}>{renderInlineMarkdown(line.slice(2))}</h1>);
+    } else if (line.startsWith('> ')) {
+      elements.push(<blockquote key={`quote-${i}`}>{renderInlineMarkdown(line.slice(2))}</blockquote>);
+    } else if (/^[-*]\s+\[([ xX])\]\s+(.*)/.test(line)) {
+      const match = line.match(/^[-*]\s+\[([ xX])\]\s+(.*)/)!;
+      const checked = match[1].toLowerCase() === 'x';
+      elements.push(
+        <div key={`task-${i}`} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+          <input type="checkbox" checked={checked} readOnly style={{ accentColor: 'var(--primary)', cursor: 'default' }} />
+          <span style={{ textDecoration: checked ? 'line-through' : 'none', color: checked ? 'var(--text-muted)' : 'var(--text-main)' }}>
+            {renderInlineMarkdown(match[2])}
+          </span>
+        </div>
+      );
+    } else if (/^[-*]\s+(.*)/.test(line)) {
+      const itemText = line.replace(/^[-*]\s+/, '');
+      elements.push(
+        <li key={`li-${i}`} style={{ marginLeft: '16px', marginBottom: '3px' }}>
+          {renderInlineMarkdown(itemText)}
+        </li>
+      );
+    } else if (line.trim() === '---' || line.trim() === '***') {
+      elements.push(<hr key={`hr-${i}`} />);
+    } else if (line.trim().length === 0) {
+      elements.push(<div key={`empty-${i}`} style={{ height: '6px' }} />);
+    } else {
+      elements.push(<p key={`p-${i}`} style={{ margin: '0 0 6px 0' }}>{renderInlineMarkdown(line)}</p>);
+    }
+  }
+
+  if (inCodeBlock && codeBuffer.length > 0) {
+    elements.push(
+      <pre key="unclosed-code">
+        <code>{codeBuffer.join('\n')}</code>
+      </pre>
+    );
+  }
+
+  return <div className="notes-preview-pane">{elements}</div>;
+}
 
 export interface NotesWorkspaceProps {
   lang: Language;
@@ -81,6 +235,58 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
   const [practices, setPractices] = useState<PracticeRecord[]>([]);
   const [loadingPractices, setLoadingPractices] = useState(false);
   const [showTimeline, setShowTimeline] = useState(false);
+
+  // Phase 31: Workbench view mode & toolbar state
+  const [viewMode, setViewMode] = useState<'split' | 'edit' | 'preview'>('split');
+  const [zenMode, setZenMode] = useState(false);
+  const [showCodeMenu, setShowCodeMenu] = useState(false);
+  const codeMenuRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Close code menu on outside click
+  useEffect(() => {
+    if (!showCodeMenu) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (codeMenuRef.current && !codeMenuRef.current.contains(e.target as Node)) {
+        setShowCodeMenu(false);
+      }
+    };
+    window.addEventListener('mousedown', handleClickOutside);
+    return () => window.removeEventListener('mousedown', handleClickOutside);
+  }, [showCodeMenu]);
+
+  /** Helper to wrap or insert markdown text at current selection cursor */
+  const wrapTextareaSelection = useCallback(
+    (prefix: string, suffix: string, defaultPlaceholder: string) => {
+      const el = textareaRef.current;
+      if (!el) return;
+      const start = el.selectionStart;
+      const end = el.selectionEnd;
+      const val = el.value;
+      const selected = val.substring(start, end) || defaultPlaceholder;
+      const replacement = `${prefix}${selected}${suffix}`;
+      const nextVal = val.substring(0, start) + replacement + val.substring(end);
+      setNoteContent(nextVal);
+      setTimeout(() => {
+        el.focus();
+        el.selectionStart = start + prefix.length;
+        el.selectionEnd = start + prefix.length + selected.length;
+      }, 0);
+    },
+    []
+  );
+
+  /** Insert language-agnostic code snippet block */
+  const insertCodeBlock = useCallback(
+    (codeLang: string = '') => {
+      const placeholder = zh ? '// 在此编写代码...' : '// Write solution code here...';
+      const prefix = `\n\`\`\`${codeLang}\n`;
+      const suffix = '\n```\n';
+      wrapTextareaSelection(prefix, suffix, placeholder);
+      setShowCodeMenu(false);
+    },
+    [wrapTextareaSelection, zh]
+  );
 
   // Retain selected summary or update from current items if present
   useEffect(() => {
@@ -283,15 +489,18 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
     }
   }
 
-  // Ctrl+S / Cmd+S shortcut to save
+  // Ctrl+S / Cmd+S shortcut to save; Ctrl+\ / Cmd+\ shortcut to toggle Zen mode
   useEffect(() => {
-    /** Route the browser save shortcut through the same eligibility and in-flight guard. */
+    /** Route keyboard shortcuts for saving and focus mode. */
     function handleKeyDown(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
         if (canSave) {
           void handleSaveNote();
         }
+      } else if ((e.ctrlKey || e.metaKey) && e.key === '\\') {
+        e.preventDefault();
+        setZenMode((z) => !z);
       }
     }
     window.addEventListener('keydown', handleKeyDown);
@@ -355,6 +564,22 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
         description={t.notesWorkspaceDesc}
         actions={
           <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              type="button"
+              className={`btn btn-secondary btn-sm ${zenMode ? 'active' : ''}`}
+              onClick={() => setZenMode((z) => !z)}
+              title={zh ? '专注模式快捷键 (Ctrl+\\)' : 'Zen Mode Shortcut (Ctrl+\\)'}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                borderColor: zenMode ? 'var(--primary)' : undefined,
+                color: zenMode ? 'var(--primary)' : undefined,
+              }}
+            >
+              {zenMode ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+              <span>{zenMode ? (zh ? '退出专注' : 'Exit Zen') : (zh ? '专注模式' : 'Zen Mode')}</span>
+            </button>
             <ExportLink
                 lang={lang}
                 onExport={() => api.exportObsidianZip('all', lang)}
@@ -383,10 +608,10 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
 
       {/* Master-Detail Grid */}
       <div
-        className="notes-master-detail"
+        className={`notes-master-detail ${zenMode ? 'zen' : ''}`}
         style={{
           display: 'grid',
-          gridTemplateColumns: '340px 1fr',
+          gridTemplateColumns: zenMode ? '1fr' : '340px 1fr',
           gap: '16px',
           flex: 1,
           minHeight: '620px',
@@ -395,9 +620,9 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
       >
         {/* Left Master Column: Problem List & Filters */}
         <div
-          className="notes-master-pane"
+          className={`notes-master-pane ${zenMode ? 'hidden' : ''}`}
           style={{
-            display: 'flex',
+            display: zenMode ? 'none' : 'flex',
             flexDirection: 'column',
             gap: '10px',
             backgroundColor: 'var(--surface)',
@@ -547,7 +772,7 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
                 cursor: 'pointer',
               }}
             >
-              <option value="all" style={{ backgroundColor: 'var(--surface)', color: 'var(--text-main)' }}>{t.filterHasNote}: 全部</option>
+              <option value="all" style={{ backgroundColor: 'var(--surface)', color: 'var(--text-main)' }}>{t.filterHasNote}: {zh ? '全部' : 'All'}</option>
               <option value="true" style={{ backgroundColor: 'var(--surface)', color: 'var(--text-main)' }}>{t.hasNoteOnly}</option>
               <option value="false" style={{ backgroundColor: 'var(--surface)', color: 'var(--text-main)' }}>{t.noNoteOnly}</option>
             </select>
@@ -561,13 +786,13 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
               overflowY: 'auto',
               display: 'flex',
               flexDirection: 'column',
-              gap: '3px',
+              gap: '6px',
               paddingRight: '2px',
             }}
           >
             {loadingList ? (
               <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
-                Loading notes...
+                {zh ? '正在加载笔记列表...' : 'Loading notes...'}
               </div>
             ) : items.length === 0 ? (
               <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
@@ -576,22 +801,18 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
             ) : (
               items.map((it) => {
                 const isSelected = selectedId === it.questionFrontendId;
-                const diffColor =
-                  it.difficulty === 'Easy'
-                    ? 'var(--easy)'
-                    : it.difficulty === 'Medium'
-                    ? 'var(--medium)'
-                    : 'var(--hard)';
 
                 return (
                   <button
                     key={it.questionId}
                     type="button"
+                    className={`notes-problem-card ${isSelected ? 'active' : ''}`}
                     onClick={() => handleSelectProblem(it.questionFrontendId)}
                     style={{
                       display: 'flex',
-                      flexDirection: 'column',
-                      gap: '3px',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '8px',
                       padding: '8px 10px',
                       borderRadius: '6px',
                       borderTop: 'none',
@@ -603,6 +824,7 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
                       cursor: 'pointer',
                       transition: 'background-color 0.12s ease',
                       boxSizing: 'border-box',
+                      width: '100%',
                     }}
                     onMouseEnter={(e) => {
                       if (!isSelected) e.currentTarget.style.backgroundColor = 'var(--muted-surface)';
@@ -611,49 +833,53 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
                       if (!isSelected) e.currentTarget.style.backgroundColor = 'transparent';
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', fontFamily: 'monospace' }}>
-                          #{it.questionFrontendId}
-                        </span>
-                        <span
-                          style={{
-                            display: 'inline-block',
-                            width: '6px',
-                            height: '6px',
-                            borderRadius: '50%',
-                            backgroundColor: diffColor,
-                          }}
-                          title={it.difficulty}
-                        />
-                        <span style={{ fontSize: '0.6875rem', color: diffColor, fontWeight: 500 }}>
-                          {it.difficulty}
-                        </span>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                        {it.hasAccepted && (
-                          <span title="Solved" style={{ color: 'var(--primary)', fontSize: '0.75rem', fontWeight: 600, lineHeight: 1 }}>
-                            ✓
-                          </span>
-                        )}
-                        {it.hasCustomNote && (
-                          <span title={t.hasNoteOnly} style={{ color: 'var(--text-muted)', display: 'inline-flex' }}>
-                            <FileText size={11} />
-                          </span>
-                        )}
-                      </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
+                      <span
+                        style={{
+                          fontSize: '0.75rem',
+                          fontWeight: 600,
+                          color: 'var(--text-muted)',
+                          fontFamily: 'monospace',
+                          flexShrink: 0,
+                        }}
+                      >
+                        #{it.questionFrontendId}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: '0.8125rem',
+                          fontWeight: isSelected ? 600 : 450,
+                          color: 'var(--text-main)',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          flex: 1,
+                        }}
+                        title={it.title}
+                      >
+                        {it.title}
+                      </span>
                     </div>
-                    <div
-                      style={{
-                        fontSize: '0.8125rem',
-                        fontWeight: isSelected ? 600 : 450,
-                        color: 'var(--text-main)',
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                      }}
-                    >
-                      {it.title}
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexShrink: 0 }}>
+                      {it.hasAccepted && (
+                        <span
+                          title={zh ? '已解出' : 'Solved'}
+                          style={{
+                            color: 'var(--primary)',
+                            fontSize: '0.8125rem',
+                            fontWeight: 700,
+                            lineHeight: 1,
+                          }}
+                        >
+                          ✓
+                        </span>
+                      )}
+                      {it.hasCustomNote && (
+                        <span title={t.hasNoteOnly} style={{ color: 'var(--text-muted)', display: 'inline-flex' }}>
+                          <FileText size={12} />
+                        </span>
+                      )}
                     </div>
                   </button>
                 );
@@ -706,49 +932,62 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
                         target="_blank"
                         rel="noreferrer"
                         className="btn-icon"
-                        title="Open on LeetCode ↗"
+                        title={zh ? '在 LeetCode 打开 ↗' : 'Open on LeetCode ↗'}
                         style={{ color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center' }}
                       >
                         <ExternalLink size={14} />
                       </a>
                     </h2>
-                    <span className={`badge badge-${selectedSummary.difficulty.toLowerCase()}`} style={{ fontSize: '0.6875rem' }}>
-                      {selectedSummary.difficulty}
-                    </span>
-                    {selectedSummary.hasAccepted && (
-                      <span style={{ fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 600 }}>
-                        ✓ Solved
-                      </span>
-                    )}
-                    {Boolean(selectedSummary.reviewStage) && (
-                      <span style={{ fontSize: '0.6875rem', padding: '1px 6px', borderRadius: '4px', backgroundColor: 'var(--warning-bg)', color: 'var(--warning)', fontWeight: 500 }}>
-                        Review · Stage {selectedSummary.reviewStage}
-                      </span>
-                    )}
                   </div>
 
-                  {/* Subtle tags */}
-                  {selectedSummary.tags.length > 0 && (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                      {selectedSummary.tags.map((tag) => (
-                        <span
-                          key={tag}
-                          style={{
-                            fontSize: '0.6875rem',
-                            backgroundColor: 'var(--muted-surface)',
-                            padding: '1px 6px',
-                            borderRadius: '3px',
-                            color: 'var(--text-muted)',
-                          }}
-                        >
-                          #{tag}
-                        </span>
-                      ))}
-                    </div>
-                  )}
+                  {/* Row 2: Metadata row */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', fontSize: '0.75rem' }}>
+                    <span className={`notes-diff-badge ${selectedSummary.difficulty}`}>
+                      {zh
+                        ? selectedSummary.difficulty === 'Easy'
+                          ? t.statEasy
+                          : selectedSummary.difficulty === 'Medium'
+                          ? t.statMedium
+                          : t.statHard
+                        : selectedSummary.difficulty}
+                    </span>
+
+                    {selectedSummary.hasAccepted && (
+                      <span style={{ fontSize: '0.75rem', color: 'var(--primary)', fontWeight: 600 }}>
+                        ✓ {zh ? '已解出' : 'Solved'}
+                      </span>
+                    )}
+
+                    {Boolean(selectedSummary.reviewStage) && (
+                      <span style={{ fontSize: '0.6875rem', padding: '1px 6px', borderRadius: '4px', backgroundColor: 'var(--warning-bg)', color: 'var(--warning)', fontWeight: 500 }}>
+                        {zh ? `复习 · 第 ${selectedSummary.reviewStage} 阶段` : `Review · Stage ${selectedSummary.reviewStage}`}
+                      </span>
+                    )}
+
+                    {/* Subtle tags */}
+                    {selectedSummary.tags && selectedSummary.tags.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                        {selectedSummary.tags.map((tag) => (
+                          <span
+                            key={tag}
+                            className="notes-tag-chip"
+                            style={{
+                              fontSize: '0.6875rem',
+                              backgroundColor: 'var(--muted-surface)',
+                              padding: '1px 6px',
+                              borderRadius: '3px',
+                              color: 'var(--text-muted)',
+                            }}
+                          >
+                            #{tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
-                {/* Actions: Quick Copy and single Markdown download */}
+                {/* Actions: Quick Copy, single Markdown download, and Zen Mode */}
                 <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexShrink: 0 }}>
                   <QuickCopyButtons
                     lang={lang}
@@ -768,9 +1007,9 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
                   />
 
                   <ExportLink
-                lang={lang}
-                onExport={() => api.exportSingleMarkdown(selectedSummary.questionFrontendId, lang)}
-                href={api.getSingleMarkdownUrl(selectedSummary.questionFrontendId, lang)}
+                    lang={lang}
+                    onExport={() => api.exportSingleMarkdown(selectedSummary.questionFrontendId, lang)}
+                    href={api.getSingleMarkdownUrl(selectedSummary.questionFrontendId, lang)}
                     className="btn btn-secondary btn-sm"
                     title={t.exportSingleMarkdown}
                     style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
@@ -778,6 +1017,23 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
                     <Download size={13} />
                     <span>.md</span>
                   </ExportLink>
+
+                  <button
+                    type="button"
+                    className={`btn btn-secondary btn-sm ${zenMode ? 'active' : ''}`}
+                    onClick={() => setZenMode((z) => !z)}
+                    title={zh ? '专注模式快捷键 (Ctrl+\\)' : 'Zen Mode Shortcut (Ctrl+\\)'}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      borderColor: zenMode ? 'var(--primary)' : undefined,
+                      color: zenMode ? 'var(--primary)' : undefined,
+                    }}
+                  >
+                    {zenMode ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+                    <span>{zenMode ? (zh ? '退出专注' : 'Exit Zen') : (zh ? '专注' : 'Zen')}</span>
+                  </button>
                 </div>
               </div>
 
@@ -872,8 +1128,9 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
                 )}
               </div>
 
-              {/* Long-form Note Editor */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1 }}>
+              {/* Long-form Note Editor & Markdown Workbench */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', flex: 1 }}>
+                {/* Header row: Title + Actions */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
                   <div
                     style={{
@@ -887,24 +1144,6 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
                   >
                     <BookOpen size={15} />
                     <span>{t.solutionReflectionTitle}</span>
-
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => setNoteContent(NOTE_TEMPLATES[lang])}
-                      disabled={loadingNote || noteLoadError || noteContent.trim().length > 0}
-                      title={t.insertTemplateTitle}
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                        fontSize: '0.75rem',
-                        padding: '3px 8px',
-                      }}
-                    >
-                      <FileText size={12} />
-                      <span>{t.insertTemplate}</span>
-                    </button>
 
                     {noteContent.trim().length > 0 && !hasMeaningfulNoteContent(noteContent) && (
                       <span
@@ -945,7 +1184,7 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
                       title={
                         !canSave
                           ? !isModified
-                            ? zh ? '内容未修改' : 'No changes to save'
+                            ? t.noChangesToSave
                             : isBlank
                             ? t.emptyNoteSaveDisabled
                             : t.unfilledTemplateNotice
@@ -954,7 +1193,9 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
                     >
                       <Save size={13} />
                       <span>{savingNote ? t.savingNote : t.saveNote}</span>
-                      <span style={{ fontSize: '0.6875rem', opacity: 0.75 }}>{/Mac/.test(navigator.platform) ? '(⌘S)' : '(Ctrl+S)'}</span>
+                      <span style={{ fontSize: '0.6875rem', opacity: 0.75 }}>
+                        {/Mac/.test(navigator.platform) ? '(⌘S)' : '(Ctrl+S)'}
+                      </span>
                     </button>
                   </div>
                 </div>
@@ -985,33 +1226,227 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
                   </div>
                 )}
 
-                <textarea
-                  rows={16}
-                  disabled={loadingNote || noteLoadError}
-                  value={noteContent}
-                  onChange={(e) => setNoteContent(e.target.value)}
-                  placeholder={t.noteEditorPlaceholder}
-                  style={{
-                    width: '100%',
-                    padding: '12px 14px',
-                    borderRadius: '8px',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'var(--canvas)',
-                    color: 'var(--text-main)',
-                    fontSize: '0.875rem',
-                    lineHeight: 1.65,
-                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-                    resize: 'vertical',
-                    minHeight: '340px',
-                    outline: 'none',
-                    boxSizing: 'border-box',
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--focus)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border-color)')}
-                />
+                {/* Phase 31: Markdown Formatting Toolbar */}
+                <div className="notes-toolbar">
+                  <div className="notes-tool-group">
+                    <button
+                      type="button"
+                      className="notes-tool-btn"
+                      onClick={() => wrapTextareaSelection('**', '**', 'bold')}
+                      title={t.toolbarBold}
+                      disabled={loadingNote || noteLoadError}
+                    >
+                      <Bold size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      className="notes-tool-btn"
+                      onClick={() => wrapTextareaSelection('*', '*', 'italic')}
+                      title={t.toolbarItalic}
+                      disabled={loadingNote || noteLoadError}
+                    >
+                      <Italic size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      className="notes-tool-btn"
+                      onClick={() => wrapTextareaSelection('### ', '', 'Heading')}
+                      title={t.toolbarHeading}
+                      disabled={loadingNote || noteLoadError}
+                    >
+                      <Heading size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      className="notes-tool-btn"
+                      onClick={() => wrapTextareaSelection('- ', '', 'List item')}
+                      title={t.toolbarList}
+                      disabled={loadingNote || noteLoadError}
+                    >
+                      <List size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      className="notes-tool-btn"
+                      onClick={() => wrapTextareaSelection('- [ ] ', '', 'Task')}
+                      title={t.toolbarTask}
+                      disabled={loadingNote || noteLoadError}
+                    >
+                      <CheckSquare size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      className="notes-tool-btn"
+                      onClick={() => wrapTextareaSelection('$', '$', 'O(N)')}
+                      title={t.toolbarMath}
+                      disabled={loadingNote || noteLoadError}
+                      style={{ fontFamily: 'KaTeX_Main, "Times New Roman", serif', fontWeight: 600 }}
+                    >
+                      $
+                    </button>
+
+                    <div className="notes-tool-sep" />
+
+                    {/* Multi-Language Code Snippet Dropdown */}
+                    <div className="notes-dropdown" ref={codeMenuRef}>
+                      <button
+                        type="button"
+                        className="notes-tool-btn"
+                        onClick={() => setShowCodeMenu((prev) => !prev)}
+                        title={t.toolbarCode}
+                        disabled={loadingNote || noteLoadError}
+                      >
+                        <Code size={13} />
+                        <span>{t.toolbarCode}</span>
+                        <ChevronDown size={11} />
+                      </button>
+
+                      {showCodeMenu && (
+                        <div className="notes-dropdown-menu">
+                          <button type="button" className="notes-dropdown-item" onClick={() => insertCodeBlock('')}>
+                            <span>{t.codeGeneric}</span>
+                            <span style={{ color: 'var(--text-muted)', fontSize: '11px', fontFamily: 'monospace' }}>```</span>
+                          </button>
+                          <button type="button" className="notes-dropdown-item" onClick={() => insertCodeBlock('python')}>
+                            <span>{t.codePython}</span>
+                            <span style={{ color: 'var(--text-muted)', fontSize: '11px', fontFamily: 'monospace' }}>py</span>
+                          </button>
+                          <button type="button" className="notes-dropdown-item" onClick={() => insertCodeBlock('cpp')}>
+                            <span>{t.codeCpp}</span>
+                            <span style={{ color: 'var(--text-muted)', fontSize: '11px', fontFamily: 'monospace' }}>cpp</span>
+                          </button>
+                          <button type="button" className="notes-dropdown-item" onClick={() => insertCodeBlock('java')}>
+                            <span>{t.codeJava}</span>
+                            <span style={{ color: 'var(--text-muted)', fontSize: '11px', fontFamily: 'monospace' }}>java</span>
+                          </button>
+                          <button type="button" className="notes-dropdown-item" onClick={() => insertCodeBlock('go')}>
+                            <span>{t.codeGo}</span>
+                            <span style={{ color: 'var(--text-muted)', fontSize: '11px', fontFamily: 'monospace' }}>go</span>
+                          </button>
+                          <button type="button" className="notes-dropdown-item" onClick={() => insertCodeBlock('typescript')}>
+                            <span>{t.codeTypeScript}</span>
+                            <span style={{ color: 'var(--text-muted)', fontSize: '11px', fontFamily: 'monospace' }}>ts</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="notes-tool-sep" />
+
+                    {/* Insert Template Button */}
+                    <button
+                      type="button"
+                      className="notes-tool-btn"
+                      onClick={() => setNoteContent(NOTE_TEMPLATES[lang])}
+                      disabled={loadingNote || noteLoadError || noteContent.trim().length > 0}
+                      title={t.insertTemplateTitle}
+                    >
+                      <FileText size={12} />
+                      <span>{t.insertTemplate}</span>
+                    </button>
+                  </div>
+
+                  {/* View Mode Segmented Control */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div
+                      style={{
+                        display: 'inline-flex',
+                        backgroundColor: 'var(--surface)',
+                        borderRadius: '5px',
+                        border: '1px solid var(--border-color)',
+                        padding: '2px',
+                        gap: '2px',
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setViewMode('edit')}
+                        style={{
+                          border: 'none',
+                          background: viewMode === 'edit' ? 'var(--selected)' : 'transparent',
+                          color: viewMode === 'edit' ? 'var(--primary)' : 'var(--text-muted)',
+                          fontWeight: viewMode === 'edit' ? 600 : 450,
+                          fontSize: '11.5px',
+                          padding: '2px 8px',
+                          borderRadius: '3px',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {t.viewModeEdit}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setViewMode('split')}
+                        style={{
+                          border: 'none',
+                          background: viewMode === 'split' ? 'var(--selected)' : 'transparent',
+                          color: viewMode === 'split' ? 'var(--primary)' : 'var(--text-muted)',
+                          fontWeight: viewMode === 'split' ? 600 : 450,
+                          fontSize: '11.5px',
+                          padding: '2px 8px',
+                          borderRadius: '3px',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {t.viewModeSplit}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setViewMode('preview')}
+                        style={{
+                          border: 'none',
+                          background: viewMode === 'preview' ? 'var(--selected)' : 'transparent',
+                          color: viewMode === 'preview' ? 'var(--primary)' : 'var(--text-muted)',
+                          fontWeight: viewMode === 'preview' ? 600 : 450,
+                          fontSize: '11.5px',
+                          padding: '2px 8px',
+                          borderRadius: '3px',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {t.viewModePreview}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Split / Canvas Grid */}
+                <div className={`notes-canvas-grid ${viewMode === 'edit' ? 'edit-only' : viewMode === 'preview' ? 'preview-only' : ''}`}>
+                  <div className="notes-editor-pane">
+                    <textarea
+                      ref={textareaRef}
+                      rows={16}
+                      disabled={loadingNote || noteLoadError}
+                      value={noteContent}
+                      onChange={(e) => setNoteContent(e.target.value)}
+                      placeholder={t.noteEditorPlaceholder}
+                      style={{
+                        width: '100%',
+                        padding: '12px 14px',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border-color)',
+                        backgroundColor: 'var(--canvas)',
+                        color: 'var(--text-main)',
+                        fontSize: '0.875rem',
+                        lineHeight: 1.65,
+                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                        resize: 'vertical',
+                        minHeight: '340px',
+                        outline: 'none',
+                        boxSizing: 'border-box',
+                      }}
+                      onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--focus)')}
+                      onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border-color)')}
+                    />
+                  </div>
+
+                  <MarkdownPreview content={noteContent} lang={lang} />
+                </div>
+
+                {/* Footer status line */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.6875rem', color: 'var(--text-muted)' }}>
-                  <span>Markdown & LaTeX KaTeX math ($O(N)$) supported</span>
-                  <span>{noteContent.length} chars</span>
+                  <span>{t.markdownMathSupported}</span>
+                  <span>{t.wordCountChars.replace('{chars}', String(noteContent.length)).replace('{words}', String((noteContent.trim().match(/\S+/g) || []).length))}</span>
                 </div>
               </div>
             </>

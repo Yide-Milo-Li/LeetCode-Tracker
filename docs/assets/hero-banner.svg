@@ -76,10 +76,10 @@
 
     <!-- Feature Pill Badges -->
     <g transform="translate(0, 212)">
-      <!-- Badge 1: 100% Offline SQLite -->
+      <!-- Badge 1: Local SQLite Storage -->
       <g transform="translate(0, 0)">
         <rect width="168" height="34" rx="8" fill="#18231c" stroke="#2d4031" stroke-width="1"/>
-        <text x="14" y="21.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" font-weight="600" fill="#c8e6c9">💾 100% Offline SQLite</text>
+        <text x="14" y="21.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" font-weight="600" fill="#c8e6c9">💾 Local SQLite Storage</text>
       </g>
 
       <!-- Badge 2: 365-Day Heatmap -->
@@ -167,7 +167,7 @@
     <g transform="translate(18, 282)">
       <rect width="368" height="26" rx="5" fill="#152018" stroke="#253529" stroke-width="0.8"/>
       <circle cx="14" cy="13" r="3.5" fill="#81c784"/>
-      <text x="26" y="17" font-family="monospace" font-size="10.5" fill="#a5d6a7">Loopback Fastify @ 127.0.0.1:3000 • Schema v9</text>
+      <text x="26" y="17" font-family="monospace" font-size="10.5" fill="#a5d6a7">Local Fastify + SQLite • Schema v10</text>
     </g>
   </g>
 </svg>

@@ -1,6 +1,6 @@
 # Roadmap
 
-Release 1.0.0 adds Windows desktop packaging. Implemented features and historical benchmark observations below are distinct from the open acceptance work listed here. See [current status](status.md).
+Release 1.1.0 updates the Windows desktop package, planning controls, knowledge feedback, and desktop workspaces. An Apple Silicon macOS port is available for internal builds. Implemented features and historical benchmark observations below are distinct from the open acceptance work listed here. See [current status](status.md).
 
 ## Desktop distribution: implemented and remaining
 
@@ -8,7 +8,7 @@ Release 1.0.0 adds Windows desktop packaging. Implemented features and historica
 - Remaining: complete SQLite migration and custom paths, clean-machine installation/upgrade/downgrade, real WebView2/native-dialog acceptance, performance measurements, signing and automatic updates.
 - macOS/Linux/ARM64 native packages and mobile UI are not part of Release 1.0.
 
-## Implemented milestones carried into v1.0.0
+## Historical milestones carried into v1.0.0
 
 1. **BYOD JSON Lines Ingestion (Phases 1–2)**:
    - High-performance JSONL parser with preflight duplicate detection, field mutation tracking, and atomic SQLite commits.
@@ -45,9 +45,16 @@ Release 1.0.0 adds Windows desktop packaging. Implemented features and historica
 12. **Open Source Readiness (Phase 19)**:
     - Zero credentials in Git, comprehensive issue/PR templates, sanitized `.env.example`, and updated docs.
 
+## Delivered since 1.0.1
+
+- SQLite v10 outcome feedback, knowledge profiles, and adaptive topic allocation; Snapshot Bundle v3 preserves that feedback and accepts legacy imports.
+- Local Add one, strict integer review quotas, confirmed Today item removal, and difficulty-count short-circuit filling.
+- Updated Today, Problems, Statistics, and Notes workspaces; Statistics is the default Progress tab. Notes adds unsaved-change protection, formatting, split preview, and focus mode.
+- Internal Apple Silicon macOS build and native CI workflow; public macOS distribution and physical-device acceptance remain separate.
+
 ## Future Community Directions
 
-- **Focus Practice Mode & Live Stopwatch (Zen Mode)**:
+- **Timed Practice Mode & Live Stopwatch**:
   - Floating/pinned real-time practice stopwatch with keyboard shortcuts (e.g., pause/resume).
   - Automated elapsed duration recording upon marking problems complete, eliminating manual time estimates.
   - Distraction-free full-screen Zen mode that temporarily hides sidebar navigation and peripheral stats, keeping only the problem link, timer, and solution scratchpad.

@@ -1,6 +1,6 @@
 # Architecture
 
-The repository baseline implements an offline-first, Bring-Your-Own-Data (BYOD) practice workbench. It provides shared TypeScript contracts, transactional SQLite storage (schema v9), a local Fastify loopback API, a multi-provider LLM assistant tier (Gemini, OpenAI, DeepSeek), and a bilingual React web client, and a Windows Tauri host with a private Node 24.15.0 runtime.
+The repository baseline implements an offline-first, Bring-Your-Own-Data (BYOD) practice workbench. It provides shared TypeScript contracts, transactional SQLite storage (schema v10), a local Fastify loopback API, a multi-provider LLM assistant tier (Gemini, OpenAI, DeepSeek), and a bilingual React web client, and a Windows Tauri host with a private Node 24.15.0 runtime.
 
 The interactive diagram predates the native shell and shows the shared application core; the current native boundary is described below. For an interactive SVG diagram with dark/light themes, search, pan/zoom, and guided views, see the [Interactive Architecture Diagram](diagrams/architecture.html).
 
@@ -46,7 +46,7 @@ flowchart TD
 ## Component structure
 
 - **`packages/contracts`**: Validated Zod schemas and normalization pipelines for JSON Lines parsing, preflight preview, import summaries, catalog filtering, manual practice records, progress snapshots, conflict evaluation, planning lifecycle, and dashboard analytics.
-- **`packages/database`**: High-performance SQLite engine (`DatabaseSync`) managing schema migrations (supported v3–v8 to v9), preflight validation, atomic multi-table writes, point-in-time backups via native Node SQLite backup, daily backup pruning, problem notes store, planning store, dashboard query layer, and offline restore.
+- **`packages/database`**: High-performance SQLite engine (`DatabaseSync`) managing schema migrations (supported v3–v9 to v10), preflight validation, atomic multi-table writes, point-in-time backups via native Node SQLite backup, daily backup pruning, problem notes store, planning store, dashboard query layer, and offline restore.
 - **`packages/domain`**: Pure algorithmic domain logic for deterministic quota calculation (largest remainder), review candidate selection, streak calculation, yearly heatmap matrix generation, and activity pagination.
 - **`apps/server`**: Local Fastify API bound to `127.0.0.1`. Exposes `/api/v1` endpoints for catalog, imports, practice records, progress snapshots, recommendation planning, problem notes, read-only dashboard overview and activity stream, and multi-provider LLM assistant with write serialization mutex and static SPA hosting.
 - **`apps/desktop`**: Rust host and NSIS packaging. Owns native file destinations, parsed external URL launching, session secrets, bounded startup/health checks, and a Job-bound Node child. See [desktop lifecycle and storage](desktop.md).

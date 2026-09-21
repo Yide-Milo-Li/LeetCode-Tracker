@@ -1,5 +1,7 @@
 # Release 1.0 promotional assets
 
+The images in this social folder are historical theme examples. Use the freshly generated [1.1.0 README gallery](../../../README.md) for current UI screenshots.
+
 These images are generated from an isolated synthetic catalog and seeded practice data. The cover and theme matrix are illustrative HTML artwork; the remaining images capture the shared browser UI. They are not native-installer or WebView2 acceptance evidence. Filenames retain their original theme names for link stability.
 
 Regenerate with `npm run build` followed by `npm run assets:social-zh`; local Chrome is required. The script uses a new temporary profile, explicitly disables provider keys, and does not read the private JSONL backup. See the [script guide](../../../scripts/README.md).
@@ -14,6 +16,6 @@ Regenerate with `npm run build` followed by `npm run assets:social-zh`; local Ch
 >
 > 1.0 安装包尚未签名，完整干净系统安装升级和原生界面验收仍待完成。图片使用演示数据。详细限制请阅读 Release 说明。
 
-Release: [v1.0.0](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.0.0).
+Release: [v1.1.0](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.1.0).
 
-Do not describe these assets as proof of live AI availability, universal sub-millisecond latency, rendered LaTeX previews, legal compliance, or zero data leakage. Notes are Markdown source text; raw SQLite backups may contain provider keys. Current behavior and limitations are documented in the [release notes](../../releases/1.0.0.md).
+Do not describe these assets as proof of live AI availability, universal sub-millisecond latency, rendered LaTeX previews, legal compliance, or zero data leakage. Notes offer a lightweight Markdown preview, without a full LaTeX typesetter; raw SQLite backups may contain provider keys. Current behavior and limitations are documented in the [release notes](../../releases/1.1.0.md).

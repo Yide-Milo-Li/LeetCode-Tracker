@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.1.0] - 2026-09-20
+
+- Refresh Today, catalog, Statistics, and Notes desktop layouts; add Notes formatting, split preview, focus mode, and save/discard/cancel switching protection.
+- Add local Add one, confirmed plan-item removal, integer review quotas, equivalent-edit preservation, and difficulty-count short-circuit filling.
+- Add outcome-aware knowledge profiles and adaptive topic planning with constraint repairs.
+- Upgrade SQLite to schema v10 and export Snapshot Bundle v3 with backward-compatible imports.
+- Add internal Apple Silicon macOS packaging and native migration CI alongside Windows x64.
+- Synchronize current documentation and regenerate eight README screenshots with fictional synthetic data.
+- Fix duplicate Notes style property and bilingual loading/filter labels found during release verification.
+- See [release notes](docs/releases/1.1.0.md) for upgrade guidance and verification limits.
+
 ## [1.0.1] - 2026-09-14
 
 - Fix Windows desktop startup when Tauri supplies canonical `\\?\` resource paths. The host safely simplifies the private Node executable and entrypoint paths without changing resource selection or searching PATH.

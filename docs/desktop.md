@@ -6,7 +6,7 @@ LeetCode Tracker provides a native Windows 11 x64 desktop application and an App
 
 The published 1.0.0 host can fail before readiness because Tauri returns a canonical Windows `\\?\` resource path that the bundled Node runtime cannot use as a script entrypoint. Reinstalling the same artifact does not fix this. The 1.0.1 host simplifies those paths safely before spawning Node; it does not reset the database or require manual deletion of lock/WAL files. The regression uses the real bundle and a canonical path containing spaces and Chinese characters.
 
-Release 1.0.1 is an unsigned Windows x64 distribution; download it from [Release 1.0.1](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.0.1). Automated boundary tests and local packaging do not establish clean-machine installation, upgrade compatibility, Windows 10 compatibility, or the full WebView2 acceptance matrix; those checks remain pending. See the [release notes](releases/1.0.1.md).
+Release 1.1.0 is an unsigned Windows x64 distribution; download it from [Release 1.1.0](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.1.0). Automated boundary tests and local packaging do not establish clean-machine installation, upgrade compatibility, Windows 10 compatibility, or the full WebView2 acceptance matrix; those checks remain pending. See the [release notes](releases/1.1.0.md).
 
 The desktop shell packages the shared React user interface, the Fastify `/api/v1` service, and the native SQLite storage engine alongside a private, bundled Node.js 24 runtime. Users can run the application with **zero requirement** to install Node.js, npm, Git, or Rust on their machine.
 
@@ -29,7 +29,7 @@ The desktop shell packages the shared React user interface, the Fastify `/api/v1
 - **Administrator Rights**: **Not required**. The installer uses a per-user installation scope.
 
 ### 1.2 Installation Steps
-1. Download `LeetCode-Tracker_1.0.1_x64-setup.exe` and its checksum from the release page.
+1. Download `LeetCode-Tracker_1.1.0_x64-setup.exe` and its checksum from the release page.
 2. Run the installer. You can select the destination directory (defaults to `%LOCALAPPDATA%\Programs\LeetCode Tracker`).
 3. Launch **LeetCode Tracker** from the desktop shortcut or Start Menu.
 4. On first launch, the application creates a clean local database and guides you to import your self-provided JSONL problem catalog.
@@ -91,14 +91,14 @@ To eliminate orphan background processes if the desktop window crashes or is clo
 ### 3.2 Backup, Restore, and Credential Protection
 - **Full Database Backups**: Automatic transactional SQLite snapshots are saved to the `backups/` directory before schema migrations and bulk data imports.
 - **Portable Snapshot Bundles**: The application supports exporting and importing portable JSON Snapshot Bundles (`.json`). Settings provides one **Export Complete Migration** / **Import Migration** entry for moving a profile between Windows and macOS.
-  - **Complete v2 migration**: Bundle v2 includes the local problem catalog, tags, practice records and operation history, imported progress history, notes, strategies and versions, weekly assignments, daily plans and versions, review state, statistics inputs, and non-sensitive settings. It replaces the target business profile after a preview and confirmation; it does not merge two profiles.
-  - **Cross-platform workflow**: Export v2 on the old device, copy the JSON file to the new device, choose Import Migration, review the source/count summary, and confirm replacement. The same file format works Windows → macOS and macOS → Windows.
+  - **Complete v3 migration**: Bundle v3 includes the local problem catalog, tags, practice records and operation history, imported progress history, notes, strategies and versions, weekly assignments, daily plans and versions, review state, statistics inputs, and non-sensitive settings. It replaces the target business profile after a preview and confirmation; it does not merge two profiles.
+  - **Cross-platform workflow**: Export v3 on the old device, copy the JSON file to the new device, choose Import Migration, review the source/count summary, and confirm replacement. The same file format works Windows → macOS and macOS → Windows.
   - **Secret Exclusion**: Provider API keys (Gemini, OpenAI, DeepSeek) are **automatically omitted** from exported bundles to avoid accidental credential leakage.
   - **Local Secret Preservation**: Importing a snapshot bundle updates settings and records without overwriting or clearing existing local API keys.
   - **Untrusted Imports**: Incoming key fields are ignored even when nonempty; an unset local key stays unset.
 - **Safety and limits**: The target database is backed up before replacement; malformed, unknown-version, broken-reference, oversized (>64 MiB), backup, or write failures leave the original profile in place. Restore blocks concurrent profile writes and clears stale planning/preview state after success.
 - API keys remain in the local SQLite settings store without operating-system credential encryption. Raw SQLite backups can contain them. Portable bundles exclude keys by design.
-- v1 snapshot imports remain available for backward compatibility but are labelled partial restore. v2 is the complete migration format. API keys must be configured again on the target device when they were not already present.
+- v1 snapshot imports remain available for backward compatibility but are labelled partial restore. v2 remains readable, while v3 is the current complete migration format and preserves schema-v10 outcome feedback. API keys must be configured again on the target device when they were not already present.
 
 ---
 
@@ -141,7 +141,7 @@ cargo clippy --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --all-ta
 The Windows CI job prepares the pinned private runtime, runs isolated sidecar and Rust tests, and builds an unsigned installer artifact. Adding this job does not mean a remote CI run has passed.
 
 The completed installer will be generated at:
-`apps/desktop/src-tauri/target/release/bundle/nsis/LeetCode Tracker_1.0.1_x64-setup.exe`
+`apps/desktop/src-tauri/target/release/bundle/nsis/LeetCode Tracker_1.1.0_x64-setup.exe`
 
 The Apple Silicon internal DMG is generated at:
 `apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/`

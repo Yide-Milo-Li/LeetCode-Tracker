@@ -1,10 +1,10 @@
 # Desktop workflow guide
 
-The same desktop UI runs in the Windows 1.0.0 app and source-mode browsers. Native mode shows recoverable startup status, uses native dialogs for exports, and opens allowed external links in the system browser. See [installation and runtime behavior](desktop.md).
+The same desktop UI runs in the Windows 1.1.0 app and source-mode browsers. Native mode shows recoverable startup status, uses native dialogs for exports, and opens allowed external links in the system browser. See [installation and runtime behavior](desktop.md).
 
 ## Four places to work
 
-Today is the homepage. Problems is the local catalog. Notes provides problem Markdown editing, practice timelines, and export. Progress contains Records and Statistics, with Records selected by default. Settings remains at the sidebar bottom. The sidebar starts as a 64px icon rail; use Expand sidebar for 216px labelled navigation. This browser remembers the choice. Hover or focus icons for their names; Escape dismisses a tooltip. Row actions, reset, refresh and pagination use labelled icons, while saves and destructive actions retain text.
+Today is the homepage. Problems is the local catalog. Notes provides problem Markdown editing, practice timelines, and export. Progress contains Statistics and Records, with Statistics selected by default. Settings remains at the sidebar bottom. The sidebar starts as a 64px icon rail; use Expand sidebar for 216px labelled navigation. This browser remembers the choice. Hover or focus icons for their names; Escape dismisses a tooltip. Row actions, reset, refresh and pagination use labelled icons, while saves and destructive actions retain text.
 
 Today shows one locally selected encouragement below its heading. The library contains 240 paired English/Chinese lines, with 60 for each period: morning (06:00–11:00), daytime (11:00–17:00), evening (17:00–22:00), and night (22:00–06:00). Selection follows the saved timezone, or the browser timezone until configured. Night keeps the same line across midnight; changing language translates the same line. No extra AI request is made. Plan details exposes timezone and version metadata.
 
@@ -84,7 +84,11 @@ Existing strategies display the planner's actual rounded counts. Saving without 
 
 ## Problem notes and solution reflections
 
-The Notes Workspace provides master-detail browsing and editing for problem reflections, complexity notes, code snippets, and knowledge base exports.
+The Notes Workspace provides a filterable master list, formatting toolbar, and Edit / Split / Preview modes for problem reflections, complexity notes, code snippets, and knowledge exports. Its preview supports a lightweight Markdown subset; math is styled as text rather than typeset by a full LaTeX engine.
+
+- **Focus and save**: Ctrl/Cmd+\ toggles Notes focus mode; Ctrl/Cmd+S saves the active draft. Focus mode starts off. The practice timeline can be expanded separately.
+- **Unsaved changes**: Selecting another problem offers Save and switch, Discard and switch, or Cancel. Saving must succeed before switching; Cancel preserves the current draft.
+- **Quick copy**: The Copy menu exposes Obsidian and Notion card formats.
 
 - **Scope independence**: A problem's inclusion in "Practiced Only" (`scope=practiced`) strictly requires active practice logs or valid progress snapshots; writing or having notes never alters practice categorization.
 - **Default blank editing & on-demand templates**: New problem notes open completely blank with instructional placeholders. Clicking **Insert Template** inserts a language-specific skeleton outline without default complexity answers or placeholder code. The action is enabled only when the editor is empty, and switching language never replaces or overwrites in-progress drafts.

@@ -483,6 +483,57 @@ describe('NotesWorkspace Component', () => {
     // Draft must NOT be overwritten
     assert.equal(textarea.value, 'My custom in-progress draft');
   });
+
+  it('defaults to normal mode (not Zen mode) and toggles Zen mode via button and keyboard shortcut', async () => {
+    mock.method(api, 'listNotes', async () => ({
+      items: [
+        {
+          questionId: '1',
+          questionFrontendId: '1',
+          title: 'Two Sum',
+          titleSlug: 'two-sum',
+          url: 'https://leetcode.com/problems/two-sum/',
+          difficulty: 'Easy' as const,
+          tags: ['Array'],
+          isPaidOnly: false,
+          totalPractices: 1,
+          hasAccepted: true,
+          hasCustomNote: false,
+          customNoteUpdatedAt: null,
+          reviewStage: null,
+          latestPracticeNotes: null,
+        },
+      ],
+      total: 1,
+    }));
+    mock.method(api, 'getNote', async () => ({ note: null }));
+    mock.method(api, 'getPracticeRecords', async () => ({ total: 0, page: 1, limit: 100, items: [] }));
+
+    await act(async () => {
+      render(<NotesWorkspace lang="zh" />);
+    });
+
+    // 1. Verify default view is NOT Zen Mode
+    const zenButtons = screen.getAllByRole('button', { name: /专注模式|专注/i });
+    assert.ok(zenButtons.length >= 1);
+    const masterPane = document.querySelector('.notes-master-pane') as HTMLElement;
+    assert.ok(masterPane);
+    assert.notEqual(masterPane.style.display, 'none');
+
+    // 2. Click Zen button to enter Zen mode
+    await act(async () => {
+      fireEvent.click(zenButtons[0]);
+    });
+    assert.equal(masterPane.style.display, 'none');
+    assert.ok(screen.getAllByRole('button', { name: /退出专注/i }).length >= 1);
+
+    // 3. Toggle via shortcut Ctrl+\ to exit Zen mode
+    await act(async () => {
+      fireEvent.keyDown(window, { key: '\\', ctrlKey: true });
+    });
+    assert.notEqual(masterPane.style.display, 'none');
+    assert.ok(screen.getAllByRole('button', { name: /专注模式|专注/i }).length >= 1);
+  });
 });
 
 describe('NotesWorkspace unsaved changes guard', () => {
@@ -652,6 +703,12 @@ describe('QuickCopyButtons Component', () => {
       );
     });
 
+    // Click dropdown trigger to open options
+    const copyTrigger = screen.getByRole('button', { name: /复制/i });
+    await act(async () => {
+      fireEvent.click(copyTrigger);
+    });
+
     const obsidianBtn = screen.getByRole('button', { name: /复制为 Obsidian 卡片/i });
     await act(async () => {
       fireEvent.click(obsidianBtn);
@@ -673,6 +730,12 @@ describe('QuickCopyButtons Component', () => {
           record={{ durationMinutes: 20, notes: 'Array one pass' }}
         />
       );
+    });
+
+    // Click dropdown trigger to open options
+    const copyTrigger = screen.getByRole('button', { name: /Copy/i });
+    await act(async () => {
+      fireEvent.click(copyTrigger);
     });
 
     const notionBtn = screen.getByRole('button', { name: /Copy for Notion/i });
@@ -768,7 +831,11 @@ describe('QuickNoteDrawer Component', () => {
     // Unfilled template badge shown
     assert.ok(screen.getByText(/Template Unedited/i));
 
-    // When copying Notion card, it should fall back to practice notes instead of blank template
+    // When copying Notion card, open dropdown first then copy
+    const copyTrigger = screen.getByRole('button', { name: /Copy/i });
+    await act(async () => {
+      fireEvent.click(copyTrigger);
+    });
     const notionBtn = screen.getByRole('button', { name: /Copy for Notion/i });
     await act(async () => {
       fireEvent.click(notionBtn);
@@ -907,4 +974,3 @@ describe('TodayProblemRow note entry consolidation', () => {
     assert.equal(screen.getAllByRole('button', { name: /速查往期笔记/i }).length, 1);
   });
 });
-

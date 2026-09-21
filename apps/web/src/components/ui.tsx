@@ -28,7 +28,7 @@ export function PageHeader({
   back,
 }: {
   title: string;
-  description?: string;
+  description?: ReactNode;
   actions?: ReactNode;
   back?: { label: string; run: () => void };
 }) {
@@ -42,7 +42,14 @@ export function PageHeader({
       <header className="page-header">
         <div>
           <h1>{title}</h1>
-          {description && <p key={description} className="page-description">{description}</p>}
+          {description && (
+            <p
+              key={typeof description === 'string' ? description : undefined}
+              className="page-description"
+            >
+              {description}
+            </p>
+          )}
         </div>
         <div className="action-row">{actions}</div>
       </header>

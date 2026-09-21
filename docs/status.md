@@ -1,5 +1,15 @@
 # Implementation status
 
+## Release 1.1.0 — current delivery baseline
+
+The current tree includes the Today / Problems / Statistics / Notes desktop refresh, note-switch protection, local Add one and item removal, integer review quotas, outcome-aware knowledge profiles, SQLite v10, and Snapshot Bundle v3. Windows x64 is the public release target; Apple Silicon macOS remains an internal build. See [1.1.0 release notes](releases/1.1.0.md).
+
+Local release verification passed: **418 JavaScript/Web/sidecar tests (285 backend/platform + 132 Web DOM + 1 isolated sidecar) and 7 Rust tests**, TypeScript, production build, documentation links, Rust formatting/clippy, and Windows x64 NSIS packaging. Screenshots were regenerated from the production frontend using an isolated fictional 4,046-problem catalog and synthetic history. No private dataset or live provider was used. The capture run checked page titles, populated headings, absence of error overlays, catalog-import navigation, and Notes focus button/keyboard behavior; no browser exceptions or console warnings/errors were recorded. Remote results are tracked independently in [GitHub Actions](https://github.com/Yide-Milo-Li/LeetCode-Tracker/actions). Vite plugin-option deprecation notices and a non-failing MSVC linker informational warning were observed. Clean-VM installation, populated-profile installer upgrade/downgrade, full WebView2/native-dialog acceptance, physical-Mac behavior, and fresh live-provider verification remain unperformed.
+
+## Historical implementation checkpoints
+
+The phase and older release sections below retain the evidence and limitations recorded at those checkpoints; they are not the current version or current remote-CI status.
+
 ## Phase 24 — Add-one localization, response feedback & concurrency mutex
 
 Implemented zero-model local append and comprehensive interaction protection for Today's "Add one" action under `.local/plans/phase-24-add-one-and-today-counts.md`.
@@ -11,11 +21,11 @@ Implemented zero-model local append and comprehensive interaction protection for
 
 ## Release 1.0.1 — Windows startup repair
 
-A user-reported 1.0.0 startup failure was reproduced: canonical Windows resource paths from Tauri reach Node with a verbatim prefix, causing Node to exit before its ready message. The 1.0.1 repair safely simplifies only equivalent Win32 paths at command construction. A new native process integration test exercises the real bundle/private runtime under a canonical path with spaces and Chinese characters; all seven Rust tests pass. The 1.0.0 artifact remains unchanged for historical integrity; use the 1.0.1 installer.
+A user-reported 1.0.0 startup failure was reproduced: canonical Windows resource paths from Tauri reach Node with a verbatim prefix, causing Node to exit before its ready message. The 1.0.1 repair safely simplifies only equivalent Win32 paths at command construction. A new native process integration test exercises the real bundle/private runtime under a canonical path with spaces and Chinese characters; all seven Rust tests pass. The 1.0.0 artifact remains unchanged for historical integrity; use the current 1.1.0 installer.
 
 ## Phase 21 — macOS Apple Silicon port and complete device migration
 
-The current implementation branch adds an Apple Silicon (`aarch64-apple-darwin`) macOS 14+ Tauri configuration, a pinned private Node 24.15.0 Darwin runtime, macOS URL/window lifecycle handling, and separate Windows/macOS bundle commands. Windows x64 NSIS remains supported. Snapshot Bundle v2 now exports and restores the full schema-v9 business profile, including the catalog, saved practice progress and history, notes, plans, review state, and non-sensitive settings; API keys are excluded and target keys are preserved. Settings exposes one complete migration entry with preview and replacement confirmation. Legacy v1 import remains available as partial restore.
+At the Phase 21 checkpoint, the implementation added an Apple Silicon (`aarch64-apple-darwin`) macOS 14+ Tauri configuration, a pinned private Node 24.15.0 Darwin runtime, macOS URL/window lifecycle handling, and separate Windows/macOS bundle commands. Windows x64 NSIS remains supported. Snapshot Bundle v2 now exports and restores the full schema-v9 business profile, including the catalog, saved practice progress and history, notes, plans, review state, and non-sensitive settings; API keys are excluded and target keys are preserved. Settings exposes one complete migration entry with preview and replacement confirmation. Legacy v1 import remains available as partial restore.
 
 Local evidence completed on Windows: TypeScript check, full JavaScript/Web/sidecar suite, Vite production and e2e-mode builds, migration transfer export/restore with all 22 tables, Rust format/test/clippy, and a Windows x64 NSIS installer build. Root `npm audit` reports zero known vulnerabilities. GitHub Actions now defines `macos-14` package and isolated WKWebView/WebdriverIO jobs, but those remote jobs have not run in this workspace. A physical Mac has not been used; Gatekeeper, first-launch approval, native dialogs, Dock reopen, and real Windows ↔ macOS user-data transfer remain manual acceptance gates. No public Release or notarized package was produced.
 

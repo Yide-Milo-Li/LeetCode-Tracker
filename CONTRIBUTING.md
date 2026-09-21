@@ -20,6 +20,10 @@ Use clear names, small modules, and English comments that explain contracts, inv
 
 Maintain Chinese and English interface strings together; keep technical documentation in English. Never label synthetic or fixture-based verification as a successful live integration.
 
+## Release and showcase maintenance
+
+Keep workspace manifests, lockfiles, Tauri/Cargo, API health version, and migration bundle producer version aligned. Update current guides and README links without rewriting historical release notes. Run `npm run assets:screenshots` after the production build to refresh the fictional-data gallery; inspect every output. Record automated/local evidence separately from remote CI and physical-device checks. Publish installers and SHA-256 checksums under a new immutable tag. Commit titles use `type: contents` with a lowercase type and concise English summary.
+
 ## Sensitive data
 
 Use synthetic fixtures and example credentials. Never commit databases, login cookies, tokens, raw account exports, or personal verification reports. Follow the [security policy](SECURITY.md) when reporting a problem.
