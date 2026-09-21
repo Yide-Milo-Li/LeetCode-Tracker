@@ -65,7 +65,7 @@ Ten palettes, a high-contrast option, English/Chinese text, and light/dark/syste
 | --- | --- |
 | `1` / `2` / `3` / `4` | Today / Problems / Progress / Notes |
 | `/` | Focus catalog search |
-| `n` | Quick note for the active problem |
+| `n` | Open manual practice entry |
 | `?` | Show keyboard help |
 | `Esc` | Dismiss the active overlay |
 

@@ -112,7 +112,7 @@ Practice records support optional lightweight outcome feedback: `outcome: 'indep
 
 Full device migration supports Migration Bundle v3 (`/api/v1/bundle/export?version=3`) preserving the `outcome` column, with backward compatibility for v1 and v2 bundles (which map missing outcomes to `null`).
 
-`durationMinutes` is optional on creation and defaults to `null`; supplied values must be positive safe integers. PATCH omission preserves it and explicit `null` clears it. Migration preserves old durations as unknown and never parses notes. There are no duration rankings or timing aggregates.
+`durationMinutes` is optional on creation and defaults to `null`; supplied values must be positive safe integers. PATCH omission preserves it and explicit `null` clears it. Migration preserves old durations as unknown and never parses notes. Activity views aggregate recorded durations, and topic insights use completed duration samples; missing durations remain unknown rather than zero. There are no user duration rankings.
 
 `POST /api/v1/practice-records` accepts optional `operationId`. The same normalized content and ID return the original row, including after reopening storage. Different content with the same ID is rejected. New independent practice uses a fresh ID. `GET /api/v1/practice-records/:id` reads the exact record. PATCH accepts `expectedRevision`; DELETE accepts the same optional query parameter. A stale revision returns 409 instead of overwriting newer work. Revocation retains audit and only removes that record as valid evidence.
 
