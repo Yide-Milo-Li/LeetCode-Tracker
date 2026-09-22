@@ -679,6 +679,39 @@ describe('NotesWorkspace unsaved changes guard', () => {
     dom.window.dispatchEvent(dirtyEvent);
     assert.equal(dirtyEvent.defaultPrevented, true);
   });
+
+  it('allows switching to other notes after jumping in with initialFrontendId', async () => {
+    mockEditorProblems();
+    let cleared = false;
+    await act(async () => {
+      render(
+        <NotesWorkspace
+          lang="en"
+          initialFrontendId="2"
+          onClearInitialFrontendId={() => {
+            cleared = true;
+          }}
+        />
+      );
+    });
+
+    assert.equal(cleared, true);
+    assert.equal(noteEditor().value, '2 original');
+
+    // Click Problem A ('1') in the list
+    await act(async () => {
+      fireEvent.click(screen.getByText('Problem A'));
+    });
+
+    // Verify it switched to Problem A and was NOT reverted to Problem B
+    assert.equal(noteEditor().value, '1 original');
+
+    // Click Problem B ('2') again
+    await act(async () => {
+      fireEvent.click(screen.getByText('Problem B'));
+    });
+    assert.equal(noteEditor().value, '2 original');
+  });
 });
 
 describe('QuickCopyButtons Component', () => {
@@ -746,6 +779,41 @@ describe('QuickCopyButtons Component', () => {
     assert.ok(lastCopiedText.includes('🎯 **[1. Two Sum](https://leetcode.com/problems/two-sum/)**'));
     assert.ok(lastCopiedText.includes('array, hash-table'));
     assert.ok(lastCopiedText.includes('Array one pass'));
+  });
+
+  it('respects align prop for dropdown menu position', async () => {
+    // Default / left alignment
+    const { unmount } = render(
+      <QuickCopyButtons
+        lang="en"
+        problem={sampleProblem}
+        align="left"
+      />
+    );
+    const copyTrigger = screen.getByRole('button', { name: /Copy/i });
+    await act(async () => {
+      fireEvent.click(copyTrigger);
+    });
+    const menuLeft = document.querySelector('.notes-dropdown-menu');
+    assert.ok(menuLeft);
+    assert.ok(!menuLeft.classList.contains('notes-dropdown-menu-right'));
+    unmount();
+
+    // Right alignment
+    render(
+      <QuickCopyButtons
+        lang="en"
+        problem={sampleProblem}
+        align="right"
+      />
+    );
+    const copyTriggerRight = screen.getByRole('button', { name: /Copy/i });
+    await act(async () => {
+      fireEvent.click(copyTriggerRight);
+    });
+    const menuRight = document.querySelector('.notes-dropdown-menu');
+    assert.ok(menuRight);
+    assert.ok(menuRight.classList.contains('notes-dropdown-menu-right'));
   });
 });
 
@@ -897,13 +965,23 @@ describe('TodayProblemRow note entry consolidation', () => {
     assert.equal(screen.queryByText(/Notes/), null);
     assert.equal(document.querySelector('.review-note-trigger'), null);
 
-    // 3. Verify the action bar has exactly ONE quick note button
-    const quickNoteButtons = screen.getAllByRole('button', { name: /速查往期笔记/i });
-    assert.equal(quickNoteButtons.length, 1);
+    // 3. Verify the action bar has exactly ONE note button labeled "笔记"
+    const noteButtons = screen.getAllByRole('button', { name: '笔记' });
+    assert.equal(noteButtons.length, 1);
 
-    // 4. Click the single quick note action button and verify onOpenQuickNote is triggered
+    // 4. Click the note button to open dropdown menu
     await act(async () => {
-      fireEvent.click(quickNoteButtons[0]);
+      fireEvent.click(noteButtons[0]);
+    });
+
+    // 5. Verify dropdown menu options: "去工作区写新笔记" and "速查过往笔记"
+    assert.ok(screen.getByText('去工作区写新笔记'));
+    const quickNoteOption = screen.getByText('速查过往笔记');
+    assert.ok(quickNoteOption);
+
+    // 6. Click "速查过往笔记" and verify onOpenQuickNote is triggered
+    await act(async () => {
+      fireEvent.click(quickNoteOption);
     });
     assert.equal(triggeredItem, reviewItem);
   });
@@ -937,13 +1015,23 @@ describe('TodayProblemRow note entry consolidation', () => {
     // 2. Verify no Notes suffix text
     assert.equal(screen.queryByText(/\(Notes\)/), null);
 
-    // 3. Verify exactly ONE quick notes action button
-    const quickNoteButtons = screen.getAllByRole('button', { name: /Quick notes/i });
-    assert.equal(quickNoteButtons.length, 1);
+    // 3. Verify exactly ONE note button labeled "Notes"
+    const noteButtons = screen.getAllByRole('button', { name: 'Notes' });
+    assert.equal(noteButtons.length, 1);
 
-    // 4. Click triggers onOpenQuickNote
+    // 4. Click note button to open dropdown menu
     await act(async () => {
-      fireEvent.click(quickNoteButtons[0]);
+      fireEvent.click(noteButtons[0]);
+    });
+
+    // 5. Verify dropdown menu options
+    assert.ok(screen.getByText('Write in Notes Workspace'));
+    const quickNoteOption = screen.getByText('Quick Check Past Notes');
+    assert.ok(quickNoteOption);
+
+    // 6. Click triggers onOpenQuickNote
+    await act(async () => {
+      fireEvent.click(quickNoteOption);
     });
     assert.equal(triggeredItem, reviewItem);
   });
@@ -971,6 +1059,6 @@ describe('TodayProblemRow note entry consolidation', () => {
 
     assert.equal(screen.queryByText('复习'), null);
     assert.equal(screen.queryByText('Review'), null);
-    assert.equal(screen.getAllByRole('button', { name: /速查往期笔记/i }).length, 1);
+    assert.equal(screen.getAllByRole('button', { name: '笔记' }).length, 1);
   });
 });

@@ -184,10 +184,16 @@ function MarkdownPreview({ content, lang }: { content: string; lang: Language })
 export interface NotesWorkspaceProps {
   lang: Language;
   initialFrontendId?: string | null;
+  /** Clear external initial frontend ID once consumed to prevent deadlock on subsequent switches. */
+  onClearInitialFrontendId?: () => void;
 }
 
 /** Browse and edit notes while keeping asynchronous responses owned by their selection visit. */
-export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps) {
+export function NotesWorkspace({
+  lang,
+  initialFrontendId,
+  onClearInitialFrontendId,
+}: NotesWorkspaceProps) {
   const t = translations[lang];
   const zh = lang === 'zh';
 
@@ -290,12 +296,28 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
 
   // Retain selected summary or update from current items if present
   useEffect(() => {
+    let active = true;
     if (selectedId) {
       const matched = items.find((it) => it.questionFrontendId === selectedId);
       if (matched) {
         setSelectedSummary(matched);
+      } else {
+        // If not in current items page (e.g. jumped from external view), fetch summary asynchronously
+        api
+          .listNotes({ search: selectedId, limit: 1 })
+          .then((res) => {
+            if (!active) return;
+            const found = res.items.find((it) => it.questionFrontendId === selectedId);
+            if (found) {
+              setSelectedSummary(found);
+            }
+          })
+          .catch(() => {});
       }
     }
+    return () => {
+      active = false;
+    };
   }, [items, selectedId]);
 
   /** Fetch the current filters and return cancellation for superseded list requests. */
@@ -525,16 +547,23 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
     [selectedId, hasUnsavedChanges],
   );
 
-  const isInitialMount = useRef(true);
+  const lastHandledInitialId = useRef<string | null>(null);
   useEffect(() => {
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      return;
+    if (initialFrontendId && initialFrontendId !== lastHandledInitialId.current) {
+      lastHandledInitialId.current = initialFrontendId;
+      if (initialFrontendId !== selectedId) {
+        if (hasUnsavedChanges) {
+          setPendingTargetId(initialFrontendId);
+          setShowUnsavedModal(true);
+        } else {
+          setSelectedId(initialFrontendId);
+        }
+      }
+      onClearInitialFrontendId?.();
+    } else if (!initialFrontendId) {
+      lastHandledInitialId.current = null;
     }
-    if (initialFrontendId && initialFrontendId !== selectedId) {
-      handleSelectProblem(initialFrontendId);
-    }
-  }, [initialFrontendId, selectedId, handleSelectProblem]);
+  }, [initialFrontendId, selectedId, hasUnsavedChanges, onClearInitialFrontendId]);
 
   /** Discard unsaved modifications and switch to the pending target problem. */
   const handleDiscardAndSwitch = useCallback(() => {
@@ -1004,6 +1033,7 @@ export function NotesWorkspace({ lang, initialFrontendId }: NotesWorkspaceProps)
                       notes: selectedSummary.latestPracticeNotes,
                     }}
                     customNote={noteContent}
+                    align="right"
                   />
 
                   <ExportLink

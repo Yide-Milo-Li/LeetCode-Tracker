@@ -520,7 +520,11 @@ export function App() {
             )}
             {visited.has('notes') && (
               <div hidden={view !== 'notes'} id="view-notes">
-                <NotesWorkspace lang={lang} initialFrontendId={selectedNoteProblem} />
+                <NotesWorkspace
+                  lang={lang}
+                  initialFrontendId={selectedNoteProblem}
+                  onClearInitialFrontendId={() => setSelectedNoteProblem(null)}
+                />
               </div>
             )}
             {visited.has('problems') && (

@@ -936,7 +936,7 @@ describe('Phase 24: Add-one UI Loading, Feedback, and Concurrency Mutex', () => 
     }
 
     // 3. Read-only actions remain enabled and accessible
-    const quickNoteButtons = screen.getAllByRole('button', { name: /Quick notes/i });
+    const quickNoteButtons = screen.getAllByRole('button', { name: translations.en.noteButtonLabel });
     for (const noteBtn of quickNoteButtons) {
       assert.equal((noteBtn as HTMLButtonElement).disabled, false);
     }

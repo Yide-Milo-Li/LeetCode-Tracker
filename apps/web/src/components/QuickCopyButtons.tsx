@@ -24,6 +24,8 @@ export interface QuickCopyButtonsProps {
   };
   customNote?: string | null;
   compact?: boolean;
+  /** Alignment of the dropdown menu relative to the trigger button ('left' | 'right'). Defaults to 'left'. */
+  align?: 'left' | 'right';
 }
 
 export function QuickCopyButtons({
@@ -32,6 +34,7 @@ export function QuickCopyButtons({
   record,
   customNote,
   compact = false,
+  align = 'left',
 }: QuickCopyButtonsProps) {
   const t = translations[lang];
   const [isOpen, setIsOpen] = useState(false);
@@ -118,7 +121,11 @@ export function QuickCopyButtons({
       </button>
 
       {isOpen && (
-        <div className="notes-dropdown-menu notes-dropdown-menu-right" role="menu" style={{ minWidth: '210px', whiteSpace: 'nowrap' }}>
+        <div
+          className={`notes-dropdown-menu${align === 'right' ? ' notes-dropdown-menu-right' : ''}`}
+          role="menu"
+          style={{ minWidth: '210px', whiteSpace: 'nowrap' }}
+        >
           <button
             type="button"
             className="notes-dropdown-item"

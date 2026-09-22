@@ -2,8 +2,8 @@
  * Single task row component in Today's plan view.
  * Renders reliable completion circle, topic tags with overflow dropdown, and contextual action links.
  */
-import React from 'react';
-import { Check, Circle, RefreshCw, ExternalLink, Plus, BookMarked, Trash2 } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Check, Circle, RefreshCw, ExternalLink, Plus, BookMarked, BookOpen, PenLine, Trash2 } from 'lucide-react';
 import type { PlanItem } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
@@ -50,6 +50,30 @@ export function TodayProblemRow({
   const zh = lang === 'zh';
   const t = translations[lang];
   const workspace = useWorkspace();
+
+  const [isNoteMenuOpen, setIsNoteMenuOpen] = useState(false);
+  const noteMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (noteMenuRef.current && !noteMenuRef.current.contains(e.target as Node)) {
+        setIsNoteMenuOpen(false);
+      }
+    }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        setIsNoteMenuOpen(false);
+      }
+    }
+    if (isNoteMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      window.addEventListener('keydown', handleKeyDown);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isNoteMenuOpen]);
 
   const reasonText = item.reason[lang] || item.reason.en;
 
@@ -137,15 +161,57 @@ export function TodayProblemRow({
       </div>
 
       <div className="problem-actions">
-        <Tooltip text={zh ? '速查往期笔记' : 'Quick notes'} position="top">
-          <button
-            className="btn-icon"
-            aria-label={zh ? '速查往期笔记' : 'Quick notes'}
-            onClick={() => onOpenQuickNote?.(item)}
-          >
-            <BookMarked size={18} />
-          </button>
-        </Tooltip>
+        <div className="notes-dropdown" ref={noteMenuRef} style={{ position: 'relative', display: 'inline-block' }}>
+          <Tooltip text={t.noteButtonLabel} position="top" disabled={isNoteMenuOpen}>
+            <button
+              type="button"
+              className="btn-icon"
+              aria-label={t.noteButtonLabel}
+              aria-expanded={isNoteMenuOpen}
+              aria-haspopup="true"
+              onClick={() => setIsNoteMenuOpen((open) => !open)}
+            >
+              <BookMarked size={18} />
+            </button>
+          </Tooltip>
+
+          {isNoteMenuOpen && (
+            <div
+              className="notes-dropdown-menu notes-dropdown-menu-right"
+              role="menu"
+              style={{ minWidth: '180px', whiteSpace: 'nowrap' }}
+            >
+              <button
+                type="button"
+                className="notes-dropdown-item"
+                role="menuitem"
+                onClick={() => {
+                  setIsNoteMenuOpen(false);
+                  workspace.navigate('notes', item.problem.questionFrontendId);
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <PenLine size={14} style={{ color: 'var(--primary)' }} />
+                  <span>{t.writeNewNoteInWorkspace}</span>
+                </div>
+              </button>
+              <button
+                type="button"
+                className="notes-dropdown-item"
+                role="menuitem"
+                onClick={() => {
+                  setIsNoteMenuOpen(false);
+                  onOpenQuickNote?.(item);
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <BookOpen size={14} style={{ color: 'var(--accent, #6366f1)' }} />
+                  <span>{t.quickCheckPastNotes}</span>
+                </div>
+              </button>
+            </div>
+          )}
+        </div>
         <Tooltip text={t.copyObsidianCard} position="top">
           <QuickCopyButtons
             lang={lang}
