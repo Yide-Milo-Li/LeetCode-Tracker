@@ -1055,6 +1055,7 @@ textarea::placeholder {
   padding: 12px 16px;
   border-radius: 8px;
   font-size: 14px;
+  line-height: 1.6;
   overflow-wrap: anywhere;
 }
 .feedback > svg,
@@ -1062,9 +1063,29 @@ textarea::placeholder {
   flex-shrink: 0;
   margin-top: 3px;
 }
-.feedback > div {
+.feedback > div,
+.alert > div,
+.alert > span {
   flex: 1;
   min-width: 0;
+}
+.feedback ul,
+.feedback ol,
+.feedback p,
+.alert ul,
+.alert ol,
+.alert p {
+  margin: 0;
+}
+.feedback ul,
+.feedback ol,
+.alert ul,
+.alert ol {
+  padding-left: 20px;
+}
+.feedback ul > li + li,
+.alert ul > li + li {
+  margin-top: 4px;
 }
 .feedback.error,
 .alert-danger {

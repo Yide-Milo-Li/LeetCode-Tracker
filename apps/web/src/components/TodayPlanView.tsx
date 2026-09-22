@@ -479,11 +479,15 @@ function TodayPlanViewInner({
           )}
           {plan.notices.length > 0 && (
             <Feedback tone="warning">
-              <ul>
-                {plan.notices.map((notice, index) => (
-                  <li key={index}>{notice[lang] || notice.en}</li>
-                ))}
-              </ul>
+              {plan.notices.length === 1 ? (
+                plan.notices[0][lang] || plan.notices[0].en
+              ) : (
+                <ul>
+                  {plan.notices.map((notice, index) => (
+                    <li key={index}>{notice[lang] || notice.en}</li>
+                  ))}
+                </ul>
+              )}
             </Feedback>
           )}
           <div className="today-problems">
