@@ -1,8 +1,8 @@
 # Implementation status
 
-## Release 1.1.0 — current delivery baseline
+## Release 1.1.1 — current delivery baseline
 
-The current tree includes the Today / Problems / Statistics / Notes desktop refresh, note-switch protection, local Add one and item removal, integer review quotas, outcome-aware knowledge profiles, SQLite v10, and Snapshot Bundle v3. Windows x64 is the public release target; Apple Silicon macOS remains an internal build. See [1.1.0 release notes](releases/1.1.0.md).
+The current tree includes the Today / Problems / Statistics / Notes desktop refresh, note-switch protection, local Add one and item removal, integer review quotas, outcome-aware knowledge profiles, SQLite v10, and Snapshot Bundle v3, along with alert/feedback icon alignment fixes and Today notice display polish. Windows x64 is the public release target; Apple Silicon macOS remains an internal build. See [1.1.1 release notes](releases/1.1.1.md).
 
 Local release verification passed: **418 JavaScript/Web/sidecar tests (285 backend/platform + 132 Web DOM + 1 isolated sidecar) and 7 Rust tests**, TypeScript, production build, documentation links, Rust formatting/clippy, and Windows x64 NSIS packaging. Screenshots were regenerated from the production frontend using an isolated fictional 4,046-problem catalog and synthetic history. No private dataset or live provider was used. The capture run checked page titles, populated headings, absence of error overlays, catalog-import navigation, and Notes focus button/keyboard behavior; no browser exceptions or console warnings/errors were recorded. Remote results are tracked independently in [GitHub Actions](https://github.com/Yide-Milo-Li/LeetCode-Tracker/actions). Vite plugin-option deprecation notices and a non-failing MSVC linker informational warning were observed. Clean-VM installation, populated-profile installer upgrade/downgrade, full WebView2/native-dialog acceptance, physical-Mac behavior, and fresh live-provider verification remain unperformed.
 

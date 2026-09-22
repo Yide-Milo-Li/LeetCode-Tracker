@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.1.1] - 2026-09-22
+
+- Fix warning and feedback alert icon vertical misalignment by explicitly setting feedback line-height and resetting child list and paragraph margins.
+- Clean up Today plan notice rendering to display single notices directly without unnecessary bullet points or list indentation.
+- See [release notes](docs/releases/1.1.1.md) for details.
+
 ## [1.1.0] - 2026-09-20
 
 - Refresh Today, catalog, Statistics, and Notes desktop layouts; add Notes formatting, split preview, focus mode, and save/discard/cancel switching protection.
