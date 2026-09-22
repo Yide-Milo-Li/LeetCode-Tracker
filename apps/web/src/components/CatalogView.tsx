@@ -13,6 +13,7 @@ import { translations, type Language } from '../i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
 import { Dialog, Feedback, Field, PageHeader, Pagination, IconButton, Tooltip } from './ui.tsx';
 import { PracticeEditor, PracticeHistory } from './PracticeWorkspace.tsx';
+import { PracticeTimerButton } from './PracticeTimer.tsx';
 import { ExportLink } from './ExportLink.tsx';
 
 /** Render only HTTP(S) links from user-provided catalog metadata. */
@@ -335,6 +336,7 @@ export function CatalogView({
                     <div className="action-row">
                       <IconButton icon={Plus} label={t.logPractice}
                         onClick={() => workspace.openPractice({ mode: 'manual', problem })} />
+                      <PracticeTimerButton lang={lang} frontendId={problem.questionFrontendId} title={problem.title} />
                       {safeUrl(problem.url) && (
                         <Tooltip text={t.openLink} side="top"><a
                           className="btn-icon"

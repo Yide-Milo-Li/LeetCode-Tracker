@@ -60,7 +60,7 @@
     "assets:screenshots": "node --import tsx scripts/generate-readme-assets.ts",
     "assets:social-zh": "node --import tsx scripts/generate-social-assets-zh.ts",
     "docs:check": "node scripts/check-docs.ts",
-    "test:web": "node --max-old-space-size=4096 --import tsx --test tests/web-theme-palette.test.tsx tests/web-focus-session-mastery.test.tsx tests/web-refactor.test.tsx tests/web-components.test.tsx tests/web-planning-components.test.tsx tests/web-dashboard-components.test.tsx tests/web-shortcuts.test.tsx tests/encouragement.test.ts tests/web-desktop-ui.test.tsx tests/web-notes-workspace.test.tsx",
+    "test:web": "node --max-old-space-size=4096 --import tsx --test tests/web-theme-palette.test.tsx tests/web-focus-session-mastery.test.tsx tests/web-refactor.test.tsx tests/web-components.test.tsx tests/web-planning-components.test.tsx tests/web-dashboard-components.test.tsx tests/web-shortcuts.test.tsx tests/encouragement.test.ts tests/web-desktop-ui.test.tsx tests/web-notes-workspace.test.tsx tests/web-practice-timer.test.tsx",
     "test:desktop": "npm run desktop:bundle-server && node --test tests/desktop-spike.test.ts",
     "build:desktop:e2e": "vite build apps/web --mode desktop-e2e"
   },

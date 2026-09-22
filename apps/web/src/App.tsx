@@ -20,6 +20,7 @@ import { CatalogView } from './components/CatalogView.tsx';
 import { ActivityRecords } from './components/ActivityRecords.tsx';
 import { TodayPlanView } from './components/TodayPlanView.tsx';
 import { PracticeWorkspace } from './components/PracticeWorkspace.tsx';
+import { PracticeTimerPill } from './components/PracticeTimer.tsx';
 import { ShortcutHelpModal } from './components/ShortcutHelpModal.tsx';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.ts';
 import { Feedback, PageHeader, Tooltip } from './components/ui.tsx';
@@ -452,6 +453,7 @@ export function App() {
               {error}
             </Feedback>
           )}
+          <PracticeTimerPill lang={lang} />
           {(view === 'records' || view === 'statistics') && (
             <>
               <PageHeader

@@ -7,6 +7,7 @@ import { useDailyPlan, type UseDailyPlanReturn } from '../hooks/useDailyPlan.ts'
 import { useEncouragement } from '../hooks/useEncouragement.ts';
 import { useWorkspace } from '../workspace.tsx';
 import { createPractice } from '../practice-service.ts';
+import { clearPendingMinutes, getPendingMinutes, stopTimerFor } from '../timer-service.ts';
 import { Dialog, Feedback, PageHeader, InfoPopover } from './ui.tsx';
 import { TodayRecentOverview } from './TodayRecentOverview.tsx';
 import { TodayProblemRow } from './TodayProblemRow.tsx';
@@ -87,6 +88,11 @@ function TodayPlanViewInner({
     locks.current.add(item.id);
     setSaving(new Set(locks.current));
     setRowErrors((old) => ({ ...old, [item.id]: '' }));
+    // Clicking the completion circle also stops a running timer for this problem;
+    // its minutes travel with the enrich form instead of being silently dropped.
+    const stopped = stopTimerFor(item.problem.questionFrontendId);
+    const elapsedMinutes =
+      stopped?.minutes ?? getPendingMinutes(item.problem.questionFrontendId) ?? undefined;
     try {
       const record = await createPractice('today:' + plan.id + ':' + item.id, {
         questionFrontendId: item.problem.questionFrontendId,
@@ -94,6 +100,7 @@ function TodayPlanViewInner({
         practicedAt: new Date().toISOString(),
         timePrecision: 'datetime',
       });
+      if (elapsedMinutes != null) clearPendingMinutes(item.problem.questionFrontendId);
       setRecentCompletions((ids) => new Set([...ids, item.id]));
       const timer = setTimeout(() => {
         setRecentCompletions((ids) => { const next = new Set(ids); next.delete(item.id); return next; });
@@ -101,7 +108,7 @@ function TodayPlanViewInner({
       }, 240);
       completionTimers.current.add(timer);
       workspace.notifyMutation(record);
-      workspace.openPractice({ mode: 'enrich', record });
+      workspace.openPractice({ mode: 'enrich', record, elapsedMinutes });
     } catch (err) {
       setRowErrors((old) => ({ ...old, [item.id]: err instanceof Error ? err.message : String(err) }));
     } finally {

@@ -120,6 +120,7 @@ export function PracticeWorkspace({
           record={editing.record}
           draft={draft}
           detailsOnly={request.mode === 'enrich'}
+          initialDurationMinutes={request.mode === 'enrich' ? request.elapsedMinutes : undefined}
           onSaved={(record) => {
             setDraft(undefined);
             changed(record);

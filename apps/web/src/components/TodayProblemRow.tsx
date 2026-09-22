@@ -8,6 +8,7 @@ import type { PlanItem } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
 import { Feedback, InfoPopover, Tooltip } from './ui.tsx';
+import { PracticeTimerButton } from './PracticeTimer.tsx';
 import { QuickCopyButtons } from './QuickCopyButtons.tsx';
 
 export interface TodayProblemRowProps {
@@ -260,6 +261,12 @@ export function TodayProblemRow({
             <Plus size={18} />
           </button>
         </Tooltip>
+        <PracticeTimerButton
+          lang={lang}
+          frontendId={item.problem.questionFrontendId}
+          title={item.problem.title}
+          disabled={isAppending || isSaving}
+        />
         <Tooltip text={canRemove === false ? t.cannotRemoveLastProblem : t.removeProblem} position="top">
           <button
             className="btn-icon btn-icon-danger"

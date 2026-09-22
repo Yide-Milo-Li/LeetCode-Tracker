@@ -14,7 +14,8 @@ export type View =
   | 'settings';
 export type PracticeRequest =
   | { mode: 'manual'; problem?: CatalogProblem }
-  | { mode: 'enrich' | 'detail'; record: PracticeRecord; draft?: PracticeDraft }
+  | { mode: 'enrich'; record: PracticeRecord; draft?: PracticeDraft; elapsedMinutes?: number }
+  | { mode: 'detail'; record: PracticeRecord; draft?: PracticeDraft }
   | { mode: 'evidence'; item: PlanItem };
 /** Retain the submitted fields when an editor closes before its request settles. */
 export interface PracticeDraft {

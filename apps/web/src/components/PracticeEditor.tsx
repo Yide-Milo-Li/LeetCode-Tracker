@@ -2,16 +2,23 @@
  * Practice record editor form supporting manual logging, problem search, and details enrichment.
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Square } from 'lucide-react';
 import {
   api,
   type CatalogProblem,
   type PracticeRecord,
   type TimePrecision,
 } from '../api.ts';
-import type { Language } from '../i18n.ts';
+import { translations, type Language } from '../i18n.ts';
 import { useWorkspace, type PracticeDraft } from '../workspace.tsx';
 import { createPractice, getPracticeIntent, fromZonedInput, zonedInput } from '../practice-service.ts';
+import {
+  clearPendingMinutes,
+  formatElapsed,
+  getElapsedSeconds,
+  getPendingMinutes,
+} from '../timer-service.ts';
+import { usePracticeTimer } from '../hooks/usePracticeTimer.ts';
 import { Feedback, Field, DialogClosingContext } from './ui.tsx';
 
 /**
@@ -94,6 +101,8 @@ export interface PracticeEditorProps {
   record?: PracticeRecord;
   detailsOnly?: boolean;
   draft?: PracticeDraft;
+  /** Whole minutes captured by the practice timer; used only when no duration exists yet. */
+  initialDurationMinutes?: number | null;
   onSaved: (record: PracticeRecord) => void;
   onCancel: () => void;
 }
@@ -107,10 +116,13 @@ export function PracticeEditor({
   record,
   detailsOnly = false,
   draft,
+  initialDurationMinutes,
   onSaved,
   onCancel,
 }: PracticeEditorProps) {
   const zh = lang === 'zh';
+  const t = translations[lang];
+  const timer = usePracticeTimer();
   const workspace = useWorkspace();
   const closing = React.useContext(DialogClosingContext);
   const recovered = useRef(record ? undefined : getPracticeIntent('manual')).current;
@@ -154,8 +166,47 @@ export function PracticeEditor({
   }
 
   const [duration, setDuration] = useState(
-    draft?.duration ?? String(record?.durationMinutes ?? recovered?.durationMinutes ?? ''),
+    draft?.duration ??
+      String(record?.durationMinutes ?? recovered?.durationMinutes ?? initialDurationMinutes ?? ''),
   );
+  const [durationTouched, setDurationTouched] = useState(false);
+  const [timerFilledMinutes, setTimerFilledMinutes] = useState<number | null>(() =>
+    !draft?.duration &&
+    (record?.durationMinutes ?? recovered?.durationMinutes) == null &&
+    initialDurationMinutes != null
+      ? initialDurationMinutes
+      : null,
+  );
+  const currentFrontendId =
+    record?.questionFrontendId ?? selected?.questionFrontendId ?? recovered?.questionFrontendId ?? null;
+  const activeForCurrent =
+    timer.active != null && currentFrontendId != null && timer.active.frontendId === currentFrontendId;
+
+  /** Adopt pending timer minutes once per problem until the user types their own value. */
+  useEffect(() => {
+    if (durationTouched || !currentFrontendId) return;
+    if (duration.trim()) return;
+    const pending = getPendingMinutes(currentFrontendId);
+    if (pending != null) {
+      setDuration(String(pending));
+      setTimerFilledMinutes(pending);
+    }
+  }, [currentFrontendId, duration, durationTouched]);
+
+  function handleDurationChange(value: string) {
+    setDurationTouched(true);
+    setTimerFilledMinutes(null);
+    setDuration(value);
+  }
+
+  /** Stop the running timer for this problem and fill its minutes into the form. */
+  function stopTimerAndFill() {
+    const stopped = timer.stop();
+    if (!stopped) return;
+    setDurationTouched(false);
+    setDuration(String(stopped.minutes));
+    setTimerFilledMinutes(stopped.minutes);
+  }
   const [notes, setNotes] = useState(draft?.notes ?? record?.notes ?? recovered?.notes ?? '');
   const correctionChanged = Boolean(
     record && (timeEdited || completed !== record.completed || outcome !== record.outcome),
@@ -250,6 +301,7 @@ export function PracticeEditor({
             notes: metadata.notes ?? undefined,
           });
       workspace.notifyMutation(saved);
+      clearPendingMinutes(saved.questionFrontendId);
       if (mounted.current && !closing.current) onSaved(saved);
       else workspace.reportPracticeOutcome?.({});
     } catch (err) {
@@ -261,8 +313,11 @@ export function PracticeEditor({
           error: err instanceof Error ? err.message : String(err),
           recovery: record
             ? {
-                mode: detailsOnly ? 'enrich' : 'detail',
+                mode: detailsOnly ? ('enrich' as const) : ('detail' as const),
                 record,
+                ...(detailsOnly
+                  ? { elapsedMinutes: initialDurationMinutes ?? timerFilledMinutes ?? undefined }
+                  : {}),
                 draft: { duration, notes, completed, time, precision, zone, timeEdited, correctionOpen, outcome },
               }
             : { mode: 'manual', problem: selected },
@@ -340,6 +395,22 @@ export function PracticeEditor({
             )}
           </div>
           <fieldset disabled={saving || uncertain}>
+            {activeForCurrent && timer.active && (
+              <div className="timer-inline-row">
+                <span className="muted num-tabular" aria-live="off">
+                  ⏱ {formatElapsed(getElapsedSeconds(timer.active))}
+                </span>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={stopTimerAndFill}>
+                  <Square size={14} aria-hidden="true" />
+                  {t.timerStopAndFill}
+                </button>
+              </div>
+            )}
+            {timerFilledMinutes != null && (
+              <p className="muted timer-hint" role="status">
+                {t.timerFilled.replace('{minutes}', String(timerFilledMinutes))}
+              </p>
+            )}
             {record && (
               <PracticeDetailsFields
                 lang={lang}
@@ -347,7 +418,7 @@ export function PracticeEditor({
                 duration={duration}
                 notes={notes}
                 outcome={outcome}
-                setDuration={setDuration}
+                setDuration={handleDurationChange}
                 setNotes={setNotes}
                 setOutcome={setOutcome}
               />
@@ -433,7 +504,7 @@ export function PracticeEditor({
                 duration={duration}
                 notes={notes}
                 outcome={outcome}
-                setDuration={setDuration}
+                setDuration={handleDurationChange}
                 setNotes={setNotes}
                 setOutcome={setOutcome}
               />
