@@ -1945,6 +1945,7 @@ progress::-moz-progress-bar {
 .today-problem {
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
   gap: 18px;
   padding: 16px 20px;
   background: var(--surface);
@@ -1980,7 +1981,7 @@ progress::-moz-progress-bar {
   width: 44px;
   height: 44px;
   padding: 0;
-  margin-top: 2px;
+  margin: 0;
   background: none;
   color: var(--outline);
   border-radius: 50%;
@@ -2043,9 +2044,9 @@ progress::-moz-progress-bar {
   display: grid;
   grid-template-columns: repeat(3, 38px);
   justify-items: end;
-  align-content: start;
+  align-content: center;
+  align-items: center;
   gap: 8px 16px;
-  padding-top: 2px;
   opacity: 0.88;
   transition: opacity var(--fast) ease;
 }
@@ -2644,11 +2645,23 @@ progress::-moz-progress-bar {
   font-size: 13px;
 }
 .weekday-badges,
-.weekday-selector-row,
-.changed-tags-row {
+.weekday-selector-row {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
+}
+.changed-tags-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.changed-tags-row .text-muted {
+  display: inline-flex;
+  align-items: center;
+  font-size: 13px;
+  line-height: 1;
 }
 .pref-preview-text {
   font-size: 13px;
