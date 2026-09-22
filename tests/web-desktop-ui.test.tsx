@@ -341,9 +341,11 @@ describe('Minimal Desktop UI - Phase 10', () => {
     const reasonTrigger = screen.getByRole('button', { name: 'Why recommended' });
     assert.ok(reasonTrigger);
 
-    // Check Open problem external link
-    const openLink = screen.getByRole('link', { name: 'Open problem' });
+    // Title doubles as the external problem link
+    const openLink = screen.getByRole('link', { name: 'Open problem: Two Sum' });
     assert.ok(openLink);
+    assert.equal(openLink.getAttribute('href'), 'https://leetcode.com/problems/two-sum');
+    assert.equal(openLink.getAttribute('target'), '_blank');
 
     // Check Replace button
     const replaceBtn = screen.getByRole('button', { name: /^Replace$/ });

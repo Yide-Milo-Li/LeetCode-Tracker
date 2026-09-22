@@ -3,7 +3,7 @@
  * Renders reliable completion circle, topic tags with overflow dropdown, and contextual action links.
  */
 import React, { useState, useRef, useEffect } from 'react';
-import { Check, Circle, RefreshCw, ExternalLink, Plus, BookMarked, BookOpen, PenLine, Trash2 } from 'lucide-react';
+import { Check, Circle, RefreshCw, Plus, BookMarked, BookOpen, PenLine, Trash2 } from 'lucide-react';
 import type { PlanItem } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
@@ -77,6 +77,7 @@ export function TodayProblemRow({
   }, [isNoteMenuOpen]);
 
   const reasonText = item.reason[lang] || item.reason.en;
+  const problemUrl = /^https?:\/\//i.test(item.problem.url) ? item.problem.url : undefined;
 
   return (
     <article className={'today-problem ' + (item.completed ? 'completed' : '') + (justCompleted && item.completed ? ' just-completed' : '')}>
@@ -107,7 +108,23 @@ export function TodayProblemRow({
 
       <div className="problem-content">
         <h3>
-          <span className="problem-number">{item.problem.questionFrontendId}.</span> {item.problem.title}
+          {problemUrl ? (
+            <a
+              className="problem-title-link"
+              href={problemUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={(zh ? '打开题目：' : 'Open problem: ') + item.problem.title}
+            >
+              <span className="problem-number">{item.problem.questionFrontendId}.</span>{' '}
+              {item.problem.title}
+              <span className="problem-link-mark" aria-hidden="true"> ↗</span>
+            </a>
+          ) : (
+            <>
+              <span className="problem-number">{item.problem.questionFrontendId}.</span> {item.problem.title}
+            </>
+          )}
         </h3>
         <div className="problem-meta">
           <span className={'difficulty ' + item.problem.difficulty.toLowerCase()}>
@@ -226,17 +243,6 @@ export function TodayProblemRow({
             }}
             compact
           />
-        </Tooltip>
-        <Tooltip text={zh ? '打开题目' : 'Open problem'} position="top">
-          <a
-            className="btn-icon"
-            aria-label={zh ? '打开题目' : 'Open problem'}
-            href={/^https?:\/\//i.test(item.problem.url) ? item.problem.url : undefined}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <ExternalLink size={18} />
-          </a>
         </Tooltip>
         <Tooltip text={t.replaceOne} position="top">
           <button
