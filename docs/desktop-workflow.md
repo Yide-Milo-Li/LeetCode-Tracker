@@ -14,6 +14,8 @@ Today shows one locally selected encouragement below its heading. The library co
 | Override only today's rules | Today → Adjust today |
 | Add one problem to today's plan | Today → Add one |
 | Replace one problem | Today → problem row → Replace |
+| Time a problem with the built-in stopwatch | Today → problem row → Start timer, or Problems → timer |
+| Open the original problem | Today → problem title link |
 | Replace unfinished problems or inspect versions | Today → More |
 | Import JSONL problem metadata | Problems → Import problems |
 | Bring in completed progress | Progress → Import progress |
@@ -31,6 +33,12 @@ After saving, the optional dialog offers duration in whole minutes and notes. Sa
 If several problems finish saving together, their optional detail prompts appear in order without replacing the open draft. If you close a pending detail save, its outcome appears in the workspace. A failed save offers **Recover draft**, preserving the submitted fields and original record identity for retry. This recovery is kept in the current application session. Record-edit recovery also retains pending corrections and their expanded or collapsed state.
 
 Click a checked circle to inspect the exact supporting records. Use the single Edit record action to update duration and notes. Expand Change completion or time to correct the completion result, practiced time, precision or timezone. Unchanged completion and time fields are omitted from the update; expanding alone does not rewrite evidence. Collapsing retains pending corrections and marks them as modified. Cancel discards the draft. Revocation remains a separate action. Other manual practices and imported evidence remain; the problem stays completed if another valid basis still qualifies. A failed background refresh shows feedback without undoing an acknowledged save.
+
+## Timing a problem
+
+Each Today row and Problems catalog row offers a timer button. Only one timer runs at a time; starting another problem switches the timer and discards the previous run. The active timer survives view switches and page reloads, and a status pill shows the running clock with stop and discard actions.
+
+Stopping never creates a record. It keeps whole minutes (rounded up, minimum 1) pending for that problem. Clicking the completion circle stops the same-problem timer and pre-fills the enrich dialog; manual editors pre-fill pending minutes when empty and offer stop-and-fill while the timer runs. Saving clears the pending minutes. Today problem titles link directly to the original problem in a new tab.
 
 ## Adding problems to today's plan
 

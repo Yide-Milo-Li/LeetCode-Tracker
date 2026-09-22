@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+- Add a built-in single-problem practice timer: start/stop from Today rows or Problems, one active timer persisted across reloads, stop keeps whole minutes (rounded up, minimum 1) pending for the next record. Clicking the completion circle stops the same-problem timer and pre-fills the enrich dialog; manual editors pre-fill pending minutes and offer stop-and-fill while running.
+- Make Today problem titles link directly to the original problem and remove the redundant open-icon button, leaving six row actions.
+
 ## [1.1.2] - 2026-09-22
 
 - Add dual-workflow Note dropdown menu to Today problem cards ("Go to workspace" / "Quick view past notes").
