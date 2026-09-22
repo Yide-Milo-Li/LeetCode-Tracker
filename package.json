@@ -1,6 +1,6 @@
 {
   "name": "leetcode-tracker",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "description": "Local-first desktop practice tracker with BYOD JSON Lines problem ingestion, weekly study strategies, multi-provider AI recommendations, and Markdown/Obsidian/Notion knowledge export.",
   "homepage": "https://github.com/Yide-Milo-Li/Leetcode-Tracker#readme",
   "repository": {
