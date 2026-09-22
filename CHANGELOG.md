@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.2] - 2026-09-22
+
+- Add dual-workflow Note dropdown menu to Today problem cards ("Go to workspace" / "Quick view past notes").
+- Fix QuickCopyButtons dropdown clipping inside QuickNoteDrawer by adding configurable alignment and right-direction expansion.
+- Fix NotesWorkspace note-switching deadlock when navigating from the quick note drawer.
+- Center changed fields tags in prompt override modals and align Today problem card rows vertically.
+- See [release notes](docs/releases/1.1.2.md) for details.
+
 ## [1.1.1] - 2026-09-22
 
 - Fix warning and feedback alert icon vertical misalignment by explicitly setting feedback line-height and resetting child list and paragraph margins.

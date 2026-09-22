@@ -6,7 +6,7 @@ LeetCode Tracker provides a native Windows 11 x64 desktop application and an App
 
 The published 1.0.0 host can fail before readiness because Tauri returns a canonical Windows `\\?\` resource path that the bundled Node runtime cannot use as a script entrypoint. Reinstalling the same artifact does not fix this. The 1.0.1 host simplifies those paths safely before spawning Node; it does not reset the database or require manual deletion of lock/WAL files. The regression uses the real bundle and a canonical path containing spaces and Chinese characters.
 
-Release 1.1.1 is an unsigned Windows x64 distribution; download it from [Release 1.1.1](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.1.1). Automated boundary tests and local packaging do not establish clean-machine installation, upgrade compatibility, Windows 10 compatibility, or the full WebView2 acceptance matrix; those checks remain pending. See the [release notes](releases/1.1.1.md).
+Release 1.1.2 is an unsigned Windows x64 distribution; download it from [Release 1.1.2](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.1.2). Automated boundary tests and local packaging do not establish clean-machine installation, upgrade compatibility, Windows 10 compatibility, or the full WebView2 acceptance matrix; those checks remain pending. See the [release notes](releases/1.1.2.md).
 
 The desktop shell packages the shared React user interface, the Fastify `/api/v1` service, and the native SQLite storage engine alongside a private, bundled Node.js 24 runtime. Users can run the application with **zero requirement** to install Node.js, npm, Git, or Rust on their machine.
 
@@ -29,7 +29,7 @@ The desktop shell packages the shared React user interface, the Fastify `/api/v1
 - **Administrator Rights**: **Not required**. The installer uses a per-user installation scope.
 
 ### 1.2 Installation Steps
-1. Download `LeetCode-Tracker_1.1.1_x64-setup.exe` and its checksum from the release page.
+1. Download `LeetCode-Tracker_1.1.2_x64-setup.exe` and its checksum from the release page.
 2. Run the installer. You can select the destination directory (defaults to `%LOCALAPPDATA%\Programs\LeetCode Tracker`).
 3. Launch **LeetCode Tracker** from the desktop shortcut or Start Menu.
 4. On first launch, the application creates a clean local database and guides you to import your self-provided JSONL problem catalog.
@@ -141,7 +141,7 @@ cargo clippy --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --all-ta
 The Windows CI job prepares the pinned private runtime, runs isolated sidecar and Rust tests, and builds an unsigned installer artifact. Adding this job does not mean a remote CI run has passed.
 
 The completed installer will be generated at:
-`apps/desktop/src-tauri/target/release/bundle/nsis/LeetCode Tracker_1.1.1_x64-setup.exe`
+`apps/desktop/src-tauri/target/release/bundle/nsis/LeetCode Tracker_1.1.2_x64-setup.exe`
 
 The Apple Silicon internal DMG is generated at:
 `apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/`
