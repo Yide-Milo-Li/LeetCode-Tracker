@@ -22,6 +22,7 @@
     "packages/database/src/**/*.ts",
     "packages/domain/src/**/*.ts",
     "packages/markdown/src/**/*.ts",
+    "packages/application/src/**/*.ts",
     "apps/server/src/**/*.ts",
     "apps/web/src/**/*.ts",
     "apps/web/src/**/*.tsx",
