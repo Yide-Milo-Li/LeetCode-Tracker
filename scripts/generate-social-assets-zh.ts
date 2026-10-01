@@ -1,3 +1,4 @@
+import { createServerApplication } from '../apps/server/src/application-factory.ts';
 /**
  * Script to generate high-resolution (2x Retina) Chinese promotional visual assets
  * across multiple developer themes for community posting (Xiaohongshu, V2EX, Zhihu, Jike, Twitter).
@@ -286,7 +287,7 @@ $$dp[i] = \\min(dp[i], \\; dp[i - c] + 1)$$
 
   // 2. Start Fastify backend
   console.log(`  [3/6] 启动 Fastify 本地服务 (http://${host}:${port})...`);
-  const app = await buildApp({ store });
+  const app = await buildApp({ application: createServerApplication(store) });
 
   // Add custom routes for social cover & theme matrix showcase
   app.get('/social-cover.html', async (req, reply) => {

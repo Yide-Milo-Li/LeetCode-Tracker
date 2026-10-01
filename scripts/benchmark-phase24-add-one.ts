@@ -1,3 +1,4 @@
+import { createServerApplication } from '../apps/server/src/application-factory.ts';
 /**
  * Performance benchmark for Phase 24: Add-one zero-model local append.
  * Measures latency, zero-token/zero-model call guarantees, and throughput
@@ -111,11 +112,7 @@ async function createTestEnv(name: string): Promise<TestEnv> {
     },
   };
 
-  const app = await buildApp({
-    store,
-    geminiAssistant: assistant,
-    disableStatic: true,
-  });
+  const app = await buildApp({ application: createServerApplication(store, assistant), disableStatic: true });
 
   return {
     app,

@@ -1,3 +1,4 @@
+import { createServerApplication } from '../apps/server/src/application-factory.ts';
 /**
  * Phase 5 Desktop Browser Automated Verification Script.
  *
@@ -155,7 +156,7 @@ async function runDesktopVerification() {
   await seedVerificationDatabase(db, store);
 
   console.log(`[2/6] Starting Tracker workbench server on http://${host}:${port}`);
-  const app = await buildApp({ store });
+  const app = await buildApp({ application: createServerApplication(store) });
   await app.listen({ host, port });
 
   console.log(`[3/6] Launching headless Google Chrome with CDP on port ${cdpPort}`);

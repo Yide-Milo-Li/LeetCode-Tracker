@@ -1,3 +1,4 @@
+import { createServerApplication } from '../apps/server/src/application-factory.ts';
 /**
  * Phase 15 Real-world Data Headless Browser Performance & Rendering Verification Script.
  *
@@ -232,7 +233,7 @@ async function runRealDataBrowserVerification() {
   store.upsertProblemNote('70', '## 💡 Climbing Stairs Approach\n- dp[i] = dp[i-1] + dp[i-2], Space optimized to O(1).');
 
   console.log(`[2/6] Starting Tracker server on http://${host}:${port}`);
-  const app = await buildApp({ store });
+  const app = await buildApp({ application: createServerApplication(store) });
   await app.listen({ host, port });
 
   console.log(`[3/6] Launching headless Google Chrome (CDP Port: ${cdpPort})`);

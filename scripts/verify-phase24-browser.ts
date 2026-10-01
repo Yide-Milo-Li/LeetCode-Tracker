@@ -1,3 +1,4 @@
+import { createServerApplication } from '../apps/server/src/application-factory.ts';
 /**
  * Phase 24 Browser Verification Script.
  * Verifies Add-one UI loading states, mutual exclusion, zero model calls,
@@ -133,11 +134,7 @@ async function main() {
 
   // Build app with staticRoot serving built frontend
   const staticRoot = path.resolve('apps/web/dist');
-  const app = await buildApp({
-    store,
-    geminiAssistant: assistant,
-    staticRoot,
-  });
+  const app = await buildApp({ application: createServerApplication(store, assistant), staticRoot });
 
   await app.listen({ host, port });
   console.log(`[Verify] Backend server listening at http://${host}:${port}`);

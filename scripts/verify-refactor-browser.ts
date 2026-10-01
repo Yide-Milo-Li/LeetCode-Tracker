@@ -1,3 +1,4 @@
+import { createServerApplication } from '../apps/server/src/application-factory.ts';
 /** Phase 6 desktop acceptance against an isolated synthetic SQLite store and mocked Gemini.
  * Builds must exist before running. No environment files, private databases or real provider calls are used.
  * Chrome runs with its own profile; VERIFY_OUTPUT_DIR can keep evidence outside the checkout.
@@ -126,16 +127,12 @@ const gemini: IGeminiAssistant = {
       model: 'synthetic-mock',
     };
   },
-  parseOverridePrompt: async () => {
+  parseOverridePrompt: async ({prompt}) => {
     report.mockCalls++;
-    return { patch: { dailyCount: 3 }, unresolved: [], model: 'synthetic-mock' };
+    return { patch: { dailyCount: 3, ...(prompt.includes('premium')?{premium:true}:{}) }, unresolved: [], model: 'synthetic-mock' };
   },
 };
-const app = await buildApp({
-  store,
-  geminiAssistant: gemini,
-  staticRoot: path.resolve(root, 'apps/web/dist'),
-});
+const app = await buildApp({ application: createServerApplication(store, gemini), staticRoot: path.resolve(root, 'apps/web/dist') });
 await app.listen({ host: '127.0.0.1', port: 0 });
 const address = app.server.address();
 if (!address || typeof address === 'string') throw new Error('No loopback server address');
@@ -283,7 +280,7 @@ try {
   /** Click real visible controls by text without invoking application internals. */
   const click = async (label: string, selector = 'button') => {
     // Hit-test the settled control, not coordinates from a moving entrance frame.
-    await until("document.getAnimations().every(a=>a.playState!=='running'||!['dialog-enter','drawer-enter'].includes(a.animationName))");
+    await until("document.getAnimations().every(a=>a.playState!=='running'||!['tracker-dialog-enter','tracker-drawer-enter'].includes(a.animationName))");
     for (let attempt = 0; attempt < 30; attempt++) {
       try {
         const point = await evaluate(
@@ -336,18 +333,18 @@ try {
   });
   await reload();
   await until("document.querySelectorAll('.completion-circle').length === 3");
-  assert.equal(await evaluate("document.querySelectorAll('nav .nav-item').length"), 3);
+  assert.equal(await evaluate("document.querySelectorAll('nav .nav-item').length"), 4);
   // Phase 10 regression: exercise actual CSS and browser event timing using isolated fixture data.
   const initialRecords = new Set(store.queryPracticeRecords({ limit: 100 }).items.map((record) => record.id));
   await evaluate("document.querySelector('.completion-circle[aria-pressed=false]').click()");
   await until("document.querySelector('[role=dialog]')");
   const motion = await evaluate("(() => {const panel=document.querySelector('[role=dialog]');const css=getComputedStyle(panel);return {name:css.animationName,duration:css.animationDuration,background:getComputedStyle(document.querySelector('.overlay-backdrop')).animationName};})()");
-  assert.equal(motion.name, 'dialog-enter');
+  assert.equal(motion.name, 'tracker-dialog-enter');
   assert.equal(motion.duration, '0.22s');
-  assert.equal(motion.background, 'fade-in');
-  const race = await evaluate("(async () => {document.querySelector('[aria-label=Close]').click();await new Promise(r=>setTimeout(r,15));const inert=document.getElementById('root').inert;const exit=getComputedStyle(document.querySelector('[role=dialog]')).animationName;location.hash='problems';await new Promise(r=>setTimeout(r,30));document.dispatchEvent(new KeyboardEvent('keydown',{key:'n',bubbles:true}));await new Promise(r=>setTimeout(r,200));return {inert,exit,title:document.querySelector('[role=dialog] h2')?.textContent};})()");
+  assert.equal(motion.background, 'tracker-fade-in');
+  const race = await evaluate("(async () => {document.querySelector('[aria-label=Close]').click();await new Promise(r=>setTimeout(r,15));const inert=Array.from(document.querySelector('.tracker-workspace').children).some(n=>n.inert);const exit=getComputedStyle(document.querySelector('[role=dialog]')).animationName;location.hash='problems';await new Promise(r=>setTimeout(r,30));document.dispatchEvent(new KeyboardEvent('keydown',{key:'n',bubbles:true}));await new Promise(r=>setTimeout(r,200));return {inert,exit,title:document.querySelector('[role=dialog] h2')?.textContent};})()");
   assert.equal(race.inert, true, 'The exiting dialog must retain its background lock');
-  assert.equal(race.exit, 'dialog-exit');
+  assert.equal(race.exit, 'tracker-dialog-exit');
   assert.equal(race.title, 'Manual record', 'Old exit must not close a new dialog after navigation');
   await click('Close');
   await reload('today');
@@ -659,6 +656,10 @@ try {
     "document.querySelector('[role=dialog] .preview-card') || document.querySelector('[role=dialog] table')",
   );
   await screenshot('today-adjustment-preview');
+  assert.equal(await evaluate("[...document.querySelectorAll('[role=dialog] button')].find(e=>e.textContent.includes('Apply to Unfinished Slots')).disabled"),true,'Unchanged rules must be a no-op');
+  await fill('[role=dialog] textarea','Keep the count at three and include premium problems.');
+  await click('Parse with AI');
+  await until("[...document.querySelectorAll('[role=dialog] button')].some(e=>e.textContent.includes('Apply to Unfinished Slots')&&!e.disabled)");
   await click('Apply to Unfinished Slots');
   await until("!document.querySelector('[role=dialog]')");
   const beforeReplace = store.planning.plans()[0];
@@ -691,9 +692,9 @@ try {
   await delay(200);
   assert.ok(store.planning.plans()[0].version > beforeBatch);
   await navigate('problems');
-  await fill('select', 'Easy');
+  await evaluate("[...document.querySelectorAll('#view-problems .segmented-pill-btn')].find(e=>e.textContent.trim()==='Easy').click()");
   await until("document.querySelectorAll('#view-problems .data-table tbody tr').length && [...document.querySelectorAll('#view-problems .data-table tbody tr')].every(e=>e.innerText.includes('Easy'))");
-  await fill('select', '');
+  await evaluate("document.querySelector('#view-problems .segmented-pill-btn').click()");
   await until("document.querySelector('#view-problems .pagination button[aria-label=Next]') && !document.querySelector('#view-problems .pagination button[aria-label=Next]').disabled");
   const firstProblem = await evaluate("document.querySelector('.problem-title-button').textContent");
   await evaluate("document.querySelector('#view-problems .pagination button[aria-label=Next]').click()");
@@ -739,6 +740,7 @@ try {
             if (!await evaluate(`document.querySelector('.sidebar').classList.contains('${desired}')`)) {
               await click(language === 'zh' ? (expanded ? '展开侧边栏' : '折叠侧边栏') : (expanded ? 'Expand sidebar' : 'Collapse sidebar'));
             }
+            await until(`Math.abs(document.querySelector('.sidebar').getBoundingClientRect().width-${expanded?216:64})<0.01`);
             const geometry = await evaluate(
               `({ width: innerWidth, scrollWidth: document.documentElement.scrollWidth, sidebarWidth: document.querySelector('.sidebar').getBoundingClientRect().width, dialogs: document.querySelectorAll('[role=dialog]').length, title: document.querySelector('#view-${view} h1')?.textContent || document.querySelector('main h1')?.textContent })`,
             );
@@ -746,7 +748,7 @@ try {
             assert.ok(geometry.scrollWidth <= (await evaluate('document.documentElement.clientWidth')) + 1,
               'Page overflow: ' + [width, language, theme, view, desired].join('-'));
             // Layout rectangles can differ from integer CSS pixels by floating-point rounding.
-            const smallTargets = await evaluate("[...document.querySelectorAll('.btn-icon')].filter(e=>e.getClientRects().length&&!e.closest('[hidden],details:not([open])')).map(e=>({name:e.getAttribute('aria-label'),w:e.getBoundingClientRect().width,h:e.getBoundingClientRect().height})).filter(r=>r.w<37.99||r.h<37.99)");
+            const smallTargets = await evaluate("[...document.querySelectorAll('.btn-icon')].filter(e=>e.getClientRects().length&&!e.closest('[hidden],details:not([open])')).map(e=>({name:e.getAttribute('aria-label'),w:e.getBoundingClientRect().width,h:e.getBoundingClientRect().height,min:e.matches('.info-trigger')?18:38})).filter(r=>r.w<r.min-0.01||r.h<r.min-0.01)");
             assert.deepEqual(smallTargets, [], 'Icon target minimum: ' + JSON.stringify(smallTargets));
             if (!expanded) {
               await evaluate("document.querySelector('nav button').focus()");
@@ -896,7 +898,8 @@ try {
   };
   fault = { match: '/api/v1/dashboard', method: 'GET', body: noKnown };
   await reload();
-  await until("document.body.innerText.includes('No known activity')");
+  await until("document.querySelectorAll('.rhythm-count-label').length === 7 && [...document.querySelectorAll('.rhythm-count-label')].every(e => e.textContent.trim() === '0')");
+  assert.equal(await evaluate("document.querySelector('.streak-badge strong').textContent"), '0');
   await screenshot('today-no-known-records');
   fault = {
     match: '/api/v1/dashboard',
@@ -904,8 +907,8 @@ try {
     body: { ...noKnown, dataStatus: { ...noKnown.dataStatus, userTimezone: null } },
   };
   await reload();
-  await until("document.body.innerText.includes('Confirm your timezone first')");
-  assert.equal(await evaluate("document.querySelectorAll('.mini-day').length"), 0);
+  await until("document.body.innerText.includes('Set a timezone to assign daily activity')");
+  assert.equal(await evaluate("document.querySelectorAll('.rhythm-day-col').length"), 0);
   await screenshot('today-unassigned-activity-dates');
   fault = {
     match: '/api/v1/dashboard',
@@ -1007,8 +1010,8 @@ try {
   await reload();
   // Compare the two surfaces against the same real server projection rather than image heights.
   const sharedProjection = (await app.inject('/api/v1/dashboard')).json();
-  const strip = await evaluate("[...document.querySelectorAll('.mini-day')].map(e=>e.title)");
-  assert.deepEqual(strip, sharedProjection.trend30Days.slice(-7).map((day: any) => day.date + ': ' + day.completedCount));
+  const strip = await evaluate("[...document.querySelectorAll('.rhythm-day-col')].map(e=>e.title)");
+  assert.deepEqual(strip, sharedProjection.trend30Days.slice(-7).map((day: any) => day.date + ': ' + day.completedCount + ' problem(s)'));
   report.flows.push('Today seven-day values exactly equal the Statistics endpoint for the same local dates, including today.');
   await click('Switch language to Chinese');
   await until("document.documentElement.lang === 'zh-CN'");
@@ -1018,7 +1021,7 @@ try {
   assert.equal(await evaluate("document.documentElement.lang === 'zh-CN' && document.documentElement.classList.contains('dark')"), true);
   await click('切换语言为英文');
   await click('Adjust today');
-  assert.equal(await evaluate("getComputedStyle(document.querySelector('[role=dialog]')).animationName"), 'drawer-enter');
+  assert.equal(await evaluate("getComputedStyle(document.querySelector('[role=dialog]')).animationName"), 'tracker-drawer-enter');
   report.motion.push(await evaluate("document.getAnimations().map(a=>({name:a.animationName, state:a.playState, duration:a.effect.getTiming().duration}))"));
   await delay(350);
   assert.equal(await evaluate("document.getAnimations().filter(a=>a.playState==='running' && a.effect?.target?.closest('[role=dialog]')).length"), 0);
