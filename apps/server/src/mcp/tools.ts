@@ -336,10 +336,9 @@ export function registerTrackerTools(
         frontendId: z.string().optional().describe('Filter by problem frontend ID (e.g. "1")'),
         page: z.number().int().min(1).optional().default(1).describe('Page number, 1-indexed (default 1)'),
         limit: z.number().int().min(1).max(100).optional().default(20).describe('Items per page, max 100 (default 20)'),
-        order: z.enum(['asc', 'desc']).optional().default('desc').describe('Sort order by timestamp (default "desc")'),
       }),
     },
-    async ({ frontendId, page = 1, limit = 20, order = 'desc' }) => {
+    async ({ frontendId, page = 1, limit = 20 }) => {
 
       let problemId: string | undefined;
       if (frontendId) {
@@ -367,7 +366,6 @@ export function registerTrackerTools(
         questionFrontendId: problemId,
         page,
         limit,
-        order,
       });
 
       const records = result.items.map((r) => ({
