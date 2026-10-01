@@ -60,6 +60,34 @@ async function bundleDesktopServer(): Promise<void> {
   const stats = fs.statSync(outfile);
   const sizeMb = (stats.size / (1024 * 1024)).toFixed(2);
   console.log(`✓ Desktop server bundled successfully in ${duration}ms: ${outfile} (${sizeMb} MB)`);
+
+  const proxyEntryPoint = path.join(repoRoot, 'apps/server/src/mcp-proxy.ts');
+  const proxyOutfile = path.join(outdir, 'desktop-mcp-proxy.mjs');
+  await build({
+    entryPoints: [proxyEntryPoint],
+    bundle: true,
+    platform: 'node',
+    target: 'node24',
+    format: 'esm',
+    outfile: proxyOutfile,
+    sourcemap: false,
+    external: [
+      'node:*',
+      'node:fs',
+      'node:path',
+      'node:crypto',
+      'node:readline',
+      'node:os',
+      'node:stream',
+      'node:events',
+    ],
+    banner: {
+      js: `import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);`,
+    },
+    minify: false,
+    logLevel: 'info',
+  });
+  console.log(`✓ Desktop MCP proxy bundled successfully: ${proxyOutfile}`);
 }
 
 bundleDesktopServer().catch((err) => {
