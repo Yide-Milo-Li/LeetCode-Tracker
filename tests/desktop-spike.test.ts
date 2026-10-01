@@ -53,6 +53,7 @@ async function launchTestServer(options: {
     protocolVersion: 1,
     port: 0,
     dbPath: options.dbPath,
+    mcpConfigPath: path.join(path.dirname(options.dbPath), 'mcp-config.json'),
     backupDir: options.backupDir,
     sessionSecret: options.sessionSecret,
     nonce: options.nonce,

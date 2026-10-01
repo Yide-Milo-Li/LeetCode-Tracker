@@ -29,7 +29,7 @@ export interface DesktopConfig {
   port?: number;
   /** Absolute path to the SQLite database file in the user data directory. */
   dbPath: string;
-  mcpConfigPath?: string;
+  mcpConfigPath: string;
   /** Absolute path to the directory where automatic safety backups are saved. */
   backupDir: string;
   /** Cryptographic session secret required for authenticating requests. */
@@ -47,7 +47,7 @@ export async function startDesktopServer(): Promise<void> {
     protocolVersion: z.literal(1),
     port: z.number().int().min(0).max(65535).default(0),
     dbPath: z.string().refine(path.isAbsolute),
-    mcpConfigPath: z.string().refine(path.isAbsolute).optional(),
+    mcpConfigPath: z.string().refine(path.isAbsolute),
     backupDir: z.string().refine(path.isAbsolute),
     sessionSecret: z.string().min(32).max(256),
     nonce: z.string().min(16).max(256),
@@ -98,7 +98,7 @@ export async function startDesktopServer(): Promise<void> {
   try {
     runtime = await openTrackerRuntime({dbPath: config.dbPath, backupDir: config.backupDir, configure: configureApplication});
     const ownedRuntime = runtime;
-    const mcpController = new McpController(config.mcpConfigPath ?? path.join(dbDir, 'mcp-config.json'), {
+    const mcpController = new McpController(config.mcpConfigPath, {
       nodePath: process.execPath, proxyPath: path.join(path.dirname(process.argv[1]), 'desktop-mcp-proxy.mjs'),
     });
 
