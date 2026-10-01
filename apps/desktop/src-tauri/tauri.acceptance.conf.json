@@ -1,0 +1,6 @@
+{
+  "productName": "LeetCode Tracker Acceptance",
+  "mainBinaryName": "leetcode-tracker-acceptance",
+  "identifier": "com.leetcodetracker.phase36.acceptance",
+  "bundle": { "active": false }
+}

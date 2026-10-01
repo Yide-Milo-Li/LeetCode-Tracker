@@ -21,7 +21,13 @@ async function fixture() {
   store.updateSettings({ timezone: 'Asia/Shanghai' });
   const practice = await store.createPracticeRecord({ questionFrontendId: '1', completed: true, practicedAt: '2026-09-30T10:00:00+08:00', timePrecision: 'datetime', durationMinutes: 15, outcome: 'independent' });
   const note = 'Synthetic note 中文🙂\n'.repeat(1000); store.upsertProblemNote('1', note);
-  const application = createServerApplication(store);
+  let modelCalls = 0;
+  const forbiddenModel = async (): Promise<never> => { modelCalls++; throw new Error('Read-only tools called a model'); };
+  const application = createServerApplication(store, {
+    getStatus: () => ({ configured: false, model: 'local' }),
+    formatProgressText: forbiddenModel, generatePlanContent: forbiddenModel,
+    selectPlanProblems: forbiddenModel, parseOverridePrompt: forbiddenModel, testConnection: forbiddenModel,
+  });
   const controller = new McpController(join(dir, 'config.json'));
   const client = controller.createClient('Codex'); controller.update({ aiAccessPaused: false });
   const mcp = await startMcpServer({ application, controller, preferredPort: 0 });
@@ -35,7 +41,7 @@ async function fixture() {
   };
   const call = async (name: string, args = {}) => (await rpc('tools/call', { name, arguments: args })).json.result;
   const snapshot = () => JSON.stringify(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map(row => [row.name, db.prepare(`SELECT * FROM "${String(row.name).replaceAll('"', '""')}"`).all()]));
-  return { dir, db, store, application, controller, client, mcp, endpoint, headers, rpc, call, note, practice, snapshot,
+  return { dir, db, store, application, controller, client, mcp, endpoint, headers, rpc, call, note, practice, snapshot, getModelCalls: () => modelCalls,
     close: async () => { await mcp.close(); db.close(); rmSync(dir, { recursive: true, force: true }); } };
 }
 
@@ -89,6 +95,7 @@ test('nine tools return structured data without changing any business row', asyn
       const before = env.snapshot(); const result = await env.call(name, args);
       assert.ok(result && !result.isError, name); assert.ok(result.structuredContent, name);
       assert.equal(env.snapshot(), before, `${name} wrote business data`);
+      assert.equal(env.getModelCalls(), 0, `${name} called a model`);
     }
     assert.equal((await env.call('tracker_get_today')).structuredContent.hasPlan, false);
     let reconstructed = '';

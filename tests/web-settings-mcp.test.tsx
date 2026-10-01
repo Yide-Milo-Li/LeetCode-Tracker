@@ -81,6 +81,7 @@ describe('SettingsView: Background Runtime & AI Connection (MCP)', () => {
 
     mock.method(mcpApi, 'getStatus', async () => ({state:'ready',configuredPort:30138,listeningPort:30138,restartRequired:false,aiAccessPaused:false,errorCode:null}));
     mock.method(mcpApi, 'getConfig', async () => ({
+      connection: {nodePath:'C:/安装 with spaces/node.exe',proxyPath:'C:/安装 with spaces/desktop-mcp-proxy.mjs',configPath:'C:/资料 with spaces/mcp-config.json'},
       port: 30138,
       clientToken: '0123456789abcdef0123456789abcdef',
       clients: [
@@ -221,8 +222,15 @@ describe('SettingsView: Background Runtime & AI Connection (MCP)', () => {
     });
 
     assert.ok(screen.getByText(/Claude Desktop \/ Cursor \/ Cline/));
-    assert.ok(screen.getByText(/desktop-mcp-proxy\.mjs/));
+    assert.ok(screen.getAllByText(/desktop-mcp-proxy\.mjs/)[0]);
     assert.ok(screen.getByText(/ChatGPT 网页版/));
+    const guide = document.body.textContent!;
+    assert.ok(guide.includes('[mcp_servers.leetcode_tracker]'));
+    assert.ok(guide.includes('@deepseek-ai/dsh-mcp-client'));
+    assert.ok(guide.includes('--config'));
+    assert.ok(guide.includes('mcp.discovery-extra-headers'));
+    assert.ok(!guide.includes('npx @modelcontextprotocol/tunnel-cli'));
+    assert.ok(!guide.includes('Bearer token-claude-desktop-123456'));
   });
 
   it('rotates and revokes client credentials', async () => {

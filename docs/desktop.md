@@ -147,3 +147,25 @@ The Apple Silicon internal DMG is generated at:
 `apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/`
 
 The native WebdriverIO runner is deliberately isolated under `tests/desktop/` and is used only with the test-only Tauri configuration. It is not included in the distributable app.
+
+## Background runtime and read-only MCP
+
+Closing the main window hides it to the tray. Explicit Quit checks the mounted editor for unsaved notes. An unresponsive editor requires native confirmation after three seconds. The native host supervises the private sidecar without a WebView: health checks run every two seconds with a two-second timeout, three consecutive failures trigger recovery, and automatic retries share a 1/2/5-second budget reset only after sixty continuously healthy seconds. Database ownership conflicts stop retries. A manual retry keeps the same library.
+
+The sidecar owns a versioned MCP configuration. The host supplies its library configuration path over the private startup protocol. Source mode uses MCP_CONFIG_PATH, otherwise LOCAL_DIR/mcp-config.json. No directory discovery occurs. New configurations are paused and contain no connections; upgrading an unversioned configuration resets all old credentials once and remains paused. Business data and autostart preferences are preserved. Corrupt configuration or failed atomic replacement closes authorization rather than creating credentials.
+
+Settings creates independent Codex, DSH, ChatGPT or custom connections. Resume access explicitly after creating one. Rotation and revocation invalidate outstanding tool calls, including unsent results. Only successful business-tool responses update the last successful call time. The nine tools carry read-only annotations and return structured results. They never generate a plan or call a model. MCP tokens cannot authenticate desktop management routes.
+
+The stateless listener accepts authenticated POST at /mcp; authenticated GET and DELETE return 405. Missing credentials return 401 even for probes. Only Bearer headers are accepted. Host and Origin must match the current loopback port; there is no wildcard CORS. Settings reports the actual listener and desired port separately. Port changes require restart and conflicts disable MCP without changing ports.
+
+The installer includes node.exe, desktop-server.mjs and desktop-mcp-proxy.mjs. Generated snippets use absolute paths to the private runtime and the exact library configuration:
+
+~~~text
+<private-node> <installed-proxy> --config <absolute-config-path> --client <connection-id>
+~~~
+
+Codex uses config.toml with an mcp_servers table. DSH uses a cordis.patch.yml insert for @deepseek-ai/dsh-mcp-client, transport stdio, serverName, command and args. Settings generates those actual formats. The proxy rereads the selected credential on each request and requires a running Tracker. It never opens a database or starts Tracker.
+
+For ChatGPT web, follow the [official Secure MCP Tunnel guide](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels) and [client configuration reference](https://github.com/openai/tunnel-client/blob/master/docs/configuration.md). Create the Tunnel in Platform and associate the intended ChatGPT workspace. Install the official tunnel-client; its control-plane key remains under Tunnel management. Configure both mcp.extra-headers and mcp.discovery-extra-headers with the same private file reference containing the Tracker Bearer header. Keep tokens out of command arguments and logs. After rotation update the private header file and restart Tunnel. Select the same Tunnel ID when creating the developer-mode app. Tracker does not manage or launch Tunnel.
+
+For isolated development, build with tauri.acceptance.conf.json, which has its own application identifier, binary name and autostart name. It opens its own empty library; import synthetic records only. Formal installation, login, upgrade and uninstall acceptance must use a separate Windows test account. Uninstall removes only an autostart entry matching that installation's executable and preserves the library directory. Source/debug builds are not formal installed-device acceptance.
