@@ -209,7 +209,7 @@ export function registerTrackerTools(
 
       try {
         const practiceResult = await application.practice.query({
-          questionId: problem.questionId,
+          questionFrontendId: problem.questionFrontendId,
           limit: 5,
           order: 'desc',
         });
@@ -341,7 +341,7 @@ export function registerTrackerTools(
       if (frontendId) {
         const { problem: prob } = await application.catalog.read({}, { frontendId: frontendId.trim() });
         if (prob) {
-          problemId = prob.questionId;
+          problemId = prob.questionFrontendId;
         } else {
           return {
             content: [{
@@ -360,7 +360,7 @@ export function registerTrackerTools(
       }
 
       const result = await application.practice.query({
-        questionId: problemId,
+        questionFrontendId: problemId,
         page,
         limit,
         order,
