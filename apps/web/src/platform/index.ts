@@ -166,10 +166,12 @@ export function listenDesktopExit(handler: () => void | Promise<void>): () => vo
     const now = Date.now();
     if (now - lastTrigger < 300) return;
     lastTrigger = now;
+    if (isTauri()) void (window as any).__TAURI_INTERNALS__.invoke('acknowledge_exit').catch(() => {});
     void handler();
   };
 
   window.addEventListener('desktop:request-exit', onExit);
+  if (isTauri()) void (window as any).__TAURI_INTERNALS__.invoke('renderer_ready').catch(() => {});
 
   let unlistenTauri: (() => void) | null = null;
   if (isTauri()) {
@@ -210,6 +212,7 @@ export async function confirmExit(): Promise<void> {
  * Cancel exit request and keep the desktop runtime running.
  */
 export async function cancelExit(): Promise<void> {
+  window.dispatchEvent(new CustomEvent('desktop:exit-cancelled'));
   if (isTauri()) {
     const tauri = (window as unknown as {
       __TAURI_INTERNALS__: { invoke: <R>(cmd: string, args?: unknown) => Promise<R> };

@@ -3,6 +3,12 @@ import { mkdirSync, openSync, closeSync, readFileSync, writeFileSync, unlinkSync
 import { dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
+/** Stable startup code for native ownership conflicts; preserve the existing human-readable error. */
+export class DatabaseLeaseConflictError extends Error {
+  readonly code = 'DATABASE_IN_USE';
+  constructor() { super('Database is in use. Stop the local application before restoring or opening another server.'); }
+}
+
 /** Acquire exclusive application ownership; reclaim leases whose process is gone or corrupted. */
 export function acquireDatabaseLease(databasePath: string): () => void {
   const lockPath = `${resolve(databasePath)}.lock`;
@@ -45,7 +51,7 @@ export function acquireDatabaseLease(databasePath: string): () => void {
           continue;
         }
       }
-      throw new Error('Database is in use. Stop the local application before restoring or opening another server.');
+      throw new DatabaseLeaseConflictError();
     }
   }
   throw new Error('Could not acquire exclusive database lease');

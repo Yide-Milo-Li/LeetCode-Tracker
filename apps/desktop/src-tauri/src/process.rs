@@ -169,6 +169,9 @@ pub fn wait_ready(receiver: ReadyReceiver, nonce: &str, timeout: Duration) -> Re
     let message: serde_json::Value =
         serde_json::from_str(&line).map_err(|_| "Invalid sidecar ready message")?;
     if message["type"] == "error" {
+        if message["code"] == "DATABASE_IN_USE" {
+            return Err("DATABASE_IN_USE".into());
+        }
         let err = message["error"].as_str().unwrap_or("Sidecar error");
         return Err(format!("Sidecar initialization error: {err}"));
     }
@@ -269,6 +272,16 @@ mod tests {
             tx.send(Ok(value.to_string())).unwrap();
             assert!(wait_ready(rx, "test", Duration::from_secs(1)).is_err());
         }
+    }
+
+    #[test]
+    fn typed_database_conflict_does_not_depend_on_diagnostic_wording() {
+        let (tx, rx) = mpsc::channel();
+        tx.send(Ok(serde_json::json!({"type":"error","code":"DATABASE_IN_USE","error":"arbitrary diagnostic"}).to_string())).unwrap();
+        assert_eq!(
+            wait_ready(rx, "test", Duration::from_secs(1)).unwrap_err(),
+            "DATABASE_IN_USE"
+        );
     }
 
     #[test]

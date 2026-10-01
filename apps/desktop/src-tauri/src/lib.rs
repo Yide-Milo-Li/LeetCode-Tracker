@@ -1,4 +1,5 @@
 //! Desktop host: native authorization, private sidecar ownership and recoverable startup.
+mod lifecycle;
 mod process;
 mod security;
 
@@ -9,7 +10,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
@@ -38,7 +39,11 @@ struct DesktopState {
     child: Mutex<Option<process::ManagedChild>>,
     connection: Mutex<Option<Connection>>,
     status: Mutex<DesktopStatus>,
-    starting: AtomicBool,
+    manual_retry: AtomicBool,
+    ai_paused: Mutex<Option<bool>>,
+    renderer_ready: AtomicBool,
+    exit_pending: AtomicBool,
+    exit_acknowledged: AtomicBool,
     exiting: AtomicBool,
     exports: tokio::sync::Mutex<()>,
 }
@@ -53,7 +58,11 @@ impl Default for DesktopState {
                 state: "starting".into(),
                 message: None,
             }),
-            starting: AtomicBool::new(false),
+            manual_retry: AtomicBool::new(false),
+            ai_paused: Mutex::new(None),
+            renderer_ready: AtomicBool::new(false),
+            exit_pending: AtomicBool::new(false),
+            exit_acknowledged: AtomicBool::new(false),
             exiting: AtomicBool::new(false),
             exports: tokio::sync::Mutex::new(()),
         }
@@ -61,39 +70,37 @@ impl Default for DesktopState {
 }
 
 impl DesktopState {
-    fn is_ai_paused(&self, app: &AppHandle) -> bool {
-        let Ok(data_dir) = app.path().app_local_data_dir() else {
-            return false;
-        };
-        let config_file = data_dir.join("mcp-config.json");
-        if let Ok(content) = std::fs::read_to_string(&config_file) {
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-                return json["aiAccessPaused"].as_bool().unwrap_or(false);
-            }
+    /// The sidecar controller remains the only configuration owner.
+    fn mcp_request(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<serde_json::Value>,
+    ) -> Result<serde_json::Value, String> {
+        let connection = self.connection()?;
+        let mut request = blocking_client()?
+            .request(
+                method,
+                format!("http://127.0.0.1:{}/api/v1/mcp/{path}", connection.port),
+            )
+            .header("x-desktop-session-token", connection.token);
+        if let Some(body) = body {
+            request = request.json(&body);
         }
-        false
+        request
+            .send()
+            .and_then(|r| r.error_for_status())
+            .and_then(|r| r.json())
+            .map_err(|_| "MCP_UNAVAILABLE".into())
     }
-
-    fn set_ai_paused(&self, app: &AppHandle, paused: bool) {
-        let Ok(data_dir) = app.path().app_local_data_dir() else {
-            return;
-        };
-        let config_file = data_dir.join("mcp-config.json");
-        let mut json: serde_json::Value = if let Ok(content) = std::fs::read_to_string(&config_file)
-        {
-            serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}))
-        } else {
-            serde_json::json!({})
-        };
-        json["aiAccessPaused"] = serde_json::json!(paused);
-        let _ = std::fs::write(
-            &config_file,
-            serde_json::to_string_pretty(&json).unwrap_or_default(),
-        );
-        let _ = app.emit(
-            "desktop:ai-access-changed",
-            serde_json::json!({ "paused": paused }),
-        );
+    fn set_ai_paused(&self, paused: bool) -> Result<(), String> {
+        self.mcp_request(
+            reqwest::Method::PATCH,
+            "config",
+            Some(serde_json::json!({"aiAccessPaused":paused})),
+        )?;
+        *self.ai_paused.lock().unwrap() = Some(paused);
+        Ok(())
     }
     /// Reject new requests during initialization and shutdown.
     fn connection(&self) -> Result<Connection, String> {
@@ -173,6 +180,8 @@ fn start_service(app: &AppHandle) -> Result<(), String> {
         "NODE_PATH",
         "DESKTOP_CONFIG_JSON",
         "DB_PATH",
+        "MCP_CONFIG_PATH",
+        "LOCAL_DIR",
         "BACKUP_DIR",
         "SESSION_SECRET",
         "PORT",
@@ -191,14 +200,14 @@ fn start_service(app: &AppHandle) -> Result<(), String> {
         let (mut child, receiver) = process::ManagedChild::spawn(&mut command)?;
         child.send(&serde_json::json!({
             "protocolVersion": 1, "port": 0, "dbPath": data_dir.join("tracker.sqlite"),
-            "backupDir": data_dir.join("backups"), "sessionSecret": token, "nonce": nonce
+            "backupDir": data_dir.join("backups"), "mcpConfigPath": data_dir.join("mcp-config.json"), "sessionSecret": token, "nonce": nonce
         }))?;
         *owner = Some(child);
         receiver
     };
     let port = process::wait_ready(receiver, &nonce, STARTUP_TIMEOUT)?;
     let health = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(3))
+        .timeout(Duration::from_secs(2))
         .redirect(reqwest::redirect::Policy::none())
         .no_proxy()
         .build()
@@ -220,120 +229,164 @@ fn start_service(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Attempt startup with bounded retry (1s, 2s, 5s) up to 3 retries.
-fn spawn_service_with_retry(app: &AppHandle) -> Result<(), String> {
-    let delays = [
-        Duration::from_secs(1),
-        Duration::from_secs(2),
-        Duration::from_secs(5),
-    ];
-    let mut attempt = 0;
-    loop {
-        let state = app.state::<DesktopState>();
-        if state.exiting.load(Ordering::SeqCst) {
-            return Err("Application is closing".into());
-        }
-        let result = start_service(app);
-        match result {
-            Ok(()) => return Ok(()),
-            Err(e) => {
-                state.child.lock().unwrap().take();
-                state.connection.lock().unwrap().take();
-                // Do not retry on database lock / lease conflict
-                if e.contains("Database is locked") || e.contains("lease") || e.contains("conflict")
-                {
-                    return Err(format!("CONFLICT: {e}"));
-                }
-                if attempt >= delays.len() || state.exiting.load(Ordering::SeqCst) {
-                    return Err(e);
-                }
-                let delay = delays[attempt];
-                attempt += 1;
-                std::thread::sleep(delay);
-            }
-        }
-    }
+/// Bounded requests never follow redirects, consult proxy settings, or expose the session token.
+fn blocking_client() -> Result<reqwest::blocking::Client, String> {
+    reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .redirect(reqwest::redirect::Policy::none())
+        .no_proxy()
+        .build()
+        .map_err(|_| "HTTP_CLIENT_FAILED".into())
 }
-
-/// Failed initialization reaps its process and leaves the window available for retry.
-fn begin_startup(app: AppHandle) {
-    let state = app.state::<DesktopState>();
-    if state.exiting.load(Ordering::SeqCst) || state.starting.swap(true, Ordering::SeqCst) {
-        return;
+fn wait_or_exit(state: &DesktopState, duration: Duration) -> bool {
+    let deadline = Instant::now() + duration;
+    while Instant::now() < deadline {
+        if state.exiting.load(Ordering::SeqCst) || state.exit_pending.load(Ordering::SeqCst) {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(20));
     }
-    // A renderer retry must never replace an already healthy owner.
-    if state.status.lock().unwrap().state == "ready" {
-        state.starting.store(false, Ordering::SeqCst);
+    !state.exiting.load(Ordering::SeqCst)
+}
+fn set_status(app: &AppHandle, name: &str, code: Option<&str>) {
+    let state = app.state::<DesktopState>();
+    if state.exiting.load(Ordering::SeqCst) {
         return;
     }
     *state.status.lock().unwrap() = DesktopStatus {
-        state: "starting".into(),
-        message: None,
+        state: name.into(),
+        message: code.map(str::to_owned),
     };
-    update_tray_menu(&app);
-    tauri::async_runtime::spawn_blocking(move || {
+    update_tray_menu(app);
+}
+/// Reap the old owner before acquiring the same database lease again.
+fn stop_service(state: &DesktopState) {
+    state.connection.lock().unwrap().take();
+    *state.ai_paused.lock().unwrap() = None;
+    if let Some(mut child) = state.child.lock().unwrap().take() {
+        let _ = child.shutdown(Duration::from_secs(2));
+    }
+}
+/// This worker exists even when no WebView was created. A resumed sleep proceeds directly to health checks.
+fn begin_startup(app: AppHandle) {
+    std::thread::spawn(move || {
         let state = app.state::<DesktopState>();
-        let result = spawn_service_with_retry(&app);
-        let mut status = state.status.lock().unwrap();
-        match result {
-            Ok(()) => {
-                *status = DesktopStatus {
-                    state: "ready".into(),
-                    message: None,
-                };
+        let epoch = Instant::now();
+        let mut policy = lifecycle::RecoveryPolicy::default();
+        let mut needs_start = true;
+        let mut recovery = false;
+        while !state.exiting.load(Ordering::SeqCst) {
+            if state.exit_pending.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(20));
+                continue;
             }
-            Err(e) => {
-                state.child.lock().unwrap().take();
-                state.connection.lock().unwrap().take();
-                let is_conflict = e.starts_with("CONFLICT:");
-                *status = DesktopStatus {
-                    state: if is_conflict {
-                        "conflict".into()
-                    } else {
-                        "error".into()
-                    },
-                    message: Some(e),
+            if state.manual_retry.swap(false, Ordering::SeqCst)
+                && state.status.lock().unwrap().state != "ready"
+            {
+                policy.reset();
+                needs_start = true;
+                recovery = false;
+            }
+            if needs_start {
+                if recovery {
+                    let Some(delay) = policy.next_retry() else {
+                        set_status(&app, "failed", Some("RETRY_LIMIT_REACHED"));
+                        needs_start = false;
+                        continue;
+                    };
+                    set_status(&app, "recovering", None);
+                    if !wait_or_exit(&state, delay) {
+                        if state.exiting.load(Ordering::SeqCst) {
+                            break;
+                        } else {
+                            continue;
+                        }
+                    }
+                } else {
+                    set_status(&app, "starting", None);
+                }
+                match start_service(&app) {
+                    Ok(()) => {
+                        policy.healthy(epoch.elapsed());
+                        needs_start = false;
+                        set_status(&app, "ready", None);
+                    }
+                    Err(error) => {
+                        stop_service(&state);
+                        if state.exiting.load(Ordering::SeqCst) {
+                            break;
+                        }
+                        policy.outage();
+                        if error == "DATABASE_IN_USE" {
+                            needs_start = false;
+                            set_status(&app, "conflict", Some("DATABASE_IN_USE"));
+                        } else {
+                            recovery = true;
+                            set_status(&app, "recovering", Some("SIDECAR_START_FAILED"));
+                        }
+                        continue;
+                    }
+                }
+            }
+            if state.status.lock().unwrap().state == "ready" {
+                let stopped = state
+                    .child
+                    .lock()
+                    .unwrap()
+                    .as_mut()
+                    .is_none_or(|child| child.exited());
+                let healthy = state.connection().ok().is_some_and(|c| {
+                    blocking_client()
+                        .ok()
+                        .and_then(|client| {
+                            client
+                                .get(format!("http://127.0.0.1:{}/api/v1/health", c.port))
+                                .header("x-desktop-session-token", c.token)
+                                .send()
+                                .ok()
+                        })
+                        .is_some_and(|r| r.status().is_success())
+                });
+                if stopped || (!healthy && policy.unhealthy()) {
+                    policy.outage();
+                    set_status(&app, "recovering", Some("SIDECAR_UNHEALTHY"));
+                    stop_service(&state);
+                    needs_start = true;
+                    recovery = true;
+                    continue;
+                }
+                if healthy {
+                    policy.healthy(epoch.elapsed());
+                }
+                let paused = state
+                    .mcp_request(reqwest::Method::GET, "status", None)
+                    .ok()
+                    .and_then(|j| j["aiAccessPaused"].as_bool());
+                let changed = {
+                    let mut old = state.ai_paused.lock().unwrap();
+                    let changed = *old != paused;
+                    *old = paused;
+                    changed
                 };
+                if changed {
+                    update_tray_menu(&app);
+                }
+            }
+            if !wait_or_exit(&state, Duration::from_secs(2)) && state.exiting.load(Ordering::SeqCst)
+            {
+                break;
             }
         }
-        drop(status);
-        update_tray_menu(&app);
-        state.starting.store(false, Ordering::SeqCst);
     });
 }
-
-/// Poll liveness without returning private paths, secrets or raw provider errors.
+/// Renderer polling observes state only; it cannot start or supervise a process.
 #[tauri::command]
-fn get_desktop_status(state: State<'_, DesktopState>, app: AppHandle) -> DesktopStatus {
-    let mut status = state.status.lock().unwrap();
-    if status.state == "ready" {
-        let stopped = state
-            .child
-            .lock()
-            .unwrap()
-            .as_mut()
-            .is_none_or(|child| child.exited());
-        if stopped {
-            state.connection.lock().unwrap().take();
-            *status = DesktopStatus {
-                state: "starting".into(),
-                message: Some("Sidecar stopped; recovering...".into()),
-            };
-            drop(status);
-            begin_startup(app);
-            return DesktopStatus {
-                state: "starting".into(),
-                message: Some("Sidecar stopped; recovering...".into()),
-            };
-        }
-    }
-    status.clone()
+fn get_desktop_status(state: State<'_, DesktopState>) -> DesktopStatus {
+    state.status.lock().unwrap().clone()
 }
-
-/// Retry the same profile after startup failure or an unexpected exit.
 #[tauri::command]
-fn retry_sidecar(app: AppHandle) {
-    begin_startup(app);
+fn retry_sidecar(state: State<'_, DesktopState>) {
+    state.manual_retry.store(true, Ordering::SeqCst);
 }
 
 /// Loopback-only HTTP client, without redirect or proxy credential leakage.
@@ -541,16 +594,18 @@ pub fn update_tray_menu(app: &AppHandle) {
         let status = state.status.lock().unwrap();
         match status.state.as_str() {
             "ready" => "运行状态：就绪",
-            "starting" => "运行状态：启动中...",
+            "starting" => "启动中 / Starting",
+            "recovering" => "恢复中 / Recovering",
+            "exiting" => "退出中 / Exiting",
             "conflict" => "运行状态：数据库被占用",
             _ => "运行状态：异常",
         }
     };
-    let ai_paused = state.is_ai_paused(app);
-    let ai_text = if ai_paused {
-        "恢复 AI 访问"
-    } else {
-        "暂停 AI 访问"
+    let ai_paused = *state.ai_paused.lock().unwrap();
+    let ai_text = match ai_paused {
+        Some(true) => "恢复 AI 访问 / Resume AI access",
+        Some(false) => "暂停 AI 访问 / Pause AI access",
+        None => "AI 不可用 / AI unavailable",
     };
 
     let Ok(open_item) = MenuItem::with_id(app, "open", "打开 LeetCode Tracker", true, None::<&str>)
@@ -560,7 +615,9 @@ pub fn update_tray_menu(app: &AppHandle) {
     let Ok(status_item) = MenuItem::with_id(app, "status", status_text, false, None::<&str>) else {
         return;
     };
-    let Ok(pause_ai_item) = MenuItem::with_id(app, "toggle_ai", ai_text, true, None::<&str>) else {
+    let Ok(pause_ai_item) =
+        MenuItem::with_id(app, "toggle_ai", ai_text, ai_paused.is_some(), None::<&str>)
+    else {
         return;
     };
     let Ok(sep) = PredefinedMenuItem::separator(app) else {
@@ -588,10 +645,20 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), String> {
                 let _ = ensure_main_window(app);
             }
             "toggle_ai" => {
-                let state = app.state::<DesktopState>();
-                let next_paused = !state.is_ai_paused(app);
-                state.set_ai_paused(app, next_paused);
-                update_tray_menu(app);
+                let handle = app.clone();
+                std::thread::spawn(move || {
+                    let state = handle.state::<DesktopState>();
+                    let paused = state
+                        .mcp_request(reqwest::Method::GET, "status", None)
+                        .ok()
+                        .and_then(|j| j["aiAccessPaused"].as_bool());
+                    if let Some(paused) = paused {
+                        if state.set_ai_paused(!paused).is_ok() {
+                            let _ = handle.emit("desktop:ai-access-changed", ());
+                        }
+                    }
+                    update_tray_menu(&handle);
+                });
             }
             "quit" => {
                 request_app_exit(app);
@@ -622,7 +689,12 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), String> {
 /// Request graceful exit, prompting frontend if unsaved drafts exist.
 fn request_app_exit(app: &AppHandle) {
     let state = app.state::<DesktopState>();
-    if state.exiting.load(Ordering::SeqCst) {
+    if state.exiting.load(Ordering::SeqCst) || state.exit_pending.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    state.exit_acknowledged.store(false, Ordering::SeqCst);
+    if !state.renderer_ready.load(Ordering::SeqCst) {
+        force_exit_app(app);
         return;
     }
     if let Some(window) = app.get_webview_window("main") {
@@ -631,9 +703,36 @@ fn request_app_exit(app: &AppHandle) {
         let _ = window.set_focus();
         let _ = window.emit("desktop:request-exit", ());
         let _ = window.eval("window.dispatchEvent(new CustomEvent('desktop:request-exit'))");
-    } else {
-        force_exit_app(app);
     }
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        let state = handle.state::<DesktopState>();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < deadline {
+            if state.exiting.load(Ordering::SeqCst)
+                || state.exit_acknowledged.load(Ordering::SeqCst)
+                || !state.exit_pending.load(Ordering::SeqCst)
+            {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        // A renderer that previously mounted an editor may contain a draft even when unresponsive.
+        handle.dialog().message("The editor did not respond. Quit and discard possible unsaved notes? / 编辑器未响应，是否退出并放弃可能未保存的笔记？")
+            .title("LeetCode Tracker").buttons(tauri_plugin_dialog::MessageDialogButtons::OkCancel).show(move |confirmed| {
+                let state = handle.state::<DesktopState>();
+                if !state.exit_pending.load(Ordering::SeqCst) || state.exit_acknowledged.load(Ordering::SeqCst) { return; }
+                if confirmed { force_exit_app(&handle); } else { state.exit_pending.store(false, Ordering::SeqCst); }
+            });
+    });
+}
+#[tauri::command]
+fn renderer_ready(state: State<'_, DesktopState>) {
+    state.renderer_ready.store(true, Ordering::SeqCst);
+}
+#[tauri::command]
+fn acknowledge_exit(state: State<'_, DesktopState>) {
+    state.exit_acknowledged.store(true, Ordering::SeqCst);
 }
 
 /// Bounded teardown of child process and database lease before exiting host.
@@ -643,6 +742,11 @@ fn force_exit_app(app: &AppHandle) {
         return;
     }
     state.connection.lock().unwrap().take();
+    *state.status.lock().unwrap() = DesktopStatus {
+        state: "exiting".into(),
+        message: None,
+    };
+    update_tray_menu(app);
     let handle = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let state = handle.state::<DesktopState>();
@@ -660,7 +764,14 @@ fn confirm_exit(app: AppHandle) {
 }
 
 #[tauri::command]
-fn cancel_exit(_app: AppHandle) {}
+fn request_exit(app: AppHandle) {
+    request_app_exit(&app);
+}
+
+#[tauri::command]
+fn cancel_exit(state: State<'_, DesktopState>) {
+    state.exit_pending.store(false, Ordering::SeqCst);
+}
 
 #[tauri::command]
 fn get_autostart_status(app: AppHandle) -> Result<bool, String> {
@@ -679,14 +790,25 @@ fn set_autostart_status(app: AppHandle, enabled: bool) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn get_ai_access_status(app: AppHandle, state: State<'_, DesktopState>) -> bool {
-    state.is_ai_paused(&app)
+async fn get_ai_access_status(app: AppHandle) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<DesktopState>()
+            .mcp_request(reqwest::Method::GET, "status", None)?["aiAccessPaused"]
+            .as_bool()
+            .ok_or("MCP_UNAVAILABLE".into())
+    })
+    .await
+    .map_err(|_| "MCP_UNAVAILABLE".to_string())?
 }
-
 #[tauri::command]
-fn set_ai_access_status(app: AppHandle, state: State<'_, DesktopState>, paused: bool) {
-    state.set_ai_paused(&app, paused);
-    update_tray_menu(&app);
+async fn set_ai_access_status(app: AppHandle, paused: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<DesktopState>().set_ai_paused(paused)?;
+        update_tray_menu(&app);
+        Ok(())
+    })
+    .await
+    .map_err(|_| "MCP_UNAVAILABLE".to_string())?
 }
 
 /// Initialize the host and delay final exit until sidecar writes finish or the deadline expires.
@@ -728,7 +850,10 @@ pub fn run() {
             open_external,
             get_desktop_status,
             retry_sidecar,
+            renderer_ready,
+            acknowledge_exit,
             confirm_exit,
+            request_exit,
             cancel_exit,
             get_autostart_status,
             set_autostart_status,
@@ -765,19 +890,7 @@ pub fn run() {
                     return;
                 }
                 api.prevent_exit();
-                if state.exiting.swap(true, Ordering::SeqCst) {
-                    return;
-                }
-                state.connection.lock().unwrap().take();
-                let handle = app.clone();
-                tauri::async_runtime::spawn_blocking(move || {
-                    let state = handle.state::<DesktopState>();
-                    let child = state.child.lock().unwrap().take();
-                    if let Some(mut child) = child {
-                        let _ = child.shutdown(SHUTDOWN_TIMEOUT);
-                    }
-                    handle.exit(0);
-                });
+                request_app_exit(app);
             }
         });
 }
