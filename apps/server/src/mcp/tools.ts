@@ -171,13 +171,7 @@ export function registerTrackerTools(
     async ({ frontendId }) => {
 
       const trimmedId = frontendId.trim();
-      const catalogResult = await application.catalog.query({
-        search: trimmedId,
-        limit: 10,
-      });
-
-      const problem = catalogResult.items.find((p: CatalogProblem) => p.questionFrontendId === trimmedId)
-        ?? (catalogResult.items.length === 1 && catalogResult.items[0].questionFrontendId === trimmedId ? catalogResult.items[0] : null);
+      const { problem } = await application.catalog.read({}, { frontendId: trimmedId });
 
       if (!problem) {
         return {
@@ -215,7 +209,7 @@ export function registerTrackerTools(
 
       try {
         const practiceResult = await application.practice.query({
-          problemId: problem.questionId,
+          questionId: problem.questionId,
           limit: 5,
           order: 'desc',
         });
@@ -345,8 +339,7 @@ export function registerTrackerTools(
 
       let problemId: string | undefined;
       if (frontendId) {
-        const catRes = await application.catalog.query({ search: frontendId.trim(), limit: 5 });
-        const prob = catRes.items.find((p) => p.questionFrontendId === frontendId.trim());
+        const { problem: prob } = await application.catalog.read({}, { frontendId: frontendId.trim() });
         if (prob) {
           problemId = prob.questionId;
         } else {
@@ -367,7 +360,7 @@ export function registerTrackerTools(
       }
 
       const result = await application.practice.query({
-        problemId,
+        questionId: problemId,
         page,
         limit,
         order,
@@ -522,6 +515,7 @@ export function registerTrackerTools(
       const fullContent = result.note.content;
       const totalLength = fullContent.length;
       const totalChunks = Math.max(1, Math.ceil(totalLength / chunkSize));
+      if (chunkIndex >= totalChunks) return { isError: true, content: [{ type: 'text', text: 'INVALID_CHUNK_INDEX' }] };
       const start = chunkIndex * chunkSize;
       const chunkText = fullContent.slice(start, start + chunkSize);
       const hasMore = start + chunkSize < totalLength;
@@ -555,7 +549,8 @@ export function registerTrackerTools(
       }),
     },
     async ({ year }) => {
-
+      const settings = await application.settings.get();
+      if (!settings.timezone || !isTimeZone(settings.timezone)) return { isError: true, content: [{ type: 'text', text: 'TIMEZONE_REQUIRED' }] };
       const dashboard = await application.dashboard.summary({ year });
 
       const result = {

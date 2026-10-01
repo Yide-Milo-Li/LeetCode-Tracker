@@ -114,6 +114,19 @@ test('invalid tool calls do not record successful usage and listener reports a p
   } finally { await env.close(); }
 });
 
+test('exact frontend lookup survives more fuzzy matches than either old page limit', async () => {
+  const env = await fixture();
+  try {
+    await env.store.importJsonl(Array.from({ length: 30 }, (_, i) => JSON.stringify({ id: String(i + 10), title: '23 fuzzy match', difficulty: 'Easy', tags: ['Array'], url: `https://leetcode.com/problems/synthetic-${i + 10}/` })).join('\n'));
+    const record = await env.store.createPracticeRecord({ questionFrontendId: '23', completed: true, practicedAt: '2026-09-30', timePrecision: 'date' });
+    assert.ok(!(await env.application.catalog.query({ search: '23', limit: 10 })).items.some(p => p.questionFrontendId === '23'));
+    assert.equal((await env.call('tracker_get_problem', { frontendId: '23' })).structuredContent.problem.frontendId, '23');
+    assert.equal((await env.call('tracker_list_practices', { frontendId: '23' })).structuredContent.records[0].id, record.id);
+    env.store.updateSettings({ timezone: null });
+    assert.equal((await env.call('tracker_get_progress')).isError, true);
+  } finally { await env.close(); }
+});
+
 for (const change of ['pause', 'rotate', 'revoke'] as const) test(`in-flight ${change} suppresses unsent business results`, async () => {
   const env = await fixture();
   const original = env.application.notes.read;
