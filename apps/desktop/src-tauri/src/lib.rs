@@ -283,6 +283,7 @@ fn begin_startup(app: AppHandle) {
         let mut needs_start = true;
         let mut recovery = false;
         while !state.exiting.load(Ordering::SeqCst) {
+            let check_started = Instant::now();
             if state.exit_pending.load(Ordering::SeqCst) {
                 std::thread::sleep(Duration::from_millis(20));
                 continue;
@@ -365,7 +366,10 @@ fn begin_startup(app: AppHandle) {
                 if healthy {
                     policy.healthy(epoch.elapsed());
                 }
-                let mcp = state.mcp_request(reqwest::Method::GET, "status", None).ok();
+                // A failed health request already used the polling budget; do not wait on the same service twice.
+                let mcp = healthy
+                    .then(|| state.mcp_request(reqwest::Method::GET, "status", None).ok())
+                    .flatten();
                 let paused = mcp
                     .as_ref()
                     .filter(|j| j["configuredPort"].is_number())
@@ -403,8 +407,8 @@ fn begin_startup(app: AppHandle) {
                     update_tray_menu(&app);
                 }
             }
-            if !wait_or_exit(&state, Duration::from_secs(2)) && state.exiting.load(Ordering::SeqCst)
-            {
+            let remaining = Duration::from_secs(2).saturating_sub(check_started.elapsed());
+            if !wait_or_exit(&state, remaining) && state.exiting.load(Ordering::SeqCst) {
                 break;
             }
         }
