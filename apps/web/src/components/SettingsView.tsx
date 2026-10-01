@@ -103,7 +103,7 @@ export function SettingsView({
 
   // Desktop background runtime state
   const isDesktop = isTauri();
-  const [autostartEnabled, setAutostartEnabled] = useState(false);
+  const [autostartEnabled, setAutostartEnabled] = useState<boolean | null>(null);
   const [autostartLoading, setAutostartLoading] = useState(false);
 
   // MCP AI Connection State
@@ -812,7 +812,7 @@ export function SettingsView({
                 </div>
                 <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
                   {isDesktop
-                    ? autostartEnabled
+                    ? autostartEnabled === null ? (zh ? '自启状态未知' : 'Autostart status unknown') : autostartEnabled
                       ? (zh ? '已启用：开机后无窗口后台常驻' : 'Enabled: Headless tray on system boot')
                       : (zh ? '未启用：仅在手动启动时运行' : 'Disabled: Manual launch only')
                     : (zh ? '当前为浏览器模式，开机自启需在桌面应用中配置' : 'Browser mode: configure autostart in desktop app')}
@@ -822,7 +822,7 @@ export function SettingsView({
                 type="button"
                 className={`btn ${autostartEnabled ? 'btn-secondary' : 'btn-primary'} btn-sm`}
                 onClick={() => void handleToggleAutostart()}
-                disabled={!isDesktop || autostartLoading}
+                disabled={!isDesktop || autostartLoading || autostartEnabled === null}
               >
                 {autostartLoading ? '…' : autostartEnabled ? (zh ? '禁用自启' : 'Disable') : (zh ? '启用自启' : 'Enable')}
               </button>
@@ -887,8 +887,8 @@ export function SettingsView({
                   fontSize: '0.8125rem',
                   padding: '2px 8px',
                   borderRadius: '12px',
-                  backgroundColor: mcpConfig?.aiAccessPaused ? 'var(--warning-subtle, #fef7e0)' : 'var(--success-subtle, #e6f4ea)',
-                  color: mcpConfig?.aiAccessPaused ? 'var(--warning, #b06000)' : 'var(--success, #137333)',
+                  backgroundColor: !mcpStatus || mcpStatus.state !== 'ready' ? 'var(--surface-muted)' : mcpConfig?.aiAccessPaused ? 'var(--warning-subtle, #fef7e0)' : 'var(--success-subtle, #e6f4ea)',
+                  color: !mcpStatus || mcpStatus.state !== 'ready' ? 'var(--text-muted)' : mcpConfig?.aiAccessPaused ? 'var(--warning, #b06000)' : 'var(--success, #137333)',
                   fontWeight: 600,
                 }}
               >
@@ -1036,11 +1036,11 @@ export function SettingsView({
                             color: client.revoked ? 'var(--error, #c5221f)' : 'var(--success, #137333)',
                           }}
                         >
-                          {client.revoked ? (zh ? '已撤销' : 'Revoked') : (zh ? '有效' : 'Active')}
+                          {client.revoked ? (zh ? '已撤销' : 'Revoked') : (zh ? '凭证有效' : 'Credential valid')}
                         </span>
                       </div>
                       <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
-                        {zh ? '最近调用：' : 'Last call: '}
+                        {zh ? '最近成功调用：' : 'Last successful call: '}
                         <strong style={{ color: client.lastSuccessfulCallAt ? 'var(--text-primary)' : 'inherit' }}>{lastUsedText}</strong>
                       </div>
                     </div>
@@ -1120,61 +1120,28 @@ export function SettingsView({
                             gap: '10px',
                           }}
                         >
+                          {mcpConfig?.connection ? <>
+                            <div>
+                              <strong>Codex Desktop — config.toml</strong>
+                              <pre style={{overflowX:'auto'}}>{'[mcp_servers.leetcode_tracker]\ncommand = '+JSON.stringify(mcpConfig.connection.nodePath)+'\nargs = '+JSON.stringify([mcpConfig.connection.proxyPath,'--config',mcpConfig.connection.configPath,'--client',client.id])}</pre>
+                            </div>
+                            <div>
+                              <strong>DSH — cordis.patch.yml</strong>
+                              <pre style={{overflowX:'auto'}}>{'- insert:\n    - id: tracker-readonly\n      name: "@deepseek-ai/dsh-mcp-client"\n      config:\n        serverName: leetcode_tracker\n        transport: stdio\n        command: '+JSON.stringify(mcpConfig.connection.nodePath)+'\n        args: '+JSON.stringify([mcpConfig.connection.proxyPath,'--config',mcpConfig.connection.configPath,'--client',client.id])}</pre>
+                            </div>
+                            <div>
+                              <strong>Claude Desktop / Cursor / Cline</strong>
+                              <pre style={{overflowX:'auto'}}>{JSON.stringify({mcpServers:{'leetcode-tracker':{command:mcpConfig.connection.nodePath,args:[mcpConfig.connection.proxyPath,'--config',mcpConfig.connection.configPath,'--client',client.id]}}},null,2)}</pre>
+                            </div>
+                          </> : <p>{zh ? '运行时路径不可用，请重新加载设置。' : 'Runtime paths unavailable. Reload Settings.'}</p>}
                           <div>
-                            <strong>1. Claude Desktop / Cursor / Cline (stdio 代理配置)</strong>
-                            <p style={{ margin: '4px 0', color: 'var(--text-muted)' }}>
-                              {zh
-                                ? '在客户端配置文件中添加 stdio 代理，使用本地凭证自动认证：'
-                                : 'Add stdio proxy entry to your client configuration file:'}
-                            </p>
-                            <pre
-                              style={{
-                                margin: '4px 0',
-                                padding: '8px',
-                                backgroundColor: 'var(--surface)',
-                                borderRadius: '4px',
-                                overflowX: 'auto',
-                                fontSize: '0.75rem',
-                              }}
-                            >
-{JSON.stringify(
-  {
-    mcpServers: {
-      'leetcode-tracker': {
-        command: 'node',
-        args: [
-          '<TRACKER_INSTALL_DIR>/desktop-mcp-proxy.mjs',
-          '--client',
-          client.id,
-        ],
-      },
-    },
-  },
-  null,
-  2,
-)}
-                            </pre>
-                          </div>
-
-                          <div>
-                            <strong>2. ChatGPT 网页版 (Secure MCP Tunnel)</strong>
-                            <p style={{ margin: '4px 0', color: 'var(--text-muted)' }}>
-                              {zh
-                                ? '在本地运行 Secure Tunnel 转发至 LeetCode Tracker MCP：'
-                                : 'Run Secure Tunnel locally forwarding to Tracker MCP:'}
-                            </p>
-                            <pre
-                              style={{
-                                margin: '4px 0',
-                                padding: '8px',
-                                backgroundColor: 'var(--surface)',
-                                borderRadius: '4px',
-                                overflowX: 'auto',
-                                fontSize: '0.75rem',
-                              }}
-                            >
-{`npx @modelcontextprotocol/tunnel-cli --port ${mcpConfig?.port ?? 30138} --header "Authorization: Bearer ${client.token}"`}
-                            </pre>
+                            <strong>{zh ? 'ChatGPT 网页版 — Secure MCP Tunnel' : 'ChatGPT Web — Secure MCP Tunnel'}</strong>
+                            <p>{zh ? '从官方发布页安装 tunnel-client。在 Platform 创建 Tunnel，并关联目标 ChatGPT workspace。控制面凭证由 Tunnel 管理。将复制的 Tracker Token 保存为私有文本文件，内容为 Bearer 加空格和 Token。普通请求与启动探测使用同一文件；请在 Tracker 中明确恢复 AI 访问。轮换后更新该文件并重启 Tunnel。' : 'Install official tunnel-client, create a Tunnel in Platform and associate its ChatGPT workspace. Tunnel owns its control-plane credential. Save the copied Tracker Token in a private text file as Bearer, a space and the Token. Use the same file for calls and startup probes; explicitly resume AI access in Tracker. After rotation, update the file and restart Tunnel.'}</p>
+                            <a href="https://developers.openai.com/api/docs/guides/secure-mcp-tunnels" target="_blank" rel="noreferrer">{zh ? '官方 Tunnel 指南' : 'Official Tunnel guide'}</a>
+                            <pre style={{overflowX:'auto'}}>{'tunnel-client init --sample sample_mcp_remote_no_auth --profile tracker --tunnel-id <TUNNEL_ID> --mcp-server-url http://127.0.0.1:'+ (mcpStatus?.listeningPort ?? mcpConfig?.port ?? 30138)+'/mcp\n'+
+                              'tunnel-client doctor --profile tracker --explain --mcp.extra-headers "Authorization: file:C:/private/tracker-auth.txt" --mcp.discovery-extra-headers "Authorization: file:C:/private/tracker-auth.txt"\n'+
+                              'tunnel-client run --profile tracker --mcp.extra-headers "Authorization: file:C:/private/tracker-auth.txt" --mcp.discovery-extra-headers "Authorization: file:C:/private/tracker-auth.txt"'}</pre>
+                            <p>{zh ? '在 ChatGPT 开发者模式中创建连接，选择 Tunnel 和同一 Tunnel ID。Tracker 不创建或自动管理 Tunnel。' : 'Create a developer-mode connection in ChatGPT, select Tunnel and the same Tunnel ID. Tracker does not create or manage tunnels.'}</p>
                           </div>
                         </div>
                       )}

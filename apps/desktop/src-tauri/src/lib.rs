@@ -852,6 +852,30 @@ fn set_autostart_status(app: AppHandle, enabled: bool) -> Result<(), String> {
     let autolaunch = app.autolaunch();
     if enabled {
         autolaunch.enable().map_err(|e| e.to_string())?;
+        #[cfg(windows)]
+        {
+            // auto-launch stores an unquoted path on Windows; quote it before login can execute it.
+            use winreg::{
+                enums::{HKEY_CURRENT_USER, KEY_SET_VALUE},
+                RegKey,
+            };
+            let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+            let result = RegKey::predef(HKEY_CURRENT_USER)
+                .open_subkey_with_flags(
+                    "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                    KEY_SET_VALUE,
+                )
+                .and_then(|key| {
+                    key.set_value(
+                        &app.package_info().name,
+                        &format!("\"{}\" --background", exe.display()),
+                    )
+                });
+            if let Err(error) = result {
+                let _ = autolaunch.disable();
+                return Err(error.to_string());
+            }
+        }
     } else {
         autolaunch.disable().map_err(|e| e.to_string())?;
     }
