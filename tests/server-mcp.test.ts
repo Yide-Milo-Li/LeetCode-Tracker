@@ -85,6 +85,26 @@ test('transport rejects malformed or hostile input, authenticates probes, and re
   } finally { await env.close(); }
 });
 
+test('a disconnected query does not record successful usage or stop subsequent requests', { timeout: 5000 }, async () => {
+  const env = await fixture();
+  let entered!: () => void; let release!: () => void; let finished!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const completed = new Promise<void>(resolve => { finished = resolve; });
+  const original = env.application.notes.read;
+  env.application.notes.read = async (...args) => { entered(); await gate; const result = await original(...args); finished(); return result; };
+  try {
+    const req = httpRequest(env.endpoint, { method: 'POST', headers: env.headers });
+    req.on('error', () => { /* This test deliberately disconnects its own request. */ });
+    req.end(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'tracker_get_note', arguments: { frontendId: '1' } } }));
+    await started;
+    const disconnected = new Promise<void>(resolve => req.once('close', resolve));
+    req.destroy(); await disconnected; release(); await completed;
+    assert.equal((await env.rpc('tools/list')).response.status, 200);
+    assert.equal(env.controller.getConfig().clients[0].lastSuccessfulCallAt, null);
+  } finally { release(); await env.close(); }
+});
+
 test('nine tools return structured data without changing any business row', async () => {
   const env = await fixture();
   try {
@@ -174,8 +194,6 @@ for (const change of ['pause', 'rotate', 'revoke'] as const) test(`in-flight ${c
 
 test('proxy requires an exact active connection, rereads rotation, and handles notifications', async () => {
   const env = await fixture();
-  // Ephemeral test listener needs an explicit matching desired port for proxy forwarding.
-  env.controller.update({ port: env.mcp.port });
   const run = (args: string[], input = '') => new Promise<{ code: number | null; stdout: string; stderr: string }>(resolve => {
     const child = spawn(process.execPath, ['apps/server/src/mcp-proxy.ts', ...args], { stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '', stderr = ''; child.stdout.on('data', chunk => { stdout += chunk; }); child.stderr.on('data', chunk => { stderr += chunk; });
@@ -187,6 +205,10 @@ test('proxy requires an exact active connection, rereads rotation, and handles n
     env.controller.rotateClient(env.client.id);
     const response = await run(['--config', env.controller.configPath, '--client', env.client.id], JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n' + JSON.stringify({ jsonrpc: '2.0', id: 42, method: 'tools/list' }) + '\n');
     assert.equal(response.code, 0); assert.equal(JSON.parse(response.stdout).id, 42);
+    env.controller.update({ port: env.mcp.port === 32000 ? 32001 : 32000 });
+    assert.equal(env.controller.getStatus().restartRequired, true);
+    const pending = await run(['--config', env.controller.configPath, '--client', env.client.id], JSON.stringify({ jsonrpc: '2.0', id: 43, method: 'tools/call', params: { name: 'tracker_status', arguments: {} } }) + '\n');
+    assert.equal(JSON.parse(pending.stdout).result.structuredContent.readOnly, true);
     env.controller.revokeClient(env.client.id);
     assert.equal((await run(['--config', env.controller.configPath, '--client', env.client.id])).code, 1);
   } finally { await env.close(); }

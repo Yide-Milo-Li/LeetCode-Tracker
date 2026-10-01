@@ -12,6 +12,8 @@ const clientSchema = z.object({
 }).strict();
 export const mcpConfigSchema = z.object({
   schemaVersion: z.literal(2), port: z.number().int().min(1).max(65535),
+  // Listener-owned metadata lets proxies keep using the live endpoint while a port change is pending.
+  activePort: z.number().int().min(1).max(65535).nullable().optional(),
   aiAccessPaused: z.boolean(), accessRevision: z.number().int().positive(),
   clients: z.array(clientSchema).refine(items => new Set(items.map(c => c.id)).size === items.length),
 }).strict();
@@ -115,15 +117,20 @@ export class McpController {
   }
   setListener(state: McpStatus['state'], port: number | null = null, errorCode: string | null = null): void {
     this.state = state; this.listeningPort = port; this.listenerError = errorCode;
+    if (!this.failure) {
+      try { this.mutate(next => { next.activePort = port; }, false); }
+      catch { /* A failed endpoint publication closes authorization and remains observable in status. */ }
+    }
   }
   private mutate(change: (next: McpConfig) => void, authorizationChange = true): void {
     this.checkFile();
     const next = structuredClone(this.config);
     change(next);
     if (authorizationChange) next.accessRevision++;
-    try { writeAtomic(this.configPath, mcpConfigSchema.parse(next)); }
+    const validated = mcpConfigSchema.parse(next);
+    try { writeAtomic(this.configPath, validated); }
     catch (error) { this.failure = 'MCP_CONFIG_WRITE_FAILED'; throw error; }
-    this.config = next;
+    this.config = validated;
   }
   update(patch: { port?: number; aiAccessPaused?: boolean }) {
     const parsed = z.object({ port: z.number().int().min(1).max(65535).optional(), aiAccessPaused: z.boolean().optional() }).strict().parse(patch);

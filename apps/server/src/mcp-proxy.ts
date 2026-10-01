@@ -25,7 +25,7 @@ async function runMcpProxy(): Promise<void> {
       if (request.method === 'tools/call' && config.aiAccessPaused) throw new Error('AI_ACCESS_PAUSED');
       let response: Response;
       try {
-        response = await fetch(`http://127.0.0.1:${config.port}/mcp`, {
+        response = await fetch(`http://127.0.0.1:${config.activePort ?? config.port}/mcp`, {
           method: 'POST', redirect: 'error', signal: AbortSignal.timeout(15_000),
           headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', Authorization: `Bearer ${client.token}` }, body: line,
         });
