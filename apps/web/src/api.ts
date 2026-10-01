@@ -103,3 +103,31 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
 import { createHttpTrackerClient } from '../../../packages/workspace/src/client-http-adapter.ts';
 const clients = createHttpTrackerClient({request, exportDataFile, baseUrl:API_BASE});
 export const {api,catalogApi,settingsApi,practiceApi,progressApi,planningApi,dashboardApi,notesApi,exportApi,bundleApi} = clients;
+
+export interface McpClientCredential {
+  id: string;
+  name: string;
+  token: string;
+  createdAt: number;
+  lastUsedAt: number | null;
+  revoked: boolean;
+}
+
+export interface McpSettingsConfig {
+  port: number;
+  clientToken: string;
+  clients: McpClientCredential[];
+  aiAccessPaused: boolean;
+}
+
+export const mcpApi = {
+  getConfig: () => request<McpSettingsConfig>('/mcp/config'),
+  updateConfig: (patch: { port?: number; aiAccessPaused?: boolean }) =>
+    request<McpSettingsConfig>('/mcp/config', { method: 'PATCH', body: JSON.stringify(patch) }),
+  createClient: (name: string) =>
+    request<{ client: McpClientCredential }>('/mcp/clients', { method: 'POST', body: JSON.stringify({ name }) }),
+  rotateClient: (id: string) =>
+    request<{ client: McpClientCredential }>(`/mcp/clients/${id}/rotate`, { method: 'POST' }),
+  revokeClient: (id: string) =>
+    request<{ success: boolean }>(`/mcp/clients/${id}/revoke`, { method: 'POST' }),
+};

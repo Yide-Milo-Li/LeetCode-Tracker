@@ -1,15 +1,37 @@
 import { ExportLink } from './ExportLink.tsx';
 /** Application preferences only; catalog and progress imports live in their respective workspaces. */
 import React, { useEffect, useRef, useState } from 'react';
-import { Eye, EyeOff, Copy, Check, ClipboardPaste, Download, Upload, Archive, Database, AlertTriangle } from 'lucide-react';
+import {
+  Eye,
+  EyeOff,
+  Copy,
+  Check,
+  ClipboardPaste,
+  Download,
+  Upload,
+  Archive,
+  Database,
+  AlertTriangle,
+  Cpu,
+  Server,
+  Power,
+  Play,
+  Pause,
+  RefreshCw,
+  Key,
+  Shield,
+  ChevronDown,
+  ChevronUp,
+} from 'lucide-react';
 import { fixedProviderModels, type ThemePalette } from '../../../../packages/contracts/src/sync.ts';
-import { api } from '../api.ts';
+import { api, mcpApi, type McpSettingsConfig, type McpClientCredential } from '../api.ts';
 import { snapshotBundleSchema, type SnapshotBundle } from '../../../../packages/contracts/src/notes.ts';
 import { MAX_BUNDLE_BYTES } from '../../../../packages/contracts/src/migration.ts';
 import { clearPracticeIntents } from '../practice-service.ts';
 import { translations, type Language } from '../i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
 import { PageHeader, Feedback, Field, InfoPopover } from './ui.tsx';
+import { isTauri, getAutostartStatus, setAutostartStatus } from '../platform/index.ts';
 
 interface SettingsViewProps {
   lang: Language;
@@ -153,6 +175,139 @@ export function SettingsView({
   const t = translations[lang];
   const workspace = useWorkspace();
   const zh = lang === 'zh';
+
+  // Desktop background runtime state
+  const isDesktop = isTauri();
+  const [autostartEnabled, setAutostartEnabled] = useState(false);
+  const [autostartLoading, setAutostartLoading] = useState(false);
+
+  // MCP AI Connection State
+  const [mcpConfig, setMcpConfig] = useState<McpSettingsConfig | null>(null);
+  const [mcpLoading, setMcpLoading] = useState(false);
+  const [mcpError, setMcpError] = useState<string | null>(null);
+  const [mcpSuccess, setMcpSuccess] = useState<string | null>(null);
+  const [copiedTokenId, setCopiedTokenId] = useState<string | null>(null);
+  const [mcpPortDraft, setMcpPortDraft] = useState<number>(30138);
+  const [savingPort, setSavingPort] = useState(false);
+  const [newClientName, setNewClientName] = useState('');
+  const [creatingClient, setCreatingClient] = useState(false);
+  const [expandedClientId, setExpandedClientId] = useState<string | null>(null);
+  const [showTokens, setShowTokens] = useState<Record<string, boolean>>({});
+
+  const loadMcpConfigData = async () => {
+    setMcpLoading(true);
+    try {
+      const cfg = await mcpApi.getConfig();
+      setMcpConfig(cfg);
+      setMcpPortDraft(cfg.port);
+    } catch {
+      // Offline / standalone test mode
+    } finally {
+      setMcpLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isTauri()) {
+      getAutostartStatus().then(setAutostartEnabled).catch(() => {});
+    }
+    void loadMcpConfigData();
+  }, []);
+
+  const handleToggleAutostart = async () => {
+    setAutostartLoading(true);
+    try {
+      const next = !autostartEnabled;
+      await setAutostartStatus(next);
+      setAutostartEnabled(next);
+    } catch (err) {
+      setMcpError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAutostartLoading(false);
+    }
+  };
+
+  const handleToggleAiPause = async () => {
+    if (!mcpConfig) return;
+    try {
+      const next = !mcpConfig.aiAccessPaused;
+      const updated = await mcpApi.updateConfig({ aiAccessPaused: next });
+      setMcpConfig(updated);
+      setMcpSuccess(
+        next
+          ? (zh ? '已暂停外部 AI 访问' : 'External AI access paused')
+          : (zh ? '已恢复外部 AI 访问' : 'External AI access resumed')
+      );
+      setTimeout(() => setMcpSuccess(null), 3000);
+    } catch (err) {
+      setMcpError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleSavePort = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!mcpConfig || mcpPortDraft <= 0 || mcpPortDraft > 65535) return;
+    setSavingPort(true);
+    try {
+      const updated = await mcpApi.updateConfig({ port: mcpPortDraft });
+      setMcpConfig(updated);
+      setMcpSuccess(
+        zh
+          ? '端口已更新，请重启桌面应用以使新端口生效。'
+          : 'Port updated. Restart LeetCode Tracker for changes to take effect.'
+      );
+      setTimeout(() => setMcpSuccess(null), 5000);
+    } catch (err) {
+      setMcpError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSavingPort(false);
+    }
+  };
+
+  const handleCreateClient = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newClientName.trim()) return;
+    setCreatingClient(true);
+    try {
+      await mcpApi.createClient(newClientName.trim());
+      setNewClientName('');
+      await loadMcpConfigData();
+      setMcpSuccess(zh ? '已创建新连接凭证' : 'New connection created');
+      setTimeout(() => setMcpSuccess(null), 3000);
+    } catch (err) {
+      setMcpError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCreatingClient(false);
+    }
+  };
+
+  const handleRotateClient = async (id: string) => {
+    try {
+      await mcpApi.rotateClient(id);
+      await loadMcpConfigData();
+      setMcpSuccess(zh ? '凭据密钥已重新生成' : 'Connection token rotated');
+      setTimeout(() => setMcpSuccess(null), 3000);
+    } catch (err) {
+      setMcpError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleRevokeClient = async (id: string) => {
+    try {
+      await mcpApi.revokeClient(id);
+      await loadMcpConfigData();
+      setMcpSuccess(zh ? '连接已撤销' : 'Connection revoked');
+      setTimeout(() => setMcpSuccess(null), 3000);
+    } catch (err) {
+      setMcpError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const copyToClipboard = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedTokenId(id);
+    setTimeout(() => setCopiedTokenId(null), 2000);
+  };
 
   // Timezone state
   const [zone, setZone] = useState(workspace.timezone ?? '');
@@ -628,6 +783,476 @@ export function SettingsView({
           {error && <Feedback>{error}</Feedback>}
           {saved && <Feedback tone="success">{zh ? '时区已保存' : 'Timezone saved'}</Feedback>}
         </form>
+      </section>
+
+      {/* Background Runtime row */}
+      <section className="preference-row">
+        <div>
+          <h2>{zh ? '后台运行' : 'Background Runtime'}</h2>
+          <p className="muted">
+            {zh
+              ? '开机静默启动与托盘常驻守护，随时为外部 AI 工具响应请求。'
+              : 'Headless autostart and system tray daemon for external AI clients.'}
+          </p>
+          <InfoPopover
+            label={zh ? '后台运行说明' : 'Background runtime help'}
+            content={
+              <div>
+                <p>
+                  {zh
+                    ? '开启开机自启后，Windows 登录时在后台以 --background 参数静默启动服务，无窗口、无控制台窗口，系统托盘常驻。'
+                    : 'When login autostart is enabled, LeetCode Tracker launches headlessly with --background on Windows login without opening a window.'}
+                </p>
+                <p>
+                  {zh
+                    ? '主窗口关闭时将自动最小化隐藏到系统托盘，后台 HTTP 与 MCP 保持运行；如需完全退出请在托盘菜单点击“退出”。'
+                    : 'Closing the main window hides it to the system tray, keeping HTTP and MCP active. Use "Quit" in tray to stop.'}
+                </p>
+              </div>
+            }
+          />
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div
+            style={{
+              padding: '16px',
+              backgroundColor: 'var(--surface-muted)',
+              borderRadius: '8px',
+              border: '1px solid var(--border)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600 }}>
+                <Cpu size={18} />
+                <span>{zh ? 'Runtime 状态' : 'Runtime Status'}</span>
+              </div>
+              <span
+                style={{
+                  fontSize: '0.8125rem',
+                  padding: '2px 8px',
+                  borderRadius: '12px',
+                  backgroundColor: 'var(--success-subtle, #e6f4ea)',
+                  color: 'var(--success, #137333)',
+                  fontWeight: 500,
+                }}
+              >
+                {isDesktop ? (zh ? '桌面守护中' : 'Desktop Daemon Active') : (zh ? '本地服务运行中' : 'Local Server Active')}
+              </span>
+            </div>
+
+            <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+              {zh
+                ? '关闭主窗口时自动最小化到系统托盘，持续监听本地 API 与 MCP 请求，不中断正在执行的后台任务。'
+                : 'Closing the window minimizes to system tray. Local API and MCP continue listening in the background.'}
+            </p>
+
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                paddingTop: '8px',
+                borderTop: '1px solid var(--border)',
+              }}
+            >
+              <div>
+                <div style={{ fontWeight: 500, fontSize: '0.875rem' }}>
+                  {zh ? '开机静默启动' : 'Start Silently on Login'}
+                </div>
+                <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+                  {isDesktop
+                    ? autostartEnabled
+                      ? (zh ? '已启用：开机后无窗口后台常驻' : 'Enabled: Headless tray on system boot')
+                      : (zh ? '未启用：仅在手动启动时运行' : 'Disabled: Manual launch only')
+                    : (zh ? '当前为浏览器模式，开机自启需在桌面应用中配置' : 'Browser mode: configure autostart in desktop app')}
+                </div>
+              </div>
+              <button
+                type="button"
+                className={`btn ${autostartEnabled ? 'btn-secondary' : 'btn-primary'} btn-sm`}
+                onClick={() => void handleToggleAutostart()}
+                disabled={!isDesktop || autostartLoading}
+              >
+                {autostartLoading ? '…' : autostartEnabled ? (zh ? '禁用自启' : 'Disable') : (zh ? '启用自启' : 'Enable')}
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* AI Connection (MCP) row */}
+      <section className="preference-row">
+        <div>
+          <h2>{zh ? 'AI 连接' : 'AI Connection'}</h2>
+          <p className="muted">
+            {zh
+              ? '通过标准 Model Context Protocol (MCP) 允许外部 AI 只读检索做题记录与学习进度。'
+              : 'Connect external AI tools via official read-only Model Context Protocol (MCP).'}
+          </p>
+          <InfoPopover
+            label={zh ? 'AI 连接与安全说明' : 'AI connection & security help'}
+            content={
+              <div>
+                <p>
+                  {zh
+                    ? '提供 9 个只读工具（题库检索、题目详情、今日计划、练习记录、笔记摘要与分段、进度概览），不开放任何写入或修改能力。'
+                    : 'Provides 9 read-only tools (search, problem details, today plan, practice records, notes chunking, progress). No write capabilities.'}
+                </p>
+                <p>
+                  {zh
+                    ? '外部 AI 查询不消耗您的 Gemini/OpenAI API 额度，全部由外部客户端与本地只读服务交互。'
+                    : 'External AI queries do not use your tracker API quota; they run via external client tokens.'}
+                </p>
+                <p>
+                  {zh
+                    ? '支持一键暂停所有外部访问，暂停期间任何工具调用均被拦截并不返回业务数据。'
+                    : 'You can pause external access at any time. When paused, all tools return an explicit pause message.'}
+                </p>
+              </div>
+            }
+          />
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {/* Global Pause Card */}
+          <div
+            style={{
+              padding: '16px',
+              backgroundColor: mcpConfig?.aiAccessPaused ? 'var(--warning-subtle, #fef7e0)' : 'var(--surface-muted)',
+              borderRadius: '8px',
+              border: `1px solid ${mcpConfig?.aiAccessPaused ? 'var(--warning, #f9ab00)' : 'var(--border)'}`,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600 }}>
+                <Shield size={18} />
+                <span>{zh ? '外部 AI 访问状态' : 'External AI Access State'}</span>
+              </div>
+              <span
+                style={{
+                  fontSize: '0.8125rem',
+                  padding: '2px 8px',
+                  borderRadius: '12px',
+                  backgroundColor: mcpConfig?.aiAccessPaused ? 'var(--warning-subtle, #fef7e0)' : 'var(--success-subtle, #e6f4ea)',
+                  color: mcpConfig?.aiAccessPaused ? 'var(--warning, #b06000)' : 'var(--success, #137333)',
+                  fontWeight: 600,
+                }}
+              >
+                {mcpConfig?.aiAccessPaused ? (zh ? '外部访问已暂停' : 'Paused') : (zh ? '外部访问就绪' : 'Active')}
+              </span>
+            </div>
+
+            <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+              {mcpConfig?.aiAccessPaused
+                ? (zh ? '当前已全局暂停外部 AI 访问。所有外部 MCP 请求将收到拦截提示，无法读取题库、笔记与做题历史。'
+                  : 'External AI access is paused. External MCP clients receive a paused notice and cannot read your data.')
+                : (zh ? '外部 AI 可通过持有有效凭证的专用连接只读检索你的做题数据。你可以随时从托盘或在此处暂停。'
+                  : 'External AI clients can query study data using valid connection tokens. You can pause anytime here or from the tray.')}
+            </p>
+
+            <div>
+              <button
+                type="button"
+                className={`btn ${mcpConfig?.aiAccessPaused ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+                onClick={() => void handleToggleAiPause()}
+                disabled={!mcpConfig}
+              >
+                {mcpConfig?.aiAccessPaused ? <Play size={14} /> : <Pause size={14} />}
+                <span>{mcpConfig?.aiAccessPaused ? (zh ? '恢复外部 AI 访问' : 'Resume Access') : (zh ? '暂停外部 AI 访问' : 'Pause Access')}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* MCP Server Endpoint & Port Config */}
+          <div
+            style={{
+              padding: '16px',
+              backgroundColor: 'var(--surface-muted)',
+              borderRadius: '8px',
+              border: '1px solid var(--border)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600 }}>
+              <Server size={18} />
+              <span>{zh ? 'MCP 服务端点' : 'MCP Server Endpoint'}</span>
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <code style={{ padding: '4px 8px', borderRadius: '4px', backgroundColor: 'var(--surface)', border: '1px solid var(--border)', fontSize: '0.875rem' }}>
+                http://127.0.0.1:{mcpConfig?.port ?? 30138}/mcp
+              </code>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => copyToClipboard(`http://127.0.0.1:${mcpConfig?.port ?? 30138}/mcp`, 'endpoint')}
+              >
+                {copiedTokenId === 'endpoint' ? <Check size={14} /> : <Copy size={14} />}
+                <span>{copiedTokenId === 'endpoint' ? (zh ? '已复制' : 'Copied') : (zh ? '复制地址' : 'Copy URL')}</span>
+              </button>
+            </div>
+
+            <form onSubmit={handleSavePort} style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', marginTop: '4px' }}>
+              <div style={{ flex: 1, maxWidth: '180px' }}>
+                <label style={{ display: 'block', fontSize: '0.8125rem', marginBottom: '4px', color: 'var(--text-muted)' }}>
+                  {zh ? '监听端口 (Port)' : 'Port'}
+                </label>
+                <input
+                  type="number"
+                  min={1024}
+                  max={65535}
+                  value={mcpPortDraft}
+                  onChange={(e) => setMcpPortDraft(parseInt(e.target.value, 10) || 30138)}
+                  style={{ width: '100%' }}
+                />
+              </div>
+              <button
+                type="submit"
+                className="btn btn-secondary btn-sm"
+                disabled={savingPort || mcpPortDraft === mcpConfig?.port}
+              >
+                {savingPort ? '…' : (zh ? '更新端口' : 'Save Port')}
+              </button>
+            </form>
+            <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+              {zh ? '默认端口 30138。端口冲突时 MCP 会报错停用，不静默改端口；修改后需重启应用生效。' : 'Default port is 30138. Port conflicts disable MCP rather than silently changing ports. Restart app to apply.'}
+            </p>
+          </div>
+
+          {/* Named Client Credentials */}
+          <div
+            style={{
+              padding: '16px',
+              backgroundColor: 'var(--surface-muted)',
+              borderRadius: '8px',
+              border: '1px solid var(--border)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '14px',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600 }}>
+                <Key size={18} />
+                <span>{zh ? '专用连接凭证 (Named Connections)' : 'Named Connections & Credentials'}</span>
+              </div>
+            </div>
+
+            <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+              {zh
+                ? '每个客户端（Claude Desktop、Cursor、Cline、ChatGPT 网页）拥有独立凭据，支持随时轮换或撤销，日志与命令不泄露密钥。'
+                : 'Each client connection has an isolated bearer token with rotation and revocation support.'}
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {(mcpConfig?.clients || []).map((client) => {
+                const isExpanded = expandedClientId === client.id;
+                const isVisible = Boolean(showTokens[client.id]);
+                const lastUsedText = client.lastUsedAt
+                  ? new Date(client.lastUsedAt).toLocaleString()
+                  : (zh ? '从未调用' : 'Never called');
+
+                return (
+                  <div
+                    key={client.id}
+                    style={{
+                      padding: '12px 14px',
+                      backgroundColor: 'var(--surface)',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border)',
+                      opacity: client.revoked ? 0.6 : 1,
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontWeight: 600, fontSize: '0.9375rem' }}>{client.name}</span>
+                        <span
+                          style={{
+                            fontSize: '0.75rem',
+                            padding: '1px 6px',
+                            borderRadius: '10px',
+                            backgroundColor: client.revoked ? 'var(--error-subtle, #fce8e6)' : 'var(--success-subtle, #e6f4ea)',
+                            color: client.revoked ? 'var(--error, #c5221f)' : 'var(--success, #137333)',
+                          }}
+                        >
+                          {client.revoked ? (zh ? '已撤销' : 'Revoked') : (zh ? '有效' : 'Active')}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+                        {zh ? '最近调用：' : 'Last call: '}
+                        <strong style={{ color: client.lastUsedAt ? 'var(--text-primary)' : 'inherit' }}>{lastUsedText}</strong>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginTop: '10px' }}>
+                      <input
+                        type={isVisible ? 'text' : 'password'}
+                        readOnly
+                        value={client.token}
+                        style={{
+                          flex: 1,
+                          fontSize: '0.8125rem',
+                          fontFamily: 'monospace',
+                          padding: '4px 8px',
+                          backgroundColor: 'var(--surface-muted)',
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        title={zh ? '显示/隐藏' : 'Show/Hide'}
+                        onClick={() => setShowTokens((prev) => ({ ...prev, [client.id]: !prev[client.id] }))}
+                      >
+                        {isVisible ? <EyeOff size={14} /> : <Eye size={14} />}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        title={zh ? '复制密钥' : 'Copy Token'}
+                        onClick={() => copyToClipboard(client.token, client.id)}
+                      >
+                        {copiedTokenId === client.id ? <Check size={14} /> : <Copy size={14} />}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        title={zh ? '轮换重置密钥' : 'Rotate Token'}
+                        onClick={() => void handleRotateClient(client.id)}
+                      >
+                        <RefreshCw size={14} />
+                        <span>{zh ? '轮换' : 'Rotate'}</span>
+                      </button>
+                      {!client.revoked && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          title={zh ? '撤销此连接' : 'Revoke Connection'}
+                          onClick={() => void handleRevokeClient(client.id)}
+                        >
+                          <span>{zh ? '撤销' : 'Revoke'}</span>
+                        </button>
+                      )}
+                    </div>
+
+                    <div style={{ marginTop: '8px' }}>
+                      <button
+                        type="button"
+                        className="text-link"
+                        style={{ fontSize: '0.8125rem', display: 'flex', alignItems: 'center', gap: '4px' }}
+                        onClick={() => setExpandedClientId(isExpanded ? null : client.id)}
+                      >
+                        <span>{isExpanded ? (zh ? '收起配置指南' : 'Hide Config Guide') : (zh ? '查看接入配置指南' : 'View Config Guide')}</span>
+                        {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                      </button>
+
+                      {isExpanded && (
+                        <div
+                          style={{
+                            marginTop: '10px',
+                            padding: '12px',
+                            backgroundColor: 'var(--surface-muted)',
+                            borderRadius: '6px',
+                            border: '1px solid var(--border)',
+                            fontSize: '0.8125rem',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '10px',
+                          }}
+                        >
+                          <div>
+                            <strong>1. Claude Desktop / Cursor / Cline (stdio 代理配置)</strong>
+                            <p style={{ margin: '4px 0', color: 'var(--text-muted)' }}>
+                              {zh
+                                ? '在客户端配置文件中添加 stdio 代理，使用本地凭证自动认证：'
+                                : 'Add stdio proxy entry to your client configuration file:'}
+                            </p>
+                            <pre
+                              style={{
+                                margin: '4px 0',
+                                padding: '8px',
+                                backgroundColor: 'var(--surface)',
+                                borderRadius: '4px',
+                                overflowX: 'auto',
+                                fontSize: '0.75rem',
+                              }}
+                            >
+{JSON.stringify(
+  {
+    mcpServers: {
+      'leetcode-tracker': {
+        command: 'node',
+        args: [
+          '<TRACKER_INSTALL_DIR>/desktop-mcp-proxy.mjs',
+          '--client',
+          client.id,
+        ],
+      },
+    },
+  },
+  null,
+  2,
+)}
+                            </pre>
+                          </div>
+
+                          <div>
+                            <strong>2. ChatGPT 网页版 (Secure MCP Tunnel)</strong>
+                            <p style={{ margin: '4px 0', color: 'var(--text-muted)' }}>
+                              {zh
+                                ? '在本地运行 Secure Tunnel 转发至 LeetCode Tracker MCP：'
+                                : 'Run Secure Tunnel locally forwarding to Tracker MCP:'}
+                            </p>
+                            <pre
+                              style={{
+                                margin: '4px 0',
+                                padding: '8px',
+                                backgroundColor: 'var(--surface)',
+                                borderRadius: '4px',
+                                overflowX: 'auto',
+                                fontSize: '0.75rem',
+                              }}
+                            >
+{`npx @modelcontextprotocol/tunnel-cli --port ${mcpConfig?.port ?? 30138} --header "Authorization: Bearer ${client.token}"`}
+                            </pre>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Create Custom Connection Form */}
+            <form onSubmit={handleCreateClient} style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '6px' }}>
+              <input
+                type="text"
+                placeholder={zh ? '新连接名称（如：Work Laptop Cursor）' : 'Connection Name (e.g. Work Laptop Cursor)'}
+                value={newClientName}
+                onChange={(e) => setNewClientName(e.target.value)}
+                style={{ flex: 1, fontSize: '0.875rem' }}
+              />
+              <button
+                type="submit"
+                className="btn btn-secondary btn-sm"
+                disabled={creatingClient || !newClientName.trim()}
+              >
+                {creatingClient ? '…' : (zh ? '添加连接' : 'Add Connection')}
+              </button>
+            </form>
+
+            {mcpSuccess && <Feedback tone="success">{mcpSuccess}</Feedback>}
+            {mcpError && <Feedback tone="error">{mcpError}</Feedback>}
+          </div>
+        </div>
       </section>
 
       {/* Multi-provider AI Assistant Configuration row */}
