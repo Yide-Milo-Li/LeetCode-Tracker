@@ -16,6 +16,7 @@ import { configureApplication } from './application-factory.ts';
 import { buildApp } from './app.ts';
 import { startMcpServer, type McpServerHandle } from './mcp/server.ts';
 import { McpController } from './mcp/config.ts';
+import { DatabaseLeaseConflictError } from '../../../packages/database/src/lease.ts';
 import type { FastifyInstance } from 'fastify';
 
 /**
@@ -173,6 +174,7 @@ export async function startDesktopServer(): Promise<void> {
     try { await app?.close(); } finally { await runtime?.close(); }
     const errorMsg = JSON.stringify({
       type: 'error',
+      code: error instanceof DatabaseLeaseConflictError ? error.code : 'SIDECAR_START_FAILED',
       error: error instanceof Error ? error.message : String(error),
     });
     process.stdout.write(errorMsg + '\n');

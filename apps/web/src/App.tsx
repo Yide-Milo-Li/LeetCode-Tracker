@@ -548,7 +548,7 @@ function AppContent() {
                   notesFormatOnSave={notesFormatOnSave ?? undefined}
                   initialFrontendId={selectedNoteProblem}
                   onClearInitialFrontendId={() => setSelectedNoteProblem(null)}
-                  onDirtyChange={setNotesDirty}
+                  onDirtyChange={dirty => { notesDirtyRef.current = dirty; setNotesDirty(dirty); }}
                   registerSaveHandler={(handler) => {
                     saveNoteRef.current = handler;
                   }}
@@ -673,7 +673,7 @@ function AppContent() {
                     setExitError('');
                     try {
                       const saved = await saveNoteRef.current?.();
-                      if (saved) {
+                      if (saved && !notesDirtyRef.current) {
                         setShowExitModal(false);
                         await confirmExit();
                       } else {

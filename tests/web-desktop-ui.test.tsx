@@ -360,3 +360,25 @@ describe('Minimal Desktop UI - Phase 10', () => {
     assert.ok(recordBtn);
   });
 });
+
+// Preserve the actual editor node across a runtime outage and allow the exit dialog to receive focus.
+const {DesktopGate}=await import('../apps/web/src/components/DesktopGate.tsx');
+it('retains the editor and draft while native runtime recovers', async () => {
+  let state='ready';
+  Object.assign(window,{__TAURI_INTERNALS__:{invoke:async()=>({state})}});
+  try {
+    await act(async()=>{ render(<DesktopGate><textarea aria-label="Retained draft" defaultValue="synthetic draft" /></DesktopGate>); });
+    const editor=screen.getByLabelText('Retained draft');
+    state='recovering';
+    await act(async()=>{await new Promise(resolve=>setTimeout(resolve,550));});
+    assert.equal(screen.getByLabelText('Retained draft'),editor);
+    assert.ok(editor.parentElement?.hasAttribute('inert'));
+    await act(async()=>{window.dispatchEvent(new dom.window.CustomEvent('desktop:request-exit'));});
+    assert.equal(editor.parentElement?.hasAttribute('inert'),false);
+    await act(async()=>{window.dispatchEvent(new dom.window.CustomEvent('desktop:exit-cancelled'));});
+    assert.ok(editor.parentElement?.hasAttribute('inert'));
+    state='ready';
+    await act(async()=>{await new Promise(resolve=>setTimeout(resolve,550));});
+    assert.equal((screen.getByLabelText('Retained draft') as HTMLTextAreaElement).value,'synthetic draft');
+  } finally {cleanup();delete (window as any).__TAURI_INTERNALS__;}
+});
