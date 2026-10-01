@@ -21,6 +21,11 @@ export {
   type Selection,
 } from './recommendations.ts';
 
+export {
+  rankAdaptiveTopics,
+  selectAdaptiveSlots,
+} from './adaptive-topics.ts';
+
 // Dashboard statistics, activity metrics, and time aggregation
 export {
   getZonedDayInterval,
