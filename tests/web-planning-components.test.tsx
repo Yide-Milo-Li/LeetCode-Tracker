@@ -241,6 +241,9 @@ it('renders rest day view when today has no assigned strategy', async () => {
 
   assert.ok(screen.getByText('Rest Day'));
   assert.ok(screen.getByRole('button', { name: /Create Today's Plan/i }));
+  assert.ok(screen.getByText('Today’s Target'));
+  assert.ok(screen.getByText('No target yet'));
+  assert.equal((screen.getByRole('progressbar') as HTMLProgressElement).value, 0);
 });
 
 it('renders active daily plan and triggers single problem item replacement', async () => {
@@ -1210,6 +1213,10 @@ describe('Phase 26: Today remove plan item UI', () => {
     // DOM should now render the rest day view (今天是休息日)
     assert.ok(screen.getByRole('heading', { name: translations.zh.restDayTitle }));
     assert.ok(screen.getByText(translations.zh.allProblemsRemovedRestDesc));
+    // Removing the final item must retain the goal widget without claiming completion.
+    assert.ok(screen.getByText('今日目标推进'));
+    assert.ok(screen.getByText('暂无目标'));
+    assert.equal((screen.getByRole('progressbar') as HTMLProgressElement).value, 0);
 
     // And action buttons are present: "加一题" and "调整今天"
     assert.ok(screen.getByRole('button', { name: '加一题' }));

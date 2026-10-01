@@ -34,6 +34,7 @@ Object.defineProperty(window, 'matchMedia', {
 
 const React = await import('react');
 const { render, renderHook, fireEvent, screen, act, cleanup } = await import('@testing-library/react');
+const {DesktopWorkspaceProvider}=await import('../apps/web/src/workspace-adapter.tsx');
 const { App } = await import('../apps/web/src/App.tsx');
 const { Tooltip, InfoPopover, Dialog } = await import('../apps/web/src/components/ui.tsx');
 const { TodayPlanView } = await import('../apps/web/src/components/TodayPlanView.tsx');
@@ -161,13 +162,16 @@ describe('Minimal Desktop UI - Phase 10', () => {
 
   it('keeps the background inert throughout exit and calls close only once', async () => {
     let closes = 0;
-    const result = render(<Dialog title="Exit lifecycle" lang="en" onClose={() => closes++}>Details</Dialog>);
+    const result = render(<DesktopWorkspaceProvider><button>Background</button><Dialog title="Exit lifecycle" lang="en" onClose={() => closes++}>Details</Dialog></DesktopWorkspaceProvider>);
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     assert.equal(closes, 0, 'Normal motion must exercise the production delay even in JSDOM');
-    assert.equal(result.container.inert, true, 'The visible exiting dialog still owns the background');
+    assert.equal(screen.getByRole('button',{name:'Background',hidden:true}).inert,true,'The workspace background stays inert through exit');
+    assert.equal(document.body.style.overflow, 'hidden', 'Desktop dialogs prevent background document scrolling');
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 180)); });
     assert.equal(closes, 1);
+    result.unmount();
+    assert.equal(document.body.style.overflow, '', 'Closing the desktop dialog restores document scrolling');
   });
 
   it('cancels an old exit callback when navigation immediately closes its dialog', async () => {

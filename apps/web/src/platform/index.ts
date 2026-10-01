@@ -6,16 +6,8 @@
 /**
  * HTTP failure with a stable code; network failures remain distinguishable and retryable.
  */
-export class ApiError extends Error {
-  public status: number;
-  public code: string;
-  /** Preserve server conflict metadata so retries can retain their operation identity. */
-  constructor(status: number, code: string, message: string) {
-    super(message);
-    this.status = status;
-    this.code = code;
-  }
-}
+import { ApiError } from '../../../../packages/workspace/src/client.ts';
+export { ApiError };
 
 /**
  * Determine whether the application is running inside the Tauri native desktop container.

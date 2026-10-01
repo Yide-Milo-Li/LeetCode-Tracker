@@ -18,7 +18,8 @@ import {
 } from 'lucide-react';
 import { CatalogView } from './components/CatalogView.tsx';
 import { ActivityRecords } from './components/ActivityRecords.tsx';
-import { TodayPlanView } from './components/TodayPlanView.tsx';
+import { TodayPlanView } from '../../../packages/workspace/src/components/TodayPlanView.tsx';
+import { DesktopWorkspaceProvider, desktopHost } from './workspace-adapter.tsx';
 import { PracticeWorkspace } from './components/PracticeWorkspace.tsx';
 import { PracticeTimerPill } from './components/PracticeTimer.tsx';
 import { ShortcutHelpModal } from './components/ShortcutHelpModal.tsx';
@@ -43,7 +44,7 @@ const SettingsView = React.lazy(() =>
   import('./components/SettingsView.tsx').then((m) => ({ default: m.SettingsView })),
 );
 const NotesWorkspace = React.lazy(() =>
-  import('./components/NotesWorkspace.tsx').then((m) => ({ default: m.NotesWorkspace })),
+  import('../../../packages/workspace/src/components/NotesWorkspace.tsx').then((m) => ({ default: m.NotesWorkspace })),
 );
 
 /** Accessible lightweight placeholder while lazy-loading secondary workspaces. */
@@ -88,7 +89,7 @@ function initialView(): View {
 }
 
 /** Preserve mounted workspaces for drafts/filters while sharing mutation invalidations and preferences. */
-export function App() {
+function AppContent() {
   const [view, setView] = useState<View>(initialView);
   const [visited, setVisited] = useState<Set<View>>(() => new Set([initialView()]));
   const [lang, setLang] = useState<Language>('en');
@@ -210,14 +211,17 @@ export function App() {
     const apply = () => {
       const dark = theme === 'dark' || (theme === 'system' && media.matches);
       document.documentElement.classList.toggle('dark', dark);
+      document.querySelector('.tracker-workspace[data-workspace-id=desktop]')?.classList.toggle('dark',dark);
       document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
     };
     apply();
     media.addEventListener('change', apply);
     if (palette && palette !== 'default') {
       document.documentElement.setAttribute('data-palette', palette);
+      document.querySelector('.tracker-workspace[data-workspace-id=desktop]')?.setAttribute('data-palette',palette);
     } else {
       document.documentElement.removeAttribute('data-palette');
+      document.querySelector('.tracker-workspace[data-workspace-id=desktop]')?.removeAttribute('data-palette');
     }
     return () => media.removeEventListener('change', apply);
   }, [theme, palette]);
@@ -261,6 +265,7 @@ export function App() {
   const notifyMutation = useCallback(
     (record?: PracticeRecord) => {
       setRevision((n) => n + 1);
+      desktopHost.emit({ type: 'refresh' });
       void plan.onPracticeLogged(record);
     },
     [plan.onPracticeLogged],
@@ -599,3 +604,6 @@ export function App() {
     </WorkspaceContext.Provider>
   );
 }
+
+/** The desktop shell hosts the same workspace components as experimental embeds. */
+export function App() {return <DesktopWorkspaceProvider><AppContent/></DesktopWorkspaceProvider>;}
