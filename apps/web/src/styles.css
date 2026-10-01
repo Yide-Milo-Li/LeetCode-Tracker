@@ -1,21 +1,4 @@
-/*
- * Stylesheet entry. Partials are imported in their original order, so the cascade is
- * identical to the former single file. Keep new rules in the partial that owns the
- * feature and append, rather than reorder, when order matters.
- */
-@import './styles/01-tokens.css';
-@import './styles/02-palettes.css';
-@import './styles/03-base.css';
-@import './styles/04-shell.css';
-@import './styles/05-controls.css';
-@import './styles/06-overlays.css';
-@import './styles/07-today.css';
-@import './styles/08-tables-imports-schedule.css';
-@import './styles/09-statistics.css';
-@import './styles/10-preferences-layout-utilities.css';
-@import './styles/11-interactions-misc.css';
-@import './styles/12-notes.css';
-@import './styles/13-timer-settings-setup.css';
-@import './styles/14-statistics-insights.css';
-@import './styles/15-notes-workspace.css';
-@import './styles/16-settings.css';
+@import "../../../packages/workspace/src/styles.css";
+
+/* Browser document sizing belongs to the desktop host, outside the shared root. */
+html, body, #root { margin: 0; min-width: 0; height: 100%; }

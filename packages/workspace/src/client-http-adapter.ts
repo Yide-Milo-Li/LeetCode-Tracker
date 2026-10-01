@@ -3,6 +3,7 @@
  * Provides typed methods for catalog browsing, JSONL problem import, manual practice records,
  * progress snapshot management, Gemini-assisted text formatting, and user preferences.
  */
+import type { RecommendationFeedbackReason } from '../../contracts/src/recommendations.ts';
 import type {
   CatalogProblem,
   CatalogQueryInput,
@@ -28,6 +29,7 @@ import type {
   ProgressImportSummary,
   ProgressSnapshot,
   ProgressSnapshotHistory,
+  ReasoningEffort,
   RulePatch,
   SnapshotBundle,
   Strategy,
@@ -151,6 +153,7 @@ const settingsApi = {
     apiKey?: string;
     model?: string;
     baseUrl?: string;
+    reasoningEffort?: ReasoningEffort;
   }): Promise<{ ok: boolean; model: string; message?: string; provider?: LLMProvider }> {
     return request<{ ok: boolean; model: string; message?: string; provider?: LLMProvider }>('/settings/test-llm', {
       method: 'POST',
@@ -158,7 +161,11 @@ const settingsApi = {
     });
   },
 
-  testGeminiConnection(params?: { apiKey?: string; model?: string }): Promise<{ ok: boolean; model: string; message?: string }> {
+  testGeminiConnection(params?: {
+    apiKey?: string;
+    model?: string;
+    reasoningEffort?: ReasoningEffort;
+  }): Promise<{ ok: boolean; model: string; message?: string }> {
     return request<{ ok: boolean; model: string; message?: string }>('/settings/test-gemini', {
       method: 'POST',
       body: JSON.stringify(params ?? {}),
@@ -336,7 +343,7 @@ const planningApi = {
     });
   },
 
-  replacePlanItems(planId: string, options: { mode: 'one' | 'all_unfinished'; itemId?: string; expectedVersion: number }): Promise<DailyPlan> {
+  replacePlanItems(planId: string, options: { mode: 'one' | 'all_unfinished'; itemId?: string; expectedVersion: number; feedbackReason?: RecommendationFeedbackReason }): Promise<DailyPlan> {
     return planningMutation(`/daily-plans/${planId}/replace`, options);
   },
 
@@ -344,7 +351,7 @@ const planningApi = {
     return planningMutation(`/daily-plans/${planId}/append`, options);
   },
 
-  removePlanItem(planId: string, options: { itemId: string; expectedVersion: number }): Promise<DailyPlan> {
+  removePlanItem(planId: string, options: { itemId: string; expectedVersion: number; feedbackReason?: RecommendationFeedbackReason }): Promise<DailyPlan> {
     return planningMutation(`/daily-plans/${planId}/remove-item`, options);
   },
 
@@ -457,16 +464,16 @@ const exportApi = {
 
 const bundleApi = {
   getBundleExportUrl(): string {
-    return `${API_BASE}/bundle/export?version=3`;
+    return `${API_BASE}/bundle/export?version=5`;
   },
 
   exportBundle(): Promise<SnapshotBundle> {
-    return request<SnapshotBundle>('/bundle/export?version=3');
+    return request<SnapshotBundle>('/bundle/export?version=5');
   },
 
   async exportBundleFile(): Promise<void> {
     const filename = `leetcode-tracker-snapshot-${new Date().toISOString().slice(0, 10)}.json`;
-    await exportDataFile('/bundle/export?version=3', filename);
+    await exportDataFile('/bundle/export?version=5', filename);
   },
 
   importBundle(

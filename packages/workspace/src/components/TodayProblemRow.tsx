@@ -6,6 +6,7 @@ import {useWorkspaceEnvironment} from '../context.tsx';
 import React, { useState, useRef, useEffect } from 'react';
 import { Check, Circle, RefreshCw, Plus, BookMarked, BookOpen, PenLine, Trash2 } from 'lucide-react';
 import type { PlanItem } from '../api.ts';
+import type { RecommendationFeedbackReason } from '../../../contracts/src/recommendations.ts';
 import { translations, type Language } from '../i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
 import { Feedback, InfoPopover, Tooltip } from './ui.tsx';
@@ -25,8 +26,8 @@ export interface TodayProblemRowProps {
   canRemove?: boolean;
   isRemoving?: boolean;
   onComplete: (item: PlanItem) => void;
-  onReplaceOne: (item: PlanItem) => void;
-  onRemove?: (item: PlanItem) => void;
+  onReplaceOne: (item: PlanItem, reason?: RecommendationFeedbackReason) => void;
+  onRemove?: (item: PlanItem, reason?: RecommendationFeedbackReason) => void;
   onOpenQuickNote?: (item: PlanItem) => void;
 }
 
@@ -56,6 +57,8 @@ export function TodayProblemRow({
 
   const [isNoteMenuOpen, setIsNoteMenuOpen] = useState(false);
   const noteMenuRef = useRef<HTMLDivElement>(null);
+  const feedbackId = React.useId();
+  const [feedbackReason, setFeedbackReason] = useState<RecommendationFeedbackReason | ''>('');
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -169,10 +172,30 @@ export function TodayProblemRow({
             <InfoPopover
               title={zh ? '推荐理由' : 'Why recommended'}
               label={zh ? '推荐理由' : 'Why recommended'}
-              content={<p className="recommendation-popover-text">{reasonText}</p>}
+              content={<div className="recommendation-popover-text"><p>{reasonText}</p>
+                {item.explanation?.reviewDecision && <p>{zh ? '结果反馈策略 v2；阶段 ' : 'Outcome policy v2; stage '}{item.explanation.reviewDecision.stage}
+                  {zh ? '；间隔 ' : '; interval '}{item.explanation.reviewDecision.intervalDays}{zh ? ' 天；到期 ' : ' days; due '}{item.explanation.reviewDecision.dueDate ?? '—'}</p>}
+                {item.explanation?.freshness && <p>{zh ? '90 天证据：' : '90-day evidence: '}{item.explanation.freshness.distinctProblems}{zh ? ' 道题，' : ' problems, '}{item.explanation.freshness.practiceDays}{zh ? ' 天；' : ' days; '}{({ recent: zh ? '近期有记录' : 'recent', stale: zh ? '仅有较旧证据，不能视为近期稳定' : 'stale, not recent stability', unseen: zh ? '尚无记录' : 'unseen' })[item.explanation.freshness.status]}</p>}
+                {item.explanation?.durationEstimate && <p>{zh ? '预计用时：' : 'Estimated effort: '}{item.explanation.durationEstimate.minutes}{zh ? ' 分钟；' : ' min; '}{item.explanation.durationEstimate.source === 'personal' ? (zh ? '个人样本中位数' : 'personal sample median') : (zh ? '难度启发式，非承诺' : 'difficulty heuristic, not a promise')}</p>}
+                {item.explanation?.durationShadow && <p>{zh ? '个人阈值影子对照：' : 'Personal threshold shadow: '}{item.explanation.durationShadow.sampleCount}{zh ? ' 个样本；' : ' samples; '}{item.explanation.durationShadow.eligible ? item.explanation.durationShadow.thresholdMinutes : item.explanation.durationShadow.staticThresholdMinutes}{zh ? ' 分钟。未应用于复习日期。' : ' min. Not applied to review dates.'}</p>}
+              </div>}
             />
           )}
         </div>
+        <details className="text-muted">
+          <summary>{zh ? '可选换题/移除反馈' : 'Optional swap/removal feedback'}</summary>
+          <label htmlFor={feedbackId}>{zh ? '下次操作的原因：' : 'Reason for next action: '}{item.problem.title}</label>
+          <select id={feedbackId} className="form-input" value={feedbackReason} aria-describedby={feedbackId + '-help'}
+            onChange={event => setFeedbackReason(event.target.value as RecommendationFeedbackReason | '')}>
+            <option value="">{zh ? '不提供原因' : 'No reason'}</option>
+            <option value="time_unavailable">{zh ? '时间不足' : 'Time unavailable'}</option>
+            <option value="already_familiar">{zh ? '已经熟悉' : 'Already familiar'}</option>
+            <option value="topic_mismatch">{zh ? '专题不匹配' : 'Topic mismatch'}</option>
+            <option value="too_difficult">{zh ? '过于困难' : 'Too difficult'}</option>
+            <option value="other">{zh ? '其他' : 'Other'}</option>
+          </select>
+          <p id={feedbackId + '-help'}>{zh ? '仅在明确换题或移除时保存；不是练习失败，也不会改变掌握评估。' : 'Saved only when you swap or remove. This is not a failed attempt and does not change mastery evidence.'}</p>
+        </details>
         {rowError && (
           <Feedback retry={{ label: t.retry, run: () => onComplete(item) }}>
             {rowError}
@@ -251,7 +274,7 @@ export function TodayProblemRow({
             className="btn-icon"
             aria-label={t.replaceOne}
             disabled={!host.capabilities.planEditing || item.completed || isSaving || replacingBatch || Boolean(replacingItemId) || isAppending}
-            onClick={() => onReplaceOne(item)}
+            onClick={() => onReplaceOne(item, feedbackReason || undefined)}
           >
             <RefreshCw size={18} className={replacingItemId === item.id ? 'spin' : ''} />
           </button>
@@ -288,7 +311,7 @@ export function TodayProblemRow({
               isAppending ||
               isRemoving
             }
-            onClick={() => onRemove?.(item)}
+            onClick={() => onRemove?.(item, feedbackReason || undefined)}
           >
             {isRemoving ? (
               <RefreshCw size={18} className="spin" />

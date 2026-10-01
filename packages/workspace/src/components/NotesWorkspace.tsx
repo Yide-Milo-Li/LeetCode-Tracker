@@ -194,6 +194,10 @@ export function NotesWorkspace({
 
   const t = translations[lang];
   const zh = lang === 'zh';
+  const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform ?? '');
+  const zenModeTitle = isMac
+    ? (zh ? '专注模式快捷键 (⌘\\)' : 'Zen Mode Shortcut (⌘\\)')
+    : (zh ? '专注模式快捷键 (Ctrl+\\)' : 'Zen Mode Shortcut (Ctrl+\\)');
 
   // Filters state
   const [scope, setScope] = useState<'practiced' | 'all'>('practiced');
@@ -254,6 +258,7 @@ export function NotesWorkspace({
   const [zenMode, setZenMode] = useState(false);
   const [showCodeMenu, setShowCodeMenu] = useState(false);
   const codeMenuRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Close code menu on outside click
@@ -523,6 +528,8 @@ export function NotesWorkspace({
   useEffect(() => {
     /** Route keyboard shortcuts for saving and focus mode. */
     function handleKeyDown(e: KeyboardEvent) {
+      // Retained hidden views must not handle shortcuts intended for the active view.
+      if (rootRef.current?.closest('[hidden]')) return;
       if(environment.host.id!=='desktop'&&(!(e.target instanceof Node)||!environment.root.current?.contains(e.target)))return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
@@ -596,7 +603,7 @@ export function NotesWorkspace({
   const totalPages = Math.max(1, Math.ceil(total / limit));
 
   return (
-    <div className="notes-workspace-view" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div ref={rootRef} className="notes-workspace-view" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {externalChange&&<div role="status">{zh ? '外部数据已更新；未保存草稿已保留。' : 'External data changed; your unsaved draft was preserved.'}</div>}
       <PageHeader
         title={t.notesWorkspaceTitle}
@@ -607,7 +614,7 @@ export function NotesWorkspace({
               type="button"
               className={`btn btn-secondary btn-sm ${zenMode ? 'active' : ''}`}
               onClick={() => setZenMode((z) => !z)}
-              title={zh ? '专注模式快捷键 (Ctrl+\\)' : 'Zen Mode Shortcut (Ctrl+\\)'}
+              title={zenModeTitle}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -1062,7 +1069,7 @@ export function NotesWorkspace({
                     type="button"
                     className={`btn btn-secondary btn-sm ${zenMode ? 'active' : ''}`}
                     onClick={() => setZenMode((z) => !z)}
-                    title={zh ? '专注模式快捷键 (Ctrl+\\)' : 'Zen Mode Shortcut (Ctrl+\\)'}
+                    title={zenModeTitle}
                     style={{
                       display: 'inline-flex',
                       alignItems: 'center',
@@ -1234,7 +1241,7 @@ export function NotesWorkspace({
                       <Save size={13} />
                       <span>{savingNote ? t.savingNote : t.saveNote}</span>
                       <span style={{ fontSize: '0.6875rem', opacity: 0.75 }}>
-                        {/Mac/.test(navigator.platform) ? '(⌘S)' : '(Ctrl+S)'}
+                        {isMac ? '(⌘S)' : '(Ctrl+S)'}
                       </span>
                     </button>
                   </div>

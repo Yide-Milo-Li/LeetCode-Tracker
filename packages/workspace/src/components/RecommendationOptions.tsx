@@ -1,0 +1,61 @@
+/** Optional future-plan policies; edits remain drafts until the parent explicitly submits. */
+import React, { useId } from 'react';
+import type { RulePatch } from '../../../contracts/src/recommendations.ts';
+import type { Language } from '../i18n.ts';
+
+type Options = Pick<RulePatch, 'reviewPolicy' | 'adaptiveReviewEnabled' | 'personalDurationCalibration' | 'timeBudgetMinutes'>;
+
+/** Copy only present experiment fields so saving a legacy draft preserves its shape. */
+export function readRecommendationOptions(value: Options): Options {
+  return { ...(value.reviewPolicy !== undefined ? { reviewPolicy: value.reviewPolicy } : {}),
+    ...(value.personalDurationCalibration !== undefined ? { personalDurationCalibration: value.personalDurationCalibration } : {}),
+    ...(value.timeBudgetMinutes !== undefined ? { timeBudgetMinutes: value.timeBudgetMinutes } : {}) };
+}
+
+/** Preserve absent legacy settings while exposing independent, labeled opt-in controls. */
+export function RecommendationOptions({ lang, reviewEnabled, value, onChange }: {
+  lang: Language; reviewEnabled: boolean; value: Options; onChange: (patch: Options) => void;
+}) {
+  const id = useId(), zh = lang === 'zh';
+  return <fieldset className="form-group recommendation-options">
+    <legend className="form-label">{zh ? '推荐策略与用时' : 'Recommendation policy and effort'}</legend>
+    {reviewEnabled && <div className="form-group">
+      <label htmlFor={id + '-policy'} className="form-label">{zh ? '复习策略' : 'Review policy'}</label>
+      <select id={id + '-policy'} className="form-input" value={value.reviewPolicy ?? ''}
+        aria-describedby={id + '-policy-help'}
+        onChange={event => {
+          const reviewPolicy = event.target.value as NonNullable<Options['reviewPolicy']>;
+          onChange({ reviewPolicy, adaptiveReviewEnabled: reviewPolicy === 'duration-v1' });
+        }}>
+        {!value.reviewPolicy && <option value="" disabled>{zh ? '保留现有策略' : 'Keep existing policy'}</option>}
+        <option value="fixed">{zh ? '固定间隔（旧版）' : 'Fixed intervals (legacy)'}</option>
+        <option value="duration-v1">{zh ? '用时调整（v1）' : 'Duration adjustment (v1)'}</option>
+        <option value="outcome-v2">{zh ? '练习结果反馈（v2，可选）' : 'Outcome feedback (v2, opt-in)'}</option>
+      </select>
+      <p id={id + '-policy-help'} className="text-muted">{zh
+        ? 'v2 根据明确记录的独立完成、借助帮助或未解决结果调整后续复习；不会改写历史计划，也不代表能力评级。'
+        : 'V2 uses explicitly recorded independent, assisted or unsolved outcomes for future reviews. It does not rewrite history or grade ability.'}</p>
+    </div>}
+    <div className="form-group">
+      <label htmlFor={id + '-calibration'} className="checkbox-label">
+        <input id={id + '-calibration'} type="checkbox" checked={!!value.personalDurationCalibration}
+          aria-describedby={id + '-calibration-help'}
+          onChange={event => onChange({ personalDurationCalibration: event.target.checked })} />
+        <span>{zh ? '个人用时实验（影子对照）' : 'Personal duration experiment (shadow)'}</span>
+      </label>
+      <p id={id + '-calibration-help'} className="text-muted">{zh
+        ? '90 天内同难度至少 12 个独立完成题目日样本、6 道题和 4 天才启用个人用时估计。调度仍使用静态阈值；该实验不改变复习日期。'
+        : 'Personal effort estimates require 12 independent question/day samples across 6 problems and 4 days in 90 days for that difficulty. Review scheduling keeps static thresholds; this experiment does not change due dates.'}</p>
+    </div>
+    <div className="form-group">
+      <label htmlFor={id + '-budget'} className="form-label">{zh ? '每日时间预算（分钟，可选）' : 'Daily time budget (minutes, optional)'}</label>
+      <input id={id + '-budget'} className="form-input" type="number" min="1" max="1440" step="1"
+        value={value.timeBudgetMinutes ?? ''} aria-describedby={id + '-budget-help'}
+        aria-invalid={value.timeBudgetMinutes != null && (!Number.isInteger(value.timeBudgetMinutes) || value.timeBudgetMinutes < 1 || value.timeBudgetMinutes > 1440)}
+        onChange={event => onChange({ timeBudgetMinutes: event.target.value === '' ? null : Number(event.target.value) })} />
+      <p id={id + '-budget-help'} className="text-muted">{zh
+        ? '留空即不设预算。估计会分别列出新题和复习；预算不足时仍保留严格题数与难度，需明确调整。'
+        : 'Leave blank for no budget. New and review effort are shown separately. An infeasible budget never silently changes counts or difficulty.'}</p>
+    </div>
+  </fieldset>;
+}

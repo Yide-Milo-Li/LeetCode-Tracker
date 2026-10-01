@@ -84,6 +84,7 @@ export function usePreferences(): Preferences {
     const apply = () => {
       const dark = theme === 'dark' || (theme === 'system' && media.matches);
       document.documentElement.classList.toggle('dark', dark);
+      document.querySelector('.tracker-workspace[data-workspace-id=desktop]')?.classList.toggle('dark', dark);
       document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
       setResolvedDark(dark);
     };
@@ -91,8 +92,10 @@ export function usePreferences(): Preferences {
     media.addEventListener('change', apply);
     if (palette && palette !== 'default') {
       document.documentElement.setAttribute('data-palette', palette);
+      document.querySelector('.tracker-workspace[data-workspace-id=desktop]')?.setAttribute('data-palette', palette);
     } else {
       document.documentElement.removeAttribute('data-palette');
+      document.querySelector('.tracker-workspace[data-workspace-id=desktop]')?.removeAttribute('data-palette');
     }
     return () => media.removeEventListener('change', apply);
   }, [theme, palette]);
