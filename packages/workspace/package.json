@@ -1,0 +1,19 @@
+{
+  "name": "@leetcode-tracker/workspace",
+  "version": "1.2.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "dependencies": {
+    "@leetcode-tracker/contracts": "file:../contracts",
+    "@leetcode-tracker/domain": "file:../domain",
+    "@modelcontextprotocol/ext-apps": "2.0.3",
+    "lucide-react": "^1.42.0"
+  }
+}
