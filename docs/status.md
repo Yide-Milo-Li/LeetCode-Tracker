@@ -31,6 +31,12 @@ The prior `v1.2.0` + `994f516` baseline included the Today / Problems / Statisti
 **Prior Windows `v1.2.0` release verification & remaining open boundaries**:
 Local Windows `v1.2.0` release verification passed **420 JavaScript/Web/sidecar tests (285 backend/platform + 134 Web DOM + 1 isolated sidecar) and 7 Rust tests** (and follow-up `v1.2.0` verification passed **427 tests: 285 backend/platform + 141 Web DOM + 1 isolated sidecar**), TypeScript, production build, documentation links, Rust formatting/clippy, and Windows x64 NSIS packaging; screenshots were regenerated using an isolated synthetic 4,046-problem catalog with 0 browser errors. Remote results are tracked independently in [GitHub Actions](https://github.com/Yide-Milo-Li/LeetCode-Tracker/actions). Apple notarization / Developer ID signing, first-launch Gatekeeper UX on non-developer Macs, manual Dock reopen and native save-dialog acceptance, clean-VM Windows installation, populated-profile Windows installer upgrade/downgrade, full WebView2 acceptance, and fresh live-provider / private-dataset verification remain unperformed.
 
+## Phase 35 — implementation in progress
+
+The application package now owns all 53 business routes across 11 route modules, shared restore admission, planning state and runtime ownership. The desktop renders the shared Today and Notes implementation; experimental MCP Apps and DSH entries use synthetic temporary storage. See [application boundaries](application-boundaries.md) and [experiment startup](../experiments/phase35/README.md).
+
+Current regression passes 443 JavaScript/Web/sidecar tests (295 backend, 147 Web DOM, 1 isolated sidecar), TypeScript and both builds. Windows Rust checks and seven tests passed; an isolated native launch created its own profile, started its private sidecar and released the lease on close. These are local synthetic checks. The synthetic browser suite passed 192 layout checks, 108 overlay checks and 19 flows at 1024/1440/1920, both languages and both themes, with no browser exceptions or external page requests. Full native-dialog acceptance remains unperformed. Neither real ChatGPT nor real DSH acceptance is complete; Phase 35 baseline is frozen for Phase 36 implementation with unperformed live host acceptance recorded.
+
 ## Historical implementation checkpoints
 
 The phase and older release sections below retain the evidence and limitations recorded at those checkpoints; they are not the current version or current remote-CI status.
