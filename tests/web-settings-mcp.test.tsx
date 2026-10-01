@@ -83,7 +83,6 @@ describe('SettingsView: Background Runtime & AI Connection (MCP)', () => {
     mock.method(mcpApi, 'getConfig', async () => ({
       connection: {nodePath:'C:/安装 with spaces/node.exe',proxyPath:'C:/安装 with spaces/desktop-mcp-proxy.mjs',configPath:'C:/资料 with spaces/mcp-config.json'},
       port: 30138,
-      clientToken: '0123456789abcdef0123456789abcdef',
       clients: [
         {
           id: 'claude-desktop',
@@ -170,7 +169,6 @@ describe('SettingsView: Background Runtime & AI Connection (MCP)', () => {
       }
       return {
         port: 30138,
-        clientToken: 'token123',
         clients: [],
         aiAccessPaused: currentPaused,
       };
