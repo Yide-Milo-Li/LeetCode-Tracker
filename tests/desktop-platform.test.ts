@@ -2,11 +2,20 @@
 import { afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { api, request, ApiError } from '../apps/web/src/api.ts';
+import {
+  confirmExit,
+  cancelExit,
+  getAutostartStatus,
+  setAutostartStatus,
+  getAiAccessStatus,
+  setAiAccessStatus,
+  listenDesktopExit,
+} from '../apps/web/src/platform/index.ts';
 
 /** Install an isolated shell bridge without giving tests real native capabilities. */
 function bridge(invoke: (command: string, args: any) => Promise<unknown>): void {
   Object.assign(globalThis, {
-    window: { __TAURI_INTERNALS__: { invoke } },
+    window: Object.assign(new EventTarget(), { __TAURI_INTERNALS__: { invoke } }),
     prompt: () => { throw new Error('Desktop exports must use a native dialog, not prompt'); },
   });
 }
@@ -69,4 +78,53 @@ test('note format requests use the authenticated desktop API bridge', async () =
     { method: 'POST', path: '/api/v1/notes/format' },
   ]);
   assert.deepEqual(JSON.parse(calls[1].body!), { content: 'Synthetic' });
+});
+
+test('desktop lifecycle commands route to correct native Tauri commands', async () => {
+  const commands: { cmd: string; args?: any }[] = [];
+  bridge(async (cmd, args) => {
+    commands.push({ cmd, args });
+    if (cmd === 'get_autostart_status') return true;
+    if (cmd === 'get_ai_access_status') return false;
+    return null;
+  });
+
+  await confirmExit();
+  await cancelExit();
+  const autostart = await getAutostartStatus();
+  await setAutostartStatus(true);
+  const aiStatus = await getAiAccessStatus();
+  await setAiAccessStatus(true);
+
+  assert.equal(autostart, true);
+  assert.equal(aiStatus, false);
+  assert.deepEqual(commands, [
+    { cmd: 'confirm_exit', args: undefined },
+    { cmd: 'cancel_exit', args: undefined },
+    { cmd: 'get_autostart_status', args: undefined },
+    { cmd: 'set_autostart_status', args: { enabled: true } },
+    { cmd: 'get_ai_access_status', args: undefined },
+    { cmd: 'set_ai_access_status', args: { paused: true } },
+  ]);
+});
+
+test('listenDesktopExit triggers callback when desktop:request-exit event is received', async () => {
+  bridge(async () => null);
+  let triggered = 0;
+  const unlisten = listenDesktopExit(() => {
+    triggered++;
+  });
+
+  window.dispatchEvent(new Event('desktop:request-exit'));
+  assert.equal(triggered, 1);
+
+  // Debounces within 300ms
+  window.dispatchEvent(new Event('desktop:request-exit'));
+  assert.equal(triggered, 1);
+
+  unlisten();
+  // Wait >300ms and dispatch again, should not fire after unlisten
+  await new Promise((r) => setTimeout(r, 350));
+  window.dispatchEvent(new Event('desktop:request-exit'));
+  assert.equal(triggered, 1);
 });

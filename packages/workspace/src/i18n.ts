@@ -459,6 +459,11 @@ export const translations = {
     unsavedNoteSwitchingTo: 'Target problem:',
     unsavedNoteStay: 'Stay on Note',
     unsavedNoteDiscard: 'Discard Changes & Switch',
+    unsavedNoteExitModalTitle: 'Unsaved Note Changes',
+    unsavedNoteExitModalDesc: 'You have unsaved changes in your note. Would you like to save before exiting?',
+    unsavedNoteSaveAndExit: 'Save & Exit',
+    unsavedNoteDiscardAndExit: 'Discard & Exit',
+    unsavedNoteCancelExit: 'Cancel',
 
     // Phase 31: Notes Workspace Workbench & Toolbar
     toolbarBold: 'Bold',
@@ -934,6 +939,11 @@ export const translations = {
     unsavedNoteSwitchingTo: '目标题目：',
     unsavedNoteStay: '留在当前笔记',
     unsavedNoteDiscard: '放弃修改并切换',
+    unsavedNoteExitModalTitle: '未保存笔记',
+    unsavedNoteExitModalDesc: '当前题目的复盘笔记有未保存的修改。退出前是否需要保存？',
+    unsavedNoteSaveAndExit: '保存并退出',
+    unsavedNoteDiscardAndExit: '放弃并退出',
+    unsavedNoteCancelExit: '取消',
 
     // Phase 31: Notes Workspace Workbench & Toolbar
     toolbarBold: '粗体',

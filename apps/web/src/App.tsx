@@ -28,7 +28,8 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.ts';
 import { SetupGate } from './components/SetupGuide.tsx';
 import { brandIconUrl } from './brand-icons.ts';
 import type { SettingsSection } from './components/SettingsView.tsx';
-import { Feedback, IconButton, PageHeader, Tooltip } from './components/ui.tsx';
+import { Feedback, IconButton, PageHeader, Tooltip, Dialog } from './components/ui.tsx';
+import { listenDesktopExit, confirmExit, cancelExit } from './platform/index.ts';
 
 
 /** Lazy-load heavy contextual workspaces and charting views to optimize desktop bundle size. */
@@ -73,6 +74,7 @@ function WorkspaceFallback({ label }: { label: string }) {
 import { useDailyPlan } from './hooks/useDailyPlan.ts';
 import { usePreferences } from './hooks/usePreferences.ts';
 import type { PracticeRecord } from './api.ts';
+import { translations } from './i18n.ts';
 import { localizeApiError } from './error-i18n.ts';
 import {
   WorkspaceContext,
@@ -240,6 +242,27 @@ function AppContent() {
     },
     [navigate],
   );
+
+  const [notesDirty, setNotesDirty] = useState(false);
+  const [showExitModal, setShowExitModal] = useState(false);
+  const [savingBeforeExit, setSavingBeforeExit] = useState(false);
+  const [exitError, setExitError] = useState('');
+  const saveNoteRef = useRef<(() => Promise<boolean>) | null>(null);
+  const notesDirtyRef = useRef(false);
+  notesDirtyRef.current = notesDirty;
+
+  useEffect(() => {
+    const unlisten = listenDesktopExit(() => {
+      if (notesDirtyRef.current) {
+        navigate('notes');
+        setShowExitModal(true);
+      } else {
+        void confirmExit();
+      }
+    });
+    return unlisten;
+  }, [navigate]);
+
   const workspace = useMemo(
     () => ({ revision, timezone, selectedNoteProblem, navigate, openRecords, notifyMutation, openPractice, reportPracticeOutcome }),
     [revision, timezone, selectedNoteProblem, navigate, openRecords, notifyMutation, openPractice, reportPracticeOutcome],
@@ -525,6 +548,10 @@ function AppContent() {
                   notesFormatOnSave={notesFormatOnSave ?? undefined}
                   initialFrontendId={selectedNoteProblem}
                   onClearInitialFrontendId={() => setSelectedNoteProblem(null)}
+                  onDirtyChange={setNotesDirty}
+                  registerSaveHandler={(handler) => {
+                    saveNoteRef.current = handler;
+                  }}
                 />
               </div>
             )}
@@ -600,6 +627,84 @@ function AppContent() {
         )}
         {showShortcutHelp && (
           <ShortcutHelpModal lang={lang} onClose={() => setShowShortcutHelp(false)} />
+        )}
+        {showExitModal && (
+          <Dialog
+            title={translations[lang].unsavedNoteExitModalTitle}
+            lang={lang}
+            onClose={() => {
+              setShowExitModal(false);
+              void cancelExit();
+            }}
+            closeDisabled={savingBeforeExit}
+            footer={
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', width: '100%' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    setShowExitModal(false);
+                    void cancelExit();
+                  }}
+                  disabled={savingBeforeExit}
+                >
+                  {translations[lang].unsavedNoteCancelExit}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    setShowExitModal(false);
+                    void confirmExit();
+                  }}
+                  disabled={savingBeforeExit}
+                  style={{
+                    color: 'var(--danger, #ef4444)',
+                    borderColor: 'var(--danger, #ef4444)',
+                  }}
+                >
+                  {translations[lang].unsavedNoteDiscardAndExit}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={async () => {
+                    setSavingBeforeExit(true);
+                    setExitError('');
+                    try {
+                      const saved = await saveNoteRef.current?.();
+                      if (saved) {
+                        setShowExitModal(false);
+                        await confirmExit();
+                      } else {
+                        setExitError(zh ? '保存笔记失败，请重试' : 'Failed to save note. Please retry.');
+                      }
+                    } catch (err) {
+                      setExitError(err instanceof Error ? err.message : String(err));
+                    } finally {
+                      setSavingBeforeExit(false);
+                    }
+                  }}
+                  disabled={savingBeforeExit}
+                >
+                  {savingBeforeExit
+                    ? (zh ? '保存中…' : 'Saving…')
+                    : translations[lang].unsavedNoteSaveAndExit}
+                </button>
+              </div>
+            }
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.875rem', lineHeight: 1.5 }}>
+                {translations[lang].unsavedNoteExitModalDesc}
+              </p>
+              {exitError && (
+                <div style={{ color: 'var(--danger, #ef4444)', fontSize: '0.8125rem' }}>
+                  {exitError}
+                </div>
+              )}
+            </div>
+          </Dialog>
         )}
       </div>
     </WorkspaceContext.Provider>

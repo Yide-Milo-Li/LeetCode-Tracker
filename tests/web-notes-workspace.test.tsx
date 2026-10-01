@@ -1120,6 +1120,51 @@ describe('NotesWorkspace unsaved changes guard', () => {
     });
     assert.equal(noteEditor().value, '2 original');
   });
+
+  it('notifies onDirtyChange and provides functional save handler', async () => {
+    mockEditorProblems();
+    let dirtyState = false;
+    let saveHandler: (() => Promise<boolean>) | null = null;
+    let upsertCalled = false;
+    mock.method(api, 'upsertNote', async (id: string, content: string) => {
+      upsertCalled = true;
+      return { note: editorNote(id, content) };
+    });
+
+    await act(async () => {
+      render(
+        <NotesWorkspace
+          lang="en"
+          onDirtyChange={(d) => {
+            dirtyState = d;
+          }}
+          registerSaveHandler={(handler) => {
+            saveHandler = handler;
+          }}
+        />
+      );
+    });
+
+    assert.equal(dirtyState, false);
+    assert.ok(saveHandler !== null);
+
+    // Make an unsaved edit
+    await act(async () => {
+      fireEvent.change(noteEditor(), { target: { value: '1 with unsaved edits' } });
+    });
+
+    assert.equal(dirtyState, true);
+
+    // Call saveHandler programmatically
+    let result = false;
+    await act(async () => {
+      result = await saveHandler!();
+    });
+
+    assert.equal(result, true);
+    assert.equal(upsertCalled, true);
+    assert.equal(dirtyState, false);
+  });
 });
 
 describe('QuickCopyButtons Component', () => {

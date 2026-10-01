@@ -181,6 +181,10 @@ export interface NotesWorkspaceProps {
   initialFrontendId?: string | null;
   /** Clear external initial frontend ID once consumed to prevent deadlock on subsequent switches. */
   onClearInitialFrontendId?: () => void;
+  /** Notify parent of active unsaved edits in current note. */
+  onDirtyChange?: (dirty: boolean) => void;
+  /** Register programmatic save handler for exit confirmation flow. */
+  registerSaveHandler?: (handler: (() => Promise<boolean>) | null) => void;
 }
 
 /** Browse and edit notes while keeping asynchronous responses owned by their selection visit. */
@@ -188,6 +192,8 @@ export function NotesWorkspace({
   lang,
   initialFrontendId,
   onClearInitialFrontendId,
+  onDirtyChange,
+  registerSaveHandler,
 }: NotesWorkspaceProps) {
   const environment = useWorkspaceEnvironment();
   const api = environment.client;
@@ -465,9 +471,9 @@ export function NotesWorkspace({
   }, [hasUnsavedChanges]);
 
   /** Persist one snapshot, retaining newer edits and ignoring responses from an obsolete visit. */
-  async function handleSaveNote() {
+  async function handleSaveNote(): Promise<boolean> {
     const session = editorSession.current;
-    if (!selectedId || !canSave || !session.active || session.saving) return;
+    if (!selectedId || !canSave || !session.active || session.saving) return false;
     // Synchronous guard also blocks repeated shortcuts before React commits savingNote.
     session.saving = true;
     const saveVersion = ++session.saveVersion;
@@ -512,10 +518,12 @@ export function NotesWorkspace({
       // A saved note can change list membership even after switching problems. Refresh
       // the latest filters while mounted, without reloading the current editor draft.
       if (editorSession.current.active) setListRevision((current) => current + 1);
+      return true;
     } catch (err) {
       if (session.active) {
         setSaveError(err instanceof Error ? err.message : String(err));
       }
+      return false;
     } finally {
       session.saving = false;
       if (session.active) {
@@ -523,6 +531,17 @@ export function NotesWorkspace({
       }
     }
   }
+
+  useEffect(() => {
+    onDirtyChange?.(hasUnsavedChanges);
+  }, [hasUnsavedChanges, onDirtyChange]);
+
+  useEffect(() => {
+    if (registerSaveHandler) {
+      registerSaveHandler(handleSaveNote);
+      return () => registerSaveHandler(null);
+    }
+  }, [registerSaveHandler, handleSaveNote]);
 
   // Ctrl+S / Cmd+S shortcut to save; Ctrl+\ / Cmd+\ shortcut to toggle Zen mode
   useEffect(() => {
