@@ -41,6 +41,7 @@ struct DesktopState {
     status: Mutex<DesktopStatus>,
     manual_retry: AtomicBool,
     ai_paused: Mutex<Option<bool>>,
+    mcp_listener: Mutex<String>,
     renderer_ready: AtomicBool,
     exit_pending: AtomicBool,
     exit_acknowledged: AtomicBool,
@@ -60,6 +61,7 @@ impl Default for DesktopState {
             }),
             manual_retry: AtomicBool::new(false),
             ai_paused: Mutex::new(None),
+            mcp_listener: Mutex::new("MCP 状态未知 / MCP unknown".into()),
             renderer_ready: AtomicBool::new(false),
             exit_pending: AtomicBool::new(false),
             exit_acknowledged: AtomicBool::new(false),
@@ -358,14 +360,38 @@ fn begin_startup(app: AppHandle) {
                 if healthy {
                     policy.healthy(epoch.elapsed());
                 }
-                let paused = state
-                    .mcp_request(reqwest::Method::GET, "status", None)
-                    .ok()
+                let mcp = state.mcp_request(reqwest::Method::GET, "status", None).ok();
+                let paused = mcp
+                    .as_ref()
+                    .filter(|j| j["configuredPort"].is_number())
                     .and_then(|j| j["aiAccessPaused"].as_bool());
+                let label = mcp.as_ref().map_or_else(
+                    || "MCP 不可用 / MCP unavailable".to_string(),
+                    |j| {
+                        if j["state"] == "ready" {
+                            format!(
+                                "MCP 就绪 / Ready :{}{}",
+                                j["listeningPort"],
+                                if j["restartRequired"] == true {
+                                    " (待重启 / restart pending)"
+                                } else {
+                                    ""
+                                }
+                            )
+                        } else {
+                            format!(
+                                "MCP 不可用 / Unavailable: {}",
+                                j["errorCode"].as_str().unwrap_or("MCP_STOPPED")
+                            )
+                        }
+                    },
+                );
                 let changed = {
                     let mut old = state.ai_paused.lock().unwrap();
-                    let changed = *old != paused;
+                    let mut old_label = state.mcp_listener.lock().unwrap();
+                    let changed = *old != paused || *old_label != label;
                     *old = paused;
+                    *old_label = label;
                     changed
                 };
                 if changed {
@@ -593,12 +619,12 @@ pub fn update_tray_menu(app: &AppHandle) {
     let status_text = {
         let status = state.status.lock().unwrap();
         match status.state.as_str() {
-            "ready" => "运行状态：就绪",
+            "ready" => "运行状态：就绪 / Runtime ready",
             "starting" => "启动中 / Starting",
             "recovering" => "恢复中 / Recovering",
             "exiting" => "退出中 / Exiting",
-            "conflict" => "运行状态：数据库被占用",
-            _ => "运行状态：异常",
+            "conflict" => "数据库被占用 / Database conflict",
+            _ => "运行失败 / Runtime failed",
         }
     };
     let ai_paused = *state.ai_paused.lock().unwrap();
@@ -608,8 +634,13 @@ pub fn update_tray_menu(app: &AppHandle) {
         None => "AI 不可用 / AI unavailable",
     };
 
-    let Ok(open_item) = MenuItem::with_id(app, "open", "打开 LeetCode Tracker", true, None::<&str>)
-    else {
+    let Ok(open_item) = MenuItem::with_id(
+        app,
+        "open",
+        "打开 / Open LeetCode Tracker",
+        true,
+        None::<&str>,
+    ) else {
         return;
     };
     let Ok(status_item) = MenuItem::with_id(app, "status", status_text, false, None::<&str>) else {
@@ -620,16 +651,27 @@ pub fn update_tray_menu(app: &AppHandle) {
     else {
         return;
     };
+    let label = state.mcp_listener.lock().unwrap().clone();
+    let Ok(mcp_item) = MenuItem::with_id(app, "mcp_status", label, false, None::<&str>) else {
+        return;
+    };
     let Ok(sep) = PredefinedMenuItem::separator(app) else {
         return;
     };
-    let Ok(quit_item) = MenuItem::with_id(app, "quit", "退出", true, None::<&str>) else {
+    let Ok(quit_item) = MenuItem::with_id(app, "quit", "退出 / Quit", true, None::<&str>) else {
         return;
     };
 
     if let Ok(menu) = Menu::with_items(
         app,
-        &[&open_item, &status_item, &pause_ai_item, &sep, &quit_item],
+        &[
+            &open_item,
+            &status_item,
+            &mcp_item,
+            &pause_ai_item,
+            &sep,
+            &quit_item,
+        ],
     ) {
         let _ = tray.set_menu(Some(menu));
     }

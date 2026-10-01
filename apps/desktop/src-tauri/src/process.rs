@@ -218,6 +218,7 @@ mod tests {
         child
             .send(&serde_json::json!({"protocolVersion":1,"port":0,
             "dbPath":install.join("test.sqlite"),"backupDir":install.join("backups"),
+            "mcpConfigPath":install.join("mcp-config.json"),
             "sessionSecret":token,"nonce":nonce}))
             .unwrap();
         let port = wait_ready(ready, nonce, Duration::from_secs(10)).unwrap();
