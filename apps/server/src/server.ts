@@ -3,12 +3,12 @@
  * Binds to 127.0.0.1 loopback interface, configures database and backups,
  * and starts listening for API requests and serving the web client.
  */
-import { DatabaseSync } from 'node:sqlite';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import { CatalogStore } from '../../../packages/database/src/store.ts';
+import { openTrackerRuntime, type TrackerRuntime } from '../../../packages/application/src/runtime.ts';
+import { configureApplication } from './application-factory.ts';
 import { buildApp } from './app.ts';
-import { acquireDatabaseLease } from '../../../packages/database/src/lease.ts';
+import type { FastifyInstance } from 'fastify';
 
 if (typeof process.loadEnvFile === 'function') {
   try {
@@ -32,15 +32,22 @@ async function startServer() {
   const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
   const host = '127.0.0.1';
 
-  const release = acquireDatabaseLease(dbPath);
-  let opened: DatabaseSync | undefined;
+  let runtime: TrackerRuntime | undefined;
+  let app: FastifyInstance | undefined;
+  let stopRequested = false;
+  let shutdown: ((signal: string) => Promise<void>) | undefined;
+  const onSignal = (signal: string) => { stopRequested = true; void shutdown?.(signal); };
+  process.once('SIGINT', onSignal);
+  process.once('SIGTERM', onSignal);
   try {
     console.log(`[Server] Opening catalog database: ${dbPath}`);
-    const db = new DatabaseSync(dbPath);
-    opened = db;
-    const store = await CatalogStore.open(db, { backupDir });
+    runtime = await openTrackerRuntime({dbPath, backupDir, configure: configureApplication});
+    const ownedRuntime = runtime;
+    app = await buildApp({application: runtime.application});
+    const ownedApp = app;
+    let shuttingDown = false;
 
-    const app = await buildApp({ store });
+    if (stopRequested) { await ownedApp.close(); await ownedRuntime.close(); return; }
 
     const address = await app.listen({ host, port });
     console.log(`✓ LeetCode Tracker local workbench listening at: ${address}`);
@@ -49,24 +56,25 @@ async function startServer() {
 
     /** Finish pending requests before closing the database and releasing its lease. */
     const gracefulShutdown = async (signal: string) => {
+      if (shuttingDown) return;
+      shuttingDown = true;
       console.log(`\n[Server] Received ${signal}, closing server and database...`);
       try {
-        await app.close();
-        db.close();
-        release();
+        await ownedApp.close();
+        await ownedRuntime.close();
         console.log('✓ Clean shutdown complete.');
         process.exit(0);
       } catch (err) {
-        release();
+        await ownedRuntime.close().catch(() => {});
         console.error('Error during shutdown:', err);
         process.exit(1);
       }
     };
 
-    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+    shutdown = gracefulShutdown;
+    if (stopRequested) await gracefulShutdown('startup signal');
   } catch (error) {
-    try { opened?.close(); } finally { release(); }
+    try { await app?.close(); } finally { await runtime?.close(); }
     throw error;
   }
 }

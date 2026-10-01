@@ -1,3 +1,4 @@
+import { createServerApplication } from '../apps/server/src/application-factory.ts';
 /** Risk-focused record metadata, durable replay, migration and recovery checks on synthetic stores. */
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -282,16 +283,12 @@ it('exposes exact record reads, nullable details and deterministic retry/conflic
   const db = new DatabaseSync(':memory:');
   const store = new CatalogStore(db);
   await seed(store);
-  const app = await buildApp({
-    store,
-    disableStatic: true,
-    geminiAssistant: {
+  const app = await buildApp({ application: createServerApplication(store, {
       getStatus: () => ({ configured: false, model: 'synthetic' }),
       formatProgressText: async () => {
         throw new Error('Unexpected provider operation');
       },
-    },
-  });
+    }), disableStatic: true });
   try {
     const payload = { ...input, operationId: 'lost-response' };
     const first = await app.inject({ method: 'POST', url: '/api/v1/practice-records', payload });

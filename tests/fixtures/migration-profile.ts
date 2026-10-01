@@ -1,3 +1,4 @@
+import { createServerApplication } from '../../apps/server/src/application-factory.ts';
 /** Synthetic cross-platform migration fixture; never reads a user profile. */
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
@@ -17,7 +18,7 @@ export async function seedMigrationProfile(store: CatalogStore) {
   db.prepare('INSERT INTO progress_snapshot_history VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').run('history-1','1',1,'2026-09-01','date','Accepted',2,'manual','active',1,'import-1','import');
   db.prepare('INSERT INTO snapshot_successes VALUES(?,?,?,?,?,?)').run('1',1,'2026-09-01','date','UTC',1);
   await store.planning.saveStrategy({name:'Synthetic strategy', weekdays:[0,1,2,3,4,5,6], rules:{dailyCount:1,difficulty:{Easy:100,Medium:0,Hard:0},tags:[],premium:false,reviewEnabled:true,reviewPercent:100,preference:''}});
-  const app = await buildApp({store, disableStatic:true});
+  const app = await buildApp({ application: createServerApplication(store), disableStatic:true });
   try {
     const result = await app.inject({method:'POST',url:'/api/v1/daily-plans/ensure',payload:{date:'2099-01-01'}});
     assert.equal(result.statusCode,200,result.body);

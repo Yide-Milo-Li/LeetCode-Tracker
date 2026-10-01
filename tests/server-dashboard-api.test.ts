@@ -1,3 +1,4 @@
+import { createServerApplication } from '../apps/server/src/application-factory.ts';
 /**
  * Integration test suite for Fastify Dashboard & Activity API endpoints (/api/v1/dashboard*).
  * Validates read-only execution, today summary statuses, yearly heatmap, 30-day trends,
@@ -43,7 +44,7 @@ describe('Fastify Dashboard & Activity API Endpoints', () => {
         ('q2', 'linked-list')
     `).run();
 
-    const app = await buildApp({ store, disableStatic: true });
+    const app = await buildApp({ application: createServerApplication(store), disableStatic: true });
     return { db, store, app };
   }
 

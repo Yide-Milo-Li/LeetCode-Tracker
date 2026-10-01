@@ -1,3 +1,4 @@
+import { createServerApplication } from '../apps/server/src/application-factory.ts';
 /**
  * Automated test suite for AI Settings and Gemini configuration endpoints.
  * Verifies API key, preferred model, candidate models persistence,
@@ -14,7 +15,7 @@ describe('Server Settings & Gemini AI Configuration (/api/v1/settings)', () => {
   it('saves and retrieves geminiApiKey, geminiModel, and geminiFallbackModels', async () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
-    const app = await buildApp({ store, disableStatic: true });
+    const app = await buildApp({ application: createServerApplication(store), disableStatic: true });
 
     // Initial check: defaults are null / unset
     const initialRes = await app.inject({ method: 'GET', url: '/api/v1/settings' });
@@ -72,7 +73,7 @@ describe('Server Settings & Gemini AI Configuration (/api/v1/settings)', () => {
       },
     };
 
-    const app = await buildApp({ store, geminiAssistant: mockAssistant, disableStatic: true });
+    const app = await buildApp({ application: createServerApplication(store, mockAssistant), disableStatic: true });
 
     const patchRes = await app.inject({
       method: 'PATCH',
@@ -111,7 +112,7 @@ describe('Server Settings & Gemini AI Configuration (/api/v1/settings)', () => {
       },
     };
 
-    const app = await buildApp({ store, geminiAssistant: mockAssistant, disableStatic: true });
+    const app = await buildApp({ application: createServerApplication(store, mockAssistant), disableStatic: true });
 
     // Successful test
     const successRes = await app.inject({
@@ -141,7 +142,7 @@ describe('Server Settings & Gemini AI Configuration (/api/v1/settings)', () => {
   it('rejects duplicate models between primary and fallback or within fallback array', async () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
-    const app = await buildApp({ store, disableStatic: true });
+    const app = await buildApp({ application: createServerApplication(store), disableStatic: true });
 
     // 1. Rejects primary model existing in fallback models list
     const overlapRes = await app.inject({

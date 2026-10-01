@@ -1,3 +1,4 @@
+import { createServerApplication } from '../apps/server/src/application-factory.ts';
 /** Full-profile portability and failure isolation; all fixtures are synthetic and temporary. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -80,7 +81,7 @@ test('a target write failure rolls back even after a valid safety backup', async
 });
 
 test('API keeps v1 default and rejects overlapping restore/write requests', async () => {
-  const p=profile(); const app=await buildApp({store:p.store,disableStatic:true});
+  const p=profile(); const app=await buildApp({ application: createServerApplication(p.store), disableStatic:true });
   try {
     await seed(p.store);
     assert.equal((await app.inject('/api/v1/bundle/export')).json().version,1);

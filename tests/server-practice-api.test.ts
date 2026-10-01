@@ -1,3 +1,4 @@
+import { createServerApplication } from '../apps/server/src/application-factory.ts';
 /**
  * Automated test suite for Fastify Practice & Progress API endpoints (/api/v1).
  * Tests manual practice records CRUD, revision drift, progress snapshots,
@@ -81,7 +82,7 @@ describe('Practice & Progress API Endpoints', () => {
         ('q3', '3', 'Longest Substring', 'longest-substring', 'https://leetcode.com/problems/longest-substring/', 'Medium', 0, 'leetcode.com', 1000)
     `).run();
     const assistant = mockAssistant ?? new MockGeminiAssistant();
-    const app = await buildApp({ store, geminiAssistant: assistant, disableStatic: true });
+    const app = await buildApp({ application: createServerApplication(store, assistant), disableStatic: true });
     return { db, store, app, assistant };
   }
 

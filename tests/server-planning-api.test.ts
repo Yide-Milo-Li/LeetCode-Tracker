@@ -1,3 +1,4 @@
+import { createServerApplication } from '../apps/server/src/application-factory.ts';
 /**
  * Integration test suite for Phase 4 Recommendation & Planning API endpoints (/api/v1).
  * Tests strategy CRUD, weekly schedule, plan generation, single/batch item replacement,
@@ -34,7 +35,7 @@ async function createTestApp() {
   ].join('\n');
   await store.importJsonl(problems);
 
-  const app = await buildApp({ store, disableStatic: true });
+  const app = await buildApp({ application: createServerApplication(store), disableStatic: true });
   return { db, store, app };
 }
 

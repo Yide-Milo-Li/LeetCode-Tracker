@@ -8,22 +8,13 @@ import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { CatalogStore } from '../../../packages/database/src/store.ts';
-import { resolveAssistantSettings } from './llm/settings.ts';
-import { GeminiAssistant, type IGeminiAssistant } from './gemini.ts';
-import { PlanningService } from './planning-service.ts';
-import { AsyncLock } from './async-lock.ts';
+import type { TrackerApplication } from '../../../packages/application/src/application.ts';
 import { registerMigrationGate } from './migration-gate.ts';
-import {
-  registerAllRoutes,
-  type ActivePreview,
-  type ActiveProgressPreview,
-} from './routes/index.ts';
+import { registerAllRoutes } from './routes/index.ts';
 
 /** Options for building Fastify app. */
 export interface AppOptions {
-  store: CatalogStore;
-  geminiAssistant?: IGeminiAssistant;
+  application: TrackerApplication;
   staticRoot?: string;
   disableStatic?: boolean;
   sessionSecret?: string;
@@ -36,15 +27,6 @@ export interface AppOptions {
  * @returns Configured Fastify instance.
  */
 export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
-  const { store } = options;
-  const gemini = options.geminiAssistant ?? new GeminiAssistant(resolveAssistantSettings(store));
-  const writeLock = new AsyncLock();
-  const planningService = new PlanningService(store, gemini);
-
-  // Only uncommitted previews live in memory; committed results survive restarts.
-  const activePreviews = new Map<string, ActivePreview>();
-  const activeProgressPreviews = new Map<string, ActiveProgressPreview>();
-
   const app = Fastify({
     bodyLimit: 15 * 1024 * 1024, // 15 MiB limit for bulk JSONL files
     logger: false, // Local-only: avoid emitting raw payloads into logs
@@ -108,15 +90,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   });
 
   // Register all modular API v1 routes
-  registerMigrationGate(app);
-  registerAllRoutes(app, {
-    store,
-    gemini,
-    writeLock,
-    planningService,
-    activePreviews,
-    activeProgressPreviews,
-  });
+  registerMigrationGate(app, options.application);
+  registerAllRoutes(app, {application: options.application});
 
   // Static Assets Serving (Production Web UI)
   const defaultStaticRoot = path.resolve(import.meta.dirname, '../../web/dist');

@@ -6,15 +6,15 @@
  * securely via a private stdin control stream, enforces session token verification
  * on all /api/v1 requests, and signals readiness through structured stdout protocol messages.
  */
-import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as readline from 'node:readline';
 import type { AddressInfo } from 'node:net';
-import { CatalogStore } from '../../../packages/database/src/store.ts';
+import { openTrackerRuntime, type TrackerRuntime } from '../../../packages/application/src/runtime.ts';
+import { configureApplication } from './application-factory.ts';
 import { buildApp } from './app.ts';
-import { acquireDatabaseLease } from '../../../packages/database/src/lease.ts';
+import type { FastifyInstance } from 'fastify';
 
 /**
  * Configuration payload received over the private initialization stream.
@@ -86,23 +86,27 @@ export async function startDesktopServer(): Promise<void> {
     fs.mkdirSync(config.backupDir, { recursive: true });
   }
 
-  const release = acquireDatabaseLease(config.dbPath);
-  let openedDb: DatabaseSync | undefined;
+  let runtime: TrackerRuntime | undefined;
+  let app: FastifyInstance | undefined;
   let isShuttingDown = false;
 
   try {
-    const db = new DatabaseSync(config.dbPath);
-    openedDb = db;
-    const store = await CatalogStore.open(db, { backupDir: config.backupDir });
+    runtime = await openTrackerRuntime({dbPath: config.dbPath, backupDir: config.backupDir, configure: configureApplication});
+    const ownedRuntime = runtime;
 
-    const app = await buildApp({
-      store,
+    app = await buildApp({
+      application: runtime.application,
       sessionSecret: config.sessionSecret,
       disableStatic: true,
     });
 
+    const ownedApp = app;
     const host = '127.0.0.1';
     const port = config.port ?? 0;
+    if (stopRequested) {
+      rl.close(); process.stdin.pause();
+      await ownedApp.close(); await ownedRuntime.close(); return;
+    }
     await app.listen({ host, port });
 
     const address = app.server.address() as AddressInfo;
@@ -128,12 +132,11 @@ export async function startDesktopServer(): Promise<void> {
           rl.close();
         }
         process.stdin.pause();
-        await app.close();
-        db.close();
-        release();
+        await ownedApp.close();
+        await ownedRuntime.close();
         process.exit(0);
       } catch (err) {
-        release();
+        await ownedRuntime.close().catch(() => {});
         process.stderr.write(`Error during desktop server shutdown (${reason}): ${String(err)}\n`);
         process.exit(1);
       }
@@ -146,11 +149,7 @@ export async function startDesktopServer(): Promise<void> {
     process.on('SIGINT', () => void gracefulShutdown('SIGINT'));
     process.on('SIGTERM', () => void gracefulShutdown('SIGTERM'));
   } catch (error) {
-    try {
-      openedDb?.close();
-    } finally {
-      release();
-    }
+    try { await app?.close(); } finally { await runtime?.close(); }
     const errorMsg = JSON.stringify({
       type: 'error',
       error: error instanceof Error ? error.message : String(error),

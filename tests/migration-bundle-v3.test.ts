@@ -1,3 +1,4 @@
+import { createServerApplication } from '../apps/server/src/application-factory.ts';
 /**
  * Tests for Schema v10 and Snapshot Bundle v3 migration.
  * Verifies export of v3 bundles with the practice outcome column,
@@ -35,7 +36,7 @@ function createTempProfile() {
 describe('Migration Bundle v3 & Schema v10', () => {
   it('exports through the actual frontend API and restores feedback on another profile', async () => {
     const source = createTempProfile(), target = createTempProfile();
-    const app = await buildApp({ store: source.store, disableStatic: true });
+    const app = await buildApp({ application: createServerApplication(source.store), disableStatic: true });
     // Exercise the frontend-selected version rather than hardcoding a v3 route in the test.
     const transport = mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
       const response = await app.inject(String(input));
@@ -159,7 +160,7 @@ describe('Migration Bundle v3 & Schema v10', () => {
 
   it('API route /api/v1/bundle/export supports formatVersion=3 and returns valid v3 bundle', async () => {
     const p = createTempProfile();
-    const app = await buildApp({ store: p.store, disableStatic: true });
+    const app = await buildApp({ application: createServerApplication(p.store), disableStatic: true });
 
     try {
       await p.store.importJsonl(
