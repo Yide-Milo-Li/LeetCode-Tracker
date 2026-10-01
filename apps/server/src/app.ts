@@ -11,6 +11,7 @@ import * as path from 'node:path';
 import type { TrackerApplication } from '../../../packages/application/src/application.ts';
 import { registerMigrationGate } from './migration-gate.ts';
 import { registerAllRoutes } from './routes/index.ts';
+import type { McpController } from './mcp/config.ts';
 
 /** Options for building Fastify app. */
 export interface AppOptions {
@@ -18,6 +19,7 @@ export interface AppOptions {
   staticRoot?: string;
   disableStatic?: boolean;
   sessionSecret?: string;
+  mcp?: McpController;
 }
 
 /**
@@ -91,7 +93,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   // Register all modular API v1 routes
   registerMigrationGate(app, options.application);
-  registerAllRoutes(app, {application: options.application});
+  registerAllRoutes(app, {application: options.application, mcp: options.mcp});
 
   // Static Assets Serving (Production Web UI)
   const defaultStaticRoot = path.resolve(import.meta.dirname, '../../web/dist');

@@ -9,6 +9,7 @@ import { openTrackerRuntime, type TrackerRuntime } from '../../../packages/appli
 import { configureApplication } from './application-factory.ts';
 import { buildApp } from './app.ts';
 import { startMcpServer, type McpServerHandle } from './mcp/server.ts';
+import { McpController } from './mcp/config.ts';
 import type { FastifyInstance } from 'fastify';
 
 if (typeof process.loadEnvFile === 'function') {
@@ -44,7 +45,10 @@ async function startServer() {
     console.log(`[Server] Opening catalog database: ${dbPath}`);
     runtime = await openTrackerRuntime({dbPath, backupDir, configure: store => configureApplication(store, undefined, localDir)});
     const ownedRuntime = runtime;
-    app = await buildApp({application: runtime.application});
+    const mcpController = new McpController(process.env.MCP_CONFIG_PATH ? path.resolve(process.env.MCP_CONFIG_PATH) : path.join(localDir, 'mcp-config.json'), {
+      nodePath: process.execPath, proxyPath: path.join(repoRoot, 'apps/server/dist/desktop-mcp-proxy.mjs'),
+    });
+    app = await buildApp({application: runtime.application, mcp: mcpController});
     const ownedApp = app;
     let shuttingDown = false;
 
@@ -59,7 +63,7 @@ async function startServer() {
     try {
       mcp = await startMcpServer({
         application: runtime.application,
-        configDir: localDir,
+        controller: mcpController,
       });
     } catch (mcpErr) {
       console.warn(`[MCP] Unable to start MCP server: ${mcpErr instanceof Error ? mcpErr.message : String(mcpErr)}. Server will continue without MCP.`);

@@ -1,226 +1,91 @@
-/**
- * Standalone Streamable HTTP Model Context Protocol (MCP) server.
- * Binds to loopback interface on port 30138 (or configured port), validates client bearer tokens,
- * and delegates requests to the official @modelcontextprotocol/server streamable HTTP handler.
- */
+/** Authenticated, stateless MCP transport; request construction stays inside the exception boundary. */
 import * as http from 'node:http';
-import { Readable } from 'node:stream';
 import type { AddressInfo } from 'node:net';
 import { McpServer, createMcpHandler } from '@modelcontextprotocol/server';
 import type { TrackerApplication } from '@leetcode-tracker/application';
-import {
-  loadMcpConfig,
-  saveMcpConfig,
-  validateClientToken,
-  isAiAccessPaused,
-} from './config.ts';
+import { McpController, McpConfigError, type McpAuthorization } from './config.ts';
 import { registerTrackerTools } from './tools.ts';
-
-export interface McpServerHandle {
-  /** The underlying Node HTTP server instance. */
-  server: http.Server;
-  /** Actual listening port on loopback interface (e.g. 30138). */
-  port: number;
-  /** Primary client Bearer token. */
-  clientToken: string;
-  /** Stop listening and clean up all resources. */
-  close: () => Promise<void>;
-}
-
+export interface McpServerHandle { server: http.Server; port: number; close: () => Promise<void> }
 export interface StartMcpServerOptions {
-  application: TrackerApplication;
-  configDir?: string;
+  application: TrackerApplication; controller: McpController;
+  /** Tests may request an ephemeral port; production uses the configured port. */
   preferredPort?: number;
 }
-
-/**
- * Start the standalone Streamable HTTP MCP server on loopback interface.
- */
+/** Start only the supplied owner's listener. Failure does not prevent the workbench starting. */
 export async function startMcpServer(options: StartMcpServerOptions): Promise<McpServerHandle> {
-  const { config, configPath } = loadMcpConfig(options.configDir);
-  const targetPort = options.preferredPort ?? config.port ?? 30138;
-
-  const mcpHandler = createMcpHandler(() => {
-    const server = new McpServer({
-      name: 'leetcode-tracker',
-      version: '1.2.0',
+  const { controller } = options;
+  let port = options.preferredPort ?? controller.getConfig().port;
+  controller.setListener('starting');
+  const handler = createMcpHandler(ctx => {
+    const auth = ctx.authInfo?.extra?.authorization as McpAuthorization;
+    const server = new McpServer({ name: 'leetcode-tracker', version: '1.2.0' });
+    registerTrackerTools(server, options.application, {
+      assert: () => controller.assertAuthorized(auth), success: () => controller.recordSuccessfulCall(auth),
     });
-    registerTrackerTools(server, options.application, () => isAiAccessPaused(options.configDir));
     return server;
   });
-
-  const httpServer = http.createServer(async (req, res) => {
-    // CORS headers for local loopback clients (ChatGPT Web tunnel, Cursor, Claude Desktop, Cline)
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-    res.setHeader(
-      'Access-Control-Allow-Headers',
-      'Content-Type, Authorization, Accept, mcp-protocol-version, mcp-session-id',
-    );
-    res.setHeader('Access-Control-Expose-Headers', 'mcp-session-id, mcp-protocol-version');
-
-    if (req.method === 'OPTIONS') {
-      res.statusCode = 204;
-      res.end();
-      return;
-    }
-
-    const host = req.headers.host || `127.0.0.1:${targetPort}`;
-    const parsedUrl = new URL(req.url || '/', `http://${host}`);
-
-    if (parsedUrl.pathname !== '/mcp' && parsedUrl.pathname !== '/mcp/') {
-      res.statusCode = 404;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ error: 'Not Found', message: 'MCP server endpoint is at /mcp' }));
-      return;
-    }
-
-    // Streamable HTTP transport check: GET without text/event-stream or DELETE returns 405 Method Not Allowed
-    if (req.method === 'GET') {
-      const acceptHeader = req.headers.accept || '';
-      if (!acceptHeader.includes('text/event-stream')) {
-        res.statusCode = 405;
-        res.setHeader('Content-Type', 'application/json');
-        res.setHeader('Allow', 'POST');
-        res.end(JSON.stringify({
-          jsonrpc: '2.0',
-          error: {
-            code: -32601,
-            message: 'Method Not Allowed: MCP Streamable HTTP requires POST for RPC messages or GET with Accept: text/event-stream for SSE.',
-          },
-          id: null,
-        }));
-        return;
-      }
-    } else if (req.method === 'DELETE') {
-      res.statusCode = 405;
-      res.setHeader('Content-Type', 'application/json');
-      res.setHeader('Allow', 'POST');
-      res.end(JSON.stringify({
-        jsonrpc: '2.0',
-        error: {
-          code: -32601,
-          message: 'Method Not Allowed: Stateless MCP endpoint does not support session deletion.',
-        },
-        id: null,
-      }));
-      return;
-    } else if (req.method !== 'POST') {
-      res.statusCode = 405;
-      res.setHeader('Content-Type', 'application/json');
-      res.setHeader('Allow', 'POST');
-      res.end(JSON.stringify({
-        jsonrpc: '2.0',
-        error: { code: -32601, message: `Method Not Allowed: ${req.method}` },
-        id: null,
-      }));
-      return;
-    }
-
-    // Authenticate client token via Bearer header or ?token= query parameter
-    let providedToken: string | undefined;
-    const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.toLowerCase().startsWith('bearer ')) {
-      providedToken = authHeader.slice(7).trim();
-    }
-    if (!providedToken) {
-      providedToken = parsedUrl.searchParams.get('token') || undefined;
-    }
-
-    const authResult = validateClientToken(providedToken || '', options.configDir);
-    if (!authResult.valid) {
-      res.statusCode = 401;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(
-        JSON.stringify({
-          jsonrpc: '2.0',
-          error: {
-            code: -32001,
-            message: 'Unauthorized: Invalid or missing MCP client bearer token.',
-          },
-          id: null,
-        }),
-      );
-      return;
-    }
-
+  const listener = http.createServer(async (req, res) => {
+    const fail = (status: number, message: string) => {
+      if (res.destroyed || res.headersSent) return;
+      res.writeHead(status, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32001, message } }));
+    };
     try {
+      const base = `http://127.0.0.1:${port}`;
+      const host = req.headers.host;
+      if (!host || !/^[a-zA-Z0-9.:-]+$/.test(host)) { fail(400, 'INVALID_HOST'); return; }
+      if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`) { fail(403, 'FORBIDDEN_HOST'); return; }
+      const origin = req.headers.origin;
+      if (origin && origin !== base && origin !== `http://localhost:${port}`) { fail(403, 'FORBIDDEN_ORIGIN'); return; }
+      const url = new URL(req.url ?? '/', base);
+      if (url.origin !== base || !['/mcp', '/mcp/'].includes(url.pathname)) { fail(404, 'MCP_ENDPOINT_NOT_FOUND'); return; }
+      const token = /^Bearer ([a-f0-9]{64})$/i.exec(req.headers.authorization ?? '')?.[1] ?? '';
+      const auth = controller.authorize(token);
+      if (!auth) { fail(401, 'MCP_UNAUTHORIZED'); return; }
+      if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); fail(405, 'METHOD_NOT_ALLOWED'); return; }
+      let bytes = 0;
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) {
+        const buffer = Buffer.from(chunk); bytes += buffer.length;
+        if (bytes > 1024 * 1024) { fail(413, 'REQUEST_TOO_LARGE'); return; }
+        chunks.push(buffer);
+      }
+      const body = Buffer.concat(chunks).toString('utf8');
+      let rpc: { method?: string };
+      try { rpc = JSON.parse(body); if (!rpc || typeof rpc !== 'object') throw new Error(); }
+      catch { fail(400, 'INVALID_JSON'); return; }
       const headers = new Headers();
-      for (const [key, value] of Object.entries(req.headers)) {
-        if (value) {
-          headers.set(key, Array.isArray(value) ? value.join(', ') : value);
-        }
-      }
-
-      const body = ['GET', 'HEAD'].includes(req.method || '') ? undefined : (Readable.toWeb(req) as unknown as BodyInit);
-      const webReq = new Request(parsedUrl.toString(), {
-        method: req.method,
-        headers,
-        body,
-        duplex: 'half',
-      } as any);
-
-      const webRes = await mcpHandler.fetch(webReq);
-
-      res.statusCode = webRes.status;
-      webRes.headers.forEach((val, key) => {
-        res.setHeader(key, val);
+      for (const [key, value] of Object.entries(req.headers)) if (value !== undefined) headers.set(key, Array.isArray(value) ? value.join(', ') : value);
+      const response = await handler.fetch(new Request(url, { method: 'POST', headers, body }), {
+        authInfo: { token, clientId: auth.clientId, scopes: ['tracker:read'], extra: { authorization: auth } },
       });
-
-      if (webRes.body) {
-        Readable.fromWeb(webRes.body as any).pipe(res);
-      } else {
-        res.end();
+      // Buffer stateless replies so revoked credentials cannot receive queued business results.
+      const payload = await response.text();
+      if (rpc.method === 'tools/call') {
+        try { controller.assertAuthorized(auth); }
+        catch (error) { fail(403, error instanceof McpConfigError ? error.code : 'MCP_UNAVAILABLE'); return; }
       }
-    } catch (err) {
-      if (!res.headersSent) {
-        res.statusCode = 500;
-        res.setHeader('Content-Type', 'application/json');
-        res.end(
-          JSON.stringify({
-            jsonrpc: '2.0',
-            error: {
-              code: -32603,
-              message: err instanceof Error ? err.message : 'Internal MCP server error',
-            },
-            id: null,
-          }),
-        );
-      }
-    }
+      if (res.destroyed) return;
+      res.statusCode = response.status;
+      response.headers.forEach((value, key) => res.setHeader(key, value));
+      res.end(payload);
+    } catch (error) { fail(error instanceof McpConfigError ? 503 : 400, error instanceof McpConfigError ? error.code : 'INVALID_REQUEST'); }
   });
-
-  const actualPort = await new Promise<number>((resolve, reject) => {
-    httpServer.once('error', (err: NodeJS.ErrnoException) => {
-      // Bounded failure per plan: "端口冲突只使 MCP 不可用，桌面继续运行，不静默改端口。"
-      reject(err);
+  listener.requestTimeout = 15_000; listener.headersTimeout = 10_000;
+  listener.on('clientError', (_error, socket) => { socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n'); });
+  try {
+    port = await new Promise<number>((resolve, reject) => {
+      listener.once('error', reject);
+      listener.listen(port, '127.0.0.1', () => resolve((listener.address() as AddressInfo).port));
     });
-
-    httpServer.listen(targetPort, '127.0.0.1', () => {
-      const addr = httpServer.address() as AddressInfo;
-      resolve(addr.port);
-    });
-  });
-
-  if (options.preferredPort !== undefined && config.port !== actualPort) {
-    config.port = actualPort;
-    saveMcpConfig(config, configPath);
+  } catch (error) {
+    controller.setListener('unavailable', null, (error as NodeJS.ErrnoException).code === 'EADDRINUSE' ? 'MCP_PORT_IN_USE' : 'MCP_LISTEN_FAILED');
+    await handler.close(); throw error;
   }
-
-  process.stderr.write(`✓ LeetCode Tracker MCP server listening at: http://127.0.0.1:${actualPort}/mcp\n`);
-
-  return {
-    server: httpServer,
-    port: actualPort,
-    clientToken: config.clientToken,
-    close: async () => {
-      await mcpHandler.close().catch(() => {});
-      if (typeof (httpServer as any).closeAllConnections === 'function') {
-        (httpServer as any).closeAllConnections();
-      }
-      await new Promise<void>((resolve) => {
-        httpServer.close(() => resolve());
-      });
-    },
-  };
+  controller.setListener('ready', port);
+  process.stderr.write(`[MCP] Listening on http://127.0.0.1:${port}/mcp\n`);
+  return { server: listener, port, close: async () => {
+    controller.setListener('stopped'); listener.closeAllConnections();
+    await new Promise<void>(resolve => listener.close(() => resolve())); await handler.close();
+  } };
 }

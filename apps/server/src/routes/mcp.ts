@@ -1,78 +1,33 @@
-/**
- * Fastify routes for MCP Server configuration, client credential management, and AI pause toggle.
- */
+/** Administrative MCP routes use only the controller injected by the owning runtime. */
 import type { FastifyInstance } from 'fastify';
+import { z, ZodError } from 'zod';
 import type { RouteContext } from './types.ts';
-import {
-  loadMcpConfig,
-  saveMcpConfig,
-  createNamedClient,
-  rotateClientToken,
-  revokeClientToken,
-} from '../mcp/config.ts';
+import { McpConfigError } from '../mcp/config.ts';
 
-export function registerMcpRoutes(app: FastifyInstance, _context: RouteContext): void {
-  // GET /api/v1/mcp/config
-  app.get('/api/v1/mcp/config', async (_req, reply) => {
-    const { config } = loadMcpConfig();
-    return reply.status(200).send({
-      port: config.port,
-      clientToken: config.clientToken,
-      clients: config.clients,
-      aiAccessPaused: config.aiAccessPaused,
+export function registerMcpRoutes(app: FastifyInstance, context: RouteContext): void {
+  app.register(async scoped => {
+    scoped.addHook('onRequest', async (_req, reply) => {
+      if (!context.mcp) return reply.code(503).send({ error: 'MCP_UNAVAILABLE', message: 'MCP is not configured for this runtime.' });
     });
-  });
-
-  // PATCH /api/v1/mcp/config
-  app.patch('/api/v1/mcp/config', async (req, reply) => {
-    const body = (req.body || {}) as { port?: number; aiAccessPaused?: boolean };
-    const { config, configPath } = loadMcpConfig();
-
-    if (typeof body.port === 'number' && body.port > 0 && body.port <= 65535) {
-      config.port = body.port;
-    }
-    if (typeof body.aiAccessPaused === 'boolean') {
-      config.aiAccessPaused = body.aiAccessPaused;
-    }
-
-    saveMcpConfig(config, configPath);
-
-    return reply.status(200).send({
-      port: config.port,
-      clientToken: config.clientToken,
-      clients: config.clients,
-      aiAccessPaused: config.aiAccessPaused,
+    scoped.setErrorHandler((error, _req, reply) => {
+      const code = error instanceof McpConfigError ? error.code : 'INVALID_REQUEST';
+      return reply.code(error instanceof ZodError ? 400 : 503).send({ error: code, message: code });
     });
-  });
-
-  // POST /api/v1/mcp/clients
-  app.post('/api/v1/mcp/clients', async (req, reply) => {
-    const body = (req.body || {}) as { name?: string };
-    const name = (body.name || '').trim();
-    if (!name) {
-      return reply.status(400).send({ error: 'INVALID_REQUEST', message: 'Client name cannot be blank.' });
-    }
-    const newClient = createNamedClient(name);
-    return reply.status(201).send({ client: newClient });
-  });
-
-  // POST /api/v1/mcp/clients/:id/rotate
-  app.post('/api/v1/mcp/clients/:id/rotate', async (req, reply) => {
-    const { id } = req.params as { id: string };
-    const rotated = rotateClientToken(id);
-    if (!rotated) {
-      return reply.status(404).send({ error: 'NOT_FOUND', message: `Client connection "${id}" not found.` });
-    }
-    return reply.status(200).send({ client: rotated });
-  });
-
-  // POST /api/v1/mcp/clients/:id/revoke
-  app.post('/api/v1/mcp/clients/:id/revoke', async (req, reply) => {
-    const { id } = req.params as { id: string };
-    const success = revokeClientToken(id);
-    if (!success) {
-      return reply.status(404).send({ error: 'NOT_FOUND', message: `Client connection "${id}" not found.` });
-    }
-    return reply.status(200).send({ success: true });
+    scoped.get('/api/v1/mcp/config', async () => context.mcp!.getConfig());
+    scoped.get('/api/v1/mcp/status', async () => context.mcp!.getStatus());
+    scoped.patch('/api/v1/mcp/config', async req => context.mcp!.update(req.body as {port?: number; aiAccessPaused?: boolean}));
+    scoped.post('/api/v1/mcp/clients', async (req, reply) => {
+      const body = z.object({name: z.string().trim().min(1).max(100)}).strict().parse(req.body);
+      return reply.code(201).send({client: context.mcp!.createClient(body.name)});
+    });
+    scoped.post('/api/v1/mcp/clients/:id/rotate', async (req, reply) => {
+      const {id} = req.params as {id: string};
+      const client = context.mcp!.rotateClient(id);
+      return client ? {client} : reply.code(404).send({error:'NOT_FOUND',message:'Connection not found.'});
+    });
+    scoped.post('/api/v1/mcp/clients/:id/revoke', async (req, reply) => {
+      const {id} = req.params as {id: string};
+      return context.mcp!.revokeClient(id) ? {success:true} : reply.code(404).send({error:'NOT_FOUND',message:'Connection not found.'});
+    });
   });
 }
