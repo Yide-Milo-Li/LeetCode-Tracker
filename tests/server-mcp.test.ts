@@ -121,7 +121,7 @@ test('empty library and missing timezone remain read-only and return explicit re
     assert.equal((await env.call('tracker_list_practices')).structuredContent.total, 0);
     assert.equal((await env.call('tracker_get_practice', { recordId: 'missing' })).structuredContent.found, false);
     assert.equal((await env.call('tracker_list_notes')).structuredContent.total, 0);
-    assert.equal((await env.call('tracker_get_note', { frontendId: '1' })).isError, true);
+    assert.equal((await env.call('tracker_get_note', { frontendId: '1' })).structuredContent.hasNote, false);
     assert.equal((await env.call('tracker_get_progress')).isError, true);
     assert.equal(env.snapshot(), before); assert.equal(env.getModelCalls(), 0);
   } finally { await env.close(); }
