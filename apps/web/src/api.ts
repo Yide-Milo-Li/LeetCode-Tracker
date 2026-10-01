@@ -109,18 +109,28 @@ export interface McpClientCredential {
   name: string;
   token: string;
   createdAt: number;
-  lastUsedAt: number | null;
+  lastSuccessfulCallAt: number | null;
+  credentialVersion: number;
   revoked: boolean;
 }
 
 export interface McpSettingsConfig {
   port: number;
-  clientToken: string;
+  schemaVersion: 2;
+  accessRevision: number;
+  connection: { configPath: string; nodePath: string; proxyPath: string } | null;
   clients: McpClientCredential[];
   aiAccessPaused: boolean;
 }
 
+export interface McpStatus {
+  state: 'starting' | 'ready' | 'unavailable' | 'stopped';
+  configuredPort: number | null; listeningPort: number | null;
+  restartRequired: boolean; aiAccessPaused: boolean; errorCode: string | null;
+}
+
 export const mcpApi = {
+  getStatus: () => request<McpStatus>('/mcp/status'),
   getConfig: () => request<McpSettingsConfig>('/mcp/config'),
   updateConfig: (patch: { port?: number; aiAccessPaused?: boolean }) =>
     request<McpSettingsConfig>('/mcp/config', { method: 'PATCH', body: JSON.stringify(patch) }),

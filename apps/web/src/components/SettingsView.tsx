@@ -24,7 +24,7 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import { fixedProviderModels, type ThemePalette } from '../../../../packages/contracts/src/sync.ts';
-import { api, mcpApi, type McpSettingsConfig, type McpClientCredential } from '../api.ts';
+import { api, mcpApi, type McpSettingsConfig, type McpClientCredential, type McpStatus } from '../api.ts';
 import { snapshotBundleSchema, type SnapshotBundle } from '../../../../packages/contracts/src/notes.ts';
 import { MAX_BUNDLE_BYTES } from '../../../../packages/contracts/src/migration.ts';
 import { clearPracticeIntents } from '../practice-service.ts';
@@ -183,6 +183,7 @@ export function SettingsView({
 
   // MCP AI Connection State
   const [mcpConfig, setMcpConfig] = useState<McpSettingsConfig | null>(null);
+  const [mcpStatus, setMcpStatus] = useState<McpStatus | null>(null);
   const [mcpLoading, setMcpLoading] = useState(false);
   const [mcpError, setMcpError] = useState<string | null>(null);
   const [mcpSuccess, setMcpSuccess] = useState<string | null>(null);
@@ -197,11 +198,13 @@ export function SettingsView({
   const loadMcpConfigData = async () => {
     setMcpLoading(true);
     try {
-      const cfg = await mcpApi.getConfig();
+      const [cfg, status] = await Promise.all([mcpApi.getConfig(), mcpApi.getStatus()]);
       setMcpConfig(cfg);
+      setMcpStatus(status);
       setMcpPortDraft(cfg.port);
     } catch {
-      // Offline / standalone test mode
+      setMcpConfig(null); setMcpStatus(null);
+      setMcpError(zh ? 'MCP 配置不可用' : 'MCP configuration unavailable');
     } finally {
       setMcpLoading(false);
     }
@@ -212,6 +215,15 @@ export function SettingsView({
       getAutostartStatus().then(setAutostartEnabled).catch(() => {});
     }
     void loadMcpConfigData();
+    let active = true;
+    const poll = setInterval(() => {
+      void mcpApi.getStatus().then(status => {
+        if (!active) return;
+        setMcpStatus(status);
+        setMcpConfig(current => current ? { ...current, aiAccessPaused: status.aiAccessPaused } : current);
+      }).catch(() => { if (active) setMcpStatus(null); });
+    }, 2000);
+    return () => { active = false; clearInterval(poll); };
   }, []);
 
   const handleToggleAutostart = async () => {
@@ -233,6 +245,7 @@ export function SettingsView({
       const next = !mcpConfig.aiAccessPaused;
       const updated = await mcpApi.updateConfig({ aiAccessPaused: next });
       setMcpConfig(updated);
+      setMcpStatus(await mcpApi.getStatus());
       setMcpSuccess(
         next
           ? (zh ? '已暂停外部 AI 访问' : 'External AI access paused')
@@ -251,6 +264,7 @@ export function SettingsView({
     try {
       const updated = await mcpApi.updateConfig({ port: mcpPortDraft });
       setMcpConfig(updated);
+      setMcpStatus(await mcpApi.getStatus());
       setMcpSuccess(
         zh
           ? '端口已更新，请重启桌面应用以使新端口生效。'
@@ -264,12 +278,12 @@ export function SettingsView({
     }
   };
 
-  const handleCreateClient = async (e: React.FormEvent) => {
+  const handleCreateClient = async (e: React.FormEvent, name = newClientName) => {
     e.preventDefault();
-    if (!newClientName.trim()) return;
+    if (!name.trim()) return;
     setCreatingClient(true);
     try {
-      await mcpApi.createClient(newClientName.trim());
+      await mcpApi.createClient(name.trim());
       setNewClientName('');
       await loadMcpConfigData();
       setMcpSuccess(zh ? '已创建新连接凭证' : 'New connection created');
@@ -839,7 +853,7 @@ export function SettingsView({
                   fontWeight: 500,
                 }}
               >
-                {isDesktop ? (zh ? '桌面守护中' : 'Desktop Daemon Active') : (zh ? '本地服务运行中' : 'Local Server Active')}
+                {mcpStatus ? (zh ? 'Runtime 已就绪' : 'Runtime ready') : (zh ? 'Runtime 状态未知' : 'Runtime status unknown')}
               </span>
             </div>
 
@@ -944,7 +958,7 @@ export function SettingsView({
                   fontWeight: 600,
                 }}
               >
-                {mcpConfig?.aiAccessPaused ? (zh ? '外部访问已暂停' : 'Paused') : (zh ? '外部访问就绪' : 'Active')}
+                {!mcpStatus || mcpStatus.state !== 'ready' ? (zh ? '外部访问不可用' : 'Unavailable') : mcpStatus.aiAccessPaused ? (zh ? '外部访问已暂停' : 'Paused') : (zh ? '外部访问就绪' : 'Active')}
               </span>
             </div>
 
@@ -988,12 +1002,13 @@ export function SettingsView({
 
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
               <code style={{ padding: '4px 8px', borderRadius: '4px', backgroundColor: 'var(--surface)', border: '1px solid var(--border)', fontSize: '0.875rem' }}>
-                http://127.0.0.1:{mcpConfig?.port ?? 30138}/mcp
+                {mcpStatus?.listeningPort ? `http://127.0.0.1:${mcpStatus.listeningPort}/mcp` : (zh ? '未监听' : 'Not listening')}
               </code>
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
-                onClick={() => copyToClipboard(`http://127.0.0.1:${mcpConfig?.port ?? 30138}/mcp`, 'endpoint')}
+                disabled={!mcpStatus?.listeningPort}
+                onClick={() => copyToClipboard(`http://127.0.0.1:${mcpStatus?.listeningPort}/mcp`, 'endpoint')}
               >
                 {copiedTokenId === 'endpoint' ? <Check size={14} /> : <Copy size={14} />}
                 <span>{copiedTokenId === 'endpoint' ? (zh ? '已复制' : 'Copied') : (zh ? '复制地址' : 'Copy URL')}</span>
@@ -1022,6 +1037,10 @@ export function SettingsView({
                 {savingPort ? '…' : (zh ? '更新端口' : 'Save Port')}
               </button>
             </form>
+            <p role="status">
+              {mcpStatus?.restartRequired && (zh ? `待重启生效端口：${mcpStatus.configuredPort}` : `Pending restart port: ${mcpStatus.configuredPort}`)}
+              {mcpStatus?.errorCode && ` ${mcpStatus.errorCode}`}
+            </p>
             <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)' }}>
               {zh ? '默认端口 30138。端口冲突时 MCP 会报错停用，不静默改端口；修改后需重启应用生效。' : 'Default port is 30138. Port conflicts disable MCP rather than silently changing ports. Restart app to apply.'}
             </p>
@@ -1056,8 +1075,8 @@ export function SettingsView({
               {(mcpConfig?.clients || []).map((client) => {
                 const isExpanded = expandedClientId === client.id;
                 const isVisible = Boolean(showTokens[client.id]);
-                const lastUsedText = client.lastUsedAt
-                  ? new Date(client.lastUsedAt).toLocaleString()
+                const lastUsedText = client.lastSuccessfulCallAt
+                  ? new Date(client.lastSuccessfulCallAt).toLocaleString()
                   : (zh ? '从未调用' : 'Never called');
 
                 return (
@@ -1088,7 +1107,7 @@ export function SettingsView({
                       </div>
                       <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
                         {zh ? '最近调用：' : 'Last call: '}
-                        <strong style={{ color: client.lastUsedAt ? 'var(--text-primary)' : 'inherit' }}>{lastUsedText}</strong>
+                        <strong style={{ color: client.lastSuccessfulCallAt ? 'var(--text-primary)' : 'inherit' }}>{lastUsedText}</strong>
                       </div>
                     </div>
 
@@ -1232,6 +1251,11 @@ export function SettingsView({
             </div>
 
             {/* Create Custom Connection Form */}
+            <div style={{ display: 'flex', gap: 8 }}>
+              {['Codex', 'DSH', 'ChatGPT'].map(name => <button key={name} className="btn btn-secondary btn-sm" disabled={creatingClient || !mcpConfig} onClick={e => void handleCreateClient(e, name)}>
+                {zh ? `创建 ${name} 连接` : `Create ${name} connection`}
+              </button>)}
+            </div>
             <form onSubmit={handleCreateClient} style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '6px' }}>
               <input
                 type="text"

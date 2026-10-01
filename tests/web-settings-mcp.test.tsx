@@ -51,6 +51,25 @@ const { api, mcpApi } = await import('../apps/web/src/api.ts');
 import * as platform from '../apps/web/src/platform/index.ts';
 
 describe('SettingsView: Background Runtime & AI Connection (MCP)', () => {
+  it('shows unknown access on load failure and a conflicting listener without readiness', async () => {
+    mock.method(mcpApi, 'getConfig', async () => { throw new Error('synthetic read failure'); });
+    await act(async () => { render(<DesktopWorkspaceProvider><SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} /></DesktopWorkspaceProvider>); });
+    assert.ok(screen.getByText('Unavailable')); assert.ok(screen.getByText('Runtime status unknown'));
+    assert.equal(screen.queryByText('Active'), null);
+    cleanup();
+    mock.method(mcpApi, 'getConfig', async () => ({ port: 32000, clients: [], aiAccessPaused: false }));
+    mock.method(mcpApi, 'getStatus', async () => ({ state: 'unavailable', configuredPort: 32000, listeningPort: null, restartRequired: false, aiAccessPaused: false, errorCode: 'MCP_PORT_IN_USE' }));
+    await act(async () => { render(<DesktopWorkspaceProvider><SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} /></DesktopWorkspaceProvider>); });
+    assert.ok(screen.getByText('MCP_PORT_IN_USE')); assert.ok(screen.getByText('Not listening'));
+    assert.equal(screen.queryByText('Active'), null);
+  });
+
+  it('shows actual and pending ports together', async () => {
+    mock.method(mcpApi, 'getStatus', async () => ({ state: 'ready', configuredPort: 32000, listeningPort: 30138, restartRequired: true, aiAccessPaused: false, errorCode: null }));
+    await act(async () => { render(<DesktopWorkspaceProvider><SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} /></DesktopWorkspaceProvider>); });
+    assert.ok(screen.getByText('http://127.0.0.1:30138/mcp')); assert.ok(screen.getByText('Pending restart port: 32000'));
+    assert.ok(screen.getByRole('button', { name: 'Create Codex connection' }));
+  });
   beforeEach(() => {
     localStorage.clear();
     mock.method(api, 'getSettings', async () => ({
@@ -60,6 +79,7 @@ describe('SettingsView: Background Runtime & AI Connection (MCP)', () => {
       ai: { hasApiKey: false },
     }));
 
+    mock.method(mcpApi, 'getStatus', async () => ({state:'ready',configuredPort:30138,listeningPort:30138,restartRequired:false,aiAccessPaused:false,errorCode:null}));
     mock.method(mcpApi, 'getConfig', async () => ({
       port: 30138,
       clientToken: '0123456789abcdef0123456789abcdef',
@@ -69,7 +89,7 @@ describe('SettingsView: Background Runtime & AI Connection (MCP)', () => {
           name: 'Claude Desktop',
           token: 'token-claude-desktop-123456',
           createdAt: 1700000000000,
-          lastUsedAt: null,
+          lastSuccessfulCallAt: null,
           revoked: false,
         },
         {
@@ -77,7 +97,7 @@ describe('SettingsView: Background Runtime & AI Connection (MCP)', () => {
           name: 'Cursor',
           token: 'token-cursor-123456',
           createdAt: 1700000000000,
-          lastUsedAt: 1727700000000,
+          lastSuccessfulCallAt: 1727700000000,
           revoked: false,
         },
       ],
@@ -211,7 +231,7 @@ describe('SettingsView: Background Runtime & AI Connection (MCP)', () => {
 
     mock.method(mcpApi, 'rotateClient', async (id: string) => {
       rotatedCalled = true;
-      return { client: { id, name: 'Claude Desktop', token: 'new-token-999', createdAt: 1, lastUsedAt: null, revoked: false } };
+      return { client: { id, name: 'Claude Desktop', token: 'new-token-999', createdAt: 1, lastSuccessfulCallAt: null, revoked: false } };
     });
 
     mock.method(mcpApi, 'revokeClient', async (id: string) => {
