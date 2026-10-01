@@ -212,7 +212,9 @@ export async function confirmExit(): Promise<void> {
  * Cancel exit request and keep the desktop runtime running.
  */
 export async function cancelExit(): Promise<void> {
-  window.dispatchEvent(new window.CustomEvent('desktop:exit-cancelled'));
+  if (typeof window !== 'undefined' && typeof window.CustomEvent === 'function') {
+    window.dispatchEvent(new window.CustomEvent('desktop:exit-cancelled'));
+  }
   if (isTauri()) {
     const tauri = (window as unknown as {
       __TAURI_INTERNALS__: { invoke: <R>(cmd: string, args?: unknown) => Promise<R> };
