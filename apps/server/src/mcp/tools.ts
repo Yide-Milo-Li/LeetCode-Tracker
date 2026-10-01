@@ -8,6 +8,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import type { TrackerApplication } from '@leetcode-tracker/application';
 import { isTimeZone, localDate } from '../../../../packages/contracts/src/time.ts';
 import type { CatalogProblem } from '../../../../packages/contracts/src/sync.ts';
+import { McpConfigError } from './config.ts';
 
 const PAUSED_ERROR_MESSAGE = 'AI access is paused in LeetCode Tracker. Resume it from the system tray or Settings.';
 
@@ -25,10 +26,25 @@ function checkAiPaused(isPausedFn: () => boolean) {
  * Registers the 9 read-only tracker tools with the given McpServer instance.
  */
 export function registerTrackerTools(
-  server: McpServer,
+  rawServer: McpServer,
   application: TrackerApplication,
-  isPausedFn: () => boolean,
+  guard: { assert: () => void; success: () => void },
 ): void {
+  const isPausedFn = () => false; // The request-scoped guard checks identity and revision as well as pause.
+  const server = { registerTool: ((name: string, config: Parameters<McpServer['registerTool']>[1], callback: (...args: any[]) => any) =>
+    rawServer.registerTool(name, { ...config, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async (...args: any[]) => {
+      try {
+        guard.assert();
+        const result = await callback(...args);
+        guard.assert();
+        if (!result.isError) guard.success();
+        const text = result.content?.find((item: { type: string }) => item.type === 'text')?.text;
+        return text && !result.isError ? { ...result, structuredContent: JSON.parse(text) } : result;
+      } catch (error) {
+        const code = error instanceof McpConfigError ? error.code : 'MCP_QUERY_FAILED';
+        return { isError: true, structuredContent: { error: code }, content: [{ type: 'text', text: code }] };
+      }
+    })) as McpServer['registerTool'] };
   // 1. tracker_status
   server.registerTool(
     'tracker_status',
