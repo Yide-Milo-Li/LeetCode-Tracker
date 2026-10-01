@@ -1,3 +1,4 @@
+import { createServerApplication } from '../apps/server/src/application-factory.ts';
 /**
  * Script to generate high-resolution, Retina (2x) screenshots for GitHub README showcase.
  *
@@ -294,7 +295,7 @@ $$dp[i] = \\min(dp[i], dp[i - c] + 1) \\quad \\forall c \\in \\text{coins}, i \\
 
   // 7. Start Server
   console.log(`  [2/5] Starting Fastify backend on http://${host}:${port}...`);
-  const app = await buildApp({ store });
+  const app = await buildApp({ application: createServerApplication(store) });
   await app.listen({ host, port });
 
   // 8. Launch Headless Chrome

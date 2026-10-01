@@ -1,3 +1,4 @@
+import { createServerApplication } from '../apps/server/src/application-factory.ts';
 /** Offline Phase 16 benchmark. Uses only synthetic metadata and an in-memory database. */
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -78,7 +79,7 @@ for (const count of [10_000, 50_000]) {
     formatProgressText: async () => ({ candidates: [], unparsedSnippets: [], model: 'local' }),
     generatePlanContent: async p => fallbackPlanContent(p.problems, p.rules),
   };
-  const app = await buildApp({ store, geminiAssistant: assistant, disableStatic: true });
+  const app = await buildApp({ application: createServerApplication(store, assistant), disableStatic: true });
   const api = await measure(async () => {
     const response = await app.inject({ url: '/api/v1/mastery' });
     assert.equal(response.statusCode, 200);

@@ -1,3 +1,4 @@
+import { createServerApplication } from '../apps/server/src/application-factory.ts';
 /** Desktop settings acceptance with isolated SQLite, Chrome and synthetic provider responses.
  * Browser plugin not available; reuse the repository's isolated Chrome/CDP acceptance harness.
  * Requires npm run build. Never opens the user's database or calls a paid provider.
@@ -25,7 +26,7 @@ await store.updateSettings({ timezone: 'UTC', language: 'en', theme: 'light',
 const assistant = new LLMAssistant({ providers: {
   gemini: { apiKey: 'synthetic-gemini' }, openai: { apiKey: 'synthetic-openai' }, deepseek: { apiKey: 'synthetic-deepseek' },
 }, generateContentFn: async () => ({ text: '{"candidates":[]}' }), customGenerateFn: async () => ({ text: '{"candidates":[]}' }) });
-const app = await buildApp({ store, geminiAssistant: assistant, staticRoot: path.resolve(root, 'apps/web/dist') });
+const app = await buildApp({ application: createServerApplication(store, assistant), staticRoot: path.resolve(root, 'apps/web/dist') });
 await app.listen({ host: '127.0.0.1', port: 0 });
 const address = app.server.address();
 if (!address || typeof address === 'string') throw new Error('No loopback address');

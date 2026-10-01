@@ -1,3 +1,4 @@
+import { createServerApplication } from '../apps/server/src/application-factory.ts';
 /** Phase 16 desktop acceptance against an isolated synthetic SQLite store and mocked Gemini.
  * Builds must exist before running. No environment files, private databases or real provider calls are used.
  * Chrome runs with its own profile; VERIFY_OUTPUT_DIR can keep evidence outside the checkout.
@@ -107,11 +108,7 @@ const gemini: IGeminiAssistant = {
     return { patch: { dailyCount: 3 }, unresolved: [], model: 'synthetic-mock' };
   },
 };
-const app = await buildApp({
-  store,
-  geminiAssistant: gemini,
-  staticRoot: path.resolve(root, 'apps/web/dist'),
-});
+const app = await buildApp({ application: createServerApplication(store, gemini), staticRoot: path.resolve(root, 'apps/web/dist') });
 await app.listen({ host: '127.0.0.1', port: 0 });
 const address = app.server.address();
 if (!address || typeof address === 'string') throw new Error('No loopback server address');
