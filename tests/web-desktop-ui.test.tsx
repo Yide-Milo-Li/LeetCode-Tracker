@@ -382,3 +382,29 @@ it('retains the editor and draft while native runtime recovers', async () => {
     assert.equal((screen.getByLabelText('Retained draft') as HTMLTextAreaElement).value,'synthetic draft');
   } finally {cleanup();delete (window as any).__TAURI_INTERNALS__;}
 });
+
+for (const choice of ['cancel','discard','save','save-failure'] as const) it('protects App exit with '+choice, async()=>{
+  let exitCount=0,cancelCount=0,ackCount=0;
+  const note=(content:string)=>({questionId:'1',questionFrontendId:'1',content,updatedAt:1});
+  mock.method(api,'getSettings',async()=>({language:'en',theme:'light',timezone:'UTC',ai:{hasApiKey:false}}));
+  mock.method(api,'getStrategies',async()=>[]);
+  mock.method(api,'listNotes',async()=>({items:[{questionId:'1',questionFrontendId:'1',title:'Synthetic exit',titleSlug:'synthetic',url:'https://example.com/synthetic',difficulty:'Easy',tags:[],totalPractices:0,hasAccepted:false,hasCustomNote:true,customNoteUpdatedAt:1,lastPracticedAt:null,reviewStage:null,latestPracticeNotes:null}],total:1}));
+  mock.method(api,'getNote',async()=>({note:note('original synthetic note')}));
+  mock.method(api,'getPracticeRecords',async()=>({items:[],total:0,page:1,limit:100}));
+  mock.method(api,'upsertNote',async(_id:string,content:string)=>{if(choice==='save-failure')throw new Error('synthetic save failure');return{note:note(content)};});
+  Object.assign(window,{__TAURI_INTERNALS__:{invoke:async(command:string)=>{if(command==='confirm_exit')exitCount++;if(command==='cancel_exit')cancelCount++;if(command==='acknowledge_exit')ackCount++;}}});
+  window.history.replaceState(null,'','#notes');localStorage.clear();
+  try {
+    await act(async()=>{render(<App/>);});
+    const editor=document.querySelector('textarea')!;
+    assert.ok(editor);
+    await act(async()=>{fireEvent.change(editor,{target:{value:'unsaved synthetic note'}});});
+    await act(async()=>{window.dispatchEvent(new dom.window.CustomEvent('desktop:request-exit'));});
+    assert.equal(ackCount,1);assert.ok(screen.getByRole('dialog',{name:'Unsaved Note Changes'}));
+    const label=choice==='cancel'?'Cancel':choice==='discard'?'Discard & Exit':'Save & Exit';
+    await act(async()=>{fireEvent.click(screen.getByRole('button',{name:label}));});
+    assert.equal(exitCount,choice==='save'||choice==='discard'?1:0);
+    if(choice==='cancel')assert.equal(cancelCount,1);
+    if(choice==='save-failure')assert.ok(screen.getByRole('dialog',{name:'Unsaved Note Changes'}));
+  } finally {cleanup();mock.restoreAll();delete (window as any).__TAURI_INTERNALS__;window.history.replaceState(null,'','/');}
+});

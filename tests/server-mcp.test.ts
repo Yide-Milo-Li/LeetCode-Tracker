@@ -13,14 +13,16 @@ import { startMcpServer } from '../apps/server/src/mcp/server.ts';
 import { McpController } from '../apps/server/src/mcp/config.ts';
 import { buildApp } from '../apps/server/src/app.ts';
 
-async function fixture() {
+async function fixture(seeded = true) {
   const dir = mkdtempSync(join(tmpdir(), 'tracker-mcp-'));
   const db = new DatabaseSync(':memory:');
   const store = new CatalogStore(db, { skipBackup: true });
-  await store.importJsonl([1, 2].map(id => JSON.stringify({ id: String(id), title: `Synthetic ${id}`, difficulty: 'Easy', tags: ['Array'], url: `https://leetcode.com/problems/synthetic-${id}/` })).join('\n'));
-  store.updateSettings({ timezone: 'Asia/Shanghai' });
-  const practice = await store.createPracticeRecord({ questionFrontendId: '1', completed: true, practicedAt: '2026-09-30T10:00:00+08:00', timePrecision: 'datetime', durationMinutes: 15, outcome: 'independent' });
-  const note = 'Synthetic note 中文🙂\n'.repeat(1000); store.upsertProblemNote('1', note);
+  if (seeded) {
+    await store.importJsonl([1, 2].map(id => JSON.stringify({ id: String(id), title: `Synthetic ${id}`, difficulty: 'Easy', tags: ['Array'], url: `https://leetcode.com/problems/synthetic-${id}/` })).join('\n'));
+    store.updateSettings({ timezone: 'Asia/Shanghai' });
+  }
+  const practice = seeded ? await store.createPracticeRecord({ questionFrontendId: '1', completed: true, practicedAt: '2026-09-30T10:00:00+08:00', timePrecision: 'datetime', durationMinutes: 15, outcome: 'independent' }) : { id: 'missing' };
+  const note = 'Synthetic note 中文🙂\n'.repeat(1000); if (seeded) store.upsertProblemNote('1', note);
   let modelCalls = 0;
   const forbiddenModel = async (): Promise<never> => { modelCalls++; throw new Error('Read-only tools called a model'); };
   const application = createServerApplication(store, {
@@ -105,6 +107,23 @@ test('nine tools return structured data without changing any business row', asyn
     }
     assert.equal(reconstructed, env.note);
     assert.ok(env.controller.getConfig().clients[0].lastSuccessfulCallAt);
+  } finally { await env.close(); }
+});
+
+test('empty library and missing timezone remain read-only and return explicit results', async () => {
+  const env = await fixture(false);
+  try {
+    const before = env.snapshot();
+    const status = await env.call('tracker_status'); assert.equal(status.structuredContent.timezone.configured, false);
+    assert.equal((await env.call('tracker_search_problems')).structuredContent.total, 0);
+    assert.equal((await env.call('tracker_get_problem', { frontendId: '1' })).structuredContent.found, false);
+    assert.equal((await env.call('tracker_get_today')).isError, true);
+    assert.equal((await env.call('tracker_list_practices')).structuredContent.total, 0);
+    assert.equal((await env.call('tracker_get_practice', { recordId: 'missing' })).structuredContent.found, false);
+    assert.equal((await env.call('tracker_list_notes')).structuredContent.total, 0);
+    assert.equal((await env.call('tracker_get_note', { frontendId: '1' })).isError, true);
+    assert.equal((await env.call('tracker_get_progress')).isError, true);
+    assert.equal(env.snapshot(), before); assert.equal(env.getModelCalls(), 0);
   } finally { await env.close(); }
 });
 
