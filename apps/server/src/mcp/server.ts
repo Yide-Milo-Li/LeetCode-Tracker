@@ -207,7 +207,7 @@ export async function startMcpServer(options: StartMcpServerOptions): Promise<Mc
     saveMcpConfig(config, configPath);
   }
 
-  console.log(`✓ LeetCode Tracker MCP server listening at: http://127.0.0.1:${actualPort}/mcp`);
+  process.stderr.write(`✓ LeetCode Tracker MCP server listening at: http://127.0.0.1:${actualPort}/mcp\n`);
 
   return {
     server: httpServer,
@@ -215,6 +215,9 @@ export async function startMcpServer(options: StartMcpServerOptions): Promise<Mc
     clientToken: config.clientToken,
     close: async () => {
       await mcpHandler.close().catch(() => {});
+      if (typeof (httpServer as any).closeAllConnections === 'function') {
+        (httpServer as any).closeAllConnections();
+      }
       await new Promise<void>((resolve) => {
         httpServer.close(() => resolve());
       });
