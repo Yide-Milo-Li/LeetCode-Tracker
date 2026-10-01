@@ -156,7 +156,7 @@ The sidecar owns a versioned MCP configuration. The host supplies its library co
 
 Settings creates independent Codex, DSH, ChatGPT or custom connections. Resume access explicitly after creating one. Rotation and revocation invalidate outstanding tool calls, including unsent results. Only successful business-tool responses update the last successful call time. The nine tools carry read-only annotations and return structured results. They never generate a plan or call a model. MCP tokens cannot authenticate desktop management routes.
 
-The stateless listener accepts authenticated POST at /mcp; authenticated GET and DELETE return 405. Missing credentials return 401 even for probes. Only Bearer headers are accepted. Host and Origin must match the current loopback port; there is no wildcard CORS. Settings reports the actual listener and desired port separately. Port changes require restart and conflicts disable MCP without changing ports.
+The stateless listener accepts authenticated POST at /mcp; authenticated GET and DELETE return 405. Missing credentials return 401 even for probes. Only Bearer headers are accepted. Host and Origin must match the current loopback port; there is no wildcard CORS. Settings reports the actual listener and desired port separately. Port changes require restart; proxies keep using the controller-published active port until then. Conflicts disable MCP without changing ports.
 
 The installer includes node.exe, desktop-server.mjs and desktop-mcp-proxy.mjs. Generated snippets use absolute paths to the private runtime and the exact library configuration:
 
