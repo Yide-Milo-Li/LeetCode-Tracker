@@ -4,7 +4,8 @@
  */
 import type { ProgressCandidateInput } from '../../contracts/src/practice.ts';
 import type { Bilingual, Rules, RulePatch } from '../../contracts/src/recommendations.ts';
-import type { CatalogProblem } from '../../contracts/src/sync.ts';
+import type { CatalogProblem, ReasoningEffort } from '../../contracts/src/sync.ts';
+import type { AiFragment, LayoutGroup } from '../../markdown/src/index.ts';
 
 export type LLMProviderType = 'gemini' | 'openai' | 'deepseek';
 
@@ -60,6 +61,7 @@ export interface LLMAssistantStatus {
   model: string;
   fallbackModels?: string[];
   baseUrl?: string;
+  reasoningEffort?: ReasoningEffort;
 }
 
 /** Legacy alias for Gemini assistant status. */
@@ -67,6 +69,7 @@ export interface GeminiAssistantStatus {
   configured: boolean;
   model: string;
   fallbackModels?: string[];
+  reasoningEffort?: ReasoningEffort;
 }
 
 /** Parameters for raw content generation call. */
@@ -77,6 +80,9 @@ export interface GenerateContentParams {
   responseSchema?: unknown;
   abortSignal: AbortSignal;
   timeoutMs?: number;
+  reasoningEffort?: ReasoningEffort;
+  maxOutputTokens?: number;
+  purpose?: 'progress_import' | 'override_parse' | 'semantic_rank' | 'coaching' | 'note_format';
 }
 
 /** Raw result from a provider content generation call. */
@@ -84,6 +90,7 @@ export interface GenerateContentOutput {
   text?: string;
   model: string;
   provider?: LLMProviderType;
+  usage?: import('./telemetry.ts').LLMUsage;
 }
 
 /** Parameters for testing provider connectivity. */
@@ -92,12 +99,14 @@ export interface ConnectionTestParams {
   apiKey?: string;
   model?: string;
   baseUrl?: string;
+  reasoningEffort?: ReasoningEffort;
 }
 
 /** Result returned by connectivity test. */
 export interface ConnectionTestResult {
   ok: boolean;
   model: string;
+  usage?: import('./telemetry.ts').LLMUsage;
   message?: string;
   provider?: LLMProviderType;
 }
@@ -121,8 +130,10 @@ export type CustomGenerateFn = (params: {
     responseMimeType: string;
     responseSchema: unknown;
     abortSignal: AbortSignal;
+    reasoningEffort?: ReasoningEffort;
+    maxOutputTokens?: number;
   };
-}) => Promise<{ text?: string }>;
+}) => Promise<{ text?: string; usage?: unknown; usageMetadata?: unknown }>;
 
 /** Legacy alias for Gemini generate content function. */
 export type GeminiGenerateContentFn = (params: {
@@ -133,8 +144,10 @@ export type GeminiGenerateContentFn = (params: {
     responseMimeType: string;
     responseSchema: unknown;
     abortSignal: AbortSignal;
+    thinkingConfig?: { thinkingLevel?: string };
+    maxOutputTokens?: number;
   };
-}) => Promise<{ text?: string }>;
+}) => Promise<{ text?: string; usage?: unknown; usageMetadata?: unknown }>;
 
 /** Configuration for a single LLM provider. */
 export interface ProviderConfig {
@@ -142,6 +155,7 @@ export interface ProviderConfig {
   model?: string;
   baseUrl?: string;
   fallbackModels?: string[];
+  reasoningEffort?: ReasoningEffort;
 }
 
 /** Options for configuring the LLMAssistant. */
@@ -152,11 +166,13 @@ export interface LLMAssistantOptions {
   model?: string;
   baseUrl?: string;
   fallbackModels?: string[];
+  reasoningEffort?: ReasoningEffort;
   maxRetriesPerModel?: number;
   initialBackoffMs?: number;
   timeoutMs?: number;
   customGenerateFn?: CustomGenerateFn;
   generateContentFn?: GeminiGenerateContentFn;
+  diagnosticSink?: import('./telemetry.ts').DiagnosticSink;
 }
 
 /** Legacy alias for Gemini assistant options. */
@@ -167,7 +183,9 @@ export type GeminiAssistantOptions = LLMAssistantOptions;
  * Implemented by LLMAssistant and fully backwards-compatible with IGeminiAssistant.
  */
 export interface ILLMAssistant {
+  getConfigurationGeneration?(): number;
   formatProgressText(rawText: string, batchYear?: number): Promise<LLMFormatResult>;
+  formatNoteMarkdown?(fragments: AiFragment[]): Promise<{ groups: LayoutGroup[]; model: string; provider?: LLMProviderType }>;
   generatePlanContent?(params: {
     problems: CatalogProblem[];
     rules: Rules;
@@ -192,6 +210,7 @@ export interface ILLMAssistant {
     model?: string | null;
     baseUrl?: string | null;
     fallbackModels?: string[] | null;
+    reasoningEffort?: ReasoningEffort | null;
     providers?: Partial<Record<LLMProviderType, ProviderConfig>> | null;
   }): void;
   testConnection?(params?: ConnectionTestParams): Promise<ConnectionTestResult>;

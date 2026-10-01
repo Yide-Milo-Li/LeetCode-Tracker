@@ -1,3 +1,4 @@
+import { createServerApplication } from '../apps/server/src/application-factory.ts';
 /** Regression evidence for the Phase 2 review, using isolated databases and synthetic records. */
 import { it, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -242,7 +243,7 @@ it('replays complete summaries including line errors after database and service 
   const directory = scratch(t);
   const filename = join(directory, 'catalog.sqlite');
   let db = new DatabaseSync(filename);
-  let app = await buildApp({ store: new CatalogStore(db), disableStatic: true });
+  let app = await buildApp({ application: createServerApplication(new CatalogStore(db)), disableStatic: true });
   try {
     const preview = (await app.inject({ method: 'POST', url: '/api/v1/imports/preview', payload: { content: `${line('1')}\n${line('2', { title: '  ' })}` } })).json();
     assert.equal(preview.errorCount, 1);
@@ -254,7 +255,7 @@ it('replays complete summaries including line errors after database and service 
     await app.close(); db.close();
     db = new DatabaseSync(filename);
     const store = new CatalogStore(db);
-    app = await buildApp({ store, disableStatic: true });
+    app = await buildApp({ application: createServerApplication(store), disableStatic: true });
     const retry = await app.inject(request);
     assert.equal(retry.statusCode, 200);
     assert.deepEqual(retry.json(), original);
@@ -348,7 +349,7 @@ it('caps activePreviews memory at limit and evicts oldest uncommitted entries', 
   const db = new DatabaseSync(':memory:');
   try {
     const store = new CatalogStore(db);
-    const app = await buildApp({ store, disableStatic: true });
+    const app = await buildApp({ application: createServerApplication(store), disableStatic: true });
     try {
       const previewIds: string[] = [];
       // Generate 12 previews (limit is 10)

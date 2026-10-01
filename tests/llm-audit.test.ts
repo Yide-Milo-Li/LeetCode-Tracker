@@ -1,3 +1,4 @@
+import { createServerApplication } from '../apps/server/src/application-factory.ts';
 /** Synthetic regressions for the Phase 17 provider boundary; never uses paid APIs. */
 import { it, mock, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -29,7 +30,7 @@ it('application configuration pins supported Gemini, OpenAI and DeepSeek models 
     [`${provider}Model`]: storedModel,
     [`${provider}FallbackModels`]: [...storedFallback],
   });
-  const app = await buildApp({ store, disableStatic: true });
+  const app = await buildApp({ application: createServerApplication(store), disableStatic: true });
   try {
     const response = await app.inject({ method: 'GET', url: '/api/v1/progress-imports/status' });
     assert.equal(response.json().model, expectedModel);
@@ -41,7 +42,7 @@ it('application configuration pins supported Gemini, OpenAI and DeepSeek models 
 it('hot reload keeps inactive keys isolated and clears keys, URLs and fallbacks', async () => {
   const store = new CatalogStore(new DatabaseSync(':memory:'), { skipBackup: true });
   const assistant = new LLMAssistant({ apiKey: '', providers: { openai: { apiKey: '' }, deepseek: { apiKey: '' } } });
-  const app = await buildApp({ store, geminiAssistant: assistant, disableStatic: true });
+  const app = await buildApp({ application: createServerApplication(store, assistant), disableStatic: true });
   try {
     const patch = async (payload: Record<string, unknown>) => {
       const res = await app.inject({ method: 'PATCH', url: '/api/v1/settings', payload });
@@ -65,10 +66,10 @@ it('progress route preserves typed provider failures and legacy instanceof check
   const assistant = new LLMAssistant({ apiKey: '' });
   await assert.rejects(assistant.formatProgressText('text'), GeminiFormatError);
   const store = new CatalogStore(new DatabaseSync(':memory:'), { skipBackup: true });
-  const app = await buildApp({ store, disableStatic: true, geminiAssistant: {
+  const app = await buildApp({ application: createServerApplication(store, {
     getStatus: () => ({ configured: true, model: 'mock', provider: 'deepseek' }),
     formatProgressText: async () => { throw new LLMError('DEEPSEEK_QUOTA_EXCEEDED', 'Synthetic balance error', 429, 'deepseek'); },
-  } });
+  }), disableStatic: true });
   try {
     const res = await app.inject({ method: 'POST', url: '/api/v1/progress-imports/format', payload: { rawText: 'text' } });
     assert.equal(res.statusCode, 429);
@@ -79,11 +80,11 @@ it('progress route preserves typed provider failures and legacy instanceof check
 it('legacy Gemini connection route targets Gemini while OpenAI is active', async () => {
   let provider: unknown;
   const store = new CatalogStore(new DatabaseSync(':memory:'), { skipBackup: true });
-  const app = await buildApp({ store, disableStatic: true, geminiAssistant: {
+  const app = await buildApp({ application: createServerApplication(store, {
     getStatus: () => ({ configured: true, model: 'mock', provider: 'openai' }),
     formatProgressText: async () => ({ candidates: [], unparsedSnippets: [], model: 'mock' }),
     testConnection: async params => { provider = params?.provider; return { ok: true, model: 'mock' }; },
-  } });
+  }), disableStatic: true });
   try {
     await app.inject({ method: 'POST', url: '/api/v1/settings/test-gemini', payload: {} });
     assert.equal(provider, 'gemini');
@@ -123,7 +124,7 @@ it('DeepSeek never borrows OpenAI credentials and blank probe keys never reuse s
 it('explicit empty fallback lists survive persistence and server restart', async () => {
   const store = new CatalogStore(new DatabaseSync(':memory:'), { skipBackup: true });
   await store.updateSettings({ llmProvider: 'openai', openaiApiKey: 'synthetic', openaiFallbackModels: [] });
-  const app = await buildApp({ store, disableStatic: true });
+  const app = await buildApp({ application: createServerApplication(store), disableStatic: true });
   try {
     const res = await app.inject({ method: 'GET', url: '/api/v1/progress-imports/status' });
     assert.deepEqual(res.json().fallbackModels, []);
@@ -145,11 +146,11 @@ it('routine plans do not claim content-provider provenance from an unused adapte
   await store.updateSettings({ timezone: 'UTC' });
   await store.importJsonl(JSON.stringify({ id: '1', title: 'Synthetic problem', difficulty: 'Easy', tags: ['Array'] }));
   await store.planning.saveStrategy({ name: 'Synthetic', rules, weekdays: [0, 1, 2, 3, 4, 5, 6] });
-  const app = await buildApp({ store, disableStatic: true, geminiAssistant: {
+  const app = await buildApp({ application: createServerApplication(store, {
     getStatus: () => ({ configured: true, provider: 'deepseek', model: 'after-switch' }),
     formatProgressText: async () => ({ candidates: [], unparsedSnippets: [], model: 'mock' }),
     generatePlanContent: async () => ({ reasons: {}, encouragement: { en: 'Synthetic', zh: 'Synthetic' }, model: 'before-switch', provider: 'openai' }),
-  } });
+  }), disableStatic: true });
   try {
     const response = await app.inject({ method: 'POST', url: '/api/v1/daily-plans/ensure', payload: {} });
     assert.equal(response.statusCode, 200, response.payload);

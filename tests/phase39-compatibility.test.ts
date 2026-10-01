@@ -11,6 +11,7 @@ import { inspectCatalogSchema } from '../packages/database/src/schema.ts';
 import { validateMigrationBundle } from '../packages/database/src/migration-bundle.ts';
 import { PlanningService } from '../apps/server/src/planning-service.ts';
 import { buildApp } from '../apps/server/src/app.ts';
+import { createServerApplication } from '../apps/server/src/application-factory.ts';
 import { fallbackPlanContent, type IGeminiAssistant } from '../apps/server/src/gemini.ts';
 
 const assistant: IGeminiAssistant = { getStatus: () => ({ configured: false, model: 'local' }),
@@ -73,7 +74,7 @@ it('roundtrips Bundle5 policy, feedback, saved reasons and replays; excludes sou
     assert.deepEqual(await restored.removePlanItem(first.id, { itemId: first.items[0].id, expectedVersion: 1, operationId, feedbackReason: 'topic_mismatch' }), current);
     const beforeRestore = (await readdir(path.join(directory, 'target-backups'))).find(file => file.startsWith('safety-pre-migration-'));
     assert.ok(beforeRestore); assert.equal(target.backupManager!.verifyBackup(path.join(directory, 'target-backups', beforeRestore)).valid, true);
-    const app = await buildApp({ store: source, geminiAssistant: assistant, disableStatic: true });
+    const app = await buildApp({ application: createServerApplication(source, assistant), disableStatic: true });
     try {
       const currentExport = await app.inject('/api/v1/bundle/export?version=5');
       assert.equal(currentExport.statusCode, 200);

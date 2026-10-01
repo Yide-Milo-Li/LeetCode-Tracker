@@ -1,8 +1,6 @@
 /** Provider counts are observations; cached/reasoning subsets are never added to totals. */
-export interface LLMUsage {
-  inputTokens: number | null; outputTokens: number | null; cachedInputTokens: number | null;
-  reasoningTokens: number | null; totalTokens: number | null; source: 'provider' | 'unknown';
-}
+import type { LLMUsage } from '../../../../packages/application/src/telemetry.ts';
+export type { LLMUsage } from '../../../../packages/application/src/telemetry.ts';
 const count = (value: unknown): number | null => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
 const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' ? value as Record<string, unknown> : {};
 

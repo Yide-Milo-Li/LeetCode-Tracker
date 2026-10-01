@@ -1,3 +1,4 @@
+import { createServerApplication } from '../apps/server/src/application-factory.ts';
 /**
  * Automated test suite for Fastify local API endpoints (/api/v1).
  * Verifies preview, transactional commits, revision drift rejection,
@@ -16,7 +17,7 @@ describe('Fastify Local API (/api/v1)', () => {
   it('generates import preview with accurate line analysis and counts', async () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
-    const app = await buildApp({ store, disableStatic: true });
+    const app = await buildApp({ application: createServerApplication(store), disableStatic: true });
 
     const content = [
       '{"id": "1", "title": "Two Sum", "difficulty": "Easy", "tags": ["Array"]}',
@@ -45,7 +46,7 @@ describe('Fastify Local API (/api/v1)', () => {
   it('rejects input exceeding line limit with 413', async () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
-    const app = await buildApp({ store, disableStatic: true });
+    const app = await buildApp({ application: createServerApplication(store), disableStatic: true });
 
     // Generate 20,001 lines
     const lines = Array.from({ length: 20001 }, (_, i) => JSON.stringify({ id: String(i + 1), title: 'T', difficulty: 'Easy' }));
@@ -76,7 +77,7 @@ describe('Fastify Local API (/api/v1)', () => {
   it('enforces exact byte limits: accepts exactly 10 MiB payload, rejects 10 MiB + 1 byte with 400, and rejects >15 MiB body with 413', async () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
-    const app = await buildApp({ store, disableStatic: true });
+    const app = await buildApp({ application: createServerApplication(store), disableStatic: true });
 
     // 1. Exact 10 MiB (10 * 1024 * 1024 bytes) boundary
     const base = '{"id": "1", "title": "Boundary Test", "difficulty": "Easy"}\n';
@@ -121,7 +122,7 @@ describe('Fastify Local API (/api/v1)', () => {
   it('rejects expired previews after 30 minutes with simulated clock advancement and prunes them from memory', async () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
-    const app = await buildApp({ store, disableStatic: true });
+    const app = await buildApp({ application: createServerApplication(store), disableStatic: true });
 
     let mockTime = 1_700_000_000_000;
     const originalNow = Date.now;
@@ -193,7 +194,7 @@ describe('Fastify Local API (/api/v1)', () => {
   it('allows querying committed results and idempotent re-commit after simulated client response loss', async () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
-    const app = await buildApp({ store, disableStatic: true });
+    const app = await buildApp({ application: createServerApplication(store), disableStatic: true });
 
     // 1. Generate preview
     const previewRes = await app.inject({
@@ -253,7 +254,7 @@ describe('Fastify Local API (/api/v1)', () => {
   it('commits preview atomically, updates catalog revision, and supports idempotent retries', async () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
-    const app = await buildApp({ store, disableStatic: true });
+    const app = await buildApp({ application: createServerApplication(store), disableStatic: true });
 
     // 1. Generate preview
     const previewRes = await app.inject({
@@ -298,7 +299,7 @@ describe('Fastify Local API (/api/v1)', () => {
   it('rejects commit when preview has 0 valid records', async () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
-    const app = await buildApp({ store, disableStatic: true });
+    const app = await buildApp({ application: createServerApplication(store), disableStatic: true });
 
     // Preview with only corrupted lines
     const previewRes = await app.inject({
@@ -322,7 +323,7 @@ describe('Fastify Local API (/api/v1)', () => {
   it('rejects commit when catalog has been modified after preview was generated (revision drift)', async () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
-    const app = await buildApp({ store, disableStatic: true });
+    const app = await buildApp({ application: createServerApplication(store), disableStatic: true });
 
     // 1. Generate preview
     const previewRes = await app.inject({
@@ -351,7 +352,7 @@ describe('Fastify Local API (/api/v1)', () => {
   it('queries catalog with pagination, tags, and search', async () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
-    const app = await buildApp({ store, disableStatic: true });
+    const app = await buildApp({ application: createServerApplication(store), disableStatic: true });
 
     await store.importJsonl([
       '{"id": "1", "title": "Two Sum", "difficulty": "Easy", "tags": ["Array"]}',
@@ -381,7 +382,7 @@ describe('Fastify Local API (/api/v1)', () => {
   it('supports all pagination combinations and validates parameter boundaries on catalog query', async () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
-    const app = await buildApp({ store, disableStatic: true });
+    const app = await buildApp({ application: createServerApplication(store), disableStatic: true });
 
     await store.importJsonl([
       '{"id": "1", "title": "P1", "difficulty": "Easy", "tags": ["Array"], "isPaidOnly": false}',
@@ -442,7 +443,7 @@ describe('Fastify Local API (/api/v1)', () => {
   it('persists and updates user preferences', async () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
-    const app = await buildApp({ store, disableStatic: true });
+    const app = await buildApp({ application: createServerApplication(store), disableStatic: true });
 
     const getRes = await app.inject({ method: 'GET', url: '/api/v1/settings' });
     assert.equal(getRes.statusCode, 200);
@@ -464,7 +465,7 @@ describe('Fastify Local API (/api/v1)', () => {
   it('enforces loopback origin protection on mutating endpoints', async () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
-    const app = await buildApp({ store, disableStatic: true });
+    const app = await buildApp({ application: createServerApplication(store), disableStatic: true });
 
     // Mutating request from external host
     const res = await app.inject({
@@ -485,7 +486,7 @@ describe('Fastify Local API (/api/v1)', () => {
     t.after(() => rmSync(staticRoot, { recursive: true, force: true }));
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
-    const app = await buildApp({ store, staticRoot });
+    const app = await buildApp({ application: createServerApplication(store), staticRoot });
     t.after(async () => { await app.close(); db.close(); });
 
     // Root index.html

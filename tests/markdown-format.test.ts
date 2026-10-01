@@ -5,6 +5,7 @@ import { formatMarkdown, prepareAiFormat, applyAiLayout } from '../packages/mark
 import { NOTE_TEMPLATES, hasMeaningfulNoteContent } from '../packages/contracts/src/notes.ts';
 import { CatalogStore } from '../packages/database/src/store.ts';
 import { buildApp } from '../apps/server/src/app.ts';
+import { createServerApplication } from '../apps/server/src/application-factory.ts';
 import { LLMAssistant } from '../apps/server/src/llm/assistant.ts';
 import { LLMError } from '../apps/server/src/llm/types.ts';
 import type { DiagnosticTrace } from '../apps/server/src/llm/diagnostics.ts';
@@ -106,7 +107,7 @@ describe('Read-only AI note formatting API', () => {
         return { text: JSON.stringify({ groups: [{ style: 'heading', ids: ['f1'], level: 2 }, { style: 'keep', ids: ['f2', 'f3'] }] }),
           usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5, totalTokenCount: 15 } };
       } });
-    const app = await buildApp({ store, geminiAssistant: assistant, disableStatic: true });
+    const app = await buildApp({ application: createServerApplication(store, assistant), disableStatic: true });
     try {
       assert.equal((await app.inject({ method: 'GET', url: '/api/v1/settings' })).json().notesFormatOnSave, true);
       const setting = await app.inject({ method: 'PATCH', url: '/api/v1/settings', payload: { notesFormatOnSave: false } });
@@ -129,14 +130,14 @@ describe('Read-only AI note formatting API', () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
     let mode: 'invalid' | 'timeout' = 'invalid';
-    const app = await buildApp({ store, disableStatic: true, geminiAssistant: {
+    const app = await buildApp({ disableStatic: true, application: createServerApplication(store, {
       getStatus: () => ({ configured: true, model: 'mock' }),
       formatProgressText: async () => ({ candidates: [], unparsedSnippets: [], model: 'mock' }),
       formatNoteMarkdown: async () => {
         if (mode === 'timeout') throw new LLMError('NOTE_FORMAT_TIMEOUT', 'Timed out', 504);
         return { groups: [{ style: 'keep', ids: ['f1', 'f1'] }], model: 'mock' };
       },
-    } });
+    }) });
     try {
       const request = () => app.inject({ method: 'POST', url: '/api/v1/notes/format', payload: { content: 'one\ntwo' } });
       assert.equal((await request()).statusCode, 422);
@@ -150,11 +151,11 @@ describe('Read-only AI note formatting API', () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
     let calls = 0;
-    const app = await buildApp({ store, disableStatic: true, geminiAssistant: {
+    const app = await buildApp({ disableStatic: true, application: createServerApplication(store, {
       getStatus: () => ({ configured: true, model: 'mock' }),
       formatProgressText: async () => ({ candidates: [], unparsedSnippets: [], model: 'mock' }),
       formatNoteMarkdown: async () => { calls++; return { groups: [], model: 'mock' }; },
-    } });
+    }) });
     try {
       const res = await app.inject({ method: 'POST', url: '/api/v1/notes/format', payload: { content: 'x'.repeat(20001) } });
       assert.equal(res.statusCode, 413);

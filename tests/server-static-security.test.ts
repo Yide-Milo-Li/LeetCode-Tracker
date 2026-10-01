@@ -1,3 +1,4 @@
+import { createServerApplication } from '../apps/server/src/application-factory.ts';
 /** Static-serving upgrade regressions: guarded routes, SPA/API separation, and native isolation. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -50,7 +51,7 @@ test('static catch-all cannot bypass a guarded route with noncanonical paths', a
 test('source static hosting preserves SPA fallback, API errors, caching and root containment', async (t) => {
   const files = fixture();
   const db = new DatabaseSync(':memory:');
-  const app = await buildApp({ store: new CatalogStore(db, { skipBackup: true }), staticRoot: files.root });
+  const app = await buildApp({ application: createServerApplication(new CatalogStore(db, { skipBackup: true })), staticRoot: files.root });
   t.after(async () => { await app.close(); db.close(); files.cleanup(); });
   assert.match((await app.inject('/')).body, /synthetic SPA/);
   assert.match((await app.inject('/client-route')).body, /synthetic SPA/);
@@ -68,7 +69,7 @@ test('source static hosting preserves SPA fallback, API errors, caching and root
 test('desktop mode never serves assets even when a static root exists', async (t) => {
   const files = fixture();
   const db = new DatabaseSync(':memory:');
-  const app = await buildApp({ store: new CatalogStore(db, { skipBackup: true }), staticRoot: files.root, disableStatic: true, sessionSecret: 'synthetic-desktop-token' });
+  const app = await buildApp({ application: createServerApplication(new CatalogStore(db, { skipBackup: true })), staticRoot: files.root, disableStatic: true, sessionSecret: 'synthetic-desktop-token' });
   t.after(async () => { await app.close(); db.close(); files.cleanup(); });
   assert.equal((await app.inject({ url: '/asset.txt', headers: { 'x-desktop-session-token': 'synthetic-desktop-token' } })).statusCode, 404);
   assert.equal((await app.inject('/api/v1/health')).statusCode, 401);

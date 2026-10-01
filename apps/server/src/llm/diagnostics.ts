@@ -4,16 +4,9 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { LLMUsage } from './usage.ts';
 
-export interface LLMTrace {
-  version: 1; at: number; operationId: string; purpose: string; attempt: number; provider: string;
-  model: string; elapsedMs: number; status: 'ok' | 'failed' | 'timeout'; usage: LLMUsage; operationUsage?: LLMUsage;
-}
-export interface SelectionTrace {
-  version: 1; at: number; purpose: 'selection_decision'; reason: string; candidateCount: number;
-  choiceGroups: number; membershipChanged: boolean; orderChanged: boolean; elapsedMs: number;
-}
-export type DiagnosticTrace = LLMTrace | SelectionTrace;
-export type DiagnosticSink = (trace: DiagnosticTrace) => void | Promise<void>;
+import type { DiagnosticSink } from '../../../../packages/application/src/telemetry.ts';
+export type { LLMTrace, SelectionTrace, DiagnosticTrace, DiagnosticSink } from '../../../../packages/application/src/telemetry.ts';
+export { emitDiagnostic } from '../../../../packages/application/src/telemetry.ts';
 export const DIAGNOSTIC_RETENTION_DAYS = 30;
 export const DIAGNOSTIC_MAX_BYTES = 5 * 1024 * 1024;
 
@@ -59,9 +52,4 @@ export function createDiagnosticSink(profileDirectory: string, maxBytes = DIAGNO
     }).catch(() => {});
     return queue;
   };
-}
-
-/** Never await diagnostics on the planning path, including a slow custom sink. */
-export function emitDiagnostic(sink: DiagnosticSink | undefined, trace: DiagnosticTrace): void {
-  try { void Promise.resolve(sink?.(trace)).catch(() => {}); } catch { /* Observability cannot fail planning. */ }
 }

@@ -1,3 +1,4 @@
+import { createServerApplication } from '../apps/server/src/application-factory.ts';
 /** Offline integration of topic selection, adaptive isolation, history and API read-only behavior. */
 import { it, mock } from 'node:test';
 import assert from 'node:assert/strict';
@@ -58,7 +59,7 @@ it('uses topic priority in ensure, replacements and overrides without converting
 });
 it('keeps fixed cache unchanged by adaptive projections and exposes aggregate-only read-only reports', async () => {
     const clock = mock.method(Date, 'now', () => now), f = await fixture();
-    const app = await buildApp({ store: f.store, geminiAssistant: f.assistant, disableStatic: true });
+    const app = await buildApp({ application: createServerApplication(f.store, f.assistant), disableStatic: true });
     try {
         const before = f.store.planning.stamp();
         const fixed = f.store.planning.reviewStates('UTC', now);

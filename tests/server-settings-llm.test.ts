@@ -1,3 +1,4 @@
+import { createServerApplication } from '../apps/server/src/application-factory.ts';
 /**
  * Automated test suite for Multi-Provider LLM Abstraction.
  * Covers:
@@ -27,7 +28,7 @@ describe('Multi-Provider LLM Settings & Server Endpoints (/api/v1/settings)', ()
   it('saves and retrieves OpenAI and DeepSeek settings independently in SQLite', async () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
-    const app = await buildApp({ store, disableStatic: true });
+    const app = await buildApp({ application: createServerApplication(store), disableStatic: true });
 
     // Initial check: defaults are null
     const initialRes = await app.inject({ method: 'GET', url: '/api/v1/settings' });
@@ -104,7 +105,7 @@ describe('Multi-Provider LLM Settings & Server Endpoints (/api/v1/settings)', ()
   it('validates duplicate models for OpenAI and DeepSeek', async () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
-    const app = await buildApp({ store, disableStatic: true });
+    const app = await buildApp({ application: createServerApplication(store), disableStatic: true });
 
     // OpenAI primary duplicate in fallback array
     const openaiDupPrimary = await app.inject({
@@ -185,7 +186,7 @@ describe('Multi-Provider LLM Settings & Server Endpoints (/api/v1/settings)', ()
       },
     };
 
-    const app = await buildApp({ store, geminiAssistant: mockAssistant, disableStatic: true });
+    const app = await buildApp({ application: createServerApplication(store, mockAssistant), disableStatic: true });
 
     // 1. Successful OpenAI test
     const successRes = await app.inject({
@@ -244,7 +245,7 @@ describe('Multi-Provider LLM Settings & Server Endpoints (/api/v1/settings)', ()
       },
     };
 
-    const app = await buildApp({ store, geminiAssistant: mockAssistant, disableStatic: true });
+    const app = await buildApp({ application: createServerApplication(store, mockAssistant), disableStatic: true });
 
     await app.inject({
       method: 'PATCH',
@@ -268,7 +269,7 @@ describe('Multi-Provider LLM Settings & Server Endpoints (/api/v1/settings)', ()
   it('persists independent reasoning efforts across providers and rejects invalid values', async () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
-    const app = await buildApp({ store, disableStatic: true });
+    const app = await buildApp({ application: createServerApplication(store), disableStatic: true });
 
     const res = await app.inject({
       method: 'PATCH',
@@ -307,7 +308,7 @@ describe('Multi-Provider LLM Settings & Server Endpoints (/api/v1/settings)', ()
         return { ok: true, model: params?.model || 'gpt-6-luna', provider: params?.provider || 'openai' };
       },
     };
-    const app = await buildApp({ store, geminiAssistant: mockAssistant, disableStatic: true });
+    const app = await buildApp({ application: createServerApplication(store, mockAssistant), disableStatic: true });
 
     const validTerra = await app.inject({
       method: 'PATCH',

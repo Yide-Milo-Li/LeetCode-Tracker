@@ -1,3 +1,4 @@
+import { createServerApplication } from '../apps/server/src/application-factory.ts';
 /**
  * API and recommendation integration tests for Knowledge Profile (/api/v1/knowledge-profile)
  * and adaptive topic recommendation linkage in PlanningService.
@@ -30,7 +31,7 @@ describe('Server Knowledge Profile API & Adaptive Recommendations', () => {
     ].join('\n');
     await store.importJsonl(jsonl);
 
-    const app = await buildApp({ store, disableStatic: true });
+    const app = await buildApp({ application: createServerApplication(store), disableStatic: true });
     return { store, app, db };
   }
 
