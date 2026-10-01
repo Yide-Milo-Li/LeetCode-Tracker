@@ -8,6 +8,7 @@ import * as fs from 'node:fs';
 import { openTrackerRuntime, type TrackerRuntime } from '../../../packages/application/src/runtime.ts';
 import { configureApplication } from './application-factory.ts';
 import { buildApp } from './app.ts';
+import { startMcpServer, type McpServerHandle } from './mcp/server.ts';
 import type { FastifyInstance } from 'fastify';
 
 if (typeof process.loadEnvFile === 'function') {
@@ -54,12 +55,25 @@ async function startServer() {
     console.log(`  API: ${address}/api/v1/catalog/stats`);
     console.log(`  Web: ${address}/`);
 
+    let mcp: McpServerHandle | null = null;
+    try {
+      mcp = await startMcpServer({
+        application: runtime.application,
+        configDir: localDir,
+      });
+    } catch (mcpErr) {
+      console.warn(`[MCP] Unable to start MCP server: ${mcpErr instanceof Error ? mcpErr.message : String(mcpErr)}. Server will continue without MCP.`);
+    }
+
     /** Finish pending requests before closing the database and releasing its lease. */
     const gracefulShutdown = async (signal: string) => {
       if (shuttingDown) return;
       shuttingDown = true;
       console.log(`\n[Server] Received ${signal}, closing server and database...`);
       try {
+        if (mcp) {
+          await mcp.close().catch(() => {});
+        }
         await ownedApp.close();
         await ownedRuntime.close();
         console.log('✓ Clean shutdown complete.');

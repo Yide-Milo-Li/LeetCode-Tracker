@@ -14,6 +14,7 @@ import type { AddressInfo } from 'node:net';
 import { openTrackerRuntime, type TrackerRuntime } from '../../../packages/application/src/runtime.ts';
 import { configureApplication } from './application-factory.ts';
 import { buildApp } from './app.ts';
+import { startMcpServer, type McpServerHandle } from './mcp/server.ts';
 import type { FastifyInstance } from 'fastify';
 
 /**
@@ -109,6 +110,16 @@ export async function startDesktopServer(): Promise<void> {
     }
     await app.listen({ host, port });
 
+    let mcp: McpServerHandle | null = null;
+    try {
+      mcp = await startMcpServer({
+        application: runtime.application,
+        configDir: path.dirname(config.dbPath),
+      });
+    } catch (mcpErr) {
+      process.stderr.write(`[MCP] Unable to start MCP server: ${mcpErr instanceof Error ? mcpErr.message : String(mcpErr)}. Desktop sidecar continues without MCP.\n`);
+    }
+
     const address = app.server.address() as AddressInfo;
     const actualPort = address.port;
 
@@ -132,6 +143,9 @@ export async function startDesktopServer(): Promise<void> {
           rl.close();
         }
         process.stdin.pause();
+        if (mcp) {
+          await mcp.close().catch(() => {});
+        }
         await ownedApp.close();
         await ownedRuntime.close();
         process.exit(0);
