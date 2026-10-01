@@ -76,6 +76,7 @@ export const problemNoteListQuerySchema = z.object({
 });
 
 export type ProblemNoteListQuery = z.infer<typeof problemNoteListQuerySchema>;
+export type ProblemNoteListQueryInput = z.input<typeof problemNoteListQuerySchema>;
 
 /** Query options for exporting the knowledge base. */
 export const exportKnowledgeQuerySchema = z.object({
