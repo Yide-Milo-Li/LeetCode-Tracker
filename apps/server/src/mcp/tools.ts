@@ -10,34 +10,20 @@ import { isTimeZone, localDate } from '../../../../packages/contracts/src/time.t
 import type { CatalogProblem } from '../../../../packages/contracts/src/sync.ts';
 import { McpConfigError } from './config.ts';
 
-const PAUSED_ERROR_MESSAGE = 'AI access is paused in LeetCode Tracker. Resume it from the system tray or Settings.';
-
-function checkAiPaused(isPausedFn: () => boolean) {
-  if (isPausedFn()) {
-    return {
-      isError: true,
-      content: [{ type: 'text' as const, text: PAUSED_ERROR_MESSAGE }],
-    };
-  }
-  return null;
-}
-
 /**
  * Registers the 9 read-only tracker tools with the given McpServer instance.
  */
 export function registerTrackerTools(
   rawServer: McpServer,
   application: TrackerApplication,
-  guard: { assert: () => void; success: () => void },
+  guard: { assert: () => void },
 ): void {
-  const isPausedFn = () => false; // The request-scoped guard checks identity and revision as well as pause.
   const server = { registerTool: ((name: string, config: Parameters<McpServer['registerTool']>[1], callback: (...args: any[]) => any) =>
     rawServer.registerTool(name, { ...config, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async (...args: any[]) => {
       try {
         guard.assert();
         const result = await callback(...args);
         guard.assert();
-        if (!result.isError) guard.success();
         const text = result.content?.find((item: { type: string }) => item.type === 'text')?.text;
         return text && !result.isError ? { ...result, structuredContent: JSON.parse(text) } : result;
       } catch (error) {
@@ -52,8 +38,6 @@ export function registerTrackerTools(
       description: 'Get runtime version, catalog problem counts, streak metrics, configured timezone, and read-only capabilities.',
     },
     async () => {
-      const paused = checkAiPaused(isPausedFn);
-      if (paused) return paused;
 
       const stats = await application.catalog.stats();
       const settings = await application.settings.get();
@@ -141,8 +125,6 @@ export function registerTrackerTools(
       }),
     },
     async ({ query, difficulty, tag, page = 1, limit = 20 }) => {
-      const paused = checkAiPaused(isPausedFn);
-      if (paused) return paused;
 
       const catalogResult = await application.catalog.query({
         page,
@@ -187,8 +169,6 @@ export function registerTrackerTools(
       }),
     },
     async ({ frontendId }) => {
-      const paused = checkAiPaused(isPausedFn);
-      if (paused) return paused;
 
       const trimmedId = frontendId.trim();
       const catalogResult = await application.catalog.query({
@@ -284,8 +264,6 @@ export function registerTrackerTools(
       }),
     },
     async ({ date }) => {
-      const paused = checkAiPaused(isPausedFn);
-      if (paused) return paused;
 
       let targetDate = date;
       if (!targetDate) {
@@ -364,8 +342,6 @@ export function registerTrackerTools(
       }),
     },
     async ({ frontendId, page = 1, limit = 20, order = 'desc' }) => {
-      const paused = checkAiPaused(isPausedFn);
-      if (paused) return paused;
 
       let problemId: string | undefined;
       if (frontendId) {
@@ -436,8 +412,6 @@ export function registerTrackerTools(
       }),
     },
     async ({ recordId }) => {
-      const paused = checkAiPaused(isPausedFn);
-      if (paused) return paused;
 
       try {
         const result = await application.practice.read({}, { id: recordId });
@@ -492,8 +466,6 @@ export function registerTrackerTools(
       }),
     },
     async ({ hasNote = 'all', search, difficulty = 'all', page = 1, limit = 20 }) => {
-      const paused = checkAiPaused(isPausedFn);
-      if (paused) return paused;
 
       const result = await application.notes.list({
         hasNote,
@@ -530,8 +502,6 @@ export function registerTrackerTools(
       }),
     },
     async ({ frontendId, chunkIndex = 0, chunkSize = 3000 }) => {
-      const paused = checkAiPaused(isPausedFn);
-      if (paused) return paused;
 
       const trimmedId = frontendId.trim();
       const result = await application.notes.read({}, { frontendId: trimmedId });
@@ -585,8 +555,6 @@ export function registerTrackerTools(
       }),
     },
     async ({ year }) => {
-      const paused = checkAiPaused(isPausedFn);
-      if (paused) return paused;
 
       const dashboard = await application.dashboard.summary({ year });
 

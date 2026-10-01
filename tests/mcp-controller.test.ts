@@ -7,6 +7,19 @@ import { join } from 'node:path';
 import { McpController } from '../apps/server/src/mcp/config.ts';
 import fs from 'node:fs';
 
+test('separate library owners never search or modify each other', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tracker-mcp-isolation-'));
+  try {
+    const first = new McpController(join(dir, 'library A', 'config.json'));
+    const second = new McpController(join(dir, '资料库 B', 'config.json'));
+    const credential = first.createClient('ChatGPT'); first.update({ aiAccessPaused: false });
+    const before = readFileSync(first.configPath, 'utf8');
+    second.createClient('DSH'); second.update({ port: 32123 });
+    assert.equal(second.authorize(credential.token), null);
+    assert.equal(readFileSync(first.configPath, 'utf8'), before);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('failed atomic replacement preserves the prior file and closes authorization', t => {
   const dir = mkdtempSync(join(tmpdir(), 'tracker-mcp-write-'));
   try {
