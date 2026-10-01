@@ -25,7 +25,10 @@ export function registerTrackerTools(
         const result = await callback(...args);
         guard.assert();
         const text = result.content?.find((item: { type: string }) => item.type === 'text')?.text;
-        return text && !result.isError ? { ...result, structuredContent: JSON.parse(text) } : result;
+        if (!text) return result;
+        let structuredContent: Record<string, unknown>;
+        try { structuredContent = JSON.parse(text); } catch { structuredContent = { error: text }; }
+        return { ...result, structuredContent };
       } catch (error) {
         const code = error instanceof McpConfigError ? error.code : 'MCP_QUERY_FAILED';
         return { isError: true, structuredContent: { error: code }, content: [{ type: 'text', text: code }] };
@@ -265,6 +268,7 @@ export function registerTrackerTools(
         const tz = settings.timezone;
         if (!tz || !isTimeZone(tz)) {
           return {
+            isError: true,
             content: [{
               type: 'text',
               text: JSON.stringify({

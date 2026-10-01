@@ -447,7 +447,7 @@ export function NotesWorkspace({
     (isBlank ? savedContent.trim().length > 0 : hasMeaningful);
 
   // Phase 30: Unsaved note modifications check
-  // Clean if note is unchanged, actively saving, or if an empty note only had whitespace typed.
+  // Note switching may dispose an in-flight save; native exit separately protects its pending draft.
   const hasUnsavedChanges =
     !loadingNote &&
     !savingNote &&
@@ -455,6 +455,8 @@ export function NotesWorkspace({
     (savedContent.trim().length > 0 || noteContent.trim().length > 0);
 
   // Phase 30: Browser beforeunload guard when unsaved changes exist
+  const draftRef = useRef(noteContent);
+  draftRef.current = noteContent;
   useEffect(() => {
     if (!hasUnsavedChanges) return;
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -513,7 +515,9 @@ export function NotesWorkspace({
       // A saved note can change list membership even after switching problems. Refresh
       // the latest filters while mounted, without reloading the current editor draft.
       if (editorSession.current.active) setListRevision((current) => current + 1);
-      return true;
+      const clean = session.active && editorSession.current === session && draftRef.current === note.content;
+      if (session.active && editorSession.current === session) onDirtyChange?.(!clean);
+      return clean;
     } catch (err) {
       if (session.active) {
         setSaveError(err instanceof Error ? err.message : String(err));
@@ -528,8 +532,8 @@ export function NotesWorkspace({
   }
 
   useEffect(() => {
-    onDirtyChange?.(hasUnsavedChanges);
-  }, [hasUnsavedChanges, onDirtyChange]);
+    onDirtyChange?.(hasUnsavedChanges || savingNote);
+  }, [hasUnsavedChanges, savingNote, onDirtyChange]);
 
   useEffect(() => {
     if (registerSaveHandler) {
