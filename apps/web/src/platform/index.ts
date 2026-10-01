@@ -154,3 +154,116 @@ export function initDesktopPlatform(): void {
     }
   });
 }
+
+/**
+ * Listen for exit request event from the desktop host (e.g. system tray quit).
+ */
+export function listenDesktopExit(handler: () => void | Promise<void>): () => void {
+  if (typeof window === 'undefined') return () => {};
+
+  let lastTrigger = 0;
+  const onExit = () => {
+    const now = Date.now();
+    if (now - lastTrigger < 300) return;
+    lastTrigger = now;
+    void handler();
+  };
+
+  window.addEventListener('desktop:request-exit', onExit);
+
+  let unlistenTauri: (() => void) | null = null;
+  if (isTauri()) {
+    try {
+      import('@tauri-apps/api/event')
+        .then(({ listen }) => {
+          listen('desktop:request-exit', onExit)
+            .then((unlisten) => {
+              unlistenTauri = unlisten;
+            })
+            .catch(() => {});
+        })
+        .catch(() => {});
+    } catch {
+      // Ignore in non-Tauri / test environments
+    }
+  }
+
+  return () => {
+    window.removeEventListener('desktop:request-exit', onExit);
+    if (unlistenTauri) unlistenTauri();
+  };
+}
+
+/**
+ * Confirm termination and tear down the background runtime.
+ */
+export async function confirmExit(): Promise<void> {
+  if (isTauri()) {
+    const tauri = (window as unknown as {
+      __TAURI_INTERNALS__: { invoke: <R>(cmd: string, args?: unknown) => Promise<R> };
+    }).__TAURI_INTERNALS__;
+    await tauri.invoke('confirm_exit');
+  }
+}
+
+/**
+ * Cancel exit request and keep the desktop runtime running.
+ */
+export async function cancelExit(): Promise<void> {
+  if (isTauri()) {
+    const tauri = (window as unknown as {
+      __TAURI_INTERNALS__: { invoke: <R>(cmd: string, args?: unknown) => Promise<R> };
+    }).__TAURI_INTERNALS__;
+    await tauri.invoke('cancel_exit');
+  }
+}
+
+/**
+ * Get whether login autostart is enabled.
+ */
+export async function getAutostartStatus(): Promise<boolean> {
+  if (isTauri()) {
+    const tauri = (window as unknown as {
+      __TAURI_INTERNALS__: { invoke: <R>(cmd: string, args?: unknown) => Promise<R> };
+    }).__TAURI_INTERNALS__;
+    return await tauri.invoke<boolean>('get_autostart_status');
+  }
+  return false;
+}
+
+/**
+ * Set login autostart enabled or disabled.
+ */
+export async function setAutostartStatus(enabled: boolean): Promise<void> {
+  if (isTauri()) {
+    const tauri = (window as unknown as {
+      __TAURI_INTERNALS__: { invoke: <R>(cmd: string, args?: unknown) => Promise<R> };
+    }).__TAURI_INTERNALS__;
+    await tauri.invoke('set_autostart_status', { enabled });
+  }
+}
+
+/**
+ * Get whether AI access to MCP is paused.
+ */
+export async function getAiAccessStatus(): Promise<boolean> {
+  if (isTauri()) {
+    const tauri = (window as unknown as {
+      __TAURI_INTERNALS__: { invoke: <R>(cmd: string, args?: unknown) => Promise<R> };
+    }).__TAURI_INTERNALS__;
+    return await tauri.invoke<boolean>('get_ai_access_status');
+  }
+  return false;
+}
+
+/**
+ * Set AI access to MCP paused or resumed.
+ */
+export async function setAiAccessStatus(paused: boolean): Promise<void> {
+  if (isTauri()) {
+    const tauri = (window as unknown as {
+      __TAURI_INTERNALS__: { invoke: <R>(cmd: string, args?: unknown) => Promise<R> };
+    }).__TAURI_INTERNALS__;
+    await tauri.invoke('set_ai_access_status', { paused });
+  }
+}

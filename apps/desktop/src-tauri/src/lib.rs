@@ -10,7 +10,10 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
-use tauri::{AppHandle, Manager, State};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_dialog::DialogExt;
 
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
@@ -26,7 +29,8 @@ struct Connection {
 /// Renderer-visible lifecycle state excludes credentials and raw diagnostics.
 #[derive(Clone, Serialize)]
 struct DesktopStatus {
-    state: &'static str,
+    state: String,
+    message: Option<String>,
 }
 
 /// Blocking process work is kept off the window event thread.
@@ -45,7 +49,10 @@ impl Default for DesktopState {
         Self {
             child: Mutex::new(None),
             connection: Mutex::new(None),
-            status: Mutex::new(DesktopStatus { state: "starting" }),
+            status: Mutex::new(DesktopStatus {
+                state: "starting".into(),
+                message: None,
+            }),
             starting: AtomicBool::new(false),
             exiting: AtomicBool::new(false),
             exports: tokio::sync::Mutex::new(()),
@@ -54,6 +61,40 @@ impl Default for DesktopState {
 }
 
 impl DesktopState {
+    fn is_ai_paused(&self, app: &AppHandle) -> bool {
+        let Ok(data_dir) = app.path().app_local_data_dir() else {
+            return false;
+        };
+        let config_file = data_dir.join("mcp-config.json");
+        if let Ok(content) = std::fs::read_to_string(&config_file) {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                return json["aiAccessPaused"].as_bool().unwrap_or(false);
+            }
+        }
+        false
+    }
+
+    fn set_ai_paused(&self, app: &AppHandle, paused: bool) {
+        let Ok(data_dir) = app.path().app_local_data_dir() else {
+            return;
+        };
+        let config_file = data_dir.join("mcp-config.json");
+        let mut json: serde_json::Value = if let Ok(content) = std::fs::read_to_string(&config_file)
+        {
+            serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}))
+        } else {
+            serde_json::json!({})
+        };
+        json["aiAccessPaused"] = serde_json::json!(paused);
+        let _ = std::fs::write(
+            &config_file,
+            serde_json::to_string_pretty(&json).unwrap_or_default(),
+        );
+        let _ = app.emit(
+            "desktop:ai-access-changed",
+            serde_json::json!({ "paused": paused }),
+        );
+    }
     /// Reject new requests during initialization and shutdown.
     fn connection(&self) -> Result<Connection, String> {
         if self.exiting.load(Ordering::SeqCst) {
@@ -179,6 +220,41 @@ fn start_service(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Attempt startup with bounded retry (1s, 2s, 5s) up to 3 retries.
+fn spawn_service_with_retry(app: &AppHandle) -> Result<(), String> {
+    let delays = [
+        Duration::from_secs(1),
+        Duration::from_secs(2),
+        Duration::from_secs(5),
+    ];
+    let mut attempt = 0;
+    loop {
+        let state = app.state::<DesktopState>();
+        if state.exiting.load(Ordering::SeqCst) {
+            return Err("Application is closing".into());
+        }
+        let result = start_service(app);
+        match result {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                state.child.lock().unwrap().take();
+                state.connection.lock().unwrap().take();
+                // Do not retry on database lock / lease conflict
+                if e.contains("Database is locked") || e.contains("lease") || e.contains("conflict")
+                {
+                    return Err(format!("CONFLICT: {e}"));
+                }
+                if attempt >= delays.len() || state.exiting.load(Ordering::SeqCst) {
+                    return Err(e);
+                }
+                let delay = delays[attempt];
+                attempt += 1;
+                std::thread::sleep(delay);
+            }
+        }
+    }
+}
+
 /// Failed initialization reaps its process and leaves the window available for retry.
 fn begin_startup(app: AppHandle) {
     let state = app.state::<DesktopState>();
@@ -190,24 +266,45 @@ fn begin_startup(app: AppHandle) {
         state.starting.store(false, Ordering::SeqCst);
         return;
     }
-    *state.status.lock().unwrap() = DesktopStatus { state: "starting" };
+    *state.status.lock().unwrap() = DesktopStatus {
+        state: "starting".into(),
+        message: None,
+    };
+    update_tray_menu(&app);
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<DesktopState>();
-        let result = start_service(&app);
-        if result.is_err() {
-            state.child.lock().unwrap().take();
-            state.connection.lock().unwrap().take();
+        let result = spawn_service_with_retry(&app);
+        let mut status = state.status.lock().unwrap();
+        match result {
+            Ok(()) => {
+                *status = DesktopStatus {
+                    state: "ready".into(),
+                    message: None,
+                };
+            }
+            Err(e) => {
+                state.child.lock().unwrap().take();
+                state.connection.lock().unwrap().take();
+                let is_conflict = e.starts_with("CONFLICT:");
+                *status = DesktopStatus {
+                    state: if is_conflict {
+                        "conflict".into()
+                    } else {
+                        "error".into()
+                    },
+                    message: Some(e),
+                };
+            }
         }
-        *state.status.lock().unwrap() = DesktopStatus {
-            state: if result.is_ok() { "ready" } else { "error" },
-        };
+        drop(status);
+        update_tray_menu(&app);
         state.starting.store(false, Ordering::SeqCst);
     });
 }
 
 /// Poll liveness without returning private paths, secrets or raw provider errors.
 #[tauri::command]
-fn get_desktop_status(state: State<'_, DesktopState>) -> DesktopStatus {
+fn get_desktop_status(state: State<'_, DesktopState>, app: AppHandle) -> DesktopStatus {
     let mut status = state.status.lock().unwrap();
     if status.state == "ready" {
         let stopped = state
@@ -218,7 +315,16 @@ fn get_desktop_status(state: State<'_, DesktopState>) -> DesktopStatus {
             .is_none_or(|child| child.exited());
         if stopped {
             state.connection.lock().unwrap().take();
-            *status = DesktopStatus { state: "error" };
+            *status = DesktopStatus {
+                state: "starting".into(),
+                message: Some("Sidecar stopped; recovering...".into()),
+            };
+            drop(status);
+            begin_startup(app);
+            return DesktopStatus {
+                state: "starting".into(),
+                message: Some("Sidecar stopped; recovering...".into()),
+            };
         }
     }
     status.clone()
@@ -391,6 +497,198 @@ fn open_external(url: String) -> Result<(), String> {
     }
 }
 
+/// Ensure main webview window exists, unminimized, shown, and focused.
+pub fn ensure_main_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+        return Ok(window);
+    }
+    let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
+        .title("LeetCode Tracker")
+        .inner_size(1280.0, 800.0)
+        .min_inner_size(1024.0, 700.0)
+        .resizable(true)
+        .fullscreen(false)
+        .build()
+        .map_err(|e| e.to_string())?;
+    let _ = window.set_focus();
+    Ok(window)
+}
+
+/// Show one-time tip informing user the window closed to system tray.
+fn show_first_close_hint(app: &AppHandle) {
+    if let Ok(data_dir) = app.path().app_local_data_dir() {
+        let hint_file = data_dir.join(".closed_to_tray_hint");
+        if !hint_file.exists() {
+            let _ = std::fs::write(&hint_file, b"1");
+            app.dialog()
+                .message("LeetCode Tracker 仍在后台运行。\n您可以从任务栏右下角的系统托盘图标重新打开窗口，或右键托盘图标选择“退出”以完全退出程序。")
+                .title("后台运行提示")
+                .show(|_| {});
+        }
+    }
+}
+
+/// Update system tray menu with latest state and AI toggle.
+pub fn update_tray_menu(app: &AppHandle) {
+    let Some(tray) = app.tray_by_id("main-tray") else {
+        return;
+    };
+    let state = app.state::<DesktopState>();
+    let status_text = {
+        let status = state.status.lock().unwrap();
+        match status.state.as_str() {
+            "ready" => "运行状态：就绪",
+            "starting" => "运行状态：启动中...",
+            "conflict" => "运行状态：数据库被占用",
+            _ => "运行状态：异常",
+        }
+    };
+    let ai_paused = state.is_ai_paused(app);
+    let ai_text = if ai_paused {
+        "恢复 AI 访问"
+    } else {
+        "暂停 AI 访问"
+    };
+
+    let Ok(open_item) = MenuItem::with_id(app, "open", "打开 LeetCode Tracker", true, None::<&str>)
+    else {
+        return;
+    };
+    let Ok(status_item) = MenuItem::with_id(app, "status", status_text, false, None::<&str>) else {
+        return;
+    };
+    let Ok(pause_ai_item) = MenuItem::with_id(app, "toggle_ai", ai_text, true, None::<&str>) else {
+        return;
+    };
+    let Ok(sep) = PredefinedMenuItem::separator(app) else {
+        return;
+    };
+    let Ok(quit_item) = MenuItem::with_id(app, "quit", "退出", true, None::<&str>) else {
+        return;
+    };
+
+    if let Ok(menu) = Menu::with_items(
+        app,
+        &[&open_item, &status_item, &pause_ai_item, &sep, &quit_item],
+    ) {
+        let _ = tray.set_menu(Some(menu));
+    }
+}
+
+/// Build system tray icon and event handlers.
+pub fn setup_tray(app: &AppHandle) -> Result<(), String> {
+    let mut builder = TrayIconBuilder::with_id("main-tray")
+        .show_menu_on_left_click(false)
+        .tooltip("LeetCode Tracker")
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "open" => {
+                let _ = ensure_main_window(app);
+            }
+            "toggle_ai" => {
+                let state = app.state::<DesktopState>();
+                let next_paused = !state.is_ai_paused(app);
+                state.set_ai_paused(app, next_paused);
+                update_tray_menu(app);
+            }
+            "quit" => {
+                request_app_exit(app);
+            }
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                let app = tray.app_handle();
+                let _ = ensure_main_window(app);
+            }
+        });
+
+    if let Some(icon) = app.default_window_icon().cloned() {
+        builder = builder.icon(icon);
+    }
+
+    builder.build(app).map_err(|e| e.to_string())?;
+    update_tray_menu(app);
+    Ok(())
+}
+
+/// Request graceful exit, prompting frontend if unsaved drafts exist.
+fn request_app_exit(app: &AppHandle) {
+    let state = app.state::<DesktopState>();
+    if state.exiting.load(Ordering::SeqCst) {
+        return;
+    }
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+        let _ = window.emit("desktop:request-exit", ());
+        let _ = window.eval("window.dispatchEvent(new CustomEvent('desktop:request-exit'))");
+    } else {
+        force_exit_app(app);
+    }
+}
+
+/// Bounded teardown of child process and database lease before exiting host.
+fn force_exit_app(app: &AppHandle) {
+    let state = app.state::<DesktopState>();
+    if state.exiting.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    state.connection.lock().unwrap().take();
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = handle.state::<DesktopState>();
+        let child = state.child.lock().unwrap().take();
+        if let Some(mut child) = child {
+            let _ = child.shutdown(SHUTDOWN_TIMEOUT);
+        }
+        handle.exit(0);
+    });
+}
+
+#[tauri::command]
+fn confirm_exit(app: AppHandle) {
+    force_exit_app(&app);
+}
+
+#[tauri::command]
+fn cancel_exit(_app: AppHandle) {}
+
+#[tauri::command]
+fn get_autostart_status(app: AppHandle) -> Result<bool, String> {
+    app.autolaunch().is_enabled().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_autostart_status(app: AppHandle, enabled: bool) -> Result<(), String> {
+    let autolaunch = app.autolaunch();
+    if enabled {
+        autolaunch.enable().map_err(|e| e.to_string())?;
+    } else {
+        autolaunch.disable().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn get_ai_access_status(app: AppHandle, state: State<'_, DesktopState>) -> bool {
+    state.is_ai_paused(&app)
+}
+
+#[tauri::command]
+fn set_ai_access_status(app: AppHandle, state: State<'_, DesktopState>, paused: bool) {
+    state.set_ai_paused(&app, paused);
+    update_tray_menu(&app);
+}
+
 /// Initialize the host and delay final exit until sidecar writes finish or the deadline expires.
 pub fn run() {
     let builder = tauri::Builder::default();
@@ -399,19 +697,29 @@ pub fn run() {
         .plugin(tauri_plugin_wdio::init())
         .plugin(tauri_plugin_wdio_webdriver::init());
     builder
-        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.unminimize();
-                let _ = window.show();
-                let _ = window.set_focus();
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _| {
+            let is_bg = argv.iter().any(|arg| arg == "--background");
+            if !is_bg {
+                let _ = ensure_main_window(app);
             }
         }))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--background"]),
+        ))
         .manage(DesktopState::default())
         .setup(|app| {
+            let is_background = std::env::args().any(|arg| arg == "--background");
             #[cfg(target_os = "macos")]
             app.set_menu(tauri::menu::Menu::default(app.handle())?)?;
+
+            setup_tray(app.handle())?;
             begin_startup(app.handle().clone());
+
+            if !is_background {
+                let _ = ensure_main_window(app.handle());
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -419,36 +727,40 @@ pub fn run() {
             export_data_file,
             open_external,
             get_desktop_status,
-            retry_sidecar
+            retry_sidecar,
+            confirm_exit,
+            cancel_exit,
+            get_autostart_status,
+            set_autostart_status,
+            get_ai_access_status,
+            set_ai_access_status
         ])
         .build(tauri::generate_context!())
-        .expect("Could not initialize the desktop window")
+        .expect("Could not initialize the desktop application")
         .run(|app, event| {
-            #[cfg(target_os = "macos")]
             match &event {
                 tauri::RunEvent::WindowEvent {
                     label,
                     event: tauri::WindowEvent::CloseRequested { api, .. },
                     ..
                 } => {
-                    if !app.state::<DesktopState>().exiting.load(Ordering::SeqCst) {
+                    let state = app.state::<DesktopState>();
+                    if !state.exiting.load(Ordering::SeqCst) {
                         api.prevent_close();
                         if let Some(window) = app.get_webview_window(label) {
                             let _ = window.hide();
+                            show_first_close_hint(app);
                         }
                     }
                 }
+                #[cfg(target_os = "macos")]
                 tauri::RunEvent::Reopen { .. } => {
-                    if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
+                    let _ = ensure_main_window(app);
                 }
                 _ => {}
             }
             if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
                 let state = app.state::<DesktopState>();
-                // The explicit app.exit below must not re-enter graceful shutdown.
                 if code.is_some() && state.exiting.load(Ordering::SeqCst) {
                     return;
                 }

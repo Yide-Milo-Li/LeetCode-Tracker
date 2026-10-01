@@ -168,6 +168,10 @@ pub fn wait_ready(receiver: ReadyReceiver, nonce: &str, timeout: Duration) -> Re
         .map_err(|_| "Sidecar startup timed out or stopped".to_string())??;
     let message: serde_json::Value =
         serde_json::from_str(&line).map_err(|_| "Invalid sidecar ready message")?;
+    if message["type"] == "error" {
+        let err = message["error"].as_str().unwrap_or("Sidecar error");
+        return Err(format!("Sidecar initialization error: {err}"));
+    }
     if message["type"] != "ready" || message["nonce"] != nonce || message["protocolVersion"] != 1 {
         return Err("Sidecar initialization failed or protocol mismatch".into());
     }
@@ -274,5 +278,17 @@ mod tests {
         );
         wait_ready(ready, "test", Duration::from_secs(5)).unwrap();
         assert!(child.shutdown(Duration::from_secs(5)).unwrap());
+    }
+
+    #[test]
+    fn sidecar_error_message_is_propagated() {
+        let (tx, rx) = mpsc::channel();
+        tx.send(Ok(
+            serde_json::json!({"type":"error","error":"Database is locked by another process"})
+                .to_string(),
+        ))
+        .unwrap();
+        let err = wait_ready(rx, "test", Duration::from_secs(1)).unwrap_err();
+        assert!(err.contains("Database is locked by another process"));
     }
 }
