@@ -101,6 +101,19 @@ test('nine tools return structured data without changing any business row', asyn
   } finally { await env.close(); }
 });
 
+test('invalid tool calls do not record successful usage and listener reports a pending port', async () => {
+  const env = await fixture();
+  try {
+    const bad = await env.rpc('tools/call', { name: 'tracker_get_note', arguments: { chunkSize: -1 } });
+    assert.ok(bad.json.error || bad.json.result?.isError);
+    assert.equal(env.controller.getConfig().clients[0].lastSuccessfulCallAt, null);
+    env.controller.update({ port: env.mcp.port === 32000 ? 32001 : 32000 });
+    const state = env.controller.getStatus();
+    assert.equal(state.state, 'ready'); assert.equal(state.listeningPort, env.mcp.port);
+    assert.equal(state.restartRequired, true);
+  } finally { await env.close(); }
+});
+
 for (const change of ['pause', 'rotate', 'revoke'] as const) test(`in-flight ${change} suppresses unsent business results`, async () => {
   const env = await fixture();
   const original = env.application.notes.read;

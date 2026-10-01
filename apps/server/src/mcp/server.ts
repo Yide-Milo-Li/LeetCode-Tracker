@@ -20,7 +20,7 @@ export async function startMcpServer(options: StartMcpServerOptions): Promise<Mc
     const auth = ctx.authInfo?.extra?.authorization as McpAuthorization;
     const server = new McpServer({ name: 'leetcode-tracker', version: '1.2.0' });
     registerTrackerTools(server, options.application, {
-      assert: () => controller.assertAuthorized(auth), success: () => controller.recordSuccessfulCall(auth),
+      assert: () => controller.assertAuthorized(auth),
     });
     return server;
   });
@@ -66,6 +66,12 @@ export async function startMcpServer(options: StartMcpServerOptions): Promise<Mc
         catch (error) { fail(403, error instanceof McpConfigError ? error.code : 'MCP_UNAVAILABLE'); return; }
       }
       if (res.destroyed) return;
+      if (rpc.method === 'tools/call' && response.ok) {
+        const data = response.headers.get('content-type')?.includes('text/event-stream')
+          ? payload.split(/\r?\n/).find(line => line.startsWith('data:'))?.slice(5) : payload;
+        const completed = data ? JSON.parse(data) : null;
+        if (completed?.result && !completed.result.isError) controller.recordSuccessfulCall(auth);
+      }
       res.statusCode = response.status;
       response.headers.forEach((value, key) => res.setHeader(key, value));
       res.end(payload);
