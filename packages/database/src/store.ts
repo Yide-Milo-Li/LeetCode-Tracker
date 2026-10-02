@@ -37,7 +37,7 @@ import {
 } from '../../contracts/src/practice.ts';
 import { BackupManager } from './backup.ts';
 import { exportMigrationBundle } from './migration-bundle.ts';
-import type { SnapshotBundleV2, SnapshotBundleV3 } from '../../contracts/src/migration.ts';
+import type { SnapshotBundleV2, SnapshotBundleV3, SnapshotBundleV4 } from '../../contracts/src/migration.ts';
 import { PlanningStore } from './planning-store.ts';
 import type {
   ProblemNote,
@@ -50,7 +50,9 @@ import {
   upsertProblemNote,
   listProblemNoteSummaries,
   registerNotesFunctions,
+  NoteConflictError,
 } from './notes-store.ts';
+export { NoteConflictError } from './notes-store.ts';
 import {
   exportSnapshotBundle,
   importSnapshotBundle,
@@ -69,6 +71,7 @@ export {
   UnsupportedSchemaVersionError,
 } from './schema.ts';
 import { CURRENT_SCHEMA_VERSION } from './schema.ts';
+import { localDate } from '../../contracts/src/time.ts';
 import { initOrMigrateSchema } from './migrations.ts';
 
 // Catalog import exports
@@ -93,6 +96,8 @@ import {
   insertPracticeRecordTransaction,
   updatePracticeRecordTransaction,
   revokePracticeRecordTransaction,
+  revokePracticeRecordStatement,
+  PracticeConflictError,
   getPracticeStatistics,
 } from './practice-store.ts';
 
@@ -156,7 +161,8 @@ export class CatalogStore {
     const { inspectCatalogSchema } = await import('./schema.ts');
     const version = inspectCatalogSchema(db, true);
     const manager = options.backupDir && !options.skipBackup ? new BackupManager(options.backupDir) : undefined;
-    if (version !== null && version < CURRENT_SCHEMA_VERSION && manager) {
+    const prototypeLedger = version === CURRENT_SCHEMA_VERSION && !(db.prepare("PRAGMA table_info('agent_operations')").all() as {name:string}[]).some(column => column.name === 'client_operation_id');
+    if (version !== null && (version < CURRENT_SCHEMA_VERSION || prototypeLedger) && manager) {
       await manager.performMigrationBackup(db, version, CURRENT_SCHEMA_VERSION);
     }
     const store = new CatalogStore(db, { ...options, skipBackup: true });
@@ -179,6 +185,54 @@ export class CatalogStore {
     });
     this.writeQueue = run.then(() => {}, () => {});
     return run;
+  }
+
+  /** One backup/queue admission, then a synchronous business and receipt transaction. */
+  public agentTransaction<T>(write: () => T, validate: () => void): Promise<T> {
+    return this.protectedWrite(() => {
+      validate();
+      this.db.exec('BEGIN IMMEDIATE');
+      try {
+        const result = write();
+        validate();
+        this.db.exec('COMMIT');
+        return result;
+      } catch (error) {
+        this.db.exec('ROLLBACK');
+        throw error;
+      }
+    });
+  }
+
+  /** Reuses practice schemas and statements inside the agent caller's transaction. */
+  public createPracticeStatement(input: CreatePracticeRecordInput): PracticeRecord {
+    const validated = createPracticeRecordSchema.parse(input);
+    const problem = this.getProblem(validated.questionFrontendId, 'frontendId');
+    if (!problem) throw new Error('Problem not found');
+    const precision = validated.timePrecision ?? (validated.practicedAt.includes('T') ? 'datetime' : 'date');
+    const id = insertPracticeRecordTransaction(this.db, problem, validated, precision, '', this.getSettings().timezone, false);
+    return this.getPracticeRecord(id)!;
+  }
+
+  /** Re-read the revision under the final transaction rather than trusting a pre-backup read. */
+  public updatePracticeStatement(id: string, input: UpdatePracticeRecordInput): PracticeRecord {
+    const validated = updatePracticeRecordSchema.parse(input);
+    const existing = this.getPracticeRecord(id);
+    if (!existing || existing.status !== 'active' || validated.expectedRevision !== existing.revision) {
+      throw new PracticeConflictError('RECORD_REVISION_MISMATCH', 'Practice changed; reload before saving.');
+    }
+    updatePracticeRecordTransaction(this.db, id, validated, existing, false);
+    return this.getPracticeRecord(id)!;
+  }
+
+  /** Revision-bound cascade and direct revocation share the same transaction-owned statement. */
+  public revokePracticeStatement(id: string, revision: number): PracticeRecord {
+    const existing = this.getPracticeRecord(id);
+    if (!existing || existing.status !== 'active' || existing.revision !== revision) {
+      throw new PracticeConflictError('RECORD_REVISION_MISMATCH', 'Practice changed; reload before revoking.');
+    }
+    revokePracticeRecordStatement(this.db, id);
+    return this.getPracticeRecord(id)!;
   }
 
   // ==========================================
@@ -444,6 +498,11 @@ export class CatalogStore {
     return run;
   }
 
+  /** Synchronous statement to revoke an active practice record within an existing transaction. */
+  public revokePracticeRecordStatement(id: string): void {
+    revokePracticeRecordStatement(this.db, id);
+  }
+
   /** Retrieve a single practice record by ID. */
   public getPracticeRecord(id: string): PracticeRecord | null {
     return getPracticeRecord(this.db, id);
@@ -680,8 +739,8 @@ export class CatalogStore {
   }
 
   /** Create or update a problem's long-form note atomically. */
-  public upsertProblemNote(questionFrontendId: string, content: string): ProblemNote {
-    return upsertProblemNote(this.db, questionFrontendId, content);
+  public upsertProblemNote(questionFrontendId: string, content: string, expectedRevision?: number, expectedLibraryGeneration?: number): ProblemNote {
+    return upsertProblemNote(this.db, questionFrontendId, content, expectedRevision, expectedLibraryGeneration);
   }
 
   /** Query problem note summaries with practice activity, difficulty, and tag filters. */
@@ -695,7 +754,7 @@ export class CatalogStore {
   }
 
   /** Export catalog and all saved business history for another device. */
-  public exportMigrationBundle(versionOrOptions: 2 | 3 | { formatVersion?: 2 | 3 } = 3): SnapshotBundleV2 | SnapshotBundleV3 {
+  public exportMigrationBundle(versionOrOptions: 2 | 3 | 4 | { formatVersion?: 2 | 3 | 4 } = 4): SnapshotBundleV2 | SnapshotBundleV3 | SnapshotBundleV4 {
     return exportMigrationBundle(this.db, '1.2.0', versionOrOptions);
   }
 
@@ -716,4 +775,129 @@ export class CatalogStore {
   public generateNotionCsvs(): { problemsSummaryCsv: string; practiceHistoryCsv: string } {
     return generateNotionCsvs(this.db);
   }
+
+  // ==========================================
+  // Library Generation & Agent Operations Ledger
+  // ==========================================
+
+  /** Get the current library generation counter from metadata. */
+  public getLibraryGeneration(): number {
+    const row = this.db
+      .prepare("SELECT value FROM catalog_meta WHERE key = 'library_generation'")
+      .get() as { value: string } | undefined;
+    return row ? parseInt(row.value, 10) : 1;
+  }
+
+  /** Lookup by internal handle, or a client-scoped request ID. Ambiguous unscoped IDs fail closed. */
+  public getAgentOperation(id: string, clientId?: string): AgentOperationRecord | null {
+    const rows = clientId
+      ? this.db.prepare('SELECT * FROM agent_operations WHERE client_id=? AND (id=? OR client_operation_id=?)').all(clientId, id, id)
+      : this.db.prepare('SELECT * FROM agent_operations WHERE id=? OR client_operation_id=?').all(id, id);
+    return rows.length === 1 ? this.agentRecord(rows[0] as Record<string, unknown>) : null;
+  }
+
+  /** Server handles occupy their own namespace; client request IDs cannot shadow an approval. */
+  public getAgentOperationByHandle(id: string, clientId?: string): AgentOperationRecord | null {
+    const row = clientId
+      ? this.db.prepare('SELECT * FROM agent_operations WHERE id=? AND client_id=?').get(id, clientId)
+      : this.db.prepare('SELECT * FROM agent_operations WHERE id=?').get(id);
+    return row ? this.agentRecord(row as Record<string, unknown>) : null;
+  }
+
+  /** Resolve only the caller's request identity, including non-executable legacy receipts. */
+  public getAgentOperationByRequest(id: string, clientId: string): AgentOperationRecord | null {
+    const rows = this.db.prepare(`SELECT * FROM agent_operations WHERE client_id=?
+      AND (client_operation_id=? OR (client_operation_id IS NULL AND id=?))`).all(clientId, id, id);
+    return rows.length === 1 ? this.agentRecord(rows[0] as Record<string, unknown>) : null;
+  }
+
+  private agentRecord(row: Record<string, unknown>): AgentOperationRecord {
+    return {
+      id: String(row.id), clientId: String(row.client_id), toolName: String(row.tool_name),
+      clientOperationId: row.client_operation_id ? String(row.client_operation_id) : null,
+      fingerprint: String(row.fingerprint), changeDigest: row.change_digest ? String(row.change_digest) : null,
+      authorizationJson: row.authorization_json ? String(row.authorization_json) : null,
+      reviewJson: row.review_json ? String(row.review_json) : null, reviewState: String(row.review_state),
+      confirmationNonce: row.confirmation_nonce ? String(row.confirmation_nonce) : null,
+      status: row.status as AgentOperationStatus, libraryGeneration: Number(row.library_generation),
+      resultJson: row.result_json ? String(row.result_json) : null,
+      summaryJson: row.summary_json ? String(row.summary_json) : null,
+      fullPayloadJson: row.full_payload_json ? String(row.full_payload_json) : null,
+      createdAt: Number(row.created_at), updatedAt: Number(row.updated_at), expiresAt: Number(row.expires_at),
+    };
+  }
+
+  public listPendingAgentOperations(clientId?: string): AgentOperationRecord[] {
+    const rows = clientId
+      ? this.db.prepare("SELECT * FROM agent_operations WHERE status='pending' AND client_id=? ORDER BY created_at DESC").all(clientId)
+      : this.db.prepare("SELECT * FROM agent_operations WHERE status='pending' ORDER BY created_at DESC").all();
+    return rows.map(row => this.agentRecord(row as Record<string, unknown>));
+  }
+
+  /** Insert immutable request identity once. Later transitions use compare-and-set. */
+  public saveAgentOperation(op: AgentOperationRecord): void {
+    this.db.prepare(`INSERT INTO agent_operations (
+      id,client_id,tool_name,fingerprint,status,library_generation,result_json,summary_json,
+      full_payload_json,created_at,updated_at,expires_at,client_operation_id,change_digest,
+      authorization_json,review_json,review_state,confirmation_nonce
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      op.id,op.clientId,op.toolName,op.fingerprint,op.status,op.libraryGeneration,op.resultJson,
+      op.summaryJson,op.fullPayloadJson,op.createdAt,op.updatedAt,op.expiresAt,op.clientOperationId,
+      op.changeDigest,op.authorizationJson,op.reviewJson,op.reviewState,op.confirmationNonce);
+    this.bumpApprovals();
+  }
+
+  /** Never resurrect an operation invalidated during an awaited backup or model request. */
+  public transitionAgentOperation(op: AgentOperationRecord, expectedReviewState?: string): boolean {
+    const result = this.db.prepare(`UPDATE agent_operations SET status=?,result_json=?,summary_json=?,
+      full_payload_json=?,review_json=?,review_state=?,confirmation_nonce=?,updated_at=?
+      WHERE id=? AND status='pending'${expectedReviewState ? ' AND review_state=?' : ''}`).run(
+      op.status,op.resultJson,op.summaryJson,op.fullPayloadJson,op.reviewJson,op.reviewState,
+      op.confirmationNonce,op.updatedAt,op.id,...(expectedReviewState ? [expectedReviewState] : []));
+    if (Number(result.changes)) this.bumpApprovals();
+    return Number(result.changes) === 1;
+  }
+
+  private bumpApprovals(): void {
+    this.db.prepare("UPDATE catalog_meta SET value=CAST(value AS INTEGER)+1 WHERE key='approvals_revision'").run();
+  }
+
+  /** Visible workspaces compare these small counters before fetching business payloads. */
+  public getBusinessVersions() {
+    const value = (key: string) => Number((this.db.prepare('SELECT value FROM catalog_meta WHERE key=?').get(key) as { value: string } | undefined)?.value ?? 0);
+    const timezone = this.getSettings().timezone ?? 'UTC';
+    return { today: localDate(Date.now(), timezone), timezone, libraryGeneration: this.getLibraryGeneration(), catalog: this.getCatalogRevision(),
+      practice: this.getPracticeRevision(), planning: this.getPlanningRevision(), notes: value('notes_revision'), approvals: value('approvals_revision') };
+  }
+
+  public invalidatePendingOperations(clientId?: string): void {
+    this.db.prepare(`UPDATE agent_operations SET status='expired',full_payload_json=NULL,
+      confirmation_nonce=NULL,updated_at=? WHERE status='pending'${clientId ? ' AND client_id=?' : ''}`)
+      .run(Date.now(),...(clientId ? [clientId] : []));
+    this.bumpApprovals();
+  }
+}
+
+export type AgentOperationStatus = 'pending' | 'applied' | 'rejected' | 'failed' | 'cancelled' | 'expired';
+
+/** Local receipts are portable neither between connections nor between profiles. */
+export interface AgentOperationRecord {
+  id: string;
+  clientOperationId: string | null;
+  clientId: string;
+  toolName: string;
+  fingerprint: string;
+  changeDigest: string | null;
+  authorizationJson: string | null;
+  reviewJson: string | null;
+  reviewState: string;
+  confirmationNonce: string | null;
+  status: AgentOperationStatus;
+  libraryGeneration: number;
+  resultJson: string | null;
+  summaryJson: string | null;
+  fullPayloadJson: string | null;
+  createdAt: number;
+  updatedAt: number;
+  expiresAt: number;
 }

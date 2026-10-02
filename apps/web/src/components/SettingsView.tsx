@@ -20,11 +20,20 @@ import {
   RefreshCw,
   Key,
   Shield,
+  ShieldAlert,
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
 import { fixedProviderModels, type ThemePalette } from '../../../../packages/contracts/src/sync.ts';
-import { api, mcpApi, type McpSettingsConfig, type McpClientCredential, type McpStatus } from '../api.ts';
+import {
+  api,
+  mcpApi,
+  type McpSettingsConfig,
+  type McpClientCredential,
+  type McpStatus,
+  type McpClientMode,
+  type PendingAgentOperation,
+} from '../api.ts';
 import { snapshotBundleSchema, type SnapshotBundle } from '../../../../packages/contracts/src/notes.ts';
 import { MAX_BUNDLE_BYTES } from '../../../../packages/contracts/src/migration.ts';
 import { clearPracticeIntents } from '../practice-service.ts';
@@ -194,13 +203,19 @@ export function SettingsView({
   const [creatingClient, setCreatingClient] = useState(false);
   const [expandedClientId, setExpandedClientId] = useState<string | null>(null);
   const [showTokens, setShowTokens] = useState<Record<string, boolean>>({});
+  const [pendingOperations, setPendingOperations] = useState<PendingAgentOperation[]>([]);
 
   const loadMcpConfigData = async () => {
     setMcpLoading(true);
     try {
-      const [cfg, status] = await Promise.all([mcpApi.getConfig(), mcpApi.getStatus()]);
+      const [cfg, status, ops] = await Promise.all([
+        mcpApi.getConfig(),
+        mcpApi.getStatus(),
+        mcpApi.listPendingOperations().catch(() => ({ operations: [] })),
+      ]);
       setMcpConfig(cfg);
       setMcpStatus(status);
+      setPendingOperations(ops.operations);
       setMcpPortDraft(cfg.port);
     } catch {
       setMcpConfig(null); setMcpStatus(null);
@@ -216,14 +231,38 @@ export function SettingsView({
     }
     void loadMcpConfigData();
     let active = true;
-    const poll = setInterval(() => {
-      void mcpApi.getStatus().then(status => {
-        if (!active) return;
-        setMcpStatus(status);
-        setMcpConfig(current => current ? { ...current, aiAccessPaused: status.aiAccessPaused } : current);
-      }).catch(() => { if (active) setMcpStatus(null); });
-    }, 2000);
-    return () => { active = false; clearInterval(poll); };
+    let previousApprovals: number | null = null;
+    let polling = false;
+    const handleFocus = () => {
+      if (polling || document.visibilityState === 'hidden' || root.current?.closest('[hidden]')) return;
+      polling = true;
+      void (async () => {
+        try {
+          const [status,versions] = await Promise.all([mcpApi.getStatus(),api.getBusinessVersions()]);
+          if (!active) return;
+          setMcpStatus(status);
+          setMcpConfig(current => current ? {...current,aiAccessPaused:status.aiAccessPaused}:current);
+          if (previousApprovals !== versions.approvals) {
+            const res=await mcpApi.listPendingOperations();
+            if (active) setPendingOperations(res.operations);
+            previousApprovals=versions.approvals;
+          }
+        } catch { /* Preserve the visible queue on transient runtime failures. */ }
+        finally { polling=false; }
+      })();
+    };
+    const poll = setInterval(handleFocus, 2000);
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('hashchange', handleFocus);
+    document.addEventListener('visibilitychange', handleFocus);
+
+    return () => {
+      active = false;
+      clearInterval(poll);
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('hashchange', handleFocus);
+      document.removeEventListener('visibilitychange', handleFocus);
+    };
   }, []);
 
   const handleToggleAutostart = async () => {
@@ -311,6 +350,60 @@ export function SettingsView({
       await mcpApi.revokeClient(id);
       await loadMcpConfigData();
       setMcpSuccess(zh ? '连接已撤销' : 'Connection revoked');
+      setTimeout(() => setMcpSuccess(null), 3000);
+    } catch (err) {
+      setMcpError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleUpdateClientMode = async (id: string, mode: McpClientMode) => {
+    try {
+      await mcpApi.updateClientMode(id, mode);
+      setMcpConfig((prev) =>
+        prev
+          ? {
+              ...prev,
+              clients: prev.clients.map((c) => (c.id === id ? { ...c, mode } : c)),
+            }
+          : prev
+      );
+      setMcpSuccess(zh ? '已更新连接访问模式' : 'Connection mode updated');
+      setTimeout(() => setMcpSuccess(null), 3000);
+    } catch (err) {
+      setMcpError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleSaveReviewModel = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value.trim() || null;
+    try {
+      const updated = await mcpApi.updateConfig({ reviewModel: val });
+      setMcpConfig(updated);
+      setMcpSuccess(zh ? '已更新写入审核模型' : 'Review model updated');
+      setTimeout(() => setMcpSuccess(null), 3000);
+    } catch (err) {
+      setMcpError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleProceedOperation = async (id: string) => {
+    try {
+      await mcpApi.proceedOperation(id);
+      setMcpSuccess(zh ? '操作已批准执行' : 'Operation approved and applied');
+      const ops = await mcpApi.listPendingOperations();
+      setPendingOperations(ops.operations);
+      setTimeout(() => setMcpSuccess(null), 3000);
+    } catch (err) {
+      setMcpError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleRejectOperation = async (id: string) => {
+    try {
+      await mcpApi.rejectOperation(id, 'User rejected from desktop UI');
+      setMcpSuccess(zh ? '操作已拒绝' : 'Operation rejected');
+      const ops = await mcpApi.listPendingOperations();
+      setPendingOperations(ops.operations);
       setTimeout(() => setMcpSuccess(null), 3000);
     } catch (err) {
       setMcpError(err instanceof Error ? err.message : String(err));
@@ -410,6 +503,7 @@ export function SettingsView({
   const currentPresetModels = PROVIDER_PRESET_MODELS[provider];
 
   // Bundle export / import state
+  const root = useRef<HTMLDivElement>(null);
   const [importingBundle, setImportingBundle] = useState(false);
   const [bundleSuccess, setBundleSuccess] = useState('');
   const [bundleError, setBundleError] = useState('');
@@ -653,7 +747,7 @@ export function SettingsView({
   }
 
   return (
-    <div className="settings-view">
+    <div className="settings-view" ref={root}>
       <PageHeader title={zh ? '设置' : 'Settings'} />
 
       {/* Language row */}
@@ -1161,6 +1255,35 @@ export function SettingsView({
                       )}
                     </div>
 
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>{zh ? '访问权限：' : 'Access Mode: '}</span>
+                      <select
+                        aria-label={zh ? `${client.name} 访问权限` : `${client.name} Access Mode`}
+                        disabled={client.revoked}
+                        value={client.mode ?? 'read_only'}
+                        onChange={(e) => void handleUpdateClientMode(client.id, e.target.value as McpClientMode)}
+                        style={{ fontSize: '0.8125rem', padding: '3px 8px', borderRadius: '4px' }}
+                      >
+                        <option value="read_only">{zh ? '只读' : 'Read-only'}</option>
+                        <option value="model_review">{zh ? '模型审核' : 'Model review'}</option>
+                        <option value="full_access">Full access</option>
+                      </select>
+                      {client.mode === 'full_access' && (
+                        <span
+                          style={{
+                            fontSize: '0.75rem',
+                            padding: '2px 8px',
+                            borderRadius: '4px',
+                            backgroundColor: 'var(--warning-subtle, #fef7e0)',
+                            color: 'var(--warning-text, #b06000)',
+                            border: '1px solid var(--warning, #f9ab00)',
+                          }}
+                        >
+                          {zh ? '仅 Tracker 练习、笔记和计划' : 'Tracker practice, notes & plan only'}
+                        </span>
+                      )}
+                    </div>
+
                     <div style={{ marginTop: '8px' }}>
                       <button
                         type="button"
@@ -1242,6 +1365,209 @@ export function SettingsView({
 
             {mcpSuccess && <Feedback tone="success">{mcpSuccess}</Feedback>}
             {mcpError && <Feedback tone="error">{mcpError}</Feedback>}
+          </div>
+
+          {/* Operation Review Model */}
+          <div
+            style={{
+              padding: '16px',
+              backgroundColor: 'var(--surface-muted)',
+              borderRadius: '8px',
+              border: '1px solid var(--border)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600 }}>
+              <Shield size={18} />
+              <span>{zh ? '写入审核模型 (Operation Review Model)' : 'Operation Review Model'}</span>
+            </div>
+            <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+              {zh
+                ? '在“模型审核”模式下，外部 AI 发起的操作由独立的审核模型评估风险。默认使用当前主模型。'
+                : 'In Model Review mode, an independent model evaluates operation risk. Uses active primary model by default.'}
+            </p>
+            <div style={{ maxWidth: '360px' }}>
+              <select
+                aria-label={zh ? '写入审核模型' : 'Operation Review Model'}
+                value={mcpConfig?.reviewModel ?? ''}
+                onChange={(e) => void handleSaveReviewModel(e)}
+                style={{ width: '100%', fontSize: '0.875rem' }}
+              >
+                <option value="">{zh ? '使用当前主模型（默认）' : 'Use active primary model (default)'}</option>
+                {currentPresetModels.map((m) => (
+                  <option key={m} value={m}>
+                    {m.replace('models/', '')}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Pending Approvals */}
+          <div
+            style={{
+              padding: '16px',
+              backgroundColor: 'var(--surface-muted)',
+              borderRadius: '8px',
+              border: '1px solid var(--border)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600 }}>
+                <ShieldAlert size={18} />
+                <span>{zh ? '待批准操作 (Pending Approvals)' : 'Pending Approvals'}</span>
+                {pendingOperations.length > 0 && (
+                  <span
+                    style={{
+                      fontSize: '0.75rem',
+                      padding: '1px 8px',
+                      borderRadius: '10px',
+                      backgroundColor: 'var(--warning-subtle, #fef7e0)',
+                      color: 'var(--warning, #e37400)',
+                      fontWeight: 700,
+                    }}
+                  >
+                    {pendingOperations.length}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {pendingOperations.length === 0 ? (
+              <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+                {zh
+                  ? '暂无待批准操作。当外部 AI 在模型审核模式下发起高风险修改（如覆盖笔记、批量换题）时，将在此列出等待批准。'
+                  : 'No pending approvals. High-impact operations from external agents in review mode will appear here.'}
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {pendingOperations.map((op) => {
+                  let summary: { action?: string; target?: string; diffSummary?: string; riskLevel?: string; reviewReason?: string } = {};
+                  try {
+                    summary = JSON.parse(op.summaryJson ?? '{}');
+                  } catch {}
+                  const client = mcpConfig?.clients.find((c) => c.id === op.clientId);
+                  const clientName = client?.name || op.clientId;
+                  const remainingMins = Math.max(0, Math.round((op.expiresAt - Date.now()) / 60000));
+                  return (
+                    <div
+                      key={op.id}
+                      style={{
+                        padding: '14px',
+                        backgroundColor: 'var(--surface)',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '8px',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <code style={{ fontWeight: 600, fontSize: '0.875rem' }}>{op.toolName}</code>
+                          <span style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>via {clientName}</span>
+                          {summary.riskLevel && (
+                            <span
+                              style={{
+                                fontSize: '0.75rem',
+                                padding: '1px 6px',
+                                borderRadius: '4px',
+                                backgroundColor:
+                                  summary.riskLevel === 'high'
+                                    ? 'var(--error-subtle, #fce8e6)'
+                                    : summary.riskLevel === 'medium'
+                                    ? 'var(--warning-subtle, #fef7e0)'
+                                    : 'var(--success-subtle, #e6f4ea)',
+                                color:
+                                  summary.riskLevel === 'high'
+                                    ? 'var(--error, #c5221f)'
+                                    : summary.riskLevel === 'medium'
+                                    ? 'var(--warning, #e37400)'
+                                    : 'var(--success, #137333)',
+                              }}
+                            >
+                              Risk: {summary.riskLevel}
+                            </span>
+                          )}
+                        </div>
+                        <span style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+                          {zh ? `剩余 ${remainingMins} 分钟有效` : `${remainingMins}m remaining`}
+                        </span>
+                      </div>
+                      {summary.target && (
+                        <div style={{ fontSize: '0.8125rem' }}>
+                          <span style={{ color: 'var(--text-muted)' }}>{zh ? '目标：' : 'Target: '}</span>
+                          <strong>{summary.target}</strong>
+                        </div>
+                      )}
+                      {summary.diffSummary && (
+                        <div
+                          style={{
+                            fontSize: '0.8125rem',
+                            padding: '6px 10px',
+                            backgroundColor: 'var(--surface-muted)',
+                            borderRadius: '4px',
+                            fontFamily: 'monospace',
+                          }}
+                        >
+                          {summary.diffSummary}
+                        </div>
+                      )}
+                      {op.preview && (
+                        <details className="agent-approval-details">
+                          <summary>{zh ? '查看实际修改前后差异' : 'Inspect actual before and after changes'}</summary>
+                          {op.preview.changes.map((change,index) => (
+                            <section key={index} style={{marginTop:'12px'}}>
+                              <strong>{change.label}</strong>
+                              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',marginTop:'6px'}}>
+                                {[['before',zh?'修改前':'Before',change.before],['after',zh?'修改后':'After',change.after]].map(([key,label,value]) => (
+                                  <div key={String(key)}><span style={{color:'var(--text-muted)'}}>{String(label)}</span>
+                                    <pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere',maxHeight:'280px',overflow:'auto',padding:'8px',background:'var(--surface-muted)',fontSize:'0.8125rem'}}>{typeof value==='string'?value:JSON.stringify(value,null,2)}</pre>
+                                  </div>
+                                ))}
+                              </div>
+                            </section>
+                          ))}
+                          {op.preview.cascades.length>0 && <section style={{marginTop:'12px'}}>
+                            <strong>{zh ? '将连带撤销以下练习记录' : 'These practice records will also be revoked'}</strong>
+                            <ul>{op.preview.cascades.map(record=><li key={record.recordId}>{record.recordId} · v{record.revision}</li>)}</ul>
+                          </section>}
+                          {op.preview.planDate && <p>{op.preview.planDate} · {op.preview.timezone}</p>}
+                        </details>
+                      )}
+                      {summary.reviewReason && (
+                        <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+                          <em>{zh ? `审核理由：${summary.reviewReason}` : `Review reason: ${summary.reviewReason}`}</em>
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          disabled={op.reviewState === 'reviewing' || op.reviewState === 'unreviewed'}
+                          onClick={() => void handleProceedOperation(op.id)}
+                        >
+                          <Check size={14} />
+                          <span>{zh ? '批准 (Proceed)' : 'Proceed'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => void handleRejectOperation(op.id)}
+                        >
+                          <span>{zh ? '拒绝 (Reject)' : 'Reject'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       </section>

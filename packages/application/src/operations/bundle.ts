@@ -10,13 +10,15 @@ export function createBundleOperations(context: ApplicationContext) {
   const { store, writeLock } = context;
   /** exportBundle: validates input and preserves existing business rules. */
   const exportBundle = async (input: unknown = {}) => {
-    const version = (input as {version?: string}).version ?? '1';
-    if (!['1', '2', '3'].includes(version)) return fail(400, {error: 'INVALID_BUNDLE_VERSION'});
-    const bundle = version === '3'
-      ? store.exportMigrationBundle(3)
-      : version === '2'
-        ? store.exportMigrationBundle(2)
-        : store.exportSnapshotBundle();
+    const version = (input as {version?: string}).version ?? '4';
+    if (!['1', '2', '3', '4'].includes(version)) return fail(400, {error: 'INVALID_BUNDLE_VERSION'});
+    const bundle = version === '4'
+      ? store.exportMigrationBundle(4)
+      : version === '3'
+        ? store.exportMigrationBundle(3)
+        : version === '2'
+          ? store.exportMigrationBundle(2)
+          : store.exportSnapshotBundle();
     const filename = `leetcode-tracker-snapshot-${new Date().toISOString().slice(0, 10)}.json`;
 
     return artifact(bundle, 'application/json; charset=utf-8', filename);
@@ -32,7 +34,7 @@ export function createBundleOperations(context: ApplicationContext) {
       });
     }
 
-    if (parseRes.data.version === 2 || parseRes.data.version === 3) {
+    if (parseRes.data.version === 2 || parseRes.data.version === 3 || parseRes.data.version === 4) {
       try { validateMigrationBundle(parseRes.data); }
       catch { return fail(400, {error: 'INVALID_BUNDLE_FORMAT', message: 'Invalid migration data or references.'}); }
     }

@@ -5,6 +5,7 @@ import {ApplicationError} from '../../packages/application/src/errors.ts';
 const id=z.string().trim().min(1).max(200);
 export function createExperimentTools(application:TrackerApplication,onWrite:()=>void=()=>{}) {
   const tools={
+    tracker_business_versions:{schema:z.object({}),write:false,run:()=>application.businessVersions()},
     tracker_preferences:{schema:z.object({}),write:false,run:async()=>{const settings=await application.settings.get();return {timezone:settings.timezone,language:settings.language,theme:settings.theme,palette:settings.palette};}},
     tracker_strategies:{schema:z.object({}),write:false,run:()=>application.planning.strategies()},
     tracker_today:{schema:z.object({date:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()}),write:false,run:async(args:Record<string,unknown>)=>{const settings=await application.settings.get();const date=args.date??new Intl.DateTimeFormat('en-CA',{timeZone:settings.timezone??'UTC'}).format(new Date());return application.planning.plans({date});}},
@@ -12,7 +13,7 @@ export function createExperimentTools(application:TrackerApplication,onWrite:()=
     tracker_note:{schema:z.object({frontendId:id}),write:false,run:(args:Record<string,unknown>)=>application.notes.read({}, {frontendId:String(args.frontendId)})},
     tracker_practices:{schema:z.object({questionFrontendId:id,page:z.coerce.number().int().positive().optional(),limit:z.coerce.number().int().min(1).max(100).optional()}),write:false,run:(args:Record<string,unknown>)=>application.practice.query(args)},
     tracker_append:{schema:z.object({planId:id,expectedVersion:z.number().int().positive(),operationId:z.string().uuid().optional()}),write:true,run:(args:Record<string,unknown>)=>application.planning.append({expectedVersion:args.expectedVersion,operationId:args.operationId},{id:String(args.planId)})},
-    tracker_save_note:{schema:z.object({frontendId:id,content:z.string().max(100000)}),write:true,run:(args:Record<string,unknown>)=>application.notes.save({content:args.content},{frontendId:String(args.frontendId)})},
+    tracker_save_note:{schema:z.object({frontendId:id,content:z.string().max(100000),expectedRevision:z.number().int().nonnegative(),expectedLibraryGeneration:z.number().int().positive()}),write:true,run:(args:Record<string,unknown>)=>application.notes.save({content:args.content,expectedRevision:args.expectedRevision,expectedLibraryGeneration:args.expectedLibraryGeneration},{frontendId:String(args.frontendId)})},
   };
   async function call(name:string,args:unknown) {
     try {

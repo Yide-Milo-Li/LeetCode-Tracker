@@ -2,7 +2,7 @@
  * Contracts and schemas for problem notes, knowledge base exports, and snapshot bundles.
  */
 import { z } from 'zod';
-import { snapshotBundleV2Schema, snapshotBundleV3Schema } from './migration.ts';
+import { snapshotBundleV2Schema, snapshotBundleV3Schema, snapshotBundleV4Schema, type SnapshotBundleV4 } from './migration.ts';
 
 /** Canonical problem note stored in SQLite. */
 export const problemNoteSchema = z.object({
@@ -10,6 +10,8 @@ export const problemNoteSchema = z.object({
   questionFrontendId: z.string().min(1).max(100),
   content: z.string().max(100000),
   updatedAt: z.number().int().nonnegative(),
+  revision: z.number().int().positive(),
+  libraryGeneration: z.number().int().positive(),
 }).strict();
 
 export type ProblemNote = z.infer<typeof problemNoteSchema>;
@@ -17,6 +19,8 @@ export type ProblemNote = z.infer<typeof problemNoteSchema>;
 /** Input payload for creating or updating a problem note. */
 export const upsertProblemNoteSchema = z.object({
   content: z.string().max(100000),
+  expectedRevision: z.number().int().nonnegative().optional(),
+  expectedLibraryGeneration: z.number().int().positive().optional(),
 }).strict();
 
 export type UpsertProblemNoteInput = z.infer<typeof upsertProblemNoteSchema>;
@@ -148,7 +152,12 @@ export const snapshotBundleV1Schema = z.object({
 }).strict();
 
 export type SnapshotBundleV1 = z.infer<typeof snapshotBundleV1Schema>;
-export const snapshotBundleSchema = z.discriminatedUnion('version', [snapshotBundleV1Schema, snapshotBundleV2Schema, snapshotBundleV3Schema]);
+export const snapshotBundleSchema = z.discriminatedUnion('version', [
+  snapshotBundleV1Schema,
+  snapshotBundleV2Schema,
+  snapshotBundleV3Schema,
+  snapshotBundleV4Schema,
+]);
 export type SnapshotBundle = z.infer<typeof snapshotBundleSchema>;
 
 

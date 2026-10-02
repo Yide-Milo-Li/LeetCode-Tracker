@@ -390,9 +390,9 @@ for (const choice of ['cancel','discard','save','save-failure','pending-new-edit
   mock.method(api,'getSettings',async()=>({language:'en',theme:'light',timezone:'UTC',ai:{hasApiKey:false}}));
   mock.method(api,'getStrategies',async()=>[]);
   mock.method(api,'listNotes',async()=>({items:[{questionId:'1',questionFrontendId:'1',title:'Synthetic exit',titleSlug:'synthetic',url:'https://example.com/synthetic',difficulty:'Easy',tags:[],totalPractices:0,hasAccepted:false,hasCustomNote:true,customNoteUpdatedAt:1,lastPracticedAt:null,reviewStage:null,latestPracticeNotes:null}],total:1}));
-  mock.method(api,'getNote',async()=>({note:note('original synthetic note')}));
+  mock.method(api,'getNote',async()=>({libraryGeneration:1,note:{...note('original synthetic note'),revision:1,libraryGeneration:1}}));
   mock.method(api,'getPracticeRecords',async()=>({items:[],total:0,page:1,limit:100}));
-  mock.method(api,'upsertNote',async(_id:string,content:string)=>{if(choice==='save-failure')throw new Error('synthetic save failure');if(choice==='pending-new-edit')await pendingSave;return{note:note(content)};});
+  mock.method(api,'upsertNote',async(_id:string,content:string)=>{if(choice==='save-failure')throw new Error('synthetic save failure');if(choice==='pending-new-edit')await pendingSave;return{note:{...note(content),revision:2,libraryGeneration:1}};});
   Object.assign(window,{__TAURI_INTERNALS__:{invoke:async(command:string)=>{if(command==='confirm_exit')exitCount++;if(command==='cancel_exit')cancelCount++;if(command==='acknowledge_exit')ackCount++;}}});
   window.history.replaceState(null,'','#notes');localStorage.clear();
   try {

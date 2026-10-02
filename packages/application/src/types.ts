@@ -185,6 +185,11 @@ export interface ILLMAssistant {
     date: string;
     deadline?: number;
   }): Promise<{ selectedQuestionIds: string[]; model: string; provider?: LLMProviderType }>;
+  reviewOperation?(params: {
+    operation: ReviewOperationInput;
+    model?: string | null;
+    abortSignal?: AbortSignal;
+  }): Promise<OperationReviewResult>;
   getStatus(): LLMAssistantStatus;
   updateConfig?(config: {
     provider?: LLMProviderType | null;
@@ -195,6 +200,39 @@ export interface ILLMAssistant {
     providers?: Partial<Record<LLMProviderType, ProviderConfig>> | null;
   }): void;
   testConnection?(params?: ConnectionTestParams): Promise<ConnectionTestResult>;
+}
+
+export type ReviewDecision = 'allow' | 'require_confirmation' | 'deny';
+export type ReviewRiskLevel = 'low' | 'medium' | 'high';
+
+export interface ReviewCeilings {
+  isNoteOverwrite?: boolean;
+  isPracticeRevocation?: boolean;
+  isMultiplePlanReplace?: boolean;
+  isCascadingPlanRemoval?: boolean;
+}
+
+export interface ReviewOperationInput {
+  toolName: string;
+  clientId: string;
+  operationId: string;
+  action: string;
+  target: string;
+  diffSummary: string;
+  ceilings?: ReviewCeilings;
+  untrustedData?: string;
+  preview?: import('../../contracts/src/agent-operations.ts').AgentOperationPreview;
+}
+
+export interface OperationReviewResult {
+  decision: ReviewDecision;
+  riskLevel: ReviewRiskLevel;
+  reason: string;
+  auditMetadata?: {
+    provider?: string;
+    model?: string;
+    durationMs: number;
+  };
 }
 
 /** Legacy alias for IGeminiAssistant. */

@@ -27,6 +27,8 @@
     "apps/server/src/**/*.ts",
     "apps/web/src/**/*.ts",
     "apps/web/src/**/*.tsx",
+    "apps/chatgpt/src/**/*.ts",
+    "apps/chatgpt/src/**/*.tsx",
     "scripts/**/*.ts",
     "tests/**/*.ts",
     "tests/**/*.tsx",

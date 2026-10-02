@@ -42,7 +42,7 @@ test('v2 round-trips every saved table into an empty device and back without cre
     assert.deepEqual(target.store.getCatalogStats(),source.store.getCatalogStats());
     await source.store.importSnapshotBundle(copied);
     assert.deepEqual(source.store.exportMigrationBundle().tables,bundle.tables);
-    const actual=source.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name <> 'schema_version'").all().map(row=>row.name).sort();
+    const actual=source.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('schema_version', 'agent_operations')").all().map(row=>row.name).sort();
     assert.deepEqual([...MIGRATION_TABLES].sort(),actual,'New schema tables must be explicitly covered');
   } finally {source.close();target.close();}
 });
@@ -80,11 +80,11 @@ test('a target write failure rolls back even after a valid safety backup', async
   } finally {p.close();}
 });
 
-test('API keeps v1 default and rejects overlapping restore/write requests', async () => {
+test('API uses v4 default and rejects overlapping restore/write requests', async () => {
   const p=profile(); const app=await buildApp({ application: createServerApplication(p.store), disableStatic:true });
   try {
     await seed(p.store);
-    assert.equal((await app.inject('/api/v1/bundle/export')).json().version,1);
+    assert.equal((await app.inject('/api/v1/bundle/export')).json().version,4);
     const exported=await app.inject('/api/v1/bundle/export?version=2');
     assert.equal(exported.json().version,2);
     let release!:()=>void; let started!:()=>void;

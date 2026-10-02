@@ -2,7 +2,8 @@ import { useWorkspaceEnvironment } from '../context.tsx';
 /**
  * Historical practice logs list with pagination for catalog problem detail view.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { useBusinessRefresh } from '../hooks/useBusinessRefresh.ts';
 import { type CatalogProblem, type PracticeRecord } from '../api.ts';
 import type { Language } from '../i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
@@ -22,6 +23,8 @@ export function PracticeHistory({ problem, lang }: PracticeHistoryProps) {
   const api = environment.client;
 
   const workspace = useWorkspace();
+  const root = useRef<HTMLElement>(null);
+  const externalRevision = useBusinessRefresh(['libraryGeneration', 'practice'], root);
   const [page, setPage] = useState(1);
   const [records, setRecords] = useState<PracticeRecord[]>([]);
   const [total, setTotal] = useState(0);
@@ -49,10 +52,10 @@ export function PracticeHistory({ problem, lang }: PracticeHistoryProps) {
     return () => {
       active = false;
     };
-  }, [problem.questionFrontendId, page, workspace.revision]);
+  }, [problem.questionFrontendId, page, workspace.revision, externalRevision]);
 
   return (
-    <section>
+    <section ref={root}>
       <h3>{lang === 'zh' ? '练习记录' : 'Practice history'}</h3>
       {error && <Feedback>{error}</Feedback>}
       {loading ? (

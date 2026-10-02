@@ -120,6 +120,7 @@ export const migrationRows = {
     question_id: z.string(),
     content: z.string(),
     updated_at: integer,
+    revision: integer,
   }).strict(),
   strategies: z.object({
     id: z.string(),
@@ -172,6 +173,7 @@ export const migrationRows = {
 export const MIGRATION_TABLES = Object.keys(migrationRows) as Array<keyof typeof migrationRows>;
 
 export const practiceRecordV2Row = migrationRows.practice_records.omit({ outcome: true }).strict();
+export const problemNoteV3Row = migrationRows.problem_notes.omit({ revision: true }).strict();
 
 export const snapshotBundleV2Schema = z.object({
   format: z.literal('leetcode-tracker-snapshot'),
@@ -193,7 +195,7 @@ export const snapshotBundleV2Schema = z.object({
     progress_import_results: z.array(migrationRows.progress_import_results),
     progress_snapshots: z.array(migrationRows.progress_snapshots),
     progress_snapshot_history: z.array(migrationRows.progress_snapshot_history),
-    problem_notes: z.array(migrationRows.problem_notes),
+    problem_notes: z.array(problemNoteV3Row),
     strategies: z.array(migrationRows.strategies),
     strategy_versions: z.array(migrationRows.strategy_versions),
     weekday_assignments: z.array(migrationRows.weekday_assignments),
@@ -227,7 +229,7 @@ export const snapshotBundleV3Schema = z.object({
     progress_import_results: z.array(migrationRows.progress_import_results),
     progress_snapshots: z.array(migrationRows.progress_snapshots),
     progress_snapshot_history: z.array(migrationRows.progress_snapshot_history),
-    problem_notes: z.array(migrationRows.problem_notes),
+    problem_notes: z.array(problemNoteV3Row),
     strategies: z.array(migrationRows.strategies),
     strategy_versions: z.array(migrationRows.strategy_versions),
     weekday_assignments: z.array(migrationRows.weekday_assignments),
@@ -240,4 +242,38 @@ export const snapshotBundleV3Schema = z.object({
 }).strict();
 
 export type SnapshotBundleV3 = z.infer<typeof snapshotBundleV3Schema>;
-export type AnyMigrationBundle = SnapshotBundleV2 | SnapshotBundleV3;
+
+export const snapshotBundleV4Schema = z.object({
+  format: z.literal('leetcode-tracker-snapshot'),
+  version: z.literal(4),
+  appVersion: z.string().min(1).max(80),
+  schemaVersion: z.literal(11),
+  exportedAt: integer.nonnegative(),
+  tables: z.object({
+    problems: z.array(migrationRows.problems),
+    tags: z.array(migrationRows.tags),
+    problem_tags: z.array(migrationRows.problem_tags),
+    import_history: z.array(migrationRows.import_history),
+    import_results: z.array(migrationRows.import_results),
+    catalog_meta: z.array(migrationRows.catalog_meta),
+    settings: z.array(migrationRows.settings),
+    practice_records: z.array(migrationRows.practice_records),
+    practice_operations: z.array(migrationRows.practice_operations),
+    progress_import_history: z.array(migrationRows.progress_import_history),
+    progress_import_results: z.array(migrationRows.progress_import_results),
+    progress_snapshots: z.array(migrationRows.progress_snapshots),
+    progress_snapshot_history: z.array(migrationRows.progress_snapshot_history),
+    problem_notes: z.array(migrationRows.problem_notes),
+    strategies: z.array(migrationRows.strategies),
+    strategy_versions: z.array(migrationRows.strategy_versions),
+    weekday_assignments: z.array(migrationRows.weekday_assignments),
+    daily_plans: z.array(migrationRows.daily_plans),
+    daily_plan_versions: z.array(migrationRows.daily_plan_versions),
+    planning_operations: z.array(migrationRows.planning_operations),
+    snapshot_successes: z.array(migrationRows.snapshot_successes),
+    problem_review_state: z.array(migrationRows.problem_review_state),
+  }).strict(),
+}).strict();
+
+export type SnapshotBundleV4 = z.infer<typeof snapshotBundleV4Schema>;
+export type AnyMigrationBundle = SnapshotBundleV2 | SnapshotBundleV3 | SnapshotBundleV4;

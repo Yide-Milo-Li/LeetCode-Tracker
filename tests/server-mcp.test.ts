@@ -78,8 +78,11 @@ test('transport rejects malformed or hostile input, authenticates probes, and re
     const listed = await env.rpc('tools/list');
     assert.equal(listed.response.status, 200); assert.equal(listed.response.headers.get('access-control-allow-origin'), null);
     assert.equal(env.controller.getConfig().clients[0].lastSuccessfulCallAt, null);
-    assert.equal(listed.json.result.tools.length, 9);
-    for (const tool of listed.json.result.tools) assert.equal(tool.annotations.readOnlyHint, true);
+    assert.equal(listed.json.result.tools.length, 26);
+    const readOnlyCount = listed.json.result.tools.filter((t: any) => t.annotations?.readOnlyHint === true).length;
+    const writeCount = listed.json.result.tools.filter((t: any) => t.annotations?.readOnlyHint === false).length;
+    assert.equal(readOnlyCount, 15);
+    assert.equal(writeCount, 11);
     assert.equal((await env.rpc('initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'synthetic', version: '1' } })).response.status, 200);
     assert.equal(env.controller.getConfig().clients[0].lastSuccessfulCallAt, null);
   } finally { await env.close(); }

@@ -18,7 +18,7 @@ export function apply(ctx:DshContext,config:{endpoint?:string}={}) {
       call:async(name,args)=>{const response=await fetch(`${endpoint}/tools/${name}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(args)});if(!response.ok)throw new Error(`Tracker connection failed (${response.status})`);return await response.json() as ToolResult;},
       subscribe:listener=>{const stream=new EventSource(`${endpoint}/events`);stream.onmessage=listener;return ()=>stream.close();},
       openExternal:async url=>{window.open(url,'_blank','noopener,noreferrer');},
-    }),[]);
+    },'experimental'),[]);
     useEffect(()=>()=>workspace.dispose(),[workspace]);
     return <><style>{css}</style><WorkspaceProvider client={workspace.client} host={workspace.host}><EmbeddedWorkspace/></WorkspaceProvider></>;
   }

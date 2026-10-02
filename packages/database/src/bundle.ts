@@ -105,7 +105,7 @@ export interface BundleRestoreResult {
   restoredNotes: number;
   restoredStrategies: number;
   restoredProblems?: number;
-  formatVersion?: 1 | 2 | 3;
+  formatVersion?: 1 | 2 | 3 | 4;
 }
 
 /**
@@ -120,7 +120,7 @@ export async function importSnapshotBundle(
 ): Promise<BundleRestoreResult> {
   // Validate schema
   const bundle = snapshotBundleSchema.parse(rawBundle);
-  if (bundle.version === 2 || bundle.version === 3) return importMigrationBundle(db, backupManager, bundle, backupDir);
+  if (bundle.version === 2 || bundle.version === 3 || bundle.version === 4) return importMigrationBundle(db, backupManager, bundle, backupDir);
 
   // 1. Create safety snapshot before any write
   const timestamp = Date.now();
@@ -146,6 +146,7 @@ export async function importSnapshotBundle(
       DELETE FROM planning_operations;
       DELETE FROM snapshot_successes;
       DELETE FROM problem_review_state;
+      DELETE FROM agent_operations;
     `);
 
     // Restore Settings
@@ -253,6 +254,12 @@ export async function importSnapshotBundle(
         insertReview.run(rs.questionId, rs.payloadJson, rs.practiceRevision);
       }
     }
+
+    // Advance library generation so old in-flight operations cannot commit against restored data
+    const curGenRow = db.prepare("SELECT value FROM catalog_meta WHERE key = 'library_generation'").get() as { value: string } | undefined;
+    const nextGen = (curGenRow ? parseInt(curGenRow.value, 10) : 0) + 1;
+    db.prepare("INSERT OR REPLACE INTO catalog_meta (key, value) VALUES ('library_generation', ?)").run(String(nextGen));
+    db.exec("UPDATE agent_operations SET status='expired',full_payload_json=NULL,confirmation_nonce=NULL WHERE status='pending'");
 
     db.exec('COMMIT');
 

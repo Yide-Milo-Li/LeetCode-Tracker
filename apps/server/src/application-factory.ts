@@ -15,6 +15,6 @@ export function configureApplication(store: CatalogStore, assistant?: IGeminiAss
 }
 
 /** Embedded callers own their Store; this helper never acquires a second lease. */
-export function createServerApplication(store: CatalogStore, assistant?: IGeminiAssistant) {
-  return createTrackerApplication({store, ...configureApplication(store, assistant)});
+export function createServerApplication(store: CatalogStore, assistant?: IGeminiAssistant, recovery: { draftsDir?: string; legacyDraftsDir?: string } = {}) {
+  return createTrackerApplication({store, ...configureApplication(store, assistant), ...recovery});
 }

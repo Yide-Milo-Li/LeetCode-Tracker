@@ -32,7 +32,7 @@ export function createNotesOperations(context: ApplicationContext) {
       }
 
       const note = store.getProblemNote(frontendId.trim());
-      return { note };
+      return { note, libraryGeneration: store.getLibraryGeneration() };
     };
 
   /** save: validates input and preserves existing business rules. */
@@ -50,12 +50,31 @@ export function createNotesOperations(context: ApplicationContext) {
         });
       }
 
+      if (parseRes.data.expectedRevision === undefined || parseRes.data.expectedLibraryGeneration === undefined) {
+        return fail(428, {
+          error: 'PRECONDITION_REQUIRED',
+          message: 'expectedRevision and expectedLibraryGeneration are required to save note',
+        });
+      }
+
       try {
         const note = await writeLock.run(() =>
-          store.upsertProblemNote(frontendId.trim(), parseRes.data.content)
+          store.agentTransaction(() => store.upsertProblemNote(frontendId.trim(), parseRes.data.content, parseRes.data.expectedRevision, parseRes.data.expectedLibraryGeneration), () => {})
         );
         return { note };
       } catch (err) {
+        if ((err as { code?: string })?.code === 'LIBRARY_GENERATION_MISMATCH') {
+          return fail(409, { error: 'LIBRARY_GENERATION_MISMATCH', message: (err as Error).message, currentLibraryGeneration: store.getLibraryGeneration() });
+        }
+        if ((err as { code?: string })?.code === 'NOTE_REVISION_MISMATCH') {
+          const conflict = err as { message: string; currentRevision?: number; expectedRevision?: number };
+          return fail(409, {
+            error: 'NOTE_REVISION_MISMATCH',
+            message: conflict.message,
+            currentRevision: conflict.currentRevision,
+            expectedRevision: conflict.expectedRevision,
+          });
+        }
         const message = err instanceof Error ? err.message : String(err);
         return fail(404, { error: 'NOTE_SAVE_FAILED', message });
       }

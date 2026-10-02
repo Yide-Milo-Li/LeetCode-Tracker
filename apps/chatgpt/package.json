@@ -1,0 +1,16 @@
+{
+  "name": "@leetcode-tracker/chatgpt",
+  "version": "1.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node --import tsx ../../scripts/build-chatgpt-app.ts"
+  },
+  "dependencies": {
+    "@leetcode-tracker/contracts": "file:../../packages/contracts",
+    "@leetcode-tracker/workspace": "file:../../packages/workspace",
+    "@modelcontextprotocol/ext-apps": "2.0.3",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}

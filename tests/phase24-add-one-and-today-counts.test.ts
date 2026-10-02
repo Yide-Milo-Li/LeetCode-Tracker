@@ -270,7 +270,7 @@ describe('Phase 24: PlanningService appendPlanItem()', () => {
     const { store } = await setupTestDb();
     const service = new PlanningService(store, dummyAssistant);
 
-    const initial = await service.ensureDailyPlan({ timezone: 'Asia/Tokyo' });
+    const initial = await service.ensureDailyPlan({ timezone: 'UTC' });
     assert.equal(initial.status, 'ready');
     const plan = initial.plan!;
     assert.equal(plan.items.length, 2);
@@ -318,7 +318,7 @@ describe('Phase 24: PlanningService appendPlanItem()', () => {
     const { store } = await setupTestDb();
     const service = new PlanningService(store, dummyAssistant);
 
-    const initial = await service.ensureDailyPlan({ timezone: 'Asia/Tokyo' });
+    const initial = await service.ensureDailyPlan({ timezone: 'UTC' });
     const plan = initial.plan!;
 
     await service.appendPlanItem(plan.id, {
@@ -380,7 +380,7 @@ describe('Phase 24: PlanningService appendPlanItem()', () => {
     });
 
     const service = new PlanningService(store, dummyAssistant);
-    const initial = await service.ensureDailyPlan({ timezone: 'Asia/Tokyo' });
+    const initial = await service.ensureDailyPlan({ timezone: 'UTC' });
     const plan = initial.plan!;
     assert.equal(plan.items.length, 1);
     assert.equal(plan.version, 1);
@@ -430,7 +430,7 @@ describe('Phase 24: Unchanged Rules Protection (Preview & Commit)', () => {
     });
 
     const service = new PlanningService(store, dummyAssistant);
-    const initial = await service.ensureDailyPlan({ timezone: 'Asia/Tokyo' });
+    const initial = await service.ensureDailyPlan({ timezone: 'UTC' });
     const plan = initial.plan!;
     assert.equal(plan.version, 1);
 

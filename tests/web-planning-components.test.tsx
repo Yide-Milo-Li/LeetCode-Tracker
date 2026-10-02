@@ -39,6 +39,8 @@ it('background refresh preserves unsaved prompt and does not overlap requests', 
     return 1 as any;
   });
   mock.method(globalThis, 'clearInterval', () => {});
+  let businessRevision=1;
+  mock.method(api,'getBusinessVersions',async()=>({libraryGeneration:1,catalog:1,practice:businessRevision++,planning:1,today:'2026-10-01',timezone:'UTC'}));
   const visibility = Object.getOwnPropertyDescriptor(document, 'visibilityState');
   Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
   let release!: () => void;
@@ -989,6 +991,8 @@ describe('Phase 24: Add-one UI Loading, Feedback, and Concurrency Mutex', () => 
   });
 
   it('queues background refresh during append without launching redundant request', async () => {
+    let businessRevision=1;
+    mock.method(api,'getBusinessVersions',async()=>({libraryGeneration:1,catalog:1,practice:businessRevision++,planning:1,today:'2026-10-01',timezone:'UTC'}));
     const visibility = Object.getOwnPropertyDescriptor(document, 'visibilityState');
     Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
     try {

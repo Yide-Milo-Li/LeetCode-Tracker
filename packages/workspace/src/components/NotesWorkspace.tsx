@@ -1,3 +1,4 @@
+import type { BusinessVersions } from '../../../contracts/src/agent-operations.ts';
 import { useWorkspaceEnvironment } from '../context.tsx';
 import { ExportLink } from './ExportLink.tsx';
 /**
@@ -28,6 +29,8 @@ import {
 } from 'lucide-react';
 import { type ProblemNoteSummary, type PracticeRecord, NOTE_TEMPLATES, hasMeaningfulNoteContent } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
+import { OperationStateError, operationMessage } from '../client.ts';
+import { problemNoteSchema } from '../../../contracts/src/notes.ts';
 import { PageHeader, Feedback, Field, Pagination, Dialog } from './ui.tsx';
 import { QuickCopyButtons } from './QuickCopyButtons.tsx';
 
@@ -225,12 +228,31 @@ export function NotesWorkspace({
   const [selectedSummary, setSelectedSummary] = useState<ProblemNoteSummary | null>(null);
   const [noteContent, setNoteContent] = useState('');
   const [savedContent, setSavedContent] = useState('');
+  const [savedRevision, setSavedRevision] = useState(0);
+  const [savedGeneration, setSavedGeneration] = useState(0);
+  const [remoteNote, setRemoteNote] = useState<{content:string; revision:number; libraryGeneration:number} | null>(null);
   const [loadingNote, setLoadingNote] = useState(false);
   const [noteLoadError, setNoteLoadError] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState('');
+  useEffect(()=>environment.host.subscribe(event=>{
+    if(event.type!=='operation'||event.operation.target!==`note:${selectedId}`)return;
+    if(event.operation.status==='applied'){
+      const result=event.operation.data as {note?:unknown}|undefined;
+      const parsed=problemNoteSchema.safeParse(result?.note);
+      if(!parsed.success)return;
+      const note=parsed.data;
+      setSavedContent(note.content);setSavedRevision(note.revision);setSavedGeneration(note.libraryGeneration);
+      setSaveError('');setSaveSuccess(true);setRemoteNote(null);setExternalChange(false);
+      setListRevision(value=>value+1);
+    }else{
+      setSaveSuccess(false);setSaveError(operationMessage(new OperationStateError(event.operation),lang));
+      if(event.operation.status==='external_change')setExternalChange(true);
+    }
+  }),[environment.host,selectedId,lang]);
   const [retryRevision, setRetryRevision] = useState(0);
+  const root = useRef<HTMLDivElement>(null);
   const [externalChange,setExternalChange]=useState(false);
   const draft=useRef({dirty:false,saving:false});
   draft.current={dirty:noteContent!==savedContent,saving:savingNote};
@@ -240,6 +262,54 @@ export function NotesWorkspace({
     if(draft.current.dirty||draft.current.saving)setExternalChange(true);
     else setRetryRevision(value=>value+1);
   }),[environment.host]);
+
+  // A changed generation invalidates drafts even when restored notes reuse or lower their revision.
+  useEffect(() => {
+    let active = true;
+    let checking = false;
+    let previous: BusinessVersions | null = null;
+    const check = async () => {
+      if (!active || checking || loadingNote || document.visibilityState === 'hidden' || root.current?.closest('[hidden]')) return;
+      checking = true;
+      try {
+        const versions = await api.getBusinessVersions();
+        if (!active) return;
+        const libraryChanged = previous?.libraryGeneration !== versions.libraryGeneration;
+        const notesChanged = libraryChanged || previous?.notes !== versions.notes;
+        const practiceChanged = libraryChanged || previous?.practice !== versions.practice;
+        if (notesChanged || practiceChanged || previous?.catalog !== versions.catalog) setListRevision(v => v + 1);
+        previous = versions;
+        if (!selectedId) return;
+        if (practiceChanged) {
+          const history = await api.getPracticeRecords({questionFrontendId:selectedId,page:1,limit:100});
+          if (active) setPractices(history.items);
+        }
+        if (!notesChanged) return;
+        const res = await api.getNote(selectedId);
+        if (!active) return;
+        const revision = res.note?.revision ?? 0;
+        const generation = res.libraryGeneration;
+        if (revision !== savedRevision || generation !== savedGeneration) {
+          if (draft.current.dirty || draft.current.saving) {
+            setRemoteNote({content:res.note?.content ?? '',revision,libraryGeneration:generation});
+            setExternalChange(true);
+          } else {
+            const content = res.note?.content ?? '';
+            setNoteContent(content); setSavedContent(content); setSavedRevision(revision);
+            setSavedGeneration(generation); setRemoteNote(null); setExternalChange(false);
+          }
+        }
+      } catch { /* A failed poll cannot replace or discard the current editor session. */ }
+      finally { checking = false; }
+    };
+    const focus = () => { void check(); };
+    const interval = setInterval(focus, 2000);
+    window.addEventListener('focus', focus);
+    window.addEventListener('hashchange', focus);
+    document.addEventListener('visibilitychange', focus);
+    return () => { active=false; clearInterval(interval); window.removeEventListener('focus',focus); window.removeEventListener('hashchange',focus); document.removeEventListener('visibilitychange',focus); };
+  }, [api, selectedId, savedRevision, savedGeneration, loadingNote]);
+
   const editorSession = useRef({ active: false, saving: false, saveVersion: 0 });
 
   useEffect(() => {
@@ -380,6 +450,8 @@ export function NotesWorkspace({
       setSelectedSummary(null);
       setNoteContent('');
       setSavedContent('');
+      setSavedRevision(0);
+      setSavedGeneration(0); setRemoteNote(null);
       setPractices([]);
       setNoteLoadError(false);
       return;
@@ -399,6 +471,8 @@ export function NotesWorkspace({
         const content = res.note?.content ?? '';
         setNoteContent(content);
         setSavedContent(content);
+        setSavedRevision(res.note?.revision ?? 0);
+        setSavedGeneration(res.libraryGeneration); setRemoteNote(null);
         setExternalChange(false);
       })
       .catch(() => {
@@ -443,6 +517,8 @@ export function NotesWorkspace({
     !loadingNote &&
     !savingNote &&
     !noteLoadError &&
+    !remoteNote &&
+    savedGeneration > 0 &&
     isModified &&
     (isBlank ? savedContent.trim().length > 0 : hasMeaningful);
 
@@ -481,9 +557,11 @@ export function NotesWorkspace({
     setSaveError('');
 
     try {
-      const { note } = await api.upsertNote(targetId, targetContent);
+      const { note } = await api.upsertNote(targetId, targetContent, savedRevision, savedGeneration);
       if (session.active) {
         setSavedContent(note.content);
+        setSavedRevision(note.revision);
+        setSavedGeneration(note.libraryGeneration); setRemoteNote(null); setExternalChange(false);
         setSaveSuccess(true);
         setTimeout(() => {
           if (session.active && session.saveVersion === saveVersion) setSaveSuccess(false);
@@ -520,7 +598,7 @@ export function NotesWorkspace({
       return clean;
     } catch (err) {
       if (session.active) {
-        setSaveError(err instanceof Error ? err.message : String(err));
+        setSaveError(err instanceof OperationStateError ? operationMessage(err,lang) : err instanceof Error ? err.message : String(err));
       }
       return false;
     } finally {
@@ -619,8 +697,37 @@ export function NotesWorkspace({
   const totalPages = Math.max(1, Math.ceil(total / limit));
 
   return (
-    <div className="notes-workspace-view" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {externalChange&&<div role="status">{zh ? '外部数据已更新；未保存草稿已保留。' : 'External data changed; your unsaved draft was preserved.'}</div>}
+    <div ref={root} className="notes-workspace-view" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {externalChange && (
+        <div
+          role="status"
+          style={{
+            padding: '8px 16px',
+            backgroundColor: 'var(--warning-subtle, #fef7e0)',
+            borderBottom: '1px solid var(--warning, #f9ab00)',
+            color: 'var(--text-primary)',
+            fontSize: '0.875rem',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+          }}
+        >
+          <span>{zh ? '⚠️ 外部数据已更新；未保存草稿已保留。' : '⚠️ External data changed; your unsaved draft was preserved.'}</span>
+        </div>
+      )}
+      {remoteNote && (
+        <details className="notes-conflict-details" style={{padding:'12px 16px',borderBottom:'1px solid var(--border)'}}>
+          <summary>{zh ? '比较资料库当前内容与保留的草稿' : 'Compare current library content and preserved draft'}</summary>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',marginTop:'12px'}}>
+            <section><strong>{zh ? '资料库当前内容' : 'Current library content'}</strong><pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere',maxHeight:'260px',overflow:'auto'}}>{remoteNote.content}</pre></section>
+            <section><strong>{zh ? '保留的草稿' : 'Preserved draft'}</strong><pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere',maxHeight:'260px',overflow:'auto'}}>{noteContent}</pre></section>
+          </div>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => {
+            setSavedContent(remoteNote.content); setSavedRevision(remoteNote.revision); setSavedGeneration(remoteNote.libraryGeneration);
+            setRemoteNote(null); setExternalChange(false);
+          }}>{zh ? '确认比较，保留草稿并采用当前版本' : 'Keep draft and use this current version'}</button>
+        </details>
+      )}
       <PageHeader
         title={t.notesWorkspaceTitle}
         description={t.notesWorkspaceDesc}

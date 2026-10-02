@@ -242,12 +242,13 @@ export function insertPracticeRecordTransaction(
   validated: ReturnType<typeof createPracticeRecordSchema.parse>,
   precision: TimePrecision,
   fingerprint: string,
-  defaultTimezone: string | null
+  defaultTimezone: string | null,
+  ownTransaction = true
 ): string {
   const id = randomUUID();
   const now = Date.now();
 
-  db.exec('BEGIN IMMEDIATE;');
+  if (ownTransaction) db.exec('BEGIN IMMEDIATE;');
   try {
     // Backup yields before this transaction; recheck both identity and content
     // under the write lock instead of trusting the earlier replay lookup.
@@ -259,7 +260,7 @@ export function insertPracticeRecordTransaction(
     );
 
     if (concurrentReplay) {
-      db.exec('COMMIT;');
+      if (ownTransaction) db.exec('COMMIT;');
       return concurrentReplay.id;
     }
 
@@ -300,10 +301,10 @@ export function insertPracticeRecordTransaction(
     }
 
     incrementPracticeRevision(db);
-    db.exec('COMMIT;');
+    if (ownTransaction) db.exec('COMMIT;');
     return id;
   } catch (err) {
-    db.exec('ROLLBACK;');
+    if (ownTransaction) db.exec('ROLLBACK;');
     throw err;
   }
 }
@@ -311,13 +312,8 @@ export function insertPracticeRecordTransaction(
 /**
  * Execute the database mutation for updating an active practice record.
  */
-export function updatePracticeRecordTransaction(
-  db: DatabaseSync,
-  id: string,
-  validated: ReturnType<typeof updatePracticeRecordSchema.parse>,
-  existing: PracticeRecord
-): void {
-  const now = Date.now();
+/** Resolve coupled event/outcome fields without writing; approval previews and persistence share these rules. */
+export function resolvePracticeUpdate(validated: ReturnType<typeof updatePracticeRecordSchema.parse>, existing: PracticeRecord) {
   const completed =
     validated.completed !== undefined
       ? validated.completed
@@ -352,7 +348,20 @@ export function updatePracticeRecordTransaction(
     throw new Error('Incompatible outcome for completed status');
   }
 
-  db.exec('BEGIN IMMEDIATE;');
+  return { completed, practicedAt, timePrecision, notes, durationMinutes, finalOutcome, finalCompleted };
+}
+
+export function updatePracticeRecordTransaction(
+  db: DatabaseSync,
+  id: string,
+  validated: ReturnType<typeof updatePracticeRecordSchema.parse>,
+  existing: PracticeRecord,
+  ownTransaction = true
+): void {
+  const now = Date.now();
+  const { completed, practicedAt, timePrecision, notes, durationMinutes, finalOutcome } = resolvePracticeUpdate(validated, existing);
+
+  if (ownTransaction) db.exec('BEGIN IMMEDIATE;');
   try {
     db.prepare(
       `
@@ -374,31 +383,39 @@ export function updatePracticeRecordTransaction(
     }
 
     incrementPracticeRevision(db);
-    db.exec('COMMIT;');
+    if (ownTransaction) db.exec('COMMIT;');
   } catch (err) {
-    db.exec('ROLLBACK;');
+    if (ownTransaction) db.exec('ROLLBACK;');
     throw err;
   }
+}
+
+/**
+ * Execute the statement to revoke an active practice record and bump practice revision.
+ * Callable within an existing active transaction without starting a new BEGIN block.
+ */
+export function revokePracticeRecordStatement(db: DatabaseSync, id: string): void {
+  const now = Date.now();
+  db.prepare(
+    `
+    UPDATE practice_records SET
+      status = 'revoked',
+      revoked_at = ?,
+      updated_at = ?, revision = revision + 1
+    WHERE id = ? AND status = 'active'
+  `
+  ).run(now, now, id);
+
+  incrementPracticeRevision(db);
 }
 
 /**
  * Revoke an active practice record within a transaction.
  */
 export function revokePracticeRecordTransaction(db: DatabaseSync, id: string): void {
-  const now = Date.now();
   db.exec('BEGIN IMMEDIATE;');
   try {
-    db.prepare(
-      `
-      UPDATE practice_records SET
-        status = 'revoked',
-        revoked_at = ?,
-        updated_at = ?, revision = revision + 1
-      WHERE id = ?
-    `
-    ).run(now, now, id);
-
-    incrementPracticeRevision(db);
+    revokePracticeRecordStatement(db, id);
     db.exec('COMMIT;');
   } catch (err) {
     db.exec('ROLLBACK;');

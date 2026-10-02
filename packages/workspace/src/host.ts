@@ -1,8 +1,10 @@
+import type { WorkspaceOperationState } from './client.ts';
 /** Host services and events contain no HTTP, Tauri or SDK implementation. */
 export type WorkspaceEvent =
   | {type:'refresh'; domains?: string[]}
   | {type:'navigate'; view:string; targetId?:string}
-  | {type:'connection'; connected:boolean};
+  | {type:'connection'; connected:boolean}
+  | {type:'operation'; operation:WorkspaceOperationState};
 export interface WorkspaceCapabilities {
   browserDownloads:boolean;
   autoEnsure:boolean;

@@ -43,7 +43,7 @@ async function startServer() {
   process.once('SIGTERM', onSignal);
   try {
     console.log(`[Server] Opening catalog database: ${dbPath}`);
-    runtime = await openTrackerRuntime({dbPath, backupDir, configure: configureApplication});
+    runtime = await openTrackerRuntime({dbPath, backupDir, legacyDraftsDir: path.join(localDir, 'drafts'), configure: configureApplication});
     const ownedRuntime = runtime;
     const mcpController = new McpController(process.env.MCP_CONFIG_PATH ? path.resolve(process.env.MCP_CONFIG_PATH) : path.join(localDir, 'mcp-config.json'), {
       nodePath: process.execPath, proxyPath: path.join(repoRoot, 'apps/server/dist/desktop-mcp-proxy.mjs'),

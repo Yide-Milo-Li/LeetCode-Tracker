@@ -45,9 +45,9 @@ describe('Migration Bundle v3 & Schema v10', () => {
     try {
       await source.store.importJsonl(JSON.stringify({ id: '1', title: 'Synthetic', difficulty: 'Easy' }));
       await source.store.createPracticeRecord({ questionFrontendId: '1', practicedAt: '2026-09-17', completed: true, outcome: 'assisted' });
-      assert.ok(api.getBundleExportUrl().endsWith('version=3'));
+      assert.ok(api.getBundleExportUrl().endsWith('version=4'));
       const bundle = await api.exportBundle();
-      assert.equal(bundle.version, 3);
+      assert.equal(bundle.version, 4);
       await target.store.importSnapshotBundle(bundle);
       assert.equal(target.store.queryPracticeRecords().items[0].outcome, 'assisted');
     } finally { transport.mock.restore(); await app.close(); source.close(); target.close(); }
@@ -185,6 +185,47 @@ describe('Migration Bundle v3 & Schema v10', () => {
       assert.equal(json.version, 3);
       assert.equal(json.schemaVersion, 10);
       assert.equal(json.tables.practice_records[0].outcome, 'independent');
+    } finally {
+      await app.close();
+      p.close();
+    }
+  });
+
+  it('API route /api/v1/bundle/export supports formatVersion=4 and returns valid v4 bundle with note revisions', async () => {
+    const p = createTempProfile();
+    const app = await buildApp({ application: createServerApplication(p.store), disableStatic: true });
+
+    try {
+      await p.store.importJsonl(
+        JSON.stringify({ id: '101', title: 'Symmetric Tree', difficulty: 'Easy', tags: ['Tree'] })
+      );
+      p.store.upsertProblemNote('101', 'Initial note content');
+      p.store.upsertProblemNote('101', 'Revised note content', 1);
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/bundle/export?version=4',
+      });
+
+      assert.equal(response.statusCode, 200);
+      const json = response.json();
+      assert.equal(json.version, 4);
+      assert.equal(json.schemaVersion, 11);
+      assert.equal(json.tables.problem_notes.length, 1);
+      assert.equal(json.tables.problem_notes[0].revision, 2);
+      assert.equal(json.tables.problem_notes[0].content, 'Revised note content');
+
+      // Roundtrip into target store
+      const target = createTempProfile();
+      try {
+        await target.store.importSnapshotBundle(json);
+        const restoredNote = target.store.getProblemNote('101');
+        assert.ok(restoredNote);
+        assert.equal(restoredNote.revision, 2);
+        assert.equal(restoredNote.content, 'Revised note content');
+      } finally {
+        target.close();
+      }
     } finally {
       await app.close();
       p.close();

@@ -7,6 +7,9 @@ import { useOptionalWorkspaceEnvironment, type WorkspaceEnvironment } from '../c
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { type DailyPlan, type EnsureResult, type PlanItem, type PracticeRecord } from '../api.ts';
 import { evidenceAfter } from '../../../domain/src/index.ts';
+import { OperationStateError, operationMessage } from '../client.ts';
+const mutationMessage=(error:unknown,fallback:string)=>error instanceof OperationStateError
+  ? `${operationMessage(error,'en')} / ${operationMessage(error,'zh')}` : error instanceof Error ? error.message : fallback;
 
 export interface UseDailyPlanReturn {
   /** Indicates initial load of today's plan is in progress. */
@@ -71,6 +74,15 @@ export function useDailyPlan(environmentOverride?:WorkspaceEnvironment): UseDail
   const planMutationPending = useRef(false);
 
   const isPlanMutationPending = useCallback(() => planMutationPending.current, []);
+  useEffect(()=>environment.host.subscribe(event=>{
+    if(event.type!=='operation'||!event.operation.target.startsWith('plan:'))return;
+    if(event.operation.status==='applied'){
+      setMutationError(null);
+      const value=event.operation.data as DailyPlan|{plan:DailyPlan}|undefined;
+      const updated=value&&'plan' in value?value.plan:value;
+      if(updated)setEnsureResult({status:'ready',plan:updated});
+    }else setMutationError(mutationMessage(new OperationStateError(event.operation),'Operation unavailable'));
+  }),[environment.host]);
 
   const clearError = useCallback(() => {
     setMutationError(null);
@@ -114,25 +126,29 @@ export function useDailyPlan(environmentOverride?:WorkspaceEnvironment): UseDail
     refresh();
 
     const unsubscribe = environment.host.subscribe(event => {if(event.type==='refresh'||(event.type==='connection'&&event.connected))void refresh();});
-    // Re-check when window regains focus or visibility
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        refresh();
-      }
+    let previous: string | null = null;
+    let checking = false;
+    let active = true;
+    const check = async () => {
+      if (!active || checking || document.visibilityState === 'hidden') return;
+      checking = true;
+      try {
+        const versions = await api.getBusinessVersions();
+        if (!active) return;
+        const key = JSON.stringify([versions.libraryGeneration,versions.catalog,versions.practice,versions.planning,versions.today,versions.timezone]);
+        if (previous !== null && previous !== key) void refresh();
+        previous = key;
+      } catch { /* Keep the current plan while the runtime is temporarily unavailable. */ }
+      finally { checking = false; }
     };
-    window.addEventListener('visibilitychange', onVisibilityChange);
-
-    // Periodic check (every 30 seconds) to detect date rollover across midnight
-    const intervalId = setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        refresh();
-      }
-    }, 30000);
-
+    const focus = () => { void check(); };
+    void check();
+    window.addEventListener('focus', focus);
+    document.addEventListener('visibilitychange', focus);
+    const intervalId = setInterval(focus, 2000);
     return () => {
-      unsubscribe();
-      clearInterval(intervalId);
-      window.removeEventListener('visibilitychange', onVisibilityChange);
+      active = false; unsubscribe(); clearInterval(intervalId);
+      window.removeEventListener('focus',focus); document.removeEventListener('visibilitychange',focus);
     };
   }, [refresh]);
 
@@ -156,7 +172,7 @@ export function useDailyPlan(environmentOverride?:WorkspaceEnvironment): UseDail
         }
       } catch (err: unknown) {
         if (currentRevision === changeRevision.current) {
-          setMutationError(err instanceof Error ? err.message : 'Failed to replace problem.');
+          setMutationError(mutationMessage(err,'Failed to replace problem.'));
         }
       } finally {
         changeRevision.current++;
@@ -189,7 +205,7 @@ export function useDailyPlan(environmentOverride?:WorkspaceEnvironment): UseDail
       }
     } catch (err: unknown) {
       if (currentRevision === changeRevision.current) {
-        setMutationError(err instanceof Error ? err.message : 'Failed to replace unfinished problems.');
+        setMutationError(mutationMessage(err,'Failed to replace unfinished problems.'));
       }
     } finally {
       changeRevision.current++;
@@ -219,7 +235,7 @@ export function useDailyPlan(environmentOverride?:WorkspaceEnvironment): UseDail
       }
     } catch (err: unknown) {
       if (currentRevision === changeRevision.current) {
-        setMutationError(err instanceof Error ? err.message : 'Failed to append problem.');
+        setMutationError(mutationMessage(err,'Failed to append problem.'));
       }
     } finally {
       changeRevision.current++;
@@ -251,7 +267,7 @@ export function useDailyPlan(environmentOverride?:WorkspaceEnvironment): UseDail
         }
       } catch (err: unknown) {
         if (currentRevision === changeRevision.current) {
-          setMutationError(err instanceof Error ? err.message : 'Failed to remove problem.');
+          setMutationError(mutationMessage(err,'Failed to remove problem.'));
         }
       } finally {
         changeRevision.current++;

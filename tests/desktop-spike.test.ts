@@ -221,7 +221,7 @@ test('Desktop bundled server lifecycle, session auth, and data persistence', asy
         'Content-Type': 'application/json',
         'x-desktop-session-token': sessionSecret,
       },
-      body: JSON.stringify({ content: '## Two Sum Solution\nHash map pattern.' }),
+      body: JSON.stringify({ content: '## Two Sum Solution\nHash map pattern.', expectedRevision: 0, expectedLibraryGeneration: 1 }),
     });
     assert.equal(noteRes.status, 200);
 

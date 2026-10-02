@@ -86,6 +86,7 @@ async function planningMutation(path: string, payload: Record<string, unknown>):
 // Catalog & Import API
 // ==========================================
 const catalogApi = {
+  getBusinessVersions: () => request<import('../../contracts/src/agent-operations.ts').BusinessVersions>('/business/versions'),
   /** Read the persisted catalog import result, including individual line errors. */
   getImportResult: (id: string) => request<ImportSummary>(`/imports/${encodeURIComponent(id)}`),
 
@@ -411,14 +412,14 @@ const notesApi = {
     return request<{ items: ProblemNoteSummary[]; total: number }>(`/notes${qs ? `?${qs}` : ''}`);
   },
 
-  getNote(frontendId: string): Promise<{ note: ProblemNote | null }> {
-    return request<{ note: ProblemNote | null }>(`/notes/${encodeURIComponent(frontendId)}`);
+  getNote(frontendId: string): Promise<{ note: ProblemNote | null; libraryGeneration: number }> {
+    return request<{ note: ProblemNote | null; libraryGeneration: number }>(`/notes/${encodeURIComponent(frontendId)}`);
   },
 
-  upsertNote(frontendId: string, content: string): Promise<{ note: ProblemNote }> {
+  upsertNote(frontendId: string, content: string, expectedRevision?: number, expectedLibraryGeneration?: number): Promise<{ note: ProblemNote }> {
     return request<{ note: ProblemNote }>(`/notes/${encodeURIComponent(frontendId)}`, {
       method: 'PUT',
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, expectedRevision, expectedLibraryGeneration }),
     });
   },
 };
@@ -457,16 +458,16 @@ const exportApi = {
 
 const bundleApi = {
   getBundleExportUrl(): string {
-    return `${API_BASE}/bundle/export?version=3`;
+    return `${API_BASE}/bundle/export?version=4`;
   },
 
   exportBundle(): Promise<SnapshotBundle> {
-    return request<SnapshotBundle>('/bundle/export?version=3');
+    return request<SnapshotBundle>('/bundle/export?version=4');
   },
 
   async exportBundleFile(): Promise<void> {
     const filename = `leetcode-tracker-snapshot-${new Date().toISOString().slice(0, 10)}.json`;
-    await exportDataFile('/bundle/export?version=3', filename);
+    await exportDataFile('/bundle/export?version=4', filename);
   },
 
   importBundle(
@@ -498,5 +499,9 @@ const api = {
   ...bundleApi,
 };
 
-return {api, catalogApi, settingsApi, practiceApi, progressApi, planningApi, dashboardApi, notesApi, exportApi, bundleApi};
+/** A formal adapter can settle an intent during background recovery without a second request. */
+const forgetOperation = (operationId: string) => {
+  for (const [key, id] of pendingOperations) if (id === operationId) pendingOperations.delete(key);
+};
+return {api, forgetOperation, catalogApi, settingsApi, practiceApi, progressApi, planningApi, dashboardApi, notesApi, exportApi, bundleApi};
 }

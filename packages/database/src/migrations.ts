@@ -8,6 +8,7 @@ import { createPlanningSchema } from './planning-schema.ts';
 import { createPracticeMetadataSchema } from './practice-schema.ts';
 import { createNotesSchema } from './notes-schema.ts';
 import { createOutcomeSchema } from './outcome-schema.ts';
+import { createAgentOperationsSchema, invalidatePendingOperationsOnStartup } from './agent-operations-schema.ts';
 
 /** Configure recommended pragmas for resilience, concurrency, and integrity. */
 export function configurePragmas(db: DatabaseSync): void {
@@ -152,10 +153,30 @@ export function createSchema(db: DatabaseSync): void {
     CREATE TABLE IF NOT EXISTS problem_notes (
       question_id TEXT PRIMARY KEY REFERENCES problems(question_id) ON DELETE CASCADE,
       content TEXT NOT NULL,
-      updated_at INTEGER NOT NULL
+      updated_at INTEGER NOT NULL,
+      revision INTEGER NOT NULL DEFAULT 1
     );
 
     CREATE INDEX IF NOT EXISTS idx_problem_notes_updated ON problem_notes(updated_at);
+
+    CREATE TABLE IF NOT EXISTS agent_operations (
+      id TEXT PRIMARY KEY,
+      client_id TEXT NOT NULL,
+      tool_name TEXT NOT NULL,
+      fingerprint TEXT NOT NULL,
+      status TEXT NOT NULL,
+      library_generation INTEGER NOT NULL,
+      result_json TEXT,
+      summary_json TEXT,
+      full_payload_json TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_agent_operations_client ON agent_operations(client_id);
+    CREATE INDEX IF NOT EXISTS idx_agent_operations_status ON agent_operations(status);
+    CREATE INDEX IF NOT EXISTS idx_agent_operations_expires ON agent_operations(expires_at);
   `);
 
   const now = Date.now();
@@ -163,6 +184,7 @@ export function createSchema(db: DatabaseSync): void {
   db.prepare("INSERT OR REPLACE INTO catalog_meta (key, value) VALUES ('catalog_revision', '0');").run();
   db.prepare("INSERT OR REPLACE INTO catalog_meta (key, value) VALUES ('last_imported_at', '0');").run();
   db.prepare("INSERT OR REPLACE INTO catalog_meta (key, value) VALUES ('practice_revision', '0');").run();
+  db.prepare("INSERT OR REPLACE INTO catalog_meta (key, value) VALUES ('library_generation', '1');").run();
   db.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('language', 'en', ?);").run(now);
   db.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('theme', 'system', ?);").run(now);
 }
@@ -304,7 +326,15 @@ export function migrateV5ToV6(db: DatabaseSync): void {
 export function initOrMigrateSchema(db: DatabaseSync): void {
   const version = inspectCatalogSchema(db, true);
   configurePragmas(db);
-  if (version === CURRENT_SCHEMA_VERSION) return;
+  if (version === CURRENT_SCHEMA_VERSION) {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      createAgentOperationsSchema(db);
+      invalidatePendingOperationsOnStartup(db);
+      db.exec('COMMIT');
+    } catch (error) { db.exec('ROLLBACK'); throw error; }
+    return;
+  }
 
   db.exec('BEGIN IMMEDIATE');
   try {
@@ -329,7 +359,9 @@ export function initOrMigrateSchema(db: DatabaseSync): void {
     createPracticeMetadataSchema(db);
     createNotesSchema(db);
     createOutcomeSchema(db);
+    createAgentOperationsSchema(db);
     inspectCatalogSchema(db);
+    invalidatePendingOperationsOnStartup(db);
     db.exec('COMMIT');
   } catch (error) {
     db.exec('ROLLBACK');

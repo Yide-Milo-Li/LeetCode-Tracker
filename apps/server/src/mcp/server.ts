@@ -5,6 +5,7 @@ import { McpServer, createMcpHandler } from '@modelcontextprotocol/server';
 import type { TrackerApplication } from '@leetcode-tracker/application';
 import { McpController, McpConfigError, type McpAuthorization } from './config.ts';
 import { registerTrackerTools } from './tools.ts';
+import { OperationReviewService } from './review.ts';
 export interface McpServerHandle { server: http.Server; port: number; close: () => Promise<void> }
 export interface StartMcpServerOptions {
   application: TrackerApplication; controller: McpController;
@@ -14,13 +15,23 @@ export interface StartMcpServerOptions {
 /** Start only the supplied owner's listener. Failure does not prevent the workbench starting. */
 export async function startMcpServer(options: StartMcpServerOptions): Promise<McpServerHandle> {
   const { controller } = options;
+  options.application.configureAgentAuthorization(auth => controller.assertOperationAuthorized(auth));
   let port = options.preferredPort ?? controller.getConfig().port;
   controller.setListener('starting');
+  const reviewService = new OperationReviewService();
+  controller.onAuthorizationInvalidated = (clientId?: string) => {
+    try {
+      options.application.agentOperations.invalidatePendingOperations(clientId);
+    } catch {}
+  };
   const handler = createMcpHandler(ctx => {
     const auth = ctx.authInfo?.extra?.authorization as McpAuthorization;
     const server = new McpServer({ name: 'leetcode-tracker', version: '1.2.0' });
     registerTrackerTools(server, options.application, {
       assert: () => controller.assertAuthorized(auth),
+      getAuth: () => auth,
+      getReviewModel: () => controller.getConfig().reviewModel,
+      reviewService,
     });
     return server;
   });
@@ -56,8 +67,9 @@ export async function startMcpServer(options: StartMcpServerOptions): Promise<Mc
       catch { fail(400, 'INVALID_JSON'); return; }
       const headers = new Headers();
       for (const [key, value] of Object.entries(req.headers)) if (value !== undefined) headers.set(key, Array.isArray(value) ? value.join(', ') : value);
+      const scopes = auth.mode === 'read_only' ? ['tracker:read'] : ['tracker:read', 'tracker:write'];
       const response = await handler.fetch(new Request(url, { method: 'POST', headers, body }), {
-        authInfo: { token, clientId: auth.clientId, scopes: ['tracker:read'], extra: { authorization: auth } },
+        authInfo: { token, clientId: auth.clientId, scopes, extra: { authorization: auth } },
       });
       // Buffer stateless replies so revoked credentials cannot receive queued business results.
       const payload = await response.text();
@@ -77,7 +89,7 @@ export async function startMcpServer(options: StartMcpServerOptions): Promise<Mc
       res.end(payload);
     } catch (error) { fail(error instanceof McpConfigError ? 503 : 400, error instanceof McpConfigError ? error.code : 'INVALID_REQUEST'); }
   });
-  listener.requestTimeout = 15_000; listener.headersTimeout = 10_000;
+  listener.requestTimeout = 60_000; listener.headersTimeout = 10_000;
   listener.on('clientError', (_error, socket) => { socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n'); });
   try {
     port = await new Promise<number>((resolve, reject) => {
@@ -91,6 +103,7 @@ export async function startMcpServer(options: StartMcpServerOptions): Promise<Mc
   controller.setListener('ready', port);
   process.stderr.write(`[MCP] Listening on http://127.0.0.1:${port}/mcp\n`);
   return { server: listener, port, close: async () => {
+    controller.onAuthorizationInvalidated = undefined;
     controller.setListener('stopped'); listener.closeAllConnections();
     await new Promise<void>(resolve => listener.close(() => resolve())); await handler.close();
   } };

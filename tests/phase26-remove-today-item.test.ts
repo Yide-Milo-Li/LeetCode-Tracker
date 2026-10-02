@@ -37,6 +37,7 @@ describe('Phase 26: Problem Removal from Today Plan', () => {
   async function setupTestDb(strategyRules?: any) {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
+    await store.updateSettings({timezone:'Asia/Tokyo'});
 
     // Seed 10 problems
     const lines = [];
@@ -260,5 +261,44 @@ describe('Phase 26: Problem Removal from Today Plan', () => {
 
     assert.equal(firstResult.version, secondResult.version);
     assert.equal(firstResult.items.length, secondResult.items.length);
+  });
+
+  it('atomically rolls back practice revocation if plan commit fails', async () => {
+    const { store, service } = await setupTestDb();
+    const result = await service.ensureDailyPlan({ timezone: 'Asia/Tokyo' });
+    const initialPlan = result.plan!;
+    const targetItem = initialPlan.items[0];
+
+    await new Promise((r) => setTimeout(r, 15));
+
+    const practiceRecord = await store.createPracticeRecord({
+      questionFrontendId: targetItem.problem.questionFrontendId,
+      completed: true,
+      practicedAt: new Date().toISOString(),
+      timePrecision: 'datetime',
+      operationId: crypto.randomUUID(),
+    });
+    assert.equal(practiceRecord.status, 'active');
+
+    // Reconcile plan so targetItem has evidenceIds
+    const currentPlan = (await service.ensureDailyPlan({ timezone: 'Asia/Tokyo' })).plan!;
+    const completedItem = currentPlan.items.find((i) => i.id === targetItem.id)!;
+    assert.ok(completedItem.evidenceIds.length > 0);
+
+    // Attempt removePlanItem with a wrong expectedVersion (triggering STALE_PLAN)
+    await assert.rejects(
+      service.removePlanItem(currentPlan.id, {
+        itemId: targetItem.id,
+        expectedVersion: 9999, // Stale version
+        operationId: crypto.randomUUID(),
+      }),
+      (err: any) => err.code === 'STALE_PLAN'
+    );
+
+    // Verify practice record is STILL active (was NOT revoked)
+    const freshRecord = store.getPracticeRecord(practiceRecord.id);
+    assert.ok(freshRecord);
+    assert.equal(freshRecord.status, 'active');
+    assert.equal(freshRecord.revokedAt, null);
   });
 });

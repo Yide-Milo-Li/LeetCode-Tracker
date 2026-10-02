@@ -4,23 +4,28 @@ import * as path from 'node:path';
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 
+export const mcpAccessModeSchema = z.enum(['read_only', 'model_review', 'full_access']);
+export type McpAccessMode = z.infer<typeof mcpAccessModeSchema>;
+
 const clientSchema = z.object({
   id: z.string().min(1), name: z.string().trim().min(1).max(100),
   token: z.string().regex(/^[a-f0-9]{64}$/), credentialVersion: z.number().int().positive(),
+  mode: mcpAccessModeSchema.default('read_only'),
   createdAt: z.number().int().nonnegative(), revoked: z.boolean(),
   lastSuccessfulCallAt: z.number().int().nonnegative().nullable(),
 }).strict();
 export const mcpConfigSchema = z.object({
-  schemaVersion: z.literal(2), port: z.number().int().min(1).max(65535),
+  schemaVersion: z.literal(3), port: z.number().int().min(1).max(65535),
   // Listener-owned metadata lets proxies keep using the live endpoint while a port change is pending.
   activePort: z.number().int().min(1).max(65535).nullable().optional(),
   aiAccessPaused: z.boolean(), accessRevision: z.number().int().positive(),
+  reviewModel: z.string().nullable().optional(),
   clients: z.array(clientSchema).refine(items => new Set(items.map(c => c.id)).size === items.length),
 }).strict();
 export type McpConfig = z.infer<typeof mcpConfigSchema>;
 export type McpClientCredential = z.infer<typeof clientSchema>;
 export interface McpAuthorization {
-  clientId: string; token: string; credentialVersion: number; accessRevision: number;
+  clientId: string; token: string; credentialVersion: number; accessRevision: number; mode: McpAccessMode;
 }
 export interface McpStatus {
   state: 'starting' | 'ready' | 'unavailable' | 'stopped';
@@ -35,7 +40,7 @@ export class McpConfigError extends Error {
   constructor(code: string) { super(code); this.code = code; }
 }
 const freshConfig = (port = 30138): McpConfig => ({
-  schemaVersion: 2, port, aiAccessPaused: true, accessRevision: 1, clients: [],
+  schemaVersion: 3, port, aiAccessPaused: true, accessRevision: 1, reviewModel: null, clients: [],
 });
 
 /** Proxy reads only a specified file, without discovery, migration or writes. */
@@ -73,6 +78,7 @@ export class McpController {
   private state: McpStatus['state'] = 'stopped';
   private listeningPort: number | null = null;
   private listenerError: string | null = null;
+  onAuthorizationInvalidated?: (clientId?: string) => void;
 
   constructor(configPath: string, connection?: Omit<McpConnectionPaths, 'configPath'>) {
     if (!path.isAbsolute(configPath)) throw new McpConfigError('MCP_CONFIG_PATH_REQUIRED');
@@ -86,6 +92,28 @@ export class McpController {
           // The user authorized a one-time reset of all legacy connections, never a cross-directory import.
           const old = z.object({ port: z.number().int().min(1).max(65535), clients: z.array(z.unknown()).optional(), clientToken: z.string().optional() }).passthrough().parse(raw);
           this.config = freshConfig(old.port);
+          writeAtomic(this.configPath, this.config);
+        } else if (raw && typeof raw === 'object' && (raw as { schemaVersion?: number }).schemaVersion === 2) {
+          // v2 -> v3 migration: set schemaVersion 3, set all clients to read_only, reviewModel null
+          const v2 = z.object({
+            schemaVersion: z.literal(2), port: z.number().int().min(1).max(65535),
+            activePort: z.number().int().min(1).max(65535).nullable().optional(),
+            aiAccessPaused: z.boolean(), accessRevision: z.number().int().positive(),
+            clients: z.array(z.object({
+              id: z.string(), name: z.string(), token: z.string(), credentialVersion: z.number(),
+              createdAt: z.number(), revoked: z.boolean(), lastSuccessfulCallAt: z.number().nullable(),
+            }).passthrough()),
+          }).parse(raw);
+          this.config = {
+            schemaVersion: 3, port: v2.port, activePort: v2.activePort,
+            aiAccessPaused: v2.aiAccessPaused, accessRevision: v2.accessRevision,
+            reviewModel: null,
+            clients: v2.clients.map(c => ({
+              id: c.id, name: c.name, token: c.token, credentialVersion: c.credentialVersion,
+              mode: 'read_only' as const, createdAt: c.createdAt, revoked: c.revoked,
+              lastSuccessfulCallAt: c.lastSuccessfulCallAt,
+            })),
+          };
           writeAtomic(this.configPath, this.config);
         } else this.config = mcpConfigSchema.parse(raw);
       }
@@ -132,18 +160,35 @@ export class McpController {
     catch (error) { this.failure = 'MCP_CONFIG_WRITE_FAILED'; throw error; }
     this.config = validated;
   }
-  update(patch: { port?: number; aiAccessPaused?: boolean }) {
-    const parsed = z.object({ port: z.number().int().min(1).max(65535).optional(), aiAccessPaused: z.boolean().optional() }).strict().parse(patch);
+  update(patch: { port?: number; aiAccessPaused?: boolean; reviewModel?: string | null }) {
+    const parsed = z.object({
+      port: z.number().int().min(1).max(65535).optional(),
+      aiAccessPaused: z.boolean().optional(),
+      reviewModel: z.string().nullable().optional(),
+    }).strict().parse(patch);
     this.mutate(next => Object.assign(next, parsed));
+    if (parsed.aiAccessPaused === true) {
+      this.onAuthorizationInvalidated?.();
+    }
     return this.getConfig();
   }
-  createClient(name: string): McpClientCredential {
+  createClient(name: string, mode: McpAccessMode = 'read_only'): McpClientCredential {
     const client: McpClientCredential = {
       id: randomUUID(), name: z.string().trim().min(1).max(100).parse(name), token: randomBytes(32).toString('hex'),
-      credentialVersion: 1, createdAt: Date.now(), revoked: false, lastSuccessfulCallAt: null,
+      credentialVersion: 1, mode: mcpAccessModeSchema.parse(mode), createdAt: Date.now(), revoked: false, lastSuccessfulCallAt: null,
     };
     this.mutate(next => next.clients.push(client));
     return structuredClone(client);
+  }
+  updateClientMode(id: string, mode: McpAccessMode): McpClientCredential | null {
+    if (!this.getConfig().clients.some(c => c.id === id)) return null;
+    this.mutate(next => {
+      const client = next.clients.find(c => c.id === id)!;
+      client.mode = mcpAccessModeSchema.parse(mode);
+      client.credentialVersion++;
+    });
+    this.onAuthorizationInvalidated?.(id);
+    return this.getConfig().clients.find(c => c.id === id)!;
   }
   rotateClient(id: string): McpClientCredential | null {
     if (!this.getConfig().clients.some(c => c.id === id)) return null;
@@ -152,24 +197,32 @@ export class McpController {
       client.token = randomBytes(32).toString('hex'); client.credentialVersion++; client.revoked = false;
       client.lastSuccessfulCallAt = null;
     });
+    this.onAuthorizationInvalidated?.(id);
     return this.getConfig().clients.find(c => c.id === id)!;
   }
   revokeClient(id: string): boolean {
     if (!this.getConfig().clients.some(c => c.id === id)) return false;
     this.mutate(next => { const client = next.clients.find(c => c.id === id)!; client.revoked = true; client.credentialVersion++; });
+    this.onAuthorizationInvalidated?.(id);
     return true;
   }
   authorize(token: string): McpAuthorization | null {
     this.checkFile();
     if (!/^[a-f0-9]{64}$/.test(token)) return null;
     const client = this.config.clients.find(c => !c.revoked && timingSafeEqual(Buffer.from(c.token), Buffer.from(token)));
-    return client ? { clientId: client.id, token, credentialVersion: client.credentialVersion, accessRevision: this.config.accessRevision } : null;
+    return client ? { clientId: client.id, token, credentialVersion: client.credentialVersion, accessRevision: this.config.accessRevision, mode: client.mode } : null;
   }
   /** Revalidate after every awaited tool operation, including pause-and-resume races. */
   assertAuthorized(auth: McpAuthorization): void {
     const current = this.authorize(auth.token);
-    if (!current || current.clientId !== auth.clientId || current.credentialVersion !== auth.credentialVersion) throw new McpConfigError('MCP_UNAUTHORIZED');
+    if (!current || current.clientId !== auth.clientId || current.credentialVersion !== auth.credentialVersion || current.mode !== auth.mode) throw new McpConfigError('MCP_UNAUTHORIZED');
     if (this.config.aiAccessPaused || current.accessRevision !== auth.accessRevision) throw new McpConfigError('AI_ACCESS_PAUSED');
+  }
+  /** Validate a stored grant by connection/version; the ledger never needs a bearer token. */
+  assertOperationAuthorized(auth: import('../../../../packages/contracts/src/agent-operations.ts').AgentAuthorization): void {
+    const client = this.getConfig().clients.find(c => c.id === auth.clientId);
+    if (!client || client.revoked || client.mode !== auth.mode || client.credentialVersion !== auth.credentialVersion) throw new McpConfigError('MCP_UNAUTHORIZED');
+    if (this.config.aiAccessPaused || this.config.accessRevision !== auth.accessRevision) throw new McpConfigError('AI_ACCESS_PAUSED');
   }
   recordSuccessfulCall(auth: McpAuthorization): void {
     this.assertAuthorized(auth);

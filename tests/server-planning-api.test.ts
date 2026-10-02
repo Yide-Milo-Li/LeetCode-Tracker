@@ -482,7 +482,7 @@ describe('Recommendation & Planning API Endpoints', () => {
 
   it('handles idempotent replay on replace and override commit', async () => {
     const { app } = await createTestApp();
-    const { dateStr, weekday } = getFutureDate(2);
+    const { dateStr, weekday } = getFutureDate(0);
 
     // Keep the test within the writable planning window as the calendar advances.
     await app.inject({
@@ -592,7 +592,7 @@ describe('Recommendation & Planning API Endpoints', () => {
   it('supports creating daily plan on a rest day via prompt override and rejects unknown tags', async () => {
     const { app } = await createTestApp();
 
-    const restDay = getFutureDate(15);
+    const restDay = getFutureDate(0);
     let res = await app.inject({
       method: 'POST',
       url: '/api/v1/daily-plans/ensure',
@@ -671,7 +671,7 @@ describe('Recommendation & Planning API Endpoints', () => {
 
   it('preserves slot kind strictly when replacing items', async () => {
     const { app, store } = await createTestApp();
-    const { dateStr, weekday } = getFutureDate(2);
+    const { dateStr, weekday } = getFutureDate(0);
 
     // Problem 1 (Two Sum, Easy) is solved, making it eligible for review
     store.createPracticeRecord({
