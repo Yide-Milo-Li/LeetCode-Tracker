@@ -13,6 +13,9 @@ import { createBundleOperations } from './operations/bundle.ts';
 import { createSettingsOperations } from './operations/settings.ts';
 import { createMasteryOperations } from './operations/mastery.ts';
 import { createKnowledgeProfileOperations } from './operations/knowledge-profile.ts';
+import { createAgentOperations } from './operations/agent-operations.ts';
+import { createWorkspaceDraftOperations } from './operations/drafts.ts';
+import type { AgentAuthorization } from '../../contracts/src/agent-operations.ts';
 
 /** Guard every public method, including queued writes, while preserving inferred result types. */
 function protect<T extends Record<string, (...args: never[]) => unknown>>(operations: T, gate: OperationGate, restoreKey?: keyof T): T {
@@ -43,6 +46,11 @@ export function createTrackerApplication(dependencies: ApplicationDependencies) 
     settings: protect(createSettingsOperations(context), gate),
     mastery: protect(createMasteryOperations(context), gate),
     knowledgeProfile: protect(createKnowledgeProfileOperations(context), gate),
+    agentOperations: protect(createAgentOperations(context), gate),
+    workspaceDrafts: protect(createWorkspaceDraftOperations(context, dependencies.draftsDir, { legacyDir: dependencies.legacyDraftsDir }), gate),
+    configureAgentAuthorization: (validate: (authorization: AgentAuthorization) => void) => { context.assertAgentAuthorized = validate; },
+    businessVersions: () => { gate.assertAvailable(); return context.store.getBusinessVersions(); },
+    getModelService: () => context.gemini,
     isBusy: () => gate.isBusy(),
     assertAvailable: (restore = false) => gate.assertAvailable(restore),
     close: () => gate.drain(),

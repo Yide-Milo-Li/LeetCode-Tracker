@@ -1,5 +1,6 @@
 /** Explicit synthetic runtime. No default profile, provider keys or production launch changes. */
-import {mkdtempSync,readFileSync} from 'node:fs';
+import { z } from 'zod'; void z;
+import {existsSync,mkdtempSync,readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createServer} from 'node:http';
@@ -19,7 +20,7 @@ export async function openExperimentLab(html:string) {
     const preview=await application.catalog.preview({content});await application.catalog.commit({previewId:preview.previewId});
     await application.planning.createStrategy({name:'Synthetic daily',weekdays:[0,1,2,3,4,5,6],rules:{dailyCount:2,difficulty:{Easy:100,Medium:0,Hard:0},tags:[],premium:false,reviewEnabled:false,reviewPercent:0,preference:''}});
     await application.planning.ensure({});
-    await application.notes.save({content:'# Synthetic note\nInitial lab content'},{frontendId:'1'});
+    await application.notes.save({content:'# Synthetic note\nInitial lab content', expectedRevision: 0,expectedLibraryGeneration:application.businessVersions().libraryGeneration},{frontendId:'1'});
     const streams=new Set<ServerResponse>();
     const tools=createExperimentTools(application,()=>{for(const stream of streams)stream.write('data: refresh\n\n');});
     const server=createServer(async(req,res)=>{
@@ -56,7 +57,8 @@ export async function openExperimentLab(html:string) {
   }catch(error){await runtime.close();throw error;}
 }
 if(process.argv[1]===import.meta.filename){
-  const lab=await openExperimentLab(readFileSync(join(import.meta.dirname,'dist/workspace.html'),'utf8'));
+  const htmlFile=existsSync(join(import.meta.dirname,'workspace.html'))?join(import.meta.dirname,'workspace.html'):join(import.meta.dirname,'dist/workspace.html');
+  const lab=await openExperimentLab(readFileSync(htmlFile,'utf8'));
   process.on('SIGINT',()=>void lab.close());process.on('SIGTERM',()=>void lab.close());
   try{await lab.listen();console.error(`Synthetic tracker lab: http://127.0.0.1:30135/mcp; data: ${lab.dir}`);}catch(error){await lab.close();throw error;}
 }

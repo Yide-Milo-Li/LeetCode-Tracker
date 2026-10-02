@@ -80,3 +80,72 @@ test('experimental Today loads an existing plan without calling ensure or genera
   const view=render(<WorkspaceProvider host={host} client={api}><TodayWorkspace lang="en" onNavigateToSettings={()=>{}}/></WorkspaceProvider>);
   await act(async()=>{});assert.ok(calls.some(path=>path.startsWith('/daily-plans?')));assert.ok(!calls.some(path=>path.includes('/ensure')));view.unmount();host.dispose();
 });
+
+test('formal note approval recovers the saved baseline while preserving newer editor input',async()=>{
+  const {writeFixture}=await import('./fixtures/agent-write.ts');
+  const {createToolTrackerClient}=await import('../packages/workspace/src/hosts/tool-client.ts');
+  const f=await writeFixture('model_review');
+  const host=createWorkspaceHost({id:'formal-note-ui'});
+  const api=createToolTrackerClient(f.call,host);
+  f.setReviewMock(async()=>({decision:'require_confirmation',riskLevel:'medium',reason:'Synthetic approval required'}));
+  f.store.createPracticeRecord({questionFrontendId:'1',completed:false,practicedAt:'2026-09-20',timePrecision:'date'});
+  let view:ReturnType<typeof render>|undefined;
+  try{
+    await act(async()=>{view=render(<WorkspaceProvider host={host} client={api}><NotesWorkspace lang="en"/></WorkspaceProvider>);});
+    const {waitFor}=await import('@testing-library/react');
+    await waitFor(()=>{const field=view!.container.querySelector('textarea');assert.ok(field);assert.equal(field.disabled,false);});
+    const editor=view!.container.querySelector('textarea')!;
+    fireEvent.change(editor,{target:{value:'submitted synthetic note'}});
+    await waitFor(()=>assert.equal((within(view!.container).getByRole('button',{name:/save note/i}) as HTMLButtonElement).disabled,false));
+    fireEvent.click(within(view!.container).getByRole('button',{name:/save note/i}));
+    await waitFor(()=>assert.match(view!.container.textContent!,/Waiting for approval/));
+    assert.equal(f.store.getProblemNote('1'),null);
+    fireEvent.change(editor,{target:{value:'newer input during approval'}});
+    const op=(await f.application.agentOperations.listPendingOperations())[0];
+    await act(async()=>{await f.application.agentOperations.proceedOperation(op.id,f.client.id);await api.recoverOperations();});
+    assert.equal(editor.value,'newer input during approval');
+    assert.equal(f.store.getProblemNote('1')?.content,'submitted synthetic note');
+    assert.doesNotMatch(view!.container.textContent!,/Waiting for approval/);
+    view!.unmount();view=undefined;
+    await api.recoverOperations();
+  }finally{view?.unmount();host.dispose();await f.close();}
+});
+
+test('formal Today waits for approval and recovers a complete plan without duplicate writes',async()=>{
+  const {writeFixture}=await import('./fixtures/agent-write.ts');
+  const {createToolTrackerClient}=await import('../packages/workspace/src/hosts/tool-client.ts');
+  const {TodayWorkspace}=await import('../packages/workspace/src/components/TodayWorkspace.tsx');
+  const {waitFor}=await import('@testing-library/react');
+  const f=await writeFixture('model_review');
+  const host=createWorkspaceHost({id:'formal-today-ui'});let writes=0;
+  const api=createToolTrackerClient(async(name,args)=>{if(name==='tracker_append_today')writes++;return f.call(name,args);},host);
+  let view:ReturnType<typeof render>|undefined;
+  try{
+    const created=await f.call('tracker_create_today',{operationId:'initial-today-ui'});assert.equal(created.structuredContent.status,'applied');
+    f.setReviewMock(async()=>({decision:'require_confirmation',riskLevel:'medium',reason:'Synthetic approval'}));
+    await act(async()=>{view=render(<WorkspaceProvider host={host} client={api}><TodayWorkspace lang="en" onNavigateToSettings={()=>{}}/></WorkspaceProvider>);});
+    await waitFor(()=>assert.equal((within(view!.container).getByRole('button',{name:/add one/i}) as HTMLButtonElement).disabled,false));
+    fireEvent.click(within(view!.container).getByRole('button',{name:/add one/i}));
+    await waitFor(()=>assert.match(view!.container.textContent!,/Waiting for approval/));
+    assert.equal(f.store.planning.plans()[0].items.length,3);
+    fireEvent.click(within(view!.container).getByRole('button',{name:/add one/i}));
+    await act(async()=>{});assert.equal(writes,1);
+    const pending=(await f.application.agentOperations.listPendingOperations())[0];
+    await act(async()=>{await f.application.agentOperations.proceedOperation(pending.id,f.client.id);await api.recoverOperations();});
+    await waitFor(()=>assert.doesNotMatch(view!.container.textContent!,/Waiting for approval/));
+    assert.equal(f.store.planning.plans()[0].items.length,4);assert.equal(writes,1);
+    await waitFor(()=>assert.equal(view!.container.querySelectorAll('.today-problem').length,4));
+  }finally{view?.unmount();host.dispose();await f.close();}
+});
+
+test('operation recovery skips hidden workspaces and stops focus or reconnect checks after unmount',async()=>{
+  const host=createWorkspaceHost({id:'recovery-lifetime'});let checks=0;
+  const api=Object.assign(client('Alpha'),{recoverOperations:async()=>{checks++;}});
+  const view=render(<WorkspaceProvider host={host} client={api}><span>Recovery owner</span></WorkspaceProvider>);
+  view.container.hidden=true;
+  await act(async()=>{window.dispatchEvent(new window.Event('focus'));host.emit({type:'connection',connected:true});});assert.equal(checks,0);
+  view.container.hidden=false;
+  await act(async()=>{window.dispatchEvent(new window.Event('focus'));});assert.equal(checks,1);
+  view.unmount();
+  await act(async()=>{window.dispatchEvent(new window.Event('focus'));host.emit({type:'connection',connected:true});});assert.equal(checks,1);host.dispose();
+});

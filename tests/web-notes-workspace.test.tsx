@@ -49,6 +49,7 @@ const { TodayProblemRow } = await import('../apps/web/src/components/TodayProble
 
 beforeEach(() => {
   mock.method(api, 'getSettings', async () => ({ language: 'en', theme: 'light', timezone: null, updatedAt: 0 }));
+  mock.method(api, 'getBusinessVersions', async () => ({today:'2026-10-01',timezone:'UTC',libraryGeneration:1,catalog:1,practice:1,planning:1,notes:1,approvals:1}));
 });
 
 afterEach(() => {
@@ -77,13 +78,13 @@ function mockEditorProblems() {
   }));
   const list = mock.method(api, 'listNotes', async () => ({ items, total: items.length }));
   mock.method(api, 'getPracticeRecords', async () => ({ items: [], total: 0, page: 1, limit: 100 }));
-  mock.method(api, 'getNote', async (id: string) => ({ note: editorNote(id, `${id} original`) }));
+  mock.method(api, 'getNote', async (id: string) => ({ libraryGeneration: 1, note: editorNote(id, `${id} original`) }));
   return list;
 }
 
 /** Build a server-shaped note response without touching a database. */
 function editorNote(id: string, content: string) {
-  return { questionId: id, questionFrontendId: id, content, updatedAt: 1 };
+  return { questionId: id, questionFrontendId: id, content, updatedAt: 1, revision: 1, libraryGeneration: 1 };
 }
 
 /** Read the active note editor independently of translated placeholder text. */
@@ -95,10 +96,10 @@ describe('NotesWorkspace request ownership', () => {
   for (const fails of [false, true]) {
     it(`ignores stale retry ${fails ? 'failure' : 'success'} after switching and editing another problem`, async () => {
       mockEditorProblems();
-      const retry = deferred<{ note: ReturnType<typeof editorNote> }>();
+      const retry = deferred<{ libraryGeneration: 1, note: ReturnType<typeof editorNote> }>();
       let firstAttempt = true;
       mock.method(api, 'getNote', async (id: string) => {
-        if (id === '2') return { note: editorNote(id, 'B original') };
+        if (id === '2') return { libraryGeneration: 1, note: editorNote(id, 'B original') };
         if (firstAttempt) { firstAttempt = false; throw new Error('Synthetic initial failure'); }
         return retry.promise;
       });
@@ -108,7 +109,7 @@ describe('NotesWorkspace request ownership', () => {
       await act(async () => { fireEvent.change(noteEditor(), { target: { value: 'B unsaved draft' } }); });
       await act(async () => {
         if (fails) retry.reject(new Error('Stale retry error'));
-        else retry.resolve({ note: editorNote('1', 'A retry response') });
+        else retry.resolve({ libraryGeneration: 1, note: editorNote('1', 'A retry response') });
       });
       assert.equal(noteEditor().value, 'B unsaved draft');
       assert.ok(!screen.queryByRole('button', { name: /retry/i }), 'A stale failure must not show retry on B');
@@ -117,7 +118,7 @@ describe('NotesWorkspace request ownership', () => {
 
     it(`ignores stale save ${fails ? 'failure' : 'success'} without changing another problem's save state`, async () => {
       const list = mockEditorProblems();
-      const pending = deferred<{ note: ReturnType<typeof editorNote> }>();
+      const pending = deferred<{ libraryGeneration: 1, note: ReturnType<typeof editorNote> }>();
       mock.method(api, 'upsertNote', () => pending.promise);
       await act(async () => { render(<NotesWorkspace lang="en" />); });
       await act(async () => { fireEvent.change(noteEditor(), { target: { value: 'shared draft' } }); });
@@ -127,7 +128,7 @@ describe('NotesWorkspace request ownership', () => {
       const listCallsBeforeResponse = list.mock.callCount();
       await act(async () => {
         if (fails) pending.reject(new Error('Stale save error'));
-        else pending.resolve({ note: editorNote('1', 'shared draft') });
+        else pending.resolve({ libraryGeneration: 1, note: editorNote('1', 'shared draft') });
       });
       // Equal text on two different problems must never imply that both were persisted.
       assert.equal(noteEditor().value, 'shared draft');
@@ -139,7 +140,7 @@ describe('NotesWorkspace request ownership', () => {
 
   it('preserves edits made during saving and uses the returned server content as the saved baseline', async () => {
     mockEditorProblems();
-    const pending = deferred<{ note: ReturnType<typeof editorNote> }>();
+    const pending = deferred<{ libraryGeneration: 1, note: ReturnType<typeof editorNote> }>();
     const save = mock.method(api, 'upsertNote', () => pending.promise);
     await act(async () => { render(<NotesWorkspace lang="en" />); });
     await act(async () => { fireEvent.change(noteEditor(), { target: { value: 'sent draft' } }); });
@@ -149,7 +150,7 @@ describe('NotesWorkspace request ownership', () => {
     });
     assert.equal(save.mock.callCount(), 1, 'Repeated shortcuts in one render must not duplicate writes');
     await act(async () => { fireEvent.change(noteEditor(), { target: { value: 'newer draft' } }); });
-    await act(async () => { pending.resolve({ note: editorNote('1', 'server content') }); });
+    await act(async () => { pending.resolve({ libraryGeneration: 1, note: editorNote('1', 'server content') }); });
     assert.equal(noteEditor().value, 'newer draft');
     assert.equal((screen.getByRole('button', { name: /save note/i }) as HTMLButtonElement).disabled, false);
     await act(async () => { fireEvent.change(noteEditor(), { target: { value: 'server content' } }); });
@@ -158,7 +159,7 @@ describe('NotesWorkspace request ownership', () => {
 
   it('does not accept a previous visit save response after selecting A, B, then A again', async () => {
     mockEditorProblems();
-    const pending = deferred<{ note: ReturnType<typeof editorNote> }>();
+    const pending = deferred<{ libraryGeneration: 1, note: ReturnType<typeof editorNote> }>();
     mock.method(api, 'upsertNote', () => pending.promise);
     await act(async () => { render(<NotesWorkspace lang="en" />); });
     await act(async () => { fireEvent.change(noteEditor(), { target: { value: 'shared draft' } }); });
@@ -166,13 +167,13 @@ describe('NotesWorkspace request ownership', () => {
     await act(async () => { fireEvent.click(screen.getByText('Problem B')); });
     await act(async () => { fireEvent.click(screen.getByText('Problem A')); });
     await act(async () => { fireEvent.change(noteEditor(), { target: { value: 'shared draft' } }); });
-    await act(async () => { pending.resolve({ note: editorNote('1', 'shared draft') }); });
+    await act(async () => { pending.resolve({ libraryGeneration: 1, note: editorNote('1', 'shared draft') }); });
     assert.equal((screen.getByRole('button', { name: /save note/i }) as HTMLButtonElement).disabled, false);
   });
 
   it('does not refresh or write again when a save finishes after unmount', async () => {
     const list = mockEditorProblems();
-    const pending = deferred<{ note: ReturnType<typeof editorNote> }>();
+    const pending = deferred<{ libraryGeneration: 1, note: ReturnType<typeof editorNote> }>();
     const save = mock.method(api, 'upsertNote', () => pending.promise);
     let unmount!: () => void;
     await act(async () => { ({ unmount } = render(<NotesWorkspace lang="en" />)); });
@@ -180,7 +181,7 @@ describe('NotesWorkspace request ownership', () => {
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: /save note/i })); });
     const listCallsBeforeUnmount = list.mock.callCount();
     await act(async () => { unmount(); });
-    await act(async () => { pending.resolve({ note: editorNote('1', 'sent draft') }); });
+    await act(async () => { pending.resolve({ libraryGeneration: 1, note: editorNote('1', 'sent draft') }); });
     assert.equal(list.mock.callCount(), listCallsBeforeUnmount);
     assert.equal(save.mock.callCount(), 1);
   });
@@ -514,7 +515,7 @@ describe('NotesWorkspace Component', () => {
     }));
 
     mock.method(api, 'getNote', async (id: string) => ({
-      note: id === '1' ? { questionFrontendId: '1', content: '## Hash Map Approach\nUse dict for O(1) lookups.', updatedAt: Date.now() } : null,
+      libraryGeneration: 1, note: id === '1' ? { questionFrontendId: '1', content: '## Hash Map Approach\nUse dict for O(1) lookups.', updatedAt: Date.now() } : null,
     }));
 
     mock.method(api, 'getPracticeRecords', async () => ({
@@ -539,7 +540,7 @@ describe('NotesWorkspace Component', () => {
     let upsertCalledWith: { frontendId: string; content: string } | null = null;
     mock.method(api, 'upsertNote', async (frontendId: string, content: string) => {
       upsertCalledWith = { frontendId, content };
-      return { note: { questionFrontendId: frontendId, content, updatedAt: Date.now() } };
+      return { libraryGeneration: 1, note: { questionFrontendId: frontendId, content, updatedAt: Date.now() } };
     });
 
     await act(async () => {
@@ -594,13 +595,13 @@ describe('NotesWorkspace Component', () => {
       total: 1,
     }));
 
-    mock.method(api, 'getNote', async () => ({ note: null }));
+    mock.method(api, 'getNote', async () => ({ libraryGeneration: 1, note: null }));
     mock.method(api, 'getPracticeRecords', async () => ({ total: 0, page: 1, limit: 100, items: [] }));
 
     let upsertCalled = false;
     mock.method(api, 'upsertNote', async () => {
       upsertCalled = true;
-      return { note: { questionFrontendId: '2', content: '', updatedAt: Date.now() } };
+      return { libraryGeneration: 1, note: { questionFrontendId: '2', content: '', updatedAt: Date.now() } };
     });
 
     await act(async () => {
@@ -670,7 +671,7 @@ describe('NotesWorkspace Component', () => {
     }));
 
     mock.method(api, 'getNote', async () => ({
-      note: { questionFrontendId: '1', content: 'Existing reflections', updatedAt: Date.now() },
+      libraryGeneration: 1, note: { questionFrontendId: '1', content: 'Existing reflections', updatedAt: Date.now() },
     }));
     mock.method(api, 'getPracticeRecords', async () => ({ total: 0, page: 1, limit: 100, items: [] }));
 
@@ -678,7 +679,7 @@ describe('NotesWorkspace Component', () => {
     mock.method(api, 'upsertNote', async (id: string, content: string) => {
       savedContent = content;
       currentCustomNote = false;
-      return { note: { questionFrontendId: id, content, updatedAt: Date.now() } };
+      return { libraryGeneration: 1, note: { questionFrontendId: id, content, updatedAt: Date.now() } };
     });
 
     await act(async () => {
@@ -729,7 +730,7 @@ describe('NotesWorkspace Component', () => {
       ],
       total: 1,
     }));
-    mock.method(api, 'getNote', async () => ({ note: null }));
+    mock.method(api, 'getNote', async () => ({ libraryGeneration: 1, note: null }));
     mock.method(api, 'getPracticeRecords', async () => ({ total: 0, page: 1, limit: 100, items: [] }));
 
     const { rerender } = render(<NotesWorkspace lang="en" />);
@@ -771,7 +772,7 @@ describe('NotesWorkspace Component', () => {
       ],
       total: 1,
     }));
-    mock.method(api, 'getNote', async () => ({ note: null }));
+    mock.method(api, 'getNote', async () => ({ libraryGeneration: 1, note: null }));
     mock.method(api, 'getPracticeRecords', async () => ({ total: 0, page: 1, limit: 100, items: [] }));
 
     await act(async () => {
@@ -965,7 +966,7 @@ describe('NotesWorkspace unsaved changes guard', () => {
   it('switches directly without prompt when user only typed whitespace on an empty note', async () => {
     mockEditorProblems();
     mock.method(api, 'getNote', async (id: string) => ({
-      note: id === '1' ? null : editorNote(id, `${id} original`),
+      libraryGeneration: 1, note: id === '1' ? null : editorNote(id, `${id} original`),
     }));
     await act(async () => {
       render(<NotesWorkspace lang="zh" />);
@@ -1128,7 +1129,7 @@ describe('NotesWorkspace unsaved changes guard', () => {
     let upsertCalled = false;
     mock.method(api, 'upsertNote', async (id: string, content: string) => {
       upsertCalled = true;
-      return { note: editorNote(id, content) };
+      return { libraryGeneration: 1, note: editorNote(id, content) };
     });
 
     await act(async () => {
@@ -1299,7 +1300,7 @@ describe('QuickCopyButtons Component', () => {
 describe('QuickNoteDrawer Component', () => {
   it('loads and displays problem note, and navigates to workspace when requested', async () => {
     mock.method(api, 'getNote', async () => ({
-      note: {
+      libraryGeneration: 1, note: {
         questionFrontendId: '1',
         content: '## Review Strategy\nCheck hash table complement indices.',
         updatedAt: Date.now(),
@@ -1349,7 +1350,7 @@ describe('QuickNoteDrawer Component', () => {
 
   it('displays unfilled template notice and falls back to practice log in QuickCopyButtons', async () => {
     mock.method(api, 'getNote', async () => ({
-      note: {
+      libraryGeneration: 1, note: {
         questionFrontendId: '1',
         content: `## 💡 Key Idea & Approach\n- \n\n---\n\n## ⏱️ Complexity Analysis\n- \n\n---\n\n## 💻 Clean Implementation\n\`\`\`python\n\`\`\`\n\n---\n\n## ⚠️ Edge Cases & Traps\n- `,
         updatedAt: Date.now(),
@@ -1571,5 +1572,134 @@ describe('TodayProblemRow note entry consolidation', () => {
       if (previousWorker) Object.assign(globalThis, { Worker: previousWorker });
       else Reflect.deleteProperty(globalThis, 'Worker');
     }
+  });
+});
+
+describe('NotesWorkspace external note revision polling', () => {
+  for (const restoredRevision of [2, 1]) {
+    it(`preserves and blocks a dirty draft after restore to revision ${restoredRevision}`, async () => {
+      mockEditorProblems();
+      let generation = 1;
+      let current = { ...editorNote('1', 'Initial source'), revision: 2 };
+      mock.method(api, 'getBusinessVersions', async () => ({today:'2026-10-01',timezone:'UTC',libraryGeneration:generation,catalog:1,practice:1,planning:1,notes:1,approvals:1}));
+      const reads = mock.method(api, 'getNote', async () => ({ libraryGeneration:generation, note:current }));
+      const save = mock.method(api, 'upsertNote', async (id: string, content: string) => ({note:{...editorNote(id,content),revision:restoredRevision+1,libraryGeneration:generation}}));
+      await act(async () => { render(<NotesWorkspace lang="en" />); });
+      await act(async () => { window.dispatchEvent(new dom.window.Event('focus')); });
+      const stableReads = reads.mock.callCount();
+      await act(async () => { window.dispatchEvent(new dom.window.Event('focus')); });
+      assert.equal(reads.mock.callCount(),stableReads,'An unchanged stamp must not download the note body');
+      await act(async () => { fireEvent.change(noteEditor(),{target:{value:'My preserved unsaved reasoning'}}); });
+      generation = 2;
+      current = { ...current, revision:restoredRevision, content:'Restored library text', libraryGeneration:2 };
+      await act(async () => { window.dispatchEvent(new dom.window.Event('focus')); });
+      assert.equal(noteEditor().value,'My preserved unsaved reasoning');
+      assert.equal((screen.getByRole('button',{name:/save note/i}) as HTMLButtonElement).disabled,true);
+      assert.ok(screen.getByText('Restored library text'));
+      await act(async () => { fireEvent.keyDown(window,{key:'s',ctrlKey:true}); });
+      assert.equal(save.mock.callCount(),0,'Keyboard save cannot bypass the conflict');
+      await act(async () => { fireEvent.click(screen.getByRole('button',{name:/keep draft and use this current version/i})); });
+      await act(async () => { fireEvent.click(screen.getByRole('button',{name:/save note/i})); });
+      assert.deepEqual(save.mock.calls[0].arguments,['1','My preserved unsaved reasoning',restoredRevision,2]);
+    });
+  }
+  it('automatically reloads note content when remote revision advances and note is clean', async () => {
+    let currentNote = { questionId: '1', questionFrontendId: '1', content: '# Initial Content', revision: 1, updatedAt: 1 };
+    mock.method(api, 'listNotes', async () => ({
+      items: [
+        {
+          questionId: '1',
+          questionFrontendId: '1',
+          title: 'Two Sum',
+          titleSlug: 'two-sum',
+          url: 'https://leetcode.com/problems/two-sum/',
+          difficulty: 'Easy' as const,
+          tags: ['Array'],
+          isPaidOnly: false,
+          totalPractices: 1,
+          hasAccepted: true,
+          hasCustomNote: true,
+          customNoteUpdatedAt: 1,
+          lastPracticedAt: null,
+          reviewStage: null,
+          latestPracticeNotes: null,
+        },
+      ],
+      total: 1,
+    }));
+    mock.method(api, 'getPracticeRecords', async () => ({ items: [], total: 0, page: 1, limit: 100 }));
+    mock.method(api, 'getNote', async () => ({ libraryGeneration: 1, note: currentNote }));
+
+    await act(async () => {
+      render(<NotesWorkspace lang="zh" />);
+    });
+
+    const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
+    assert.ok(textarea);
+    assert.equal(textarea.value, '# Initial Content');
+
+    // Simulate external update
+    currentNote = { questionId: '1', questionFrontendId: '1', content: '# Externally Updated Content', revision: 2, updatedAt: 2 };
+
+    // Trigger focus to check immediately
+    await act(async () => {
+      window.dispatchEvent(new dom.window.Event('focus'));
+    });
+
+    assert.equal(textarea.value, '# Externally Updated Content');
+    assert.equal(screen.queryByText(/外部数据已更新；未保存草稿已保留。/), null);
+  });
+
+  it('displays external change notice and preserves draft when remote revision advances with unsaved changes', async () => {
+    let currentNote = { questionId: '1', questionFrontendId: '1', content: '# Initial Content', revision: 1, updatedAt: 1 };
+    mock.method(api, 'listNotes', async () => ({
+      items: [
+        {
+          questionId: '1',
+          questionFrontendId: '1',
+          title: 'Two Sum',
+          titleSlug: 'two-sum',
+          url: 'https://leetcode.com/problems/two-sum/',
+          difficulty: 'Easy' as const,
+          tags: ['Array'],
+          isPaidOnly: false,
+          totalPractices: 1,
+          hasAccepted: true,
+          hasCustomNote: true,
+          customNoteUpdatedAt: 1,
+          lastPracticedAt: null,
+          reviewStage: null,
+          latestPracticeNotes: null,
+        },
+      ],
+      total: 1,
+    }));
+    mock.method(api, 'getPracticeRecords', async () => ({ items: [], total: 0, page: 1, limit: 100 }));
+    mock.method(api, 'getNote', async () => ({ libraryGeneration: 1, note: currentNote }));
+
+    await act(async () => {
+      render(<NotesWorkspace lang="zh" />);
+    });
+
+    const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
+    assert.ok(textarea);
+
+    // User types local changes (dirty draft)
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: '# My Local Edits in Progress' } });
+    });
+
+    // Simulate external update
+    currentNote = { questionId: '1', questionFrontendId: '1', content: '# Remote Agent Edit', revision: 2, updatedAt: 2 };
+
+    // Trigger focus
+    await act(async () => {
+      window.dispatchEvent(new dom.window.Event('focus'));
+    });
+
+    // Draft is preserved!
+    assert.equal(textarea.value, '# My Local Edits in Progress');
+    // Notice is displayed!
+    assert.ok(screen.getByText(/外部数据已更新；未保存草稿已保留。/));
   });
 });

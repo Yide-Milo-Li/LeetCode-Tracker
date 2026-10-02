@@ -32,7 +32,7 @@ test('direct catalog, practice, notes, statistics and exports require no HTTP se
     assert.equal((await f.application.catalog.query()).total,4);
     const record=await f.application.practice.create({questionFrontendId:'1',completed:true,practicedAt:'2026-09-30',timePrecision:'date',operationId:'synthetic-operation'});
     assert.equal((await f.application.practice.read({}, {id:record.id})).id,record.id);
-    await f.application.notes.save({content:'# Synthetic\nA meaningful explanation'}, {frontendId:'1'});
+    await f.application.notes.save({content:'# Synthetic\nA meaningful explanation', expectedRevision: 0, expectedLibraryGeneration: f.store.getLibraryGeneration()}, {frontendId:'1'});
     assert.match((await f.application.notes.read({}, {frontendId:'1'})).note!.content,/meaningful/);
     assert.equal((await f.application.exports.markdown({}, {frontendId:'1'})).kind,'export');
     assert.ok(await f.application.mastery.report());

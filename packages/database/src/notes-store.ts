@@ -4,6 +4,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import {
   problemNoteListQuerySchema,
+  upsertProblemNoteSchema,
   hasMeaningfulNoteContent,
   type ProblemNote,
   type ProblemNoteListQuery,
@@ -29,6 +30,20 @@ export function registerNotesFunctions(db: DatabaseSync): void {
   }
 }
 
+/** Conflict error when note revision does not match expected revision. */
+export class NoteConflictError extends Error {
+  override name = 'NoteConflictError';
+  readonly code = 'NOTE_REVISION_MISMATCH';
+  readonly currentRevision: number;
+  readonly expectedRevision: number;
+
+  constructor(message: string, currentRevision: number, expectedRevision: number) {
+    super(message);
+    this.currentRevision = currentRevision;
+    this.expectedRevision = expectedRevision;
+  }
+}
+
 /**
  * Retrieve a problem's long-form note by frontend question ID.
  * Returns null if no note has been created yet.
@@ -37,24 +52,41 @@ export function registerNotesFunctions(db: DatabaseSync): void {
 export function getProblemNote(db: DatabaseSync, questionFrontendId: string): ProblemNote | null {
   const row = db
     .prepare(
-      `SELECT p.frontend_question_id AS questionFrontendId, n.question_id AS questionId, n.content, n.updated_at AS updatedAt
+      `SELECT p.frontend_question_id AS questionFrontendId, n.question_id AS questionId, n.content, n.updated_at AS updatedAt, n.revision AS revision
        FROM problem_notes n
        JOIN problems p ON p.question_id = n.question_id
        WHERE p.frontend_question_id = ?`
     )
-    .get(questionFrontendId) as { questionFrontendId: string; questionId: string; content: string; updatedAt: number } | undefined;
+    .get(questionFrontendId) as { questionFrontendId: string; questionId: string; content: string; updatedAt: number; revision?: number } | undefined;
 
-  return row ?? null;
+  if (!row) return null;
+  return {
+    questionFrontendId: row.questionFrontendId,
+    questionId: row.questionId,
+    content: row.content,
+    updatedAt: row.updatedAt,
+    revision: row.revision ?? 1,
+    libraryGeneration: Number((db.prepare("SELECT value FROM catalog_meta WHERE key='library_generation'").get() as { value: string }).value),
+  };
 }
 
 /**
  * Create or update a problem's long-form note atomically.
+ * If expectedRevision is provided, validates that current note revision matches expectedRevision.
+ * Notes start at revision 1 on create, and increment revision on each update.
  */
 export function upsertProblemNote(
   db: DatabaseSync,
   questionFrontendId: string,
-  content: string
+  content: string,
+  expectedRevision?: number,
+  expectedLibraryGeneration?: number
 ): ProblemNote {
+  upsertProblemNoteSchema.parse({ content, expectedRevision, expectedLibraryGeneration });
+  const libraryGeneration = Number((db.prepare("SELECT value FROM catalog_meta WHERE key='library_generation'").get() as { value: string }).value);
+  if (expectedLibraryGeneration !== undefined && expectedLibraryGeneration !== libraryGeneration) {
+    throw Object.assign(new Error('Library was replaced; reload before saving this draft.'), { code: 'LIBRARY_GENERATION_MISMATCH', currentLibraryGeneration: libraryGeneration });
+  }
   const problem = db
     .prepare('SELECT question_id AS questionId FROM problems WHERE frontend_question_id = ?')
     .get(questionFrontendId) as { questionId: string } | undefined;
@@ -63,18 +95,45 @@ export function upsertProblemNote(
     throw new Error(`Problem with frontend ID '${questionFrontendId}' was not found in catalog`);
   }
 
-  const now = Date.now();
-  db.prepare(
-    `INSERT INTO problem_notes (question_id, content, updated_at)
-     VALUES (?, ?, ?)
-     ON CONFLICT(question_id) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at`
-  ).run(problem.questionId, content, now);
+  const existing = db
+    .prepare('SELECT revision, content FROM problem_notes WHERE question_id = ?')
+    .get(problem.questionId) as { revision: number; content: string } | undefined;
 
+  const currentRevision = existing ? (existing.revision ?? 1) : 0;
+
+  if (expectedRevision !== undefined && expectedRevision !== currentRevision) {
+    throw new NoteConflictError(
+      `Note revision mismatch for problem ${questionFrontendId}: expected ${expectedRevision}, current is ${currentRevision}`,
+      currentRevision,
+      expectedRevision
+    );
+  }
+
+  const now = Date.now();
+  let nextRevision: number;
+  if (!existing) {
+    nextRevision = 1;
+    db.prepare(
+      `INSERT INTO problem_notes (question_id, content, updated_at, revision)
+       VALUES (?, ?, ?, ?)`
+    ).run(problem.questionId, content, now, nextRevision);
+  } else {
+    nextRevision = currentRevision + 1;
+    db.prepare(
+      `UPDATE problem_notes
+       SET content = ?, updated_at = ?, revision = ?
+       WHERE question_id = ?`
+    ).run(content, now, nextRevision, problem.questionId);
+  }
+
+  db.prepare("UPDATE catalog_meta SET value=CAST(value AS INTEGER)+1 WHERE key='notes_revision'").run();
   return {
     questionId: problem.questionId,
     questionFrontendId,
     content,
     updatedAt: now,
+    revision: nextRevision,
+    libraryGeneration,
   };
 }
 

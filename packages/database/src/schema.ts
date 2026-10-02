@@ -1,7 +1,7 @@
 /** Read-only compatibility checks shared by storage initialization and recovery. */
 import type { DatabaseSync } from 'node:sqlite';
 
-export const CURRENT_SCHEMA_VERSION = 12;
+export const CURRENT_SCHEMA_VERSION = 13;
 
 /** Unsupported historical or future catalog layout. */
 export class UnsupportedSchemaVersionError extends Error {
@@ -56,7 +56,7 @@ export function inspectCatalogSchema(db: DatabaseSync, allowEmpty = false): numb
   }
   if (versions.length !== 1 || !Number.isInteger(versions[0].version)) throw new DatabaseCorruptionError('Exactly one integer schema version is required');
   const version = versions[0].version;
-  if (![3, 4, 5, 6, 7, 8, 9, 10, CURRENT_SCHEMA_VERSION].includes(version)) throw new UnsupportedSchemaVersionError(`Unsupported catalog schema version ${version}; supported versions are 3 through 10 and ${CURRENT_SCHEMA_VERSION} (11 belongs to a different development format)`);
+  if (![3, 4, 5, 6, 7, 8, 9, 10, 11, 12, CURRENT_SCHEMA_VERSION].includes(version)) throw new UnsupportedSchemaVersionError(`Unsupported catalog schema version ${version}; supported versions are 3 through ${CURRENT_SCHEMA_VERSION}`);
   const required = { ...columns };
   if (version >= 4) {
     required.import_history = [...columns.import_history, 'unchanged_count', 'duplicate_count'];
@@ -94,6 +94,23 @@ export function inspectCatalogSchema(db: DatabaseSync, allowEmpty = false): numb
   }
   if (version >= 10) {
     required.practice_records = [...required.practice_records, 'outcome'];
+  }
+  if (version === 11 || version >= 13) {
+    required.problem_notes = [...required.problem_notes, 'revision'];
+    required.agent_operations = [
+      'id',
+      'client_id',
+      'tool_name',
+      'fingerprint',
+      'status',
+      'library_generation',
+      'result_json',
+      'summary_json',
+      'full_payload_json',
+      'created_at',
+      'updated_at',
+      'expires_at',
+    ];
   }
   for (const [table, names] of Object.entries(required)) {
     if (!tables.has(table)) throw new DatabaseCorruptionError(`Missing required table '${table}'`);
@@ -179,6 +196,13 @@ export function inspectCatalogSchema(db: DatabaseSync, allowEmpty = false): numb
     const notesFk = db.prepare('SELECT * FROM pragma_foreign_key_list(?)').all('problem_notes') as { from: string; table: string; to: string; on_delete: string }[];
     if (!notesFk.some(f => f.from === 'question_id' && f.table === 'problems' && f.to === 'question_id' && f.on_delete === 'CASCADE')) {
       throw new DatabaseCorruptionError('Missing problem_notes question_id foreign key');
+    }
+  }
+  if (version === 11 || version >= 13) {
+    requireKey(db, 'agent_operations', ['id']);
+    const libGen = db.prepare("SELECT value FROM catalog_meta WHERE key = 'library_generation'").get() as { value: string } | undefined;
+    if (!libGen || !/^\d+$/.test(libGen.value) || !Number.isSafeInteger(Number(libGen.value)) || Number(libGen.value) < 1) {
+      throw new DatabaseCorruptionError("Invalid catalog metadata 'library_generation'");
     }
   }
   const integrity = db.prepare('PRAGMA integrity_check').all() as { integrity_check: string }[];

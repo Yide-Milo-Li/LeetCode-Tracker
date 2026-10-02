@@ -112,6 +112,8 @@ import { createHttpTrackerClient } from '../../../packages/workspace/src/client-
 const clients = createHttpTrackerClient({request, exportDataFile, baseUrl:API_BASE});
 export const {api,catalogApi,settingsApi,practiceApi,progressApi,planningApi,dashboardApi,notesApi,exportApi,bundleApi} = clients;
 
+export type McpClientMode = 'read_only' | 'model_review' | 'full_access';
+
 export interface McpClientCredential {
   id: string;
   name: string;
@@ -120,15 +122,31 @@ export interface McpClientCredential {
   lastSuccessfulCallAt: number | null;
   credentialVersion: number;
   revoked: boolean;
+  mode: McpClientMode;
 }
 
 export interface McpSettingsConfig {
   port: number;
-  schemaVersion: 2;
+  schemaVersion: 3;
   accessRevision: number;
   connection: { configPath: string; nodePath: string; proxyPath: string } | null;
   clients: McpClientCredential[];
   aiAccessPaused: boolean;
+  reviewModel: string | null;
+}
+
+export interface PendingAgentOperation {
+  id: string;
+  clientId: string;
+  toolName: string;
+  fingerprint: string;
+  status: 'pending' | 'applied' | 'rejected' | 'failed' | 'cancelled' | 'expired';
+  summaryJson: string | null;
+  createdAt: number;
+  updatedAt: number;
+  expiresAt: number;
+  reviewState?: string;
+  preview?: import('../../../packages/contracts/src/agent-operations.ts').AgentOperationPreview | null;
 }
 
 export interface McpStatus {
@@ -140,12 +158,20 @@ export interface McpStatus {
 export const mcpApi = {
   getStatus: () => request<McpStatus>('/mcp/status'),
   getConfig: () => request<McpSettingsConfig>('/mcp/config'),
-  updateConfig: (patch: { port?: number; aiAccessPaused?: boolean }) =>
+  updateConfig: (patch: { port?: number; aiAccessPaused?: boolean; reviewModel?: string | null }) =>
     request<McpSettingsConfig>('/mcp/config', { method: 'PATCH', body: JSON.stringify(patch) }),
   createClient: (name: string) =>
     request<{ client: McpClientCredential }>('/mcp/clients', { method: 'POST', body: JSON.stringify({ name }) }),
+  updateClientMode: (id: string, mode: McpClientMode) =>
+    request<{ client: McpClientCredential }>(`/mcp/clients/${id}`, { method: 'PATCH', body: JSON.stringify({ mode }) }),
   rotateClient: (id: string) =>
     request<{ client: McpClientCredential }>(`/mcp/clients/${id}/rotate`, { method: 'POST' }),
   revokeClient: (id: string) =>
     request<{ success: boolean }>(`/mcp/clients/${id}/revoke`, { method: 'POST' }),
+  listPendingOperations: () =>
+    request<{ operations: PendingAgentOperation[] }>('/mcp/operations/pending'),
+  proceedOperation: (id: string) =>
+    request<{ status: 'applied'; receipt?: any }>(`/mcp/operations/${id}/proceed`, { method: 'POST' }),
+  rejectOperation: (id: string, reason?: string) =>
+    request<{ success: boolean }>(`/mcp/operations/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
 };

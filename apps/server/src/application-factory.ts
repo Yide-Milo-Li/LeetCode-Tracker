@@ -17,6 +17,7 @@ export function configureApplication(store: CatalogStore, assistant?: IGeminiAss
 }
 
 /** Embedded callers own their Store; this helper never acquires a second lease. */
-export function createServerApplication(store: CatalogStore, assistant?: IGeminiAssistant, profileDirectory?: string) {
-  return createTrackerApplication({store, ...configureApplication(store, assistant, profileDirectory)});
+export function createServerApplication(store: CatalogStore, assistant?: IGeminiAssistant, recovery: string | { draftsDir?: string; legacyDraftsDir?: string; profileDirectory?: string } = {}) {
+  const options = typeof recovery === 'string' ? { profileDirectory: recovery } : recovery;
+  return createTrackerApplication({store, ...configureApplication(store, assistant, options.profileDirectory), draftsDir: options.draftsDir, legacyDraftsDir: options.legacyDraftsDir});
 }

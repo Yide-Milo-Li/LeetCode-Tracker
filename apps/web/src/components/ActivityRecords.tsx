@@ -1,6 +1,7 @@
 /** Filterable activity records for the Progress → Records tab, including statistics drilldowns. */
 import { RotateCcw } from 'lucide-react';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { useBusinessRefresh } from '../../../../packages/workspace/src/hooks/useBusinessRefresh.ts';
 import { api, type DashboardActivityListResponse, type RecentActivityItem } from '../api.ts';
 import { formatActivityAction, formatDifficulty, type Language } from '../i18n.ts';
 import { localizeApiError } from '../error-i18n.ts';
@@ -22,6 +23,8 @@ export function ActivityRecords({
 }) {
   const zh = lang === 'zh';
   const workspace = useWorkspace();
+  const root = useRef<HTMLElement>(null);
+  const externalRevision = useBusinessRefresh(['libraryGeneration', 'catalog', 'practice', 'timezone'], root);
   const [date, setDate] = useState(filterRequest?.date ?? '');
   const [source, setSource] = useState<'all' | 'manual' | 'snapshot'>('all');
   const [pending, setPending] = useState<'all' | 'true' | 'false'>(filterRequest?.pendingOnly ? 'true' : 'all');
@@ -73,7 +76,7 @@ export function ActivityRecords({
     return () => {
       active = false;
     };
-  }, [date, workspace.timezone, workspace.revision]);
+  }, [date, workspace.timezone, workspace.revision, externalRevision]);
   useEffect(() => {
     if (!filterRequest) return;
     setDate(filterRequest.date ?? '');
@@ -102,7 +105,7 @@ export function ActivityRecords({
     return () => {
       active = false;
     };
-  }, [date, source, pending, page, limit, workspace.revision, retry]);
+  }, [date, source, pending, page, limit, workspace.revision, retry, externalRevision]);
   /** Manual rows resolve exact IDs; snapshots open observations and version audits. */
   async function details(item: RecentActivityItem) {
     if (opening) return;
@@ -120,7 +123,7 @@ export function ActivityRecords({
     }
   }
   return (
-    <section className="activity-records">
+    <section className="activity-records" ref={root}>
       <div className="filter-toolbar">
         <Field label={zh ? '日期' : 'Date'}>
           <input

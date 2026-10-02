@@ -6,6 +6,7 @@ import type { ModelService } from './types.ts';
 import type { DiagnosticSink } from './telemetry.ts';
 import type { PlanningService } from './planning.ts';
 import type { AsyncLock } from './locks.ts';
+import type { AgentAuthorization } from '../../contracts/src/agent-operations.ts';
 
 export interface ActivePreview {
   preview: ImportPreview;
@@ -23,6 +24,9 @@ export interface ApplicationDependencies {
   store: CatalogStore;
   modelService: ModelService;
   diagnosticSink?: DiagnosticSink;
+  /** Runtime-owned recovery directory; embedded tests may omit it to disable file storage. */
+  draftsDir?: string;
+  legacyDraftsDir?: string;
   /** Re-resolve persisted provider configuration; exceptions after restore become warnings. */
   refreshModelConfiguration?: () => void | Promise<void>;
 }
@@ -34,4 +38,6 @@ export interface ApplicationContext {
   activePreviews: Map<string, ActivePreview>;
   activeProgressPreviews: Map<string, ActiveProgressPreview>;
   refreshModelConfiguration: () => void | Promise<void>;
+  /** Runtime-owned validator checks saved grant versions without persisting bearer credentials. */
+  assertAgentAuthorized?: (authorization: AgentAuthorization) => void;
 }

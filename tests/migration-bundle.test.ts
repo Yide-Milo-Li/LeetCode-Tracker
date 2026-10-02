@@ -42,7 +42,7 @@ test('v2 round-trips every saved table into an empty device and back without cre
     assert.deepEqual(target.store.getCatalogStats(),source.store.getCatalogStats());
     await source.store.importSnapshotBundle(copied);
     assert.deepEqual(source.store.exportMigrationBundle().tables,bundle.tables);
-    const actual=source.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name <> 'schema_version'").all().map(row=>row.name).sort();
+    const actual=source.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('schema_version', 'agent_operations')").all().map(row=>row.name).sort();
     assert.deepEqual([...MIGRATION_TABLES].sort(),actual,'New schema tables must be explicitly covered');
   } finally {source.close();target.close();}
 });
@@ -80,16 +80,16 @@ test('a target write failure rolls back even after a valid safety backup', async
   } finally {p.close();}
 });
 
-test('API keeps the empty legacy default, rejects lossy old exports and overlapping restore/write requests', async () => {
+test('API keeps the current default, rejects lossy old exports and overlapping restore/write requests', async () => {
   const p=profile(); const app=await buildApp({ application: createServerApplication(p.store), disableStatic:true });
   try {
-    assert.equal((await app.inject('/api/v1/bundle/export')).json().version,1);
+    assert.equal((await app.inject('/api/v1/bundle/export')).json().version,6);
     await seed(p.store);
     const legacy = await app.inject('/api/v1/bundle/export?version=2');
     assert.equal(legacy.statusCode,409);
     assert.equal(legacy.json().error,'BUNDLE_VERSION_REQUIRED');
-    const exported=await app.inject('/api/v1/bundle/export?version=5');
-    assert.equal(exported.json().version,5);
+    const exported=await app.inject('/api/v1/bundle/export?version=6');
+    assert.equal(exported.json().version,6);
     let release!:()=>void; let started!:()=>void;
     const signal=new Promise<void>(resolve=>{started=resolve;});
     const wait=new Promise<void>(resolve=>{release=resolve;});

@@ -348,4 +348,26 @@ describe('Notes Store & Schema v9', () => {
     assert.equal(store.getProblemNote('1')?.content, english);
     assert.equal(store.getProblemNote('2')?.content, chinese);
   });
+
+  it('tracks note revisions and rejects concurrent updates with NoteConflictError', () => {
+    // Initial note creation starts at revision 1
+    const created = store.upsertProblemNote('1', 'Initial note', 0);
+    assert.equal(created.revision, 1);
+    assert.equal(store.getProblemNote('1')?.revision, 1);
+
+    // Stale expectedRevision throws NoteConflictError
+    assert.throws(
+      () => store.upsertProblemNote('1', 'Concurrent edit', 0),
+      (err: any) => err.code === 'NOTE_REVISION_MISMATCH' && err.currentRevision === 1 && err.expectedRevision === 0
+    );
+
+    // Matching expectedRevision succeeds and increments revision to 2
+    const updated = store.upsertProblemNote('1', 'Updated note', 1);
+    assert.equal(updated.revision, 2);
+    assert.equal(store.getProblemNote('1')?.revision, 2);
+
+    // Further update without expectedRevision still increments revision
+    const updatedAgain = store.upsertProblemNote('1', 'Updated again');
+    assert.equal(updatedAgain.revision, 3);
+  });
 });

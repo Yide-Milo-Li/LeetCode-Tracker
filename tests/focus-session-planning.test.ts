@@ -87,7 +87,7 @@ it('rejects cross-midnight override previews even when revisions are unchanged',
     try {
         const preview = await f.service.previewDailyPlanOverride({ rules: { ...rules, focusWeakTags: true } });
         instant += 120000;
-        await assert.rejects(f.service.commitDailyPlanOverride(preview.id, { operationId: randomUUID(), expectedVersion: null }), { code: 'PREVIEW_EXPIRED' });
+        await assert.rejects(f.service.commitDailyPlanOverride(preview.id, { operationId: randomUUID(), expectedVersion: null }), { code: 'STALE_PLAN' });
         assert.equal(f.service.getPlans().length, 0);
     }
     finally {

@@ -47,6 +47,7 @@ import {
   type Strategy,
   type StrategyInput,
   type UpdateStrategyInput,
+  type RevisionStamp,
 } from '../../contracts/src/recommendations.ts';
 import {
   fallbackPlanContent,
@@ -266,7 +267,7 @@ export class PlanningService {
 
   /** Use the final allocator to test whether any semantic choice can matter. */
   private async choose(context: { pool: Candidate[]; nextOrdinal: number }, slots: import('../../domain/src/adaptive-topics.ts').AdaptiveSlot[], rules: Rules,
-    retained: PlanItem[], date: string, deadline: number) {
+    retained: PlanItem[], date: string, deadline: number, localOnly = false) {
     const start = Date.now(), generation = this.gemini?.getConfigurationGeneration?.() ?? 0;
     const allocate = (ids: string[] = []) => selectCandidateSlots(context.pool, slots, context.nextOrdinal, retained, !!rules.focusWeakTags, ids, rules.timeBudgetMinutes != null);
     const baseline = allocate();
@@ -276,6 +277,7 @@ export class PlanningService {
     let reason = 'no_semantic_intent', model = 'local', provider = this.gemini?.getStatus().provider ?? 'gemini';
     let selected = baseline.selected, membershipChanged = false, orderChanged = false;
     if (!slots.length) reason = 'no_open_slots';
+    else if (localOnly) reason = 'local_only';
     else if (!compiled.unresolved.length) reason = 'no_semantic_intent';
     else if (!this.gemini?.getStatus().configured || !this.gemini?.selectPlanProblems) reason = 'no_provider';
     else if (slate.reason !== 'eligible') reason = slate.reason;
@@ -428,6 +430,120 @@ export class PlanningService {
   }
 
   /**
+   * Deterministic local preparation for creating today's plan.
+   * Reuses difficulty quotas, review rules, weak topic ranking, and exclusion rules without calling any LLM.
+   */
+  public async prepareDailyPlan(options: {
+    targetDate: string;
+    userTimezone: string;
+    strategyId?: string;
+    dailyCount?: number;
+  }): Promise<{ plan: DailyPlan; stamp: RevisionStamp }> {
+    const now = Date.now();
+    const stamp = this.planning.stamp();
+    const { targetDate, userTimezone } = options;
+
+    if (!userTimezone || !isTimeZone(userTimezone)) {
+      throw new PlanningError('TIMEZONE_NOT_CONFIGURED', 'Valid timezone must be configured in settings', 400);
+    }
+
+    const targetInstant = Date.parse(`${targetDate}T12:00:00Z`);
+    const weekday = new Date(targetInstant).getUTCDay();
+
+    let strategy: Strategy | null = null;
+    if (options.strategyId) {
+      strategy = this.planning.strategy(options.strategyId);
+    } else {
+      strategy = this.planning.strategyForWeekday(weekday);
+    }
+
+    if (!strategy) {
+      throw new PlanningError('NO_ACTIVE_STRATEGY', `No study strategy configured for date ${targetDate}`, 400);
+    }
+
+    let rules = normalizeRules(strategy.rules);
+    if (options.dailyCount !== undefined && options.dailyCount >= 1 && options.dailyCount <= 50) {
+      rules = { ...rules, dailyCount: options.dailyCount };
+    }
+
+    const context = this.candidateContext(
+      rules,
+      targetDate,
+      userTimezone,
+      now,
+      targetDate + ':' + strategy.id,
+      new Set(),
+      strategy.id,
+    );
+    const { pool } = context;
+
+    if (!pool.length) {
+      throw new PlanningError('INSUFFICIENT_PROBLEMS', 'Not enough problems matching the strategy constraints.', 400);
+    }
+
+    const selection = select(pool, rules, []);
+    if (!selection.selected.length) {
+      throw new PlanningError('INSUFFICIENT_PROBLEMS', 'Not enough problems matching the strategy constraints.', 400);
+    }
+
+    if (rules.focusWeakTags) {
+      selection.selected = selectAdaptiveSlots(
+        pool,
+        selection.selected.map(p => ({ difficulty: p.difficulty, kind: p.kind })),
+        context.nextOrdinal,
+      );
+    }
+
+    const aiContent = fallbackPlanContent(selection.selected, rules);
+
+    const items: PlanItem[] = selection.selected.map(p => ({
+      id: randomUUID(),
+      problem: p,
+      kind: p.kind,
+      addedAt: now,
+      reason: p.explanation?.evidenceSummary?.reasonText ?? aiContent.reasons[p.questionId] ?? {
+        en: p.isFocusTopic
+          ? `Selected ${p.difficulty} problem targeting weak topic (${p.matchedWeakTags?.join(', ') || p.difficulty}) for focused breakthrough.`
+          : `Selected ${p.difficulty} problem to practice core algorithms.`,
+        zh: p.isFocusTopic
+          ? `精选薄弱专题${p.difficulty}题目（${p.matchedWeakTags?.join('、') || p.difficulty}），针对性训练核心算法。`
+          : `精选${p.difficulty}难度题目，针对性训练核心算法。`,
+      },
+      evidenceIds: [],
+      completed: false,
+      isFocusTopic: p.isFocusTopic,
+      matchedWeakTags: p.matchedWeakTags,
+      isAdaptiveReview: p.isAdaptiveReview,
+      adaptiveReason: p.adaptiveReason,
+      explanation: p.explanation,
+    }));
+
+    const plan: DailyPlan = {
+      id: randomUUID(),
+      date: targetDate,
+      timezone: userTimezone,
+      version: 1,
+      strategyId: strategy.id,
+      strategyVersion: strategy.version,
+      rules,
+      items,
+      source: 'local',
+      model: null,
+      encouragement: aiContent.encouragement,
+      notices: [...selection.notices, ...context.notices],
+      catalogRevision: stamp.catalog,
+      practiceRevision: stamp.practice,
+      planningRevision: stamp.planning,
+      algorithmVersion: ALGORITHM_VERSION,
+      createdAt: now,
+      updatedAt: now,
+      action: 'ensure',
+    };
+
+    return { plan, stamp };
+  }
+
+  /**
    * Replace single item or all unfinished items in a daily plan.
    * Keeps completed items, preserves slot difficulty/kind, and excludes past items.
    */
@@ -437,8 +553,10 @@ export class PlanningService {
       mode: 'one' | 'all_unfinished';
       feedbackReason?: RecommendationFeedbackReason;
       itemId?: string;
+      itemIds?: string[];
       expectedVersion: number;
       operationId: string;
+      prepareOnly?: boolean;
     }
   ): Promise<DailyPlan> {
     const fingerprint = `replace:${planId}:${options.expectedVersion}:${options.mode}:${options.itemId ?? 'all'}${options.feedbackReason ? ':' + options.feedbackReason : ''}`;
@@ -458,10 +576,19 @@ export class PlanningService {
     }
 
     const analysisDate = localDate(now, plan.timezone);
+    if (plan.date !== localDate(now, plan.timezone) || plan.timezone !== (this.store.getSettings().timezone ?? 'UTC')) throw new PlanningError('STALE_PLAN', 'Only the current day and timezone can be modified', 409);
 
     // Determine target items to replace
     let itemsToReplace: PlanItem[] = [];
-    if (options.mode === 'one') {
+    if (options.itemIds) {
+      if (new Set(options.itemIds).size !== options.itemIds.length) throw new PlanningError('INVALID_TARGETS', 'Duplicate plan targets', 400);
+      itemsToReplace = options.itemIds.map(id => {
+        const item = plan.items.find(i => i.id === id);
+        if (!item) throw new PlanningError('ITEM_NOT_FOUND', 'A requested item is absent', 400);
+        if (item.completed) throw new PlanningError('ITEM_ALREADY_COMPLETED', 'Cannot replace a completed item', 400);
+        return item;
+      });
+    } else if (options.mode === 'one') {
       const target = plan.items.find(i => i.id === options.itemId);
       if (!target) {
         throw new PlanningError('ITEM_NOT_FOUND', `Item '${options.itemId}' not found in plan`, 400);
@@ -566,6 +693,7 @@ export class PlanningService {
       ...(options.feedbackReason ? { feedback: [...(plan.feedback ?? []), ...itemsToReplace.filter(i => !updatedItems.includes(i)).map(i => ({ questionId: i.problem.questionId, action: 'replace' as const, reason: options.feedbackReason!, recordedAt: now }))] } : {}),
     };
 
+    if (options.prepareOnly) return this.withTimeEstimate(newPlan);
     return this.planning.commit(
       this.withTimeEstimate(newPlan),
       stamp,
@@ -576,6 +704,7 @@ export class PlanningService {
       () => {
         if (epoch !== this.transientEpoch) throw new PlanningError('STALE_DATA', 'Profile changed during replacement; retry', 409);
         if (analysisDate !== localDate(Date.now(), plan.timezone)) throw new PlanningError('STALE_PLAN', 'Calendar date changed during replacement; reload', 409);
+        if (plan.date !== localDate(Date.now(), plan.timezone) || plan.timezone !== (this.store.getSettings().timezone ?? 'UTC')) throw new PlanningError('STALE_PLAN', 'Plan date or timezone changed during replacement', 409);
       }
     );
   }
@@ -593,6 +722,8 @@ export class PlanningService {
     options: {
       expectedVersion: number;
       operationId: string;
+      prepareOnly?: boolean;
+      frontendQuestionId?: string;
     }
   ): Promise<DailyPlan> {
     const fingerprint = `append:${planId}:${options.expectedVersion}`;
@@ -653,8 +784,10 @@ export class PlanningService {
       plan.strategyId
     );
 
-    const candidate = selectCandidateSlots(context.pool, [{ difficulty: targetDifficulty, kind: targetKind }],
-      context.nextOrdinal, plan.items, !!plan.rules.focusWeakTags, [], plan.rules.timeBudgetMinutes != null).selected[0];
+    const candidate = options.frontendQuestionId
+      ? context.pool.find(p => p.difficulty === targetDifficulty && p.kind === targetKind && p.questionFrontendId === options.frontendQuestionId)
+      : selectCandidateSlots(context.pool, [{ difficulty: targetDifficulty, kind: targetKind }],
+        context.nextOrdinal, plan.items, !!plan.rules.focusWeakTags, [], plan.rules.timeBudgetMinutes != null).selected[0];
 
     if (!candidate) {
       throw new PlanningError('NO_CANDIDATES', 'No eligible candidates found for target difficulty and type; adjust rules to continue', 422);
@@ -712,6 +845,7 @@ export class PlanningService {
       planningRevision: stamp.planning,
     };
 
+    if (options.prepareOnly) return this.withTimeEstimate(newPlan);
     return this.planning.commit(
       this.withTimeEstimate(newPlan),
       stamp,
@@ -721,7 +855,7 @@ export class PlanningService {
       true,
       () => {
         if (this.transientEpoch !== epoch) throw new PlanningError('STALE_DATA', 'Profile changed during append; retry', 409);
-        if (localDate(Date.now(), plan.timezone) !== analysisDate) throw new PlanningError('STALE_PLAN', 'Calendar date changed during append; reload', 409);
+        if (localDate(Date.now(), plan.timezone) !== analysisDate || plan.timezone !== (this.store.getSettings().timezone ?? 'UTC')) throw new PlanningError('STALE_PLAN', 'Calendar date changed during append; reload', 409);
       }
     );
   }
@@ -744,6 +878,7 @@ export class PlanningService {
       feedbackReason?: RecommendationFeedbackReason;
       expectedVersion: number;
       operationId: string;
+      prepareOnly?: boolean;
     }
   ): Promise<DailyPlan> {
     const fingerprint = `remove:${planId}:${options.expectedVersion}:${options.itemId}${options.feedbackReason ? ':' + options.feedbackReason : ''}`;
@@ -773,20 +908,6 @@ export class PlanningService {
     }
 
     const targetItem = plan.items[targetIndex];
-
-    // Cascade practice revocation: revoke any manual practice records tied to this problem
-    if (targetItem.evidenceIds?.length) {
-      for (const evidenceId of targetItem.evidenceIds) {
-        if (evidenceId.startsWith('manual:')) {
-          const recordId = evidenceId.slice('manual:'.length);
-          try {
-            await this.store.revokePracticeRecord(recordId);
-          } catch {
-            // Ignore if already revoked or not found
-          }
-        }
-      }
-    }
 
     const stamp = this.planning.stamp();
     const newItems = plan.items.filter((_, idx) => idx !== targetIndex);
@@ -823,6 +944,16 @@ export class PlanningService {
       planningRevision: stamp.planning,
     };
 
+    const beforeCommit = () => {
+      // Any failed cascade rolls back the plan and all preceding revocations.
+      for (const evidenceId of targetItem.evidenceIds) {
+        if (!evidenceId.startsWith('manual:')) continue;
+        const record = this.store.getPracticeRecord(evidenceId.slice(7));
+        if (record?.status === 'active') this.store.revokePracticeStatement(record.id, record.revision);
+      }
+    };
+
+    if (options.prepareOnly) return this.withTimeEstimate(newPlan);
     return this.planning.commit(
       this.withTimeEstimate(newPlan),
       stamp,
@@ -832,8 +963,9 @@ export class PlanningService {
       true,
       () => {
         if (this.transientEpoch !== epoch) throw new PlanningError('STALE_DATA', 'Profile changed during remove; retry', 409);
-        if (localDate(Date.now(), plan.timezone) !== analysisDate) throw new PlanningError('STALE_PLAN', 'Calendar date changed during remove; reload', 409);
-      }
+        if (localDate(Date.now(), plan.timezone) !== analysisDate || plan.timezone !== (this.store.getSettings().timezone ?? 'UTC')) throw new PlanningError('STALE_PLAN', 'Calendar date changed during remove; reload', 409);
+      },
+      beforeCommit
     );
   }
 
@@ -1095,6 +1227,8 @@ export class PlanningService {
     options: {
       operationId: string;
       expectedVersion: number | null;
+      localOnly?: boolean;
+      prepareOnly?: boolean;
     }
   ): Promise<DailyPlan> {
     const fingerprint = `override:${previewId}:${options.expectedVersion ?? 'null'}`;
@@ -1118,6 +1252,10 @@ export class PlanningService {
     this.planning.assertStamp(preview.revision);
 
     const now = Date.now();
+    const validateCalendar = () => {
+      if (preview.date !== localDate(Date.now(), preview.revision.timezone ?? 'UTC') || (preview.revision.timezone ?? 'UTC') !== (this.store.getSettings().timezone ?? 'UTC')) throw new PlanningError('STALE_PLAN', 'Override date or timezone changed', 409);
+    };
+    validateCalendar();
     const deadline = now + this.timeoutMs;
     const epoch = this.transientEpoch;
     const basePlan = this.planning.planByDate(preview.date, now);
@@ -1130,6 +1268,7 @@ export class PlanningService {
       throw new PlanningError('PREVIEW_EXPIRED', 'Calendar date changed; preview again', 400);
 
     if (basePlan && preview.changed.length === 0) {
+      if (options.prepareOnly) return basePlan;
       const committed = await this.planning.commit(
         basePlan,
         preview.revision,
@@ -1138,6 +1277,7 @@ export class PlanningService {
         fingerprint,
         false,
         () => {
+          validateCalendar();
           if (epoch !== this.transientEpoch) throw new PlanningError('STALE_DATA', 'Profile changed during override; retry', 409);
           if (preview.analysisDate && preview.analysisDate !== localDate(Date.now(), userTimezone))
             throw new PlanningError('PREVIEW_EXPIRED', 'Calendar date changed; preview again', 400);
@@ -1174,7 +1314,7 @@ export class PlanningService {
     const selection = select(pool, effectiveRules, retainedItems);
     const reusable = basePlan?.items.filter(i => !i.completed && i.kind === 'new').map(i => i.explanation?.explorationOrdinal ?? null) ?? [];
     const choice = await this.choose(context, selection.selected.map(p => ({ difficulty: p.difficulty, kind: p.kind,
-      ...(effectiveRules.focusWeakTags && p.kind === 'new' && reusable.length ? { ordinal: reusable.shift() } : {}) })), effectiveRules, retainedItems, preview.date, deadline);
+      ...(effectiveRules.focusWeakTags && p.kind === 'new' && reusable.length ? { ordinal: reusable.shift() } : {}) })), effectiveRules, retainedItems, preview.date, deadline, options.localOnly);
     selection.selected = choice.selected;
     const aiContent = fallbackPlanContent(selection.selected, effectiveRules);
     const generationModel = choice.model, generationProvider = choice.provider;
@@ -1239,6 +1379,10 @@ export class PlanningService {
       };
     }
 
+    if (options.prepareOnly) {
+      this.activeOverridePreviews.delete(previewId);
+      return this.withTimeEstimate(planToCommit);
+    }
     const committed = await this.planning.commit(
       this.withTimeEstimate(planToCommit),
       preview.revision,
@@ -1247,6 +1391,7 @@ export class PlanningService {
       `override:${preview.id}:${options.expectedVersion ?? 'null'}`,
       true,
       () => {
+          validateCalendar();
         if (epoch !== this.transientEpoch) throw new PlanningError('STALE_DATA', 'Profile changed during override; retry', 409);
         if (localDate(Date.now(), userTimezone) !== localDate(now, userTimezone)) throw new PlanningError('PREVIEW_EXPIRED', 'Calendar date changed; preview again', 400);
       }

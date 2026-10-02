@@ -40,6 +40,21 @@ export function WorkspaceProvider({client,host,children,services,theme='light',p
     if(event.type==='connection')setConnected(event.connected);
     if(event.type==='navigate'&&event.targetId)setSelectedNoteProblem(event.targetId);
   }),[host]);
+  // One provider owns recovery polling for both retained views; hidden frames stop checking.
+  useEffect(()=>{
+    if(!client.recoverOperations)return;
+    let active=true,checking=false;
+    const check=async()=>{
+      if(!active||checking||document.visibilityState==='hidden'||root.current?.closest('[hidden]'))return;
+      checking=true;
+      try{await client.recoverOperations?.();}catch{ /* Preserve input when the host is temporarily unavailable. */ }finally{checking=false;}
+    };
+    const focus=()=>{void check();};
+    const unsubscribe=host.subscribe(event=>{if(event.type==='connection'&&event.connected)focus();});
+    const interval=setInterval(focus,2000);
+    window.addEventListener('focus',focus);document.addEventListener('visibilitychange',focus);
+    return ()=>{active=false;unsubscribe();clearInterval(interval);window.removeEventListener('focus',focus);document.removeEventListener('visibilitychange',focus);};
+  },[client,host]);
   const value=useMemo(()=>({client,host,...owned,revision,connected,root}),[client,host,owned,revision,connected]);
   const state=useMemo(()=>({revision,timezone:null,selectedNoteProblem,navigate:host.navigate,
     notifyMutation:()=>host.emit({type:'refresh'}),openPractice:()=>{throw new Error('Practice is unavailable in this host');}}),[revision,selectedNoteProblem,host]);

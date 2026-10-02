@@ -10,16 +10,16 @@ export function createBundleOperations(context: ApplicationContext) {
   const { store, writeLock } = context;
   /** Validate the requested format and reject lossy legacy exports. */
   const exportBundle = async (input: unknown = {}) => {
-    const version = (input as {version?: string}).version ?? '1';
-    if (!['1', '2', '3', '5'].includes(version)) return fail(400, {error: 'INVALID_BUNDLE_VERSION'});
+    const version = (input as {version?: string}).version ?? '6';
+    if (!['1', '2', '3', '4', '5', '6'].includes(version)) return fail(400, {error: 'INVALID_BUNDLE_VERSION'});
     let bundle;
     try {
-      bundle = version === '5' ? store.exportMigrationBundle(5) : version === '3'
-        ? store.exportMigrationBundle(3) : version === '2'
-          ? store.exportMigrationBundle(2) : store.exportSnapshotBundle();
+      bundle = version === '6' ? store.exportMigrationBundle(6) : version === '5' ? store.exportMigrationBundle(5)
+        : version === '4' ? store.exportMigrationBundle(4) : version === '3' ? store.exportMigrationBundle(3)
+        : version === '2' ? store.exportMigrationBundle(2) : store.exportSnapshotBundle();
     } catch (error) {
       if (error instanceof Error && error.message.startsWith('BUNDLE_VERSION_REQUIRED:')) {
-        return fail(409, {error: 'BUNDLE_VERSION_REQUIRED', message: error.message, requiredVersion: 5});
+        return fail(409, {error: 'BUNDLE_VERSION_REQUIRED', message: error.message, requiredVersion: error.message.includes('v6') ? 6 : 5});
       }
       throw error;
     }
@@ -38,7 +38,7 @@ export function createBundleOperations(context: ApplicationContext) {
       });
     }
 
-    if (parseRes.data.version === 2 || parseRes.data.version === 3 || parseRes.data.version === 5) {
+    if (parseRes.data.version !== 1) {
       try { validateMigrationBundle(parseRes.data); }
       catch { return fail(400, {error: 'INVALID_BUNDLE_FORMAT', message: 'Invalid migration data or references.'}); }
     }

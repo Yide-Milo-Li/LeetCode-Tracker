@@ -103,6 +103,7 @@ describe('SettingsView: Background Runtime & AI Connection (MCP)', () => {
       ],
       aiAccessPaused: false,
     }));
+    mock.method(mcpApi, 'listPendingOperations', async () => ({ operations: [] }));
   });
 
   afterEach(() => {
@@ -273,5 +274,118 @@ describe('SettingsView: Background Runtime & AI Connection (MCP)', () => {
       fireEvent.click(revokeButtons[0]);
     });
     assert.equal(revokedCalled, true);
+  });
+
+  it('switches client connection mode and displays full access boundary badge', async () => {
+    let updatedId = '';
+    let updatedMode = '';
+
+    mock.method(mcpApi, 'updateClientMode', async (id: string, mode: any) => {
+      updatedId = id;
+      updatedMode = mode;
+      return { client: { id, name: 'Claude Desktop', token: 'tok', createdAt: 1, lastSuccessfulCallAt: null, revoked: false, mode } };
+    });
+
+    await act(async () => {
+      render(
+        <DesktopWorkspaceProvider>
+          <SettingsView
+            lang="zh"
+            currentTheme="light"
+            onLanguageChange={() => {}}
+            onThemeChange={() => {}}
+          />
+        </DesktopWorkspaceProvider>
+      );
+    });
+
+    const modeSelects = screen.getAllByLabelText(/访问权限/);
+    assert.ok(modeSelects.length >= 1);
+
+    await act(async () => {
+      fireEvent.change(modeSelects[0], { target: { value: 'full_access' } });
+    });
+
+    assert.equal(updatedId, 'claude-desktop');
+    assert.equal(updatedMode, 'full_access');
+    assert.ok(screen.getByText('仅 Tracker 练习、笔记和计划'));
+  });
+
+  it('displays pending approvals and supports Proceed and Reject actions', async () => {
+    let proceedCalled = '';
+    let rejectCalled = '';
+
+    mock.method(mcpApi, 'listPendingOperations', async () => ({
+      operations: [
+        {
+          id: 'op-test-123',
+          clientId: 'claude-desktop',
+          toolName: 'tracker_create_practice',
+          fingerprint: 'fp-123',
+          status: 'pending',
+          reviewState: 'complete',
+          preview: {action:'create_practice',target:'Problem 1',libraryGeneration:1,changes:[
+            {label:'Note text',before:'Original synthetic text',after:'Edited synthetic text'},
+            {label:'Replace problem 2',before:{problemId:'2'},after:{problemId:'7'}},
+          ],cascades:[{recordId:'practice-cascade-1',revision:3}],planDate:'2026-10-01',timezone:'UTC'},
+          summaryJson: JSON.stringify({
+            action: 'create_practice',
+            target: 'Problem 1: Two Sum',
+            diffSummary: 'Record practice for problem 1 (Completed) at 2026-10-01.',
+            riskLevel: 'medium',
+            reviewReason: 'Automated logging verification required',
+          }),
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          expiresAt: Date.now() + 25 * 60 * 1000,
+        },
+      ],
+    }));
+
+    mock.method(mcpApi, 'proceedOperation', async (id: string) => {
+      proceedCalled = id;
+      return { status: 'applied' };
+    });
+
+    mock.method(mcpApi, 'rejectOperation', async (id: string) => {
+      rejectCalled = id;
+      return { success: true };
+    });
+
+    await act(async () => {
+      render(
+        <DesktopWorkspaceProvider>
+          <SettingsView
+            lang="zh"
+            currentTheme="light"
+            onLanguageChange={() => {}}
+            onThemeChange={() => {}}
+          />
+        </DesktopWorkspaceProvider>
+      );
+    });
+
+    assert.ok(screen.getByText('待批准操作 (Pending Approvals)'));
+    assert.ok(screen.getByText('tracker_create_practice'));
+    assert.ok(screen.getByText(/Problem 1: Two Sum/));
+    assert.ok(screen.getByText(/Record practice for problem 1/));
+    assert.ok(screen.getByText('Risk: medium'));
+    assert.ok(screen.getByText('Original synthetic text'));
+    assert.ok(screen.getByText('Edited synthetic text'));
+    assert.ok(screen.getByText('Replace problem 2'));
+    assert.ok(screen.getByText(/practice-cascade-1/));
+    assert.ok(screen.getByText(/Automated logging verification required/));
+
+    const proceedBtn = screen.getByText('批准 (Proceed)');
+    await act(async () => {
+      fireEvent.click(proceedBtn);
+    });
+    assert.equal(proceedCalled, 'op-test-123');
+
+    const rejectBtn = screen.getByText('拒绝 (Reject)');
+    await act(async () => {
+      fireEvent.click(rejectBtn);
+    });
+    assert.equal(rejectCalled, 'op-test-123');
   });
 });

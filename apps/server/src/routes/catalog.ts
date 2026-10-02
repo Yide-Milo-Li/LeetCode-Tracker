@@ -4,6 +4,7 @@ import type { RouteContext } from './types.ts';
 import { invokeApplication } from './adapter.ts';
 
 export function registerCatalogRoutes(app: FastifyInstance, context: RouteContext): void {
+  app.get('/api/v1/business/versions', async () => context.application.businessVersions());
   app.post("/api/v1/imports/preview", async (request, reply) =>
     invokeApplication(reply, () => context.application.catalog.preview(request.body), 200));
   app.post("/api/v1/imports", async (request, reply) =>

@@ -53,6 +53,71 @@ test('fresh config is paused and empty; legacy credentials reset exactly once', 
   } finally { rmSync(dir,{recursive:true,force:true}); }
 });
 
+test('v2 config upgrades to v3 setting existing clients to read_only and reviewModel to null', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tracker-mcp-v2-'));
+  try {
+    const file = join(dir, 'config.json');
+    const v2Payload = {
+      schemaVersion: 2,
+      port: 30123,
+      aiAccessPaused: false,
+      accessRevision: 3,
+      clients: [
+        {
+          id: 'client-1',
+          name: 'Existing Client',
+          token: 'a'.repeat(64),
+          credentialVersion: 2,
+          createdAt: 1000,
+          revoked: false,
+          lastSuccessfulCallAt: 2000,
+        },
+      ],
+    };
+    writeFileSync(file, JSON.stringify(v2Payload, null, 2));
+    const controller = new McpController(file);
+    const config = controller.getConfig();
+    assert.equal(config.schemaVersion, 3);
+    assert.equal(config.reviewModel, null);
+    assert.equal(config.clients.length, 1);
+    assert.equal(config.clients[0].mode, 'read_only');
+    assert.equal(config.clients[0].name, 'Existing Client');
+    const onDisk = JSON.parse(readFileSync(file, 'utf8'));
+    assert.equal(onDisk.schemaVersion, 3);
+    assert.equal(onDisk.clients[0].mode, 'read_only');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('client mode change updates mode, bumps credentialVersion, and invalidates outstanding authorization', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tracker-mcp-mode-'));
+  try {
+    const owner = new McpController(join(dir, 'config.json'));
+    let invalidatedId: string | undefined;
+    owner.onAuthorizationInvalidated = (id) => { invalidatedId = id; };
+    const client = owner.createClient('Codex');
+    assert.equal(client.mode, 'read_only');
+    owner.update({ aiAccessPaused: false });
+    const auth = owner.authorize(client.token)!;
+    assert.equal(auth.mode, 'read_only');
+    owner.assertAuthorized(auth);
+
+    const updated = owner.updateClientMode(client.id, 'model_review')!;
+    assert.equal(updated.mode, 'model_review');
+    assert.equal(invalidatedId, client.id);
+    assert.throws(() => owner.assertAuthorized(auth), /MCP_UNAUTHORIZED/);
+
+    const newAuth = owner.authorize(client.token)!;
+    assert.equal(newAuth.mode, 'model_review');
+    owner.assertAuthorized(newAuth);
+
+    owner.updateClientMode(client.id, 'full_access');
+    assert.throws(() => owner.assertAuthorized(newAuth), /MCP_UNAUTHORIZED/);
+    const fullAuth = owner.authorize(client.token)!;
+    assert.equal(fullAuth.mode, 'full_access');
+    owner.assertAuthorized(fullAuth);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('rotation, revocation and pause-resume invalidate an outstanding authorization', () => {
   const dir=mkdtempSync(join(tmpdir(),'tracker-mcp-auth-'));
   try {

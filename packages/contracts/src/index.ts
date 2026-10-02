@@ -9,3 +9,4 @@ export * from './dashboard.ts';
 export * from './notes.ts';
 export * from './mastery.ts';
 export * from './knowledge-profile.ts';
+export * from './agent-operations.ts';

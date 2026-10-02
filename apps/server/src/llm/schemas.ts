@@ -122,3 +122,23 @@ export const problemSelectionResponseSchema = {
   },
   required: ['selectedQuestionIds'],
 };
+
+/** Schema for agent write operation security review. */
+export const reviewOperationResponseSchema = {
+  type: Type.OBJECT,
+  properties: {
+    decision: {
+      type: Type.STRING,
+      description: 'Review decision: allow, require_confirmation, or deny',
+    },
+    riskLevel: {
+      type: Type.STRING,
+      description: 'Estimated risk level: low, medium, or high',
+    },
+    reason: {
+      type: Type.STRING,
+      description: 'Concise explanation for the review decision',
+    },
+  },
+  required: ['decision', 'riskLevel', 'reason'],
+};

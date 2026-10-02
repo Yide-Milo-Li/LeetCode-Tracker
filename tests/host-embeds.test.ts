@@ -25,7 +25,7 @@ test('stateless HTTP rejects standalone SSE and completes real SDK discovery wit
     assert.equal(standalone.headers.get('allow'),'POST');
     await standalone.text();
     await client.connect(transport);
-    assert.equal((await client.listTools()).tools.length,8);
+    assert.equal((await client.listTools()).tools.length,9);
     const resource=(await client.readResource({uri:RESOURCE_URI})).contents[0];
     assert.ok('text' in resource);
     assert.match(resource.text,/HTTP synthetic resource/);
@@ -34,13 +34,13 @@ test('stateless HTTP rejects standalone SSE and completes real SDK discovery wit
     assert.match(JSON.stringify(note.structuredContent),/Initial lab content/);
   }finally{await client.close();await lab.close();}
 });
-test('SDK discovers exactly eight allowed tools, the UI resource and application errors',async()=>{
+test('SDK discovers exactly nine allowed tools, the UI resource and application errors',async()=>{
   const lab=await openExperimentLab('<html>synthetic resource</html>');
   const server=createExperimentMcp(lab.tools,'<html>synthetic resource</html>'),client=new Client({name:'offline-test',version:'1'});
   const [c,s]=pair();
   try {
     await server.connect(s);await client.connect(c);
-    const listed=await client.listTools();assert.equal(listed.tools.length,8);assert.ok(listed.tools.every(tool=>tool._meta?.ui));
+    const listed=await client.listTools();assert.equal(listed.tools.length,9);assert.ok(listed.tools.every(tool=>tool._meta?.ui));
     const resource=await client.readResource({uri:RESOURCE_URI});assert.match(String(resource.contents[0].mimeType),/mcp-app/);
     const settings=await client.callTool({name:'tracker_preferences',arguments:{}});assert.ok(!JSON.stringify(settings).includes('ApiKey'));
     const plans=await lab.tools.call('tracker_today',{});const plan=(plans.structuredContent as {data:{items:{id:string;version:number;items:unknown[]}[]}}).data.items[0];
@@ -51,9 +51,9 @@ test('SDK discovers exactly eight allowed tools, the UI resource and application
 });
 test('MCP Apps initializes before calls, receives tool results, propagates failure and tears down',async()=>{
   const app=new App({name:'offline-ui',version:'1'},{},{strict:true,autoResize:false});
-  const workspace=createChatGPTWorkspace(app);
+  const workspace=createChatGPTWorkspace(app,'experimental');
   const bridge=new AppBridge(null,{name:'offline-host',version:'1'},{serverTools:{}});
-  bridge.oncalltool=async params=>params.name==='tracker_note'?{isError:true,content:[],structuredContent:{status:409,error:'SYNTHETIC_CONFLICT',message:'Synthetic conflict'}}:{content:[],structuredContent:{data:{timezone:'UTC'}}};
+  bridge.oncalltool=async params=>(params.name==='tracker_note'||(params.name==='tracker_workspace_query'&&(params.arguments as any)?.kind==='note'))?{isError:true,content:[],structuredContent:{status:409,error:'SYNTHETIC_CONFLICT',message:'Synthetic conflict'}}:{content:[],structuredContent:{data:{timezone:'UTC',language:'en',theme:'light',palette:'default'}}};
   const [a,b]=pair();let refreshes=0;const off=workspace.host.subscribe(event=>{if(event.type==='refresh')refreshes++;});
   try {
     await bridge.connect(b);await workspace.connect(a);assert.equal((await workspace.client.getSettings()).timezone,'UTC');

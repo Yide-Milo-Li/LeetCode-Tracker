@@ -18,7 +18,7 @@ const assistant: IGeminiAssistant = { getStatus: () => ({ configured: false, mod
   formatProgressText: async () => ({ candidates: [], unparsedSnippets: [], model: 'local' }),
   generatePlanContent: async params => fallbackPlanContent(params.problems, params.rules) };
 
-it('migrates supported v3-v10 schemas with verified pre-migration snapshots and rejects reserved/future versions', async () => {
+it('migrates supported v3-v10 schemas with verified pre-migration snapshots and rejects future versions', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'phase39-migration-'));
   try {
     for (let version = 3; version <= 10; version++) {
@@ -30,17 +30,46 @@ it('migrates supported v3-v10 schemas with verified pre-migration snapshots and 
         db.prepare('UPDATE schema_version SET version=?').run(version);
         const backups = path.join(directory, 'backups-' + version);
         const store = await CatalogStore.open(db, { backupDir: backups });
-        assert.equal(inspectCatalogSchema(db), 12);
-        const migration = (await readdir(backups)).find(file => file.startsWith('migration-v' + version + '-to-v12'))!;
+        assert.equal(inspectCatalogSchema(db), 13);
+        const migration = (await readdir(backups)).find(file => file.startsWith('migration-v' + version + '-to-v13'))!;
         assert.ok(migration); assert.equal(store.backupManager!.verifyBackup(path.join(backups, migration)).version, version);
       } finally { db.close(); }
     }
-    for (const version of [11, 13, 99]) {
+    for (const version of [14, 99]) {
       const db = new DatabaseSync(':memory:');
       try {
         db.exec('CREATE TABLE schema_version(version INTEGER PRIMARY KEY)'); db.prepare('INSERT INTO schema_version VALUES(?)').run(version);
         assert.throws(() => new CatalogStore(db), /Unsupported catalog schema/);
         assert.equal(db.prepare('SELECT version FROM schema_version').get()!.version, version);
+      } finally { db.close(); }
+    }
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+it('upgrades the independent v11 and v12 layouts without losing their notes', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'merged-schema-'));
+  try {
+    for (const version of [11, 12]) {
+      const db = new DatabaseSync(path.join(directory, `v${version}.sqlite`));
+      try {
+        const original = new CatalogStore(db, { skipBackup: true });
+        await original.importJsonl(JSON.stringify({ id: '1', title: 'Synthetic', difficulty: 'Easy' }));
+        original.upsertProblemNote('1', 'first');
+        original.upsertProblemNote('1', 'second');
+        if (version === 12) {
+          db.exec('DROP TABLE agent_operations; ALTER TABLE problem_notes DROP COLUMN revision');
+          db.exec("DELETE FROM catalog_meta WHERE key IN ('library_generation', 'notes_revision', 'approvals_revision')");
+        }
+        db.prepare('UPDATE schema_version SET version=?').run(version);
+        const backups = path.join(directory, `backups-${version}`);
+        const upgraded = await CatalogStore.open(db, { backupDir: backups });
+        assert.equal(inspectCatalogSchema(db), 13);
+        const note = upgraded.getProblemNote('1')!;
+        assert.equal(note.content, 'second');
+        assert.equal(note.revision, version === 11 ? 2 : 1);
+        const backup = (await readdir(backups)).find(file => file.startsWith(`migration-v${version}-to-v13`));
+        assert.ok(backup);
+        assert.equal(upgraded.backupManager!.verifyBackup(path.join(backups, backup)).version, version);
       } finally { db.close(); }
     }
   } finally { await rm(directory, { recursive: true, force: true }); }
@@ -107,6 +136,17 @@ it('roundtrips Bundle5 policy, feedback, saved reasons and replays; excludes sou
       assert.equal(targetDb.prepare('SELECT COUNT(*) AS count FROM planning_operations').get()!.count, 0);
       assert.equal(target.getSettings().openaiApiKey, 'synthetic-target-secret');
     } finally { emptyDb.close(); }
+    source.upsertProblemNote('1', 'first revision');
+    source.upsertProblemNote('1', 'second revision');
+    assert.throws(() => source.exportMigrationBundle(5), /Bundle v6/);
+    const combined = source.exportMigrationBundle(6);
+    assert.equal(combined.version, 6);
+    assert.equal(combined.schemaVersion, 13);
+    await target.importSnapshotBundle(combined);
+    assert.equal(target.getProblemNote('1')!.content, 'second revision');
+    assert.equal(target.getProblemNote('1')!.revision, 2);
+    assert.deepEqual(restored.getStrategy(strategy.id)?.rules, service.getStrategy(strategy.id)?.rules);
+    assert.equal(target.getSettings().openaiApiKey, 'synthetic-target-secret');
   } finally { sourceDb.close(); targetDb.close(); await rm(directory, { recursive: true, force: true }); }
 });
 

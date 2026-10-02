@@ -8,6 +8,7 @@ import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { inspectCatalogSchema } from './schema.ts';
 import { acquireDatabaseLease } from './lease.ts';
+import { initOrMigrateSchema } from './migrations.ts';
 
 /** Result of backup file validation. */
 export interface BackupVerificationResult {
@@ -206,14 +207,42 @@ export class BackupManager {
     const staged = `${targetPath}.restore-${randomUUID()}.sqlite`;
     let safetyCopyPath: string | undefined;
     let replacementStarted = false;
+    let targetGeneration = 0;
+    let receipts: Record<string, unknown>[] = [];
     try {
       const source = new DatabaseSync(sourcePath, { readOnly: true });
       try { await this.createBackup(source, staged); } finally { source.close(); }
       if (fs.existsSync(targetPath)) {
         const current = new DatabaseSync(targetPath, { readOnly: true });
         safetyCopyPath = `${targetPath}.pre-restore-${randomUUID()}.sqlite`;
-        try { await this.createBackup(current, safetyCopyPath); } finally { current.close(); }
+        try {
+          await this.createBackup(current, safetyCopyPath);
+          targetGeneration = Number((current.prepare("SELECT value FROM catalog_meta WHERE key='library_generation'").get() as { value: string } | undefined)?.value ?? 0);
+          if (current.prepare("SELECT name FROM sqlite_master WHERE name='agent_operations'").get()) receipts = current.prepare("SELECT * FROM agent_operations WHERE status<>'pending'").all() as Record<string, unknown>[];
+        } finally { current.close(); }
       }
+      // Prepare the replacement under the target lease, preserving local receipt identities and draft invalidation.
+      const prepared = new DatabaseSync(staged);
+      try {
+        initOrMigrateSchema(prepared);
+        const sourceGeneration = Number((prepared.prepare("SELECT value FROM catalog_meta WHERE key='library_generation'").get() as { value: string }).value);
+        prepared.exec('BEGIN IMMEDIATE');
+        prepared.prepare("UPDATE catalog_meta SET value=? WHERE key='library_generation'").run(String(Math.max(sourceGeneration, targetGeneration) + 1));
+        prepared.exec('DELETE FROM agent_operations');
+        const columns = (prepared.prepare("PRAGMA table_info('agent_operations')").all() as { name: string }[]).map(c => c.name);
+        for (const row of receipts) {
+          row.full_payload_json = null;
+          row.confirmation_nonce = null;
+          if (!row.review_state || row.review_state === 'legacy') {
+            row.review_state = 'legacy';
+            row.fingerprint = 'legacy';
+            row.summary_json = null;
+          }
+          const names = columns.filter(name => row[name] !== undefined);
+          prepared.prepare(`INSERT INTO agent_operations(${names.join(',')}) VALUES(${names.map(() => '?').join(',')})`).run(...names.map(name => row[name] as import('node:sqlite').SQLInputValue));
+        }
+        prepared.exec('COMMIT');
+      } finally { prepared.close(); }
       const snapshot = new DatabaseSync(staged, { readOnly: true });
       try {
         replacementStarted = true;

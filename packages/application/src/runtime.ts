@@ -1,7 +1,7 @@
 /** Lease and storage initialization are owned together, including failed starts. */
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { CatalogStore } from '../../database/src/store.ts';
 import { acquireDatabaseLease } from '../../database/src/lease.ts';
 import { createTrackerApplication, type TrackerApplication } from './application.ts';
@@ -10,6 +10,8 @@ import type { ApplicationDependencies } from './context.ts';
 export interface TrackerRuntimeConfig {
   dbPath: string;
   backupDir: string;
+  /** The composition root supplies the former recovery location, including a custom LOCAL_DIR. */
+  legacyDraftsDir?: string;
   configure: (store: CatalogStore) => Omit<ApplicationDependencies, 'store'> | Promise<Omit<ApplicationDependencies, 'store'>>;
 }
 export interface TrackerRuntime { application: TrackerApplication; close: () => Promise<void> }
@@ -23,7 +25,10 @@ export async function openTrackerRuntime(config: TrackerRuntimeConfig): Promise<
   try {
     db = new DatabaseSync(config.dbPath);
     const store = await CatalogStore.open(db, {backupDir: config.backupDir});
-    const application = createTrackerApplication({store, ...await config.configure(store)});
+    const application = createTrackerApplication({store, ...await config.configure(store),
+      draftsDir: join(dirname(config.dbPath), basename(config.dbPath) + '.drafts'),
+      legacyDraftsDir: config.legacyDraftsDir ?? join(dirname(config.dbPath), 'drafts'),
+    });
     const ownedDb = db;
     let closing: Promise<void> | undefined;
     return {application, close: () => closing ??= (async () => {

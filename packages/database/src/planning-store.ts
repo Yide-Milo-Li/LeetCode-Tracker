@@ -233,13 +233,39 @@ export class PlanningStore {
   }
 
   /** Commit a plan version and retry result together after all provider work has finished. */
-  commit(plan: DailyPlan, stamp: RevisionStamp, expectedVersion: number | null, operationId: string, fingerprint: string, changed = true, validate?: () => void): Promise<DailyPlan> {
-    return this.write(() => {
+  commit(
+    plan: DailyPlan,
+    stamp: RevisionStamp,
+    expectedVersion: number | null,
+    operationId: string,
+    fingerprint: string,
+    changed = true,
+    validate?: () => void,
+    beforeCommit?: () => void
+  ): Promise<DailyPlan> {
+    return this.write(() => this.commitStatement(plan, stamp, expectedVersion, operationId, fingerprint, changed, validate, beforeCommit));
+  }
+
+  /** Caller owns the SQLite transaction; no backup or queue is entered here. */
+  commitStatement(
+    plan: DailyPlan,
+    stamp: RevisionStamp,
+    expectedVersion: number | null,
+    operationId: string,
+    fingerprint: string,
+    changed = true,
+    validate?: () => void,
+    beforeCommit?: () => void
+  ): DailyPlan {
+
       const replay = this.replay(operationId, fingerprint); if (replay) return replay;
       validate?.(); // Recheck request lifetime after waiting for the shared backup/write queue.
       this.assertStamp(stamp);
       const current = this.plans().find(p => p.date === plan.date);
       if ((current?.version ?? null) !== expectedVersion) throw new PlanningError('STALE_PLAN', 'Plan changed; reload it');
+      beforeCommit?.();
+      const practiceRev = this.catalog.getPracticeRevision();
+      plan.practiceRevision = practiceRev;
       const json = JSON.stringify(plan);
       if (changed) {
         this.db.prepare('INSERT INTO daily_plans VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET version=excluded.version,payload_json=excluded.payload_json').run(plan.id, plan.date, plan.version, json);
@@ -249,9 +275,9 @@ export class PlanningStore {
         this.db.prepare("UPDATE catalog_meta SET value=CAST(value AS INTEGER)+1 WHERE key='planning_revision'").run();
       }
       this.db.prepare('INSERT INTO planning_operations VALUES(?,?,?)').run(operationId, fingerprint, json);
-      for (const state of this.reviewStates(plan.timezone, plan.updatedAt)) this.db.prepare('INSERT OR REPLACE INTO problem_review_state VALUES(?,?,?)').run(state.questionId, JSON.stringify(state), stamp.practice);
+      for (const state of this.reviewStates(plan.timezone, plan.updatedAt)) this.db.prepare('INSERT OR REPLACE INTO problem_review_state VALUES(?,?,?)').run(state.questionId, JSON.stringify(state), practiceRev);
       this.db.prepare('DELETE FROM problem_review_state WHERE question_id NOT IN (SELECT question_id FROM practice_records WHERE status=\'active\' AND completed=1 UNION SELECT question_id FROM progress_snapshots WHERE status=\'active\' AND has_accepted=1)').run();
       return plan;
-    });
+
   }
 }
