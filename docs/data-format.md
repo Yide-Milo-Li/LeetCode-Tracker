@@ -110,7 +110,7 @@ The local SQLite catalog schema is defined in [schema.ts](../packages/database/s
 
 Practice records support optional lightweight outcome feedback: `outcome: 'independent' | 'assisted' | 'unsolved' | null`. Independent and assisted outcomes require `completed = true`, while unsolved requires `completed = false`. Switching completion state automatically clears conflicting outcome selections.
 
-Full device migration supports Migration Bundle v3 (`/api/v1/bundle/export?version=3`) preserving the `outcome` column, with backward compatibility for v1 and v2 bundles (which map missing outcomes to `null`).
+Full device migration supports Migration Bundle v4 (`/api/v1/bundle/export?version=4`) preserving the `outcome` column, with backward compatibility for v1/v2/v3 bundles; v2 maps missing outcomes to `null`.
 
 `durationMinutes` is optional on creation and defaults to `null`; supplied values must be positive safe integers. PATCH omission preserves it and explicit `null` clears it. Migration preserves old durations as unknown and never parses notes. Activity views aggregate recorded durations, and topic insights use completed duration samples; missing durations remain unknown rather than zero. There are no user duration rankings.
 
@@ -143,4 +143,4 @@ Today's immediate completion saves the actual timestamp first; the optional meta
 
 ## Device migration export
 
-The Settings export action and frontend bundle API request Snapshot Bundle v3 (schema v10), preserving nullable practice `outcome` feedback together with plan explanations and exploration allocation metadata. Imports continue to accept v1/v2/v3. Explicit legacy v2 exports omit outcomes and should only be used for legacy compatibility; ordinary device migration uses v3.
+The Settings export action and frontend bundle API request Snapshot Bundle v4 (schema v11), preserving nullable practice `outcome` feedback together with plan explanations and exploration allocation metadata. Imports continue to accept v1/v2/v3/v4. Explicit legacy v2 exports omit outcomes and should only be used for legacy compatibility; ordinary device migration uses v4. V4 preserves note revisions; target library generation is local and advances during every restore. Public note writes require `expectedRevision` and `expectedLibraryGeneration`; missing preconditions return 428, stale preconditions return 409, and content is limited to 100,000 characters.

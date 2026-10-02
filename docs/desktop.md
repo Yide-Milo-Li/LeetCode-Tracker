@@ -91,14 +91,14 @@ To eliminate orphan background processes if the desktop window crashes or is clo
 ### 3.2 Backup, Restore, and Credential Protection
 - **Full Database Backups**: Automatic transactional SQLite snapshots are saved to the `backups/` directory before schema migrations and bulk data imports.
 - **Portable Snapshot Bundles**: The application supports exporting and importing portable JSON Snapshot Bundles (`.json`). Settings provides one **Export Complete Migration** / **Import Migration** entry for moving a profile between Windows and macOS.
-  - **Complete v3 migration**: Bundle v3 includes the local problem catalog, tags, practice records and operation history, imported progress history, notes, strategies and versions, weekly assignments, daily plans and versions, review state, statistics inputs, and non-sensitive settings. It replaces the target business profile after a preview and confirmation; it does not merge two profiles.
-  - **Cross-platform workflow**: Export v3 on the old device, copy the JSON file to the new device, choose Import Migration, review the source/count summary, and confirm replacement. The same file format works Windows → macOS and macOS → Windows.
+  - **Complete v4 migration**: Bundle v4 includes the local problem catalog, tags, practice records and operation history, imported progress history, notes, strategies and versions, weekly assignments, daily plans and versions, review state, statistics inputs, and non-sensitive settings. It replaces the target business profile after a preview and confirmation; it does not merge two profiles.
+  - **Cross-platform workflow**: Export v4 on the old device, copy the JSON file to the new device, choose Import Migration, review the source/count summary, and confirm replacement. The same file format works Windows → macOS and macOS → Windows.
   - **Secret Exclusion**: Provider API keys (Gemini, OpenAI, DeepSeek) are **automatically omitted** from exported bundles to avoid accidental credential leakage.
   - **Local Secret Preservation**: Importing a snapshot bundle updates settings and records without overwriting or clearing existing local API keys.
   - **Untrusted Imports**: Incoming key fields are ignored even when nonempty; an unset local key stays unset.
 - **Safety and limits**: The target database is backed up before replacement; malformed, unknown-version, broken-reference, oversized (>64 MiB), backup, or write failures leave the original profile in place. Restore blocks concurrent profile writes and clears stale planning/preview state after success.
 - API keys remain in the local SQLite settings store without operating-system credential encryption. Raw SQLite backups can contain them. Portable bundles exclude keys by design.
-- v1 snapshot imports remain available for backward compatibility but are labelled partial restore. v2 remains readable, while v3 is the current complete migration format and preserves schema-v10 outcome feedback. API keys must be configured again on the target device when they were not already present.
+- v1 snapshot imports remain available for backward compatibility but are labelled partial restore. v2/v3 remain readable, while v4 is the current complete migration format and preserves outcome feedback and note revisions. Restore advances the target library generation, so old drafts must reload or explicitly compare the restored version. API keys must be configured again on the target device when they were not already present.
 
 ---
 
