@@ -1,6 +1,6 @@
 # Local recommendations and efficiency
 
-This describes the `phase39-v1` recommendation and efficiency architecture shipped in Release 1.3.0, using SQLite schema 12 and portable Snapshot Bundle v5 (prior Release 1.2.0 used schema 10 / Bundle v3). Schema 11 / Bundle v4 belong to the separate LC-2.0 lineage and are deliberately not accepted here.
+This describes the merged development candidate, not an installed-host acceptance. It uses algorithm `phase39-v1`, SQLite schema 13 and portable Bundle v6. Release 1.3.0 used schema 12 / Bundle v5; schema 11 / Bundle v4 and schema 12 / Bundle v5 remain supported for migration.
 
 ## Deterministic pipeline
 
@@ -32,7 +32,7 @@ The 90-day summary distinguishes unseen, recent and stale evidence; stale data c
 
 Personal duration calibration is independently opt-in. Eligibility requires 12 explicitly independent completed question/day samples across six problems and four days in 90 days, per difficulty. The median proposes a shadow threshold of 1.5 times the median, clamped to 0.75–2 times the static 30/45/60-minute threshold. The shadow threshold does not change review dates. Eligible personal medians may inform effort; insufficient evidence uses the labeled static heuristic. New effort uses the full estimate; review effort half. Saved explanations retain version, sample count and the threshold used at generation.
 
-An optional time budget prefers lower-effort choices only within equally valid slots. If fixed counts, difficulty and due work exceed it, Today shows the excess and an explicit Adjust today action. No count, difficulty or review quota changes automatically. Swap/removal reasons are optional and stored only with the explicit action: time_unavailable, already_familiar, topic_mismatch, too_difficult or other. They never create practice or infer a negative outcome. Plan versions, Bundle v5 and restore preserve this intentional feedback.
+An optional time budget prefers lower-effort choices only within equally valid slots. If fixed counts, difficulty and due work exceed it, Today shows the excess and an explicit Adjust today action. No count, difficulty or review quota changes automatically. Swap/removal reasons are optional and stored only with the explicit action: time_unavailable, already_familiar, topic_mismatch, too_difficult or other. They never create practice or infer a negative outcome. Plan versions, Bundle v5/v6 and restore preserve this intentional feedback.
 
 ## Useful semantic calls and caches
 
@@ -50,9 +50,9 @@ Selection output is capped according to allowed IDs; override/coaching at 2,048,
 
 ## Portability and rollback
 
-Backed storage upgrades schemas 3–10 to 12 only after the normal verified safety snapshot. Schema 11 and future versions fail closed; 11 is not an intermediate upgrade here. The 22 business tables remain; schema 12 fences newer nested JSON semantics. Bundle v5 carries schema-12 rows, policies, explanations, feedback, versions and replay receipts. It excludes provider keys and preserves target keys. Legacy v1/v2/v3 imports remain supported; v1 is partial and v2 lacks outcomes. Bundle v4 and future versions are rejected.
+Backed storage upgrades schemas 3–12 to 13 only after the normal verified safety snapshot. Schema 11 contains note revisions and the operation ledger; schema 12 carries the independent Phase 39 layout. Bundle v6 preserves both note revisions and recommendation data, excludes provider keys and preserves target keys. Legacy v1–v5 imports remain supported; v1 is partial and v2 lacks outcomes. Unknown future versions are rejected.
 
-Settings/native export requests v5. Explicit legacy export returns HTTP 409 BUNDLE_VERSION_REQUIRED when newer semantics would be lost. Disable optional trial fields and select legacy review for future-policy rollback; saved history remains immutable. Binary/schema downgrade requires a verified pre-upgrade backup with the newer app stopped, not an old binary opening schema 12. Never migrate an unrelated installed or personal profile for a test.
+Settings/native export requests v6. Explicit legacy export returns HTTP 409 BUNDLE_VERSION_REQUIRED when newer semantics would be lost. Disable optional trial fields and select legacy review for future-policy rollback; saved history remains immutable. Binary/schema downgrade requires a verified pre-upgrade backup with the newer app stopped, not an old binary opening schema 13. Never migrate an unrelated installed or personal profile for a test.
 
 ## Verification and limits
 

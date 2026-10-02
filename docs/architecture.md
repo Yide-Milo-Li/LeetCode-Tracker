@@ -1,6 +1,6 @@
 # Architecture
 
-The repository baseline implements an offline-first, Bring-Your-Own-Data (BYOD) practice workbench. It provides shared TypeScript contracts, transactional SQLite storage (schema v12), a local Fastify loopback API, a multi-provider LLM assistant tier (Gemini, OpenAI, DeepSeek), a bilingual React web client, and Windows x64 / Apple Silicon macOS Tauri hosts with a private Node 26.13.0 runtime.
+The repository baseline implements an offline-first, Bring-Your-Own-Data (BYOD) practice workbench. It provides shared TypeScript contracts, transactional SQLite storage (schema v13), a local Fastify loopback API, a multi-provider LLM assistant tier (Gemini, OpenAI, DeepSeek), a bilingual React web client, and Windows x64 / Apple Silicon macOS Tauri hosts with a private Node 26.13.0 runtime.
 
 The interactive diagram predates the native shell and shows the shared application core; the current native boundary is described below. For an interactive SVG diagram with dark/light themes, search, pan/zoom, and guided views, see the [Interactive Architecture Diagram](diagrams/architecture.html).
 

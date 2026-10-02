@@ -110,7 +110,7 @@ The local SQLite catalog schema is defined in [schema.ts](../packages/database/s
 
 Practice records support optional lightweight outcome feedback: `outcome: 'independent' | 'assisted' | 'unsolved' | null`. Independent and assisted outcomes require `completed = true`, while unsolved requires `completed = false`. Switching completion state automatically clears conflicting outcome selections.
 
-Full device migration uses **Snapshot Bundle v5** (`/api/v1/bundle/export?version=5`, schema v12) preserving the `outcome` column, recommendation policy, feedback reasons, and plan versions, with backward-compatible imports for v1, v2 (mapping missing outcomes to `null`), and v3 bundles.
+Full device migration uses Migration Bundle v6 (`/api/v1/bundle/export?version=6`), preserving outcomes, note revisions and recommendation data. Older v1–v5 imports remain supported; v2 maps missing outcomes to `null`.
 
 `durationMinutes` is optional on creation and defaults to `null`; supplied values must be positive safe integers. PATCH omission preserves it and explicit `null` clears it. Migration preserves old durations as unknown and never parses notes. Activity views aggregate recorded durations, and topic insights use completed duration samples; missing durations remain unknown rather than zero. There are no user duration rankings.
 
@@ -143,4 +143,4 @@ Today's immediate completion saves the actual timestamp first; the optional meta
 
 ## Device migration export
 
-The Settings export action and frontend/native bundle API request **Snapshot Bundle v5** (schema v12), preserving nullable practice outcomes, outcome-review policy, explanation/provenance versions, optional time/calibration rules and explicit swap/removal feedback. Imports accept v1/v2/v3/v5; v4 belongs to a different lineage and is rejected. Prior Release 1.2.0 used v3/schema 10. Legacy export returns HTTP 409 when it cannot preserve `phase39-v1` semantics. Ordinary migration uses v5; target keys remain private and unchanged. See [local recommendation portability](local-recommendations.md#portability-and-rollback).
+The merged development Settings export uses Snapshot Bundle v6 (schema v13), preserving note revisions and Phase 39 recommendation policy, explanation, provenance and feedback. Imports accept v1–v6; v1 is partial, v2 omits outcomes, v4 carries note revisions, and v5 carries Phase 39 data without note revisions. Incompatible older exports return HTTP 409. Target keys remain private and target library generation advances on restore. Public note writes require `expectedRevision` and `expectedLibraryGeneration`; missing preconditions return 428, stale preconditions return 409, and content is limited to 100,000 characters. See [local recommendation portability](local-recommendations.md#portability-and-rollback).

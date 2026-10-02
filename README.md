@@ -8,7 +8,7 @@
   <a href="https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.3.1"><img src="https://img.shields.io/badge/release-1.3.1-blue?style=flat-square" alt="Release 1.3.1"></a>
   <a href="docs/desktop.md"><img src="https://img.shields.io/badge/desktop-Windows%20x64%20%2B%20macOS%20ARM64-455a64?style=flat-square" alt="Windows x64 and macOS ARM64"></a>
   <a href="tests/README.md"><img src="https://img.shields.io/badge/tests-519%20JS%20%2B%2011%20Rust-brightgreen?style=flat-square" alt="519 JavaScript and 11 Rust tests"></a>
-  <a href="docs/architecture.md"><img src="https://img.shields.io/badge/sqlite-schema%20v12-003b57?style=flat-square" alt="SQLite schema v12"></a>
+  <a href="docs/architecture.md"><img src="https://img.shields.io/badge/sqlite-schema%20v13-003b57?style=flat-square" alt="SQLite schema v13"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT License"></a>
 </p>
 
@@ -106,7 +106,7 @@ See the [workflow guide](docs/desktop-workflow.md) for input guards and context-
 - API keys are stored in local SQLite settings without operating-system credential encryption. Raw database backups can contain keys; keep them private.
 - AI features send task-relevant inputs to the selected provider or configured gateway. These can include candidate problem metadata, strategy/override text, pasted progress text, or explicitly selected note text for AI formatting. Existing code blocks, inline code, formulas, links and other protected blocks are not sent as provider text. AI-assisted progress import and AI note formatting require a working provider; local note formatting does not.
 - Supported models and per-model reasoning effort controls in Settings: **Google Gemini** (`models/gemini-3.8-flash`, `models/gemini-4-hydrogen` via `thinkingConfig.thinkingLevel`), **OpenAI** (`gpt-6-luna`, `gpt-6.1-terra` via `reasoning_effort`), and **DeepSeek** (`deepseek-flash` via `reasoning_effort` and `thinking`).
-- Portable **Snapshot Bundle v5** (SQLite schema v12) is the complete one-time Windows ↔ macOS migration path for the catalog, saved practice progress, history, notes, plans, review state, and non-sensitive settings (`Settings → Data → Export migration file` / `Import migration file`). It excludes provider keys, preserves keys already configured on the target, validates references before writing, and replaces the target business profile only after confirmation. Legacy v1 bundles remain partial restore files; v2/v3 imports remain supported (v2 maps missing outcomes to unknown). Incompatible legacy exports fail explicitly rather than dropping newer policy/feedback semantics.
+- The merged development candidate uses portable Snapshot Bundle v6 (schema v13) for complete one-time profile migration, preserving note revisions and Phase 39 recommendation data. It excludes provider keys, preserves target keys, validates references before replacement, and advances the target library generation. Imports accept v1–v6; v1 is partial, v2 lacks outcomes, v4 preserves note revisions, and v5 carries Phase 39 semantics. Lossy legacy exports are rejected when required. Release 1.3.0 used schema v12 / Bundle v5.
 
 Read [AI provider behavior](docs/llm-providers.md) and the [security policy](SECURITY.md) before configuring a provider or sharing exports.
 
