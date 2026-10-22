@@ -4,7 +4,7 @@ import { useWorkspaceEnvironment } from '../context.tsx';
  * Missing activity data is never inferred; reads deduplicated activity series.
  */
 import React, { useEffect, useState } from 'react';
-import { Activity, Flame } from 'lucide-react';
+import { Activity } from 'lucide-react';
 import { type DashboardResponse } from '../api.ts';
 import type { Language } from '../i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
@@ -49,6 +49,10 @@ export function TodayRecentOverview({ lang, embedded = false }: TodayRecentOverv
 
   const days = data?.dataStatus.userTimezone ? data.trend30Days.slice(-7) : [];
   const max = Math.max(1, ...days.map((day) => day.completedCount));
+  const activeDays = days.filter((day) => day.completedCount > 0).length;
+  // Series dates are already local calendar days, so format them in UTC to avoid shifting a day.
+  const weekday = (date: string) =>
+    new Date(`${date}T00:00:00Z`).toLocaleDateString(zh ? 'zh-CN' : 'en-US', { weekday: 'short', timeZone: 'UTC' });
 
   const content = (
     <>
@@ -70,14 +74,12 @@ export function TodayRecentOverview({ lang, embedded = false }: TodayRecentOverv
               }
             />
           </span>
-          {data?.dataStatus.userTimezone && (
-            <div className="streak-badge">
-              <Flame size={13} className="streak-icon" aria-hidden="true" />
-              <span>
-                <strong>{data.overview.currentStreak}</strong>{' '}
-                {zh ? '天连续打卡' : 'day streak'}
-              </span>
-            </div>
+          {data?.dataStatus.userTimezone && days.length > 0 && (
+            <span className="rhythm-summary num-tabular">
+              {zh
+                ? `近 ${days.length} 天有 ${activeDays} 天有记录`
+                : `Records on ${activeDays} of ${days.length} days`}
+            </span>
           )}
         </div>
 
@@ -91,10 +93,11 @@ export function TodayRecentOverview({ lang, embedded = false }: TodayRecentOverv
         >
           {days.map((day, idx) => {
             const isToday = idx === days.length - 1;
-            const fillHeight = Math.max(6, Math.min(100, (day.completedCount / max) * 100));
+            const isZero = day.completedCount === 0;
+            const fillHeight = Math.min(100, (day.completedCount / max) * 100);
             return (
               <div
-                className={`rhythm-day-col ${isToday ? 'is-today' : ''}`}
+                className={`rhythm-day-col${isToday ? ' is-today' : ''}${isZero ? ' is-zero' : ''}`}
                 key={day.date}
                 title={`${day.date}: ${day.completedCount} ${zh ? '题' : 'problem(s)'}`}
               >
@@ -102,23 +105,15 @@ export function TodayRecentOverview({ lang, embedded = false }: TodayRecentOverv
                   {isToday ? (zh ? '今天 ' : 'Today ') : ''}
                   {day.date.slice(5)}: {day.completedCount} {zh ? '题已攻克' : 'solved'}
                 </span>
-                <span
-                  className="rhythm-count-label num-tabular"
-                  style={day.completedCount === 0 ? { opacity: 0.35 } : undefined}
-                >
-                  {day.completedCount}
-                </span>
+                <span className="rhythm-count-label num-tabular">{day.completedCount}</span>
                 <div className="rhythm-bar-track">
                   <div
                     className="rhythm-bar-fill"
-                    style={{
-                      height: `${fillHeight}%`,
-                      opacity: day.completedCount === 0 ? 0.25 : undefined,
-                    }}
+                    style={{ height: isZero ? undefined : `${fillHeight}%`, '--bar-delay': `${idx * 40}ms` } as React.CSSProperties}
                   />
                 </div>
-                <span className="rhythm-date-label num-tabular">
-                  {isToday ? (zh ? '今日' : 'Today') : day.date.slice(5)}
+                <span className="rhythm-date-label">
+                  {isToday ? (zh ? '今日' : 'Today') : weekday(day.date)}
                 </span>
               </div>
             );

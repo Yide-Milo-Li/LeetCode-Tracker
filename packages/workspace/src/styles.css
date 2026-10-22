@@ -1557,63 +1557,76 @@
 }
 
 .tracker-workspace .rhythm-count-label {
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 500;
   color: var(--text-muted);
   line-height: 1;
   height: 13px;
 }
 
-.tracker-workspace .rhythm-day-col.is-today .rhythm-count-label {
-  color: var(--primary);
-  font-weight: 700;
+.tracker-workspace .rhythm-day-col.is-zero .rhythm-count-label {
+  opacity: 0.6;
 }
 
+.tracker-workspace .rhythm-day-col.is-today .rhythm-count-label {
+  color: var(--text-main);
+  font-weight: 650;
+}
+
+/* Bars stand on their own: no track box, the column height is the scale. */
 .tracker-workspace .rhythm-bar-track {
   width: 100%;
-  max-width: 28px;
   height: 52px;
-  background: var(--muted-surface);
-  border-radius: var(--radius-sm, 6px);
   display: flex;
   align-items: flex-end;
-  padding: 2px;
-  position: relative;
-  box-sizing: border-box;
-  transition: background-color var(--fast, 140ms) ease;
-}
-
-.tracker-workspace .rhythm-day-col:hover .rhythm-bar-track {
-  background: var(--border-color);
-}
-
-.tracker-workspace .rhythm-day-col.is-today .rhythm-bar-track {
-  box-shadow: 0 0 0 2px var(--primary);
-  border-radius: var(--radius-sm, 6px);
+  justify-content: center;
 }
 
 .tracker-workspace .rhythm-bar-fill {
-  width: 100%;
-  background: var(--primary);
-  border-radius: 4px;
-  opacity: 0.85;
-  transition: height 300ms var(--spring-bounce), opacity var(--fast, 140ms) ease;
+  width: 12px;
+  min-height: 2px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--primary) 45%, var(--muted-surface));
+  transform-origin: bottom;
+  animation: rhythm-bar-grow 520ms var(--spring-tactile) both;
+  animation-delay: var(--bar-delay, 0ms);
+  transition: height 420ms var(--spring-tactile), background-color var(--fast, 140ms) ease;
 }
 
-.tracker-workspace .rhythm-day-col:hover .rhythm-bar-fill,
+.tracker-workspace .rhythm-day-col.is-zero .rhythm-bar-fill {
+  height: 2px;
+  background: var(--border-color);
+}
+
+.tracker-workspace .rhythm-day-col:hover .rhythm-bar-fill {
+  background: color-mix(in srgb, var(--primary) 70%, var(--muted-surface));
+}
+
 .tracker-workspace .rhythm-day-col.is-today .rhythm-bar-fill {
-  opacity: 1;
+  background: var(--primary);
+}
+
+@keyframes rhythm-bar-grow {
+  from {
+    transform: scaleY(0);
+  }
 }
 
 .tracker-workspace .rhythm-date-label {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
   white-space: nowrap;
 }
 
 .tracker-workspace .rhythm-day-col.is-today .rhythm-date-label {
-  color: var(--primary);
+  color: var(--text-main);
   font-weight: 650;
+}
+
+.tracker-workspace .rhythm-summary {
+  font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
 }
 
 /* Floating Tooltip */
@@ -1652,14 +1665,13 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border-color);
+  padding-top: 4px;
   font-size: 12px;
 }
 
 .tracker-workspace .rhythm-note-text {
   color: var(--text-muted);
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 .tracker-workspace .rhythm-link-btn {
@@ -1684,23 +1696,21 @@
 }
 
 /* Unified Hub / Embedded variant support */
+/* A recessed band: one tone step below the page, no outline or shadow. */
 .tracker-workspace .today-unified-hub {
-  background: var(--surface);
-  border: 1px solid var(--border-color);
+  background: var(--muted-surface);
   border-radius: var(--radius-lg, 12px);
   padding: 20px 24px;
   margin-bottom: 24px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
   display: grid;
-  grid-template-columns: 1.15fr 1px 0.85fr;
-  gap: 24px;
+  grid-template-columns: 1.25fr 1px 1fr;
+  gap: 28px;
   align-items: stretch;
 }
 
 .tracker-workspace .hub-divider {
   width: 1px;
   background: var(--border-color);
-  opacity: 0.8;
   height: 100%;
 }
 .tracker-workspace .today-unified-hub.is-target-only {
@@ -1767,21 +1777,30 @@
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-  margin: 14px 0 10px;
+  margin: 6px 0 14px;
 }
 
 .tracker-workspace .progress-count-group {
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: 8px;
 }
 
 .tracker-workspace .progress-big-num {
-  font-size: 32px;
-  font-weight: 700;
-  color: var(--primary);
+  display: inline-block;
+  font-size: 28px;
+  font-weight: 650;
+  color: var(--text-main);
   line-height: 1;
   letter-spacing: -0.02em;
+  animation: progress-num-tick 360ms var(--spring-tactile);
+}
+
+@keyframes progress-num-tick {
+  from {
+    opacity: 0.35;
+    transform: translateY(6px);
+  }
 }
 
 .tracker-workspace .progress-total-num {
@@ -1790,45 +1809,67 @@
   color: var(--text-muted);
 }
 
-.tracker-workspace .progress-percent-badge {
-  display: inline-flex;
-  align-items: center;
-  background: var(--selected);
-  color: var(--primary);
-  border: 1px solid color-mix(in srgb, var(--primary) 28%, transparent);
-  padding: 2px 8px;
-  border-radius: var(--radius-sm, 4px);
-  font-size: 12px;
-  font-weight: 600;
+.tracker-workspace .progress-percent-text {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
   white-space: nowrap;
 }
 
-.tracker-workspace .today-unified-hub progress {
-  appearance: none;
-  border: 0;
-  width: 100%;
+/* One segment per planned problem; the fill grows from the left of each segment. */
+.tracker-workspace .target-meter {
+  display: flex;
+  gap: 5px;
+}
+
+.tracker-workspace .target-meter-seg {
+  flex: 1;
   height: 8px;
-  display: block;
-  border-radius: var(--radius-sm, 4px);
+  border-radius: 3px;
+  background: var(--border-color);
+  position: relative;
   overflow: hidden;
-  background: var(--muted-surface);
-  margin: 0 0 14px;
 }
 
-.tracker-workspace .today-unified-hub progress::-webkit-progress-bar {
-  background: var(--muted-surface);
-  border-radius: var(--radius-sm, 4px);
-}
-
-.tracker-workspace .today-unified-hub progress::-webkit-progress-value {
+.tracker-workspace .target-meter-seg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
   background: var(--primary);
-  border-radius: var(--radius-sm, 4px);
-  transition: width 240ms ease;
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 420ms var(--spring-tactile);
 }
 
-.tracker-workspace .today-unified-hub progress::-moz-progress-bar {
-  background: var(--primary);
-  border-radius: var(--radius-sm, 4px);
+.tracker-workspace .target-meter-seg.is-filled::after {
+  transform: scaleX(1);
+  animation: target-seg-fill 520ms var(--spring-tactile) both;
+  animation-delay: var(--seg-delay, 0ms);
+}
+
+.tracker-workspace .target-meter.is-continuous .target-meter-seg::after {
+  transform: scaleX(var(--seg-fill, 0));
+}
+
+@keyframes target-seg-fill {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+.tracker-workspace .progress-meter-note {
+  margin: 10px 0 14px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tracker-workspace .progress-big-num,
+  .tracker-workspace .target-meter-seg::after,
+  .tracker-workspace .rhythm-bar-fill {
+    animation: none;
+    transition: none;
+  }
 }
 
 .tracker-workspace .plan-actions-toolbar {
@@ -2093,7 +2134,7 @@
 .tracker-workspace .chart-legend { display: flex; gap: 20px; font-size: 13px; color: var(--text-muted); margin-bottom: 8px; }
 .tracker-workspace .chart-legend span { display: inline-flex; align-items: center; gap: 8px; }
 .tracker-workspace .chart-legend i { width: 20px; border-top: 2px solid var(--primary); }
-.tracker-workspace .chart-legend .legend-active { border-top: 2px dashed var(--text-muted); }
+.tracker-workspace .chart-legend .legend-active { border-top: 1.5px dashed var(--text-muted); }
 .tracker-workspace .today-problem.completed .problem-content h3 {
   color: var(--primary);
 }
@@ -2995,6 +3036,138 @@
 .tracker-workspace .trend-chart-wrapper {
   height: 270px;
   width: 100%;
+}
+
+/* Trend and mastery share one row; each card keeps the page's card container. */
+.tracker-workspace .progress-insights-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 24px;
+  margin-bottom: 24px;
+}
+.tracker-workspace .progress-insights-grid > .trend-card,
+.tracker-workspace .progress-insights-grid > .distribution-card {
+  margin-bottom: 0;
+}
+@media (max-width: 1180px) {
+  .tracker-workspace .progress-insights-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.tracker-workspace .insight-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin-bottom: 18px;
+}
+.tracker-workspace .insight-card-head h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+}
+.tracker-workspace .insight-card-head p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.tracker-workspace .insight-card-head .chart-legend {
+  margin: 2px 0 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.tracker-workspace .trend-tooltip {
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius, 8px);
+  box-shadow: var(--shadow-md);
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.tracker-workspace .trend-tooltip-date {
+  font-weight: 600;
+  color: var(--text-main);
+  margin-bottom: 4px;
+}
+.tracker-workspace .trend-tooltip strong {
+  color: var(--text-main);
+  font-weight: 600;
+}
+.tracker-workspace .trend-tooltip-row.is-solved strong {
+  color: var(--primary);
+}
+
+/* Mastery: label, bar, fraction. Bars grow once on mount, then follow data changes. */
+.tracker-workspace .mastery-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.tracker-workspace .mastery-row {
+  display: grid;
+  grid-template-columns: minmax(88px, 10rem) minmax(0, 1fr) 56px;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+}
+.tracker-workspace .mastery-row-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tracker-workspace .mastery-row-track {
+  height: 8px;
+  border-radius: 3px;
+  background: var(--muted-surface);
+  overflow: hidden;
+}
+.tracker-workspace .mastery-row-fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--primary) 62%, var(--muted-surface));
+  transform: scaleX(var(--fill, 0));
+  transform-origin: left;
+  transition: transform 420ms var(--spring-tactile);
+  animation: mastery-fill-grow 640ms var(--spring-tactile) both;
+}
+.tracker-workspace .mastery-row.is-easy .mastery-row-fill {
+  background: var(--easy);
+}
+.tracker-workspace .mastery-row.is-medium .mastery-row-fill {
+  background: var(--medium);
+}
+.tracker-workspace .mastery-row.is-hard .mastery-row-fill {
+  background: var(--hard);
+}
+.tracker-workspace .mastery-row-frac {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-align: right;
+}
+.tracker-workspace .mastery-rows-sep {
+  height: 1px;
+  background: var(--border-color);
+  margin: 4px 0;
+}
+.tracker-workspace .mastery-empty {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+@keyframes mastery-fill-grow {
+  from {
+    transform: scaleX(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tracker-workspace .mastery-row-fill {
+    animation: none;
+    transition: none;
+  }
 }
 .tracker-workspace .recharts-text {
   fill: var(--text-muted);
