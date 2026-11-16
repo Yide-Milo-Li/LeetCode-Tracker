@@ -57,14 +57,14 @@ describe('macOS native profile migration',()=>{
     await view.waitForDisplayed();
     // Settings is tabbed; migration controls live on the Data tab.
     await openDataTab();
-    assert.match(await view.getText(),/导出完整迁移包/);
+    assert.match(await view.getText(),/导出迁移包/);
     assert.match(await view.getText(),/导入迁移包/);
     await api('PATCH','/settings',{language:'en',theme:'light'});
     await browser.refresh();
     const english=await browser.$('button[aria-label="Settings"]');
     await english.waitForDisplayed();await english.click();
     await openDataTab();
-    assert.match(await (await browser.$('#view-settings')).getText(),/Export Complete Migration/);
+    assert.match(await (await browser.$('#view-settings')).getText(),/Export migration file/);
     mkdirSync(evidenceDir,{recursive:true});
     await browser.saveScreenshot(path.join(evidenceDir,'macos-settings.png'));
     const state=await api('GET','/bundle/export?version=5');
