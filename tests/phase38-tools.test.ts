@@ -7,13 +7,11 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { WORKSPACE_HTML_PATH, getWorkspaceHtml } from '../apps/server/src/mcp/workspace-html.ts';
 
-// Build the real formal resource even in a clean checkout; no fixture HTML stands in for it.
-execFileSync(process.execPath, ['--import', 'tsx', 'scripts/build-chatgpt-app.ts'], { cwd: resolve(import.meta.dirname, '..') });
+// npm pretest builds the real resource before parallel workers import its hash-based URI.
 import { CatalogStore } from '../packages/database/src/store.ts';
 import { createServerApplication } from '../apps/server/src/application-factory.ts';
 import { startMcpServer } from '../apps/server/src/mcp/server.ts';
