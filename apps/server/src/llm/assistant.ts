@@ -7,7 +7,12 @@
 import { quotas } from '../../../../packages/domain/src/index.ts';
 import type { ProgressCandidateInput } from '../../../../packages/contracts/src/practice.ts';
 import type { Bilingual, Rules, RulePatch, Candidate } from '../../../../packages/contracts/src/recommendations.ts';
-import type { CatalogProblem } from '../../../../packages/contracts/src/sync.ts';
+import {
+  defaultGeminiFallbackModels,
+  defaultGeminiModel,
+  normalizeGeminiModel,
+  type CatalogProblem,
+} from '../../../../packages/contracts/src/sync.ts';
 import {
   progressFormatResponseSchema,
   planContentResponseSchema,
@@ -85,12 +90,10 @@ export class LLMAssistant implements ILLMAssistant {
     this.providerConfigs = {
       gemini: {
         apiKey: geminiOpts?.apiKey ?? (this.activeProviderType === 'gemini' ? options.apiKey : undefined) ?? process.env.GEMINI_API_KEY,
-        model: geminiOpts?.model || (this.activeProviderType === 'gemini' ? options.model : undefined) || process.env.GEMINI_MODEL || 'models/gemini-3.5-flash',
+        model: geminiOpts?.model || (this.activeProviderType === 'gemini' ? options.model : undefined) || normalizeGeminiModel(process.env.GEMINI_MODEL) || defaultGeminiModel,
         baseUrl: undefined,
         fallbackModels: geminiOpts?.fallbackModels || (this.activeProviderType === 'gemini' ? options.fallbackModels : undefined) || [
-          'models/gemini-3.5-flash-lite',
-          'models/gemini-3.6-flash',
-          'models/gemini-3.7-flash',
+          ...defaultGeminiFallbackModels,
         ],
       },
       openai: {

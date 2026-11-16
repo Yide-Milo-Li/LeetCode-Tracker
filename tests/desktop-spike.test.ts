@@ -37,7 +37,7 @@ async function launchTestServer(options: {
   const child = spawn(executable, [path.join(path.dirname(options.dbPath), 'desktop-server.mjs')], {
     stdio: ['pipe', 'pipe', 'pipe'],
     cwd: path.dirname(options.dbPath),
-    env: Object.fromEntries(Object.entries(process.env).filter(([key]) => ['systemroot', 'windir', 'temp', 'tmp'].includes(key.toLowerCase()))),
+    env: Object.fromEntries(Object.entries(process.env).filter(([key]) => ['systemroot', 'windir', 'temp', 'tmp', 'tmpdir'].includes(key.toLowerCase()))),
   });
 
   child.stderr?.pipe(process.stderr);
@@ -59,39 +59,55 @@ async function launchTestServer(options: {
   child.stdin!.write(payload + '\n');
 
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const settle = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      rl.close();
+      fn();
+    };
+
     const timer = setTimeout(() => {
-      child.kill();
-      reject(new Error('Timed out waiting for server ready signal.'));
+      settle(() => {
+        child.kill();
+        reject(new Error('Timed out waiting for server ready signal.'));
+      });
     }, 10000);
 
     rl.once('line', (line: string) => {
-      clearTimeout(timer);
-      try {
-        const msg = JSON.parse(line);
-        if (msg.type === 'ready') {
-          resolve({
-            child,
-            port: msg.port,
-            nonce: msg.nonce,
-          });
-        } else {
-          reject(new Error(`Unexpected message: ${line}`));
+      settle(() => {
+        try {
+          const msg = JSON.parse(line);
+          if (msg.type === 'ready') {
+            resolve({
+              child,
+              port: msg.port,
+              nonce: msg.nonce,
+            });
+          } else {
+            try {
+              child.kill();
+            } catch {}
+            reject(new Error(`Unexpected message: ${line}`));
+          }
+        } catch (e) {
+          try {
+            child.kill();
+          } catch {}
+          reject(new Error(`Failed to parse ready message: ${line}`));
         }
-      } catch (e) {
-        reject(new Error(`Failed to parse ready message: ${line}`));
-      }
+      });
     });
 
     child.on('error', (err) => {
-      clearTimeout(timer);
-      reject(err);
+      settle(() => reject(err));
     });
 
-    child.on('exit', (code) => {
-      clearTimeout(timer);
-      if (code !== 0) {
-        reject(new Error(`Server process exited prematurely with code ${code}`));
-      }
+    child.on('exit', (code, signal) => {
+      settle(() => {
+        reject(new Error(`Server process exited prematurely with code ${code ?? `signal ${signal}`}`));
+      });
     });
   });
 }

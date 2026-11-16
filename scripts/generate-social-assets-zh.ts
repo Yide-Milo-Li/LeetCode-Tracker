@@ -13,21 +13,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { CatalogStore } from '../packages/database/src/store.ts';
 import { buildApp } from '../apps/server/src/app.ts';
 import { createSocialCatalog, socialPracticeIds } from './social-catalog.ts';
-
-/** Resolve a locally installed browser without downloading or changing its profile. */
-function findChrome(): string {
-  const paths = [
-    process.env.CHROME_BIN,
-    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-    path.join(process.env.LOCALAPPDATA || '', 'Google\\Chrome\\Application\\chrome.exe'),
-  ].filter(Boolean) as string[];
-
-  for (const p of paths) {
-    if (fs.existsSync(p)) return p;
-  }
-  throw new Error('Google Chrome executable was not found.');
-}
+import { findChromeExecutable } from './find-chrome.ts';
 
 /** Minimal request/response CDP client for an isolated headless capture session. */
 class CdpClient {
@@ -956,7 +942,7 @@ $$dp[i] = \\min(dp[i], \\; dp[i - c] + 1)$$
 
   // 3. Launch Headless Chrome
   console.log(`  [4/6] 启动 Headless Chrome 自动化截屏 (CDP Port: ${cdpPort})...`);
-  const chromeBin = findChrome();
+  const chromeBin = findChromeExecutable();
   const chromeProcess: ChildProcess = spawn(
     chromeBin,
     [

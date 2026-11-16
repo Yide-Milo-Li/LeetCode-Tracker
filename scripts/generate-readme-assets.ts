@@ -14,21 +14,7 @@ import { CatalogStore } from '../packages/database/src/store.ts';
 import { buildApp } from '../apps/server/src/app.ts';
 import { createSocialCatalog, socialPracticeIds } from './social-catalog.ts';
 import { localDate } from '../packages/contracts/src/time.ts';
-
-/** Resolve Chrome without downloading a browser or using a personal profile. */
-function findChrome(): string {
-  const paths = [
-    process.env.CHROME_BIN,
-    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-    path.join(process.env.LOCALAPPDATA || '', 'Google\\Chrome\\Application\\chrome.exe'),
-  ].filter(Boolean) as string[];
-
-  for (const p of paths) {
-    if (fs.existsSync(p)) return p;
-  }
-  throw new Error('Google Chrome executable was not found.');
-}
+import { findChromeExecutable } from './find-chrome.ts';
 
 /** Request/response transport for the isolated screenshot browser. */
 class CdpClient {
@@ -299,7 +285,7 @@ $$dp[i] = \\min(dp[i], dp[i - c] + 1) \\quad \\forall c \\in \\text{coins}, i \\
 
   // 8. Launch Headless Chrome
   console.log(`  [3/5] Launching Headless Chrome (CDP Port: ${cdpPort})...`);
-  const chromeBin = findChrome();
+  const chromeBin = findChromeExecutable();
   const chromeProcess: ChildProcess = spawn(
     chromeBin,
     [

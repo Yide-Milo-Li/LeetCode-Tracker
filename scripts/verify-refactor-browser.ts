@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import { CatalogStore } from '../packages/database/src/store.ts';
 import { buildApp } from '../apps/server/src/app.ts';
 import type { IGeminiAssistant } from '../apps/server/src/gemini.ts';
+import { findChromeExecutable } from './find-chrome.ts';
 
 const root = process.cwd();
 const out = process.env.VERIFY_OUTPUT_DIR
@@ -140,7 +141,7 @@ const address = app.server.address();
 if (!address || typeof address === 'string') throw new Error('No loopback server address');
 const origin = 'http://127.0.0.1:' + address.port;
 const chrome = spawn(
-  'C:/Program Files/Google/Chrome/Application/chrome.exe',
+  findChromeExecutable(),
   [
     '--headless=new',
     '--remote-debugging-port=0',

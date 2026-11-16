@@ -534,6 +534,117 @@ describe('NotesWorkspace Component', () => {
     assert.notEqual(masterPane.style.display, 'none');
     assert.ok(screen.getAllByRole('button', { name: /专注模式|专注/i }).length >= 1);
   });
+
+  it('saves notes via Cmd+S (metaKey) shortcut', async () => {
+    mockEditorProblems();
+    let saved: { id: string; content: string } | null = null;
+    mock.method(api, 'upsertNote', async (id: string, content: string) => {
+      saved = { id, content };
+      return { note: editorNote(id, content) };
+    });
+
+    await act(async () => {
+      render(<NotesWorkspace lang="en" />);
+    });
+
+    await act(async () => {
+      fireEvent.change(noteEditor(), { target: { value: 'Updated via Cmd+S' } });
+    });
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 's', metaKey: true });
+    });
+
+    assert.deepEqual(saved, { id: '1', content: 'Updated via Cmd+S' });
+    assert.equal((screen.getByRole('button', { name: /save note/i }) as HTMLButtonElement).disabled, true);
+  });
+
+  it('toggles Zen mode via Cmd+\\ (metaKey) shortcut', async () => {
+    mockEditorProblems();
+    await act(async () => {
+      render(<NotesWorkspace lang="en" />);
+    });
+
+    const masterPane = document.querySelector('.notes-master-pane') as HTMLElement;
+    assert.ok(masterPane);
+    assert.notEqual(masterPane.style.display, 'none');
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: '\\', metaKey: true });
+    });
+    assert.equal(masterPane.style.display, 'none');
+    assert.ok(screen.getAllByRole('button', { name: /exit zen/i }).length >= 1);
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: '\\', metaKey: true });
+    });
+    assert.notEqual(masterPane.style.display, 'none');
+    assert.ok(screen.getAllByRole('button', { name: /zen/i }).length >= 1);
+  });
+
+  it('displays (⌘S) and (⌘\\) on MacIntel instead of (Ctrl+S) and (Ctrl+\\)', async () => {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(navigator, 'platform');
+    try {
+      Object.defineProperty(navigator, 'platform', {
+        configurable: true,
+        value: 'MacIntel',
+      });
+      mockEditorProblems();
+
+      let rerender!: (ui: React.ReactElement) => void;
+      await act(async () => {
+        ({ rerender } = render(<NotesWorkspace lang="en" />));
+      });
+
+      const saveBtnEn = screen.getByRole('button', { name: /save note/i });
+      assert.ok(saveBtnEn.textContent?.includes('(⌘S)'));
+      assert.equal(saveBtnEn.textContent?.includes('(Ctrl+S)'), false);
+
+      const zenButtonsEn = screen.getAllByRole('button', { name: /zen/i });
+      assert.equal(zenButtonsEn.length, 2);
+      for (const btn of zenButtonsEn) {
+        assert.equal(btn.getAttribute('title'), 'Zen Mode Shortcut (⌘\\)');
+      }
+
+      await act(async () => {
+        rerender(<NotesWorkspace lang="zh" />);
+      });
+
+      const saveBtnZh = screen.getByRole('button', { name: /保存笔记/i });
+      assert.ok(saveBtnZh.textContent?.includes('(⌘S)'));
+      assert.equal(saveBtnZh.textContent?.includes('(Ctrl+S)'), false);
+
+      const zenButtonsZh = screen.getAllByRole('button', { name: /专注模式|专注/i });
+      assert.equal(zenButtonsZh.length, 2);
+      for (const btn of zenButtonsZh) {
+        assert.equal(btn.getAttribute('title'), '专注模式快捷键 (⌘\\)');
+      }
+
+      Object.defineProperty(navigator, 'platform', {
+        configurable: true,
+        value: 'Win32',
+      });
+      await act(async () => {
+        rerender(<NotesWorkspace lang="en" />);
+      });
+
+      const saveBtnWin = screen.getByRole('button', { name: /save note/i });
+      assert.ok(saveBtnWin.textContent?.includes('(Ctrl+S)'));
+      assert.equal(saveBtnWin.textContent?.includes('(⌘S)'), false);
+
+      const zenButtonsWin = screen.getAllByRole('button', { name: /zen/i });
+      assert.equal(zenButtonsWin.length, 2);
+      for (const btn of zenButtonsWin) {
+        assert.equal(btn.getAttribute('title'), 'Zen Mode Shortcut (Ctrl+\\)');
+      }
+    } finally {
+      if (originalDescriptor) {
+        Object.defineProperty(navigator, 'platform', originalDescriptor);
+      } else {
+        Reflect.deleteProperty(navigator, 'platform');
+      }
+    }
+  });
 });
 
 describe('NotesWorkspace unsaved changes guard', () => {

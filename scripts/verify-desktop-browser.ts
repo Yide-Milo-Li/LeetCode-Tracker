@@ -18,21 +18,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { CatalogStore } from '../packages/database/src/store.ts';
 import { buildApp } from '../apps/server/src/app.ts';
 import type { CatalogProblem } from '../packages/contracts/src/sync.ts';
-
-/** Locate installed Google Chrome binary. */
-function findChromeExecutable(): string {
-  const paths = [
-    process.env.CHROME_BIN,
-    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-    path.join(process.env.LOCALAPPDATA || '', 'Google\\Chrome\\Application\\chrome.exe'),
-  ].filter(Boolean) as string[];
-
-  for (const p of paths) {
-    if (fs.existsSync(p)) return p;
-  }
-  throw new Error('Google Chrome executable was not found. Please install Chrome or set CHROME_BIN.');
-}
+import { findChromeExecutable } from './find-chrome.ts';
 
 /** Seed realistic problems, planning strategy, and activity records for verification. */
 async function seedVerificationDatabase(db: DatabaseSync, store: CatalogStore) {

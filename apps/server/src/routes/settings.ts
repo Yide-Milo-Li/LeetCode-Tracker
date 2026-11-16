@@ -2,7 +2,11 @@
  * Fastify routes for managing user preferences and settings (e.g. timezone).
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { updateSettingsInputSchema, fixedProviderModels } from '../../../../packages/contracts/src/sync.ts';
+import {
+  updateSettingsInputSchema,
+  fixedProviderModels,
+  normalizeGeminiModel,
+} from '../../../../packages/contracts/src/sync.ts';
 import { z } from 'zod';
 import { resolveAssistantSettings } from '../llm/settings.ts';
 import { LLMAssistant } from '../llm/assistant.ts';
@@ -70,10 +74,24 @@ export function registerSettingsRoutes(app: FastifyInstance, context: RouteConte
     }).safeParse(request.body ?? {});
     if (!parsed.success) return reply.status(400).send({ error: 'INVALID_SETTINGS', message: 'Invalid provider connection parameters' });
     const { provider, apiKey, model, baseUrl } = parsed.data;
+    const effectiveProvider = provider ?? gemini.getStatus().provider ?? 'gemini';
+    let effectiveModel: string | undefined;
+    if (effectiveProvider === 'gemini') {
+      if (model !== undefined) {
+        const normalizedModel = normalizeGeminiModel(model);
+        if (!normalizedModel) {
+          return reply.status(400).send({
+            error: 'INVALID_SETTINGS',
+            message: 'Unsupported Gemini model. Allowed models: models/gemini-3.8-flash, models/gemini-4-hydrogen',
+          });
+        }
+        effectiveModel = normalizedModel;
+      }
+    } else {
+      effectiveModel = fixedProviderModels[effectiveProvider];
+    }
 
     if (gemini.testConnection) {
-      const effectiveProvider = provider ?? gemini.getStatus().provider ?? 'gemini';
-      const effectiveModel = effectiveProvider === 'gemini' ? model : fixedProviderModels[effectiveProvider];
       const res = await gemini.testConnection({ provider: effectiveProvider, apiKey, model: effectiveModel, baseUrl });
       if (!res.ok) {
         return reply.status(400).send({
@@ -93,7 +111,18 @@ export function registerSettingsRoutes(app: FastifyInstance, context: RouteConte
   app.post('/api/v1/settings/test-gemini', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = request.body && typeof request.body === 'object' ? (request.body as Record<string, unknown>) : {};
     const apiKey = typeof body.apiKey === 'string' ? body.apiKey : undefined;
-    const model = typeof body.model === 'string' ? body.model : undefined;
+    const rawModel = typeof body.model === 'string' ? body.model : undefined;
+    let model: string | undefined;
+    if (rawModel !== undefined && rawModel.trim().length > 0) {
+      const normalizedModel = normalizeGeminiModel(rawModel);
+      if (!normalizedModel) {
+        return reply.status(400).send({
+          error: 'INVALID_SETTINGS',
+          message: 'Unsupported Gemini model. Allowed models: models/gemini-3.8-flash, models/gemini-4-hydrogen',
+        });
+      }
+      model = normalizedModel;
+    }
 
     if (gemini.testConnection) {
       const res = await gemini.testConnection({ provider: 'gemini', apiKey, model });

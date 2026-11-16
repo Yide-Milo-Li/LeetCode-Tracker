@@ -64,7 +64,17 @@ export async function prepareDesktopRuntime(target: RuntimeTarget): Promise<void
   console.log(`Verified Node ${NODE_VERSION}: ${target}, binary SHA-256 ${sha256(binary)}`);
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+/** Resolve symlinked entrypoint paths before checking direct CLI invocation. */
+function isDirectEntrypoint(entryArg: string | undefined, modulePath: string): boolean {
+  if (!entryArg) return false;
+  try {
+    return fs.realpathSync(entryArg) === fs.realpathSync(modulePath);
+  } catch {
+    return path.resolve(entryArg) === path.resolve(modulePath);
+  }
+}
+
+if (isDirectEntrypoint(process.argv[1], fileURLToPath(import.meta.url))) {
   const args = process.argv.slice(2);
   if (args.length && (args.length !== 2 || args[0] !== '--target')) throw new Error('Usage: prepare-desktop-runtime.ts [--target TARGET]');
   await prepareDesktopRuntime(runtimeTarget(args[1]));

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Keep this source in sync with apps/desktop/src-tauri/icons/icon-source.svg. -->
+  <rect x="28" y="28" width="968" height="968" rx="230" fill="#edece1"/>
+  <rect x="175" y="175" width="674" height="674" rx="154" fill="#3c5a44"/>
+
+  <!-- Six cells frame the code in the center of the original 3-by-3 grid. -->
+  <g>
+    <rect x="284" y="284" width="112" height="112" rx="25" fill="#a7c195"/>
+    <rect x="456" y="284" width="112" height="112" rx="25" fill="#dfe8d6"/>
+    <rect x="628" y="284" width="112" height="112" rx="25" fill="#d3aa71"/>
+    <rect x="284" y="628" width="112" height="112" rx="25" fill="#dfe8d6"/>
+    <rect x="456" y="628" width="112" height="112" rx="25" fill="#a7c195"/>
+    <rect x="628" y="628" width="112" height="112" rx="25" fill="#dfe8d6"/>
+  </g>
+
+  <g fill="none" stroke="#f3f3e9" stroke-width="42" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M372 469 318 512 372 555"/>
+    <path d="M652 469 706 512 652 555"/>
+    <path d="M535 463 489 561"/>
+  </g>
+</svg>

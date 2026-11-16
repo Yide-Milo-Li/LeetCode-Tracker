@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import { CatalogStore } from '../packages/database/src/store.ts';
 import { buildApp } from '../apps/server/src/app.ts';
 import { LLMAssistant } from '../apps/server/src/llm/assistant.ts';
+import { findChromeExecutable } from './find-chrome.ts';
 
 
 const root = process.cwd();
@@ -31,7 +32,7 @@ const address = app.server.address();
 if (!address || typeof address === 'string') throw new Error('No loopback address');
 const origin = 'http://127.0.0.1:' + address.port;
 const chrome = spawn(
-  'C:/Program Files/Google/Chrome/Application/chrome.exe',
+  findChromeExecutable(),
   [
     '--headless=new',
     '--remote-debugging-port=0',
@@ -198,7 +199,12 @@ try {
       await until("document.querySelector('.ai-settings-form fieldset:not(:disabled)')");
       assert.equal(store.getSettings().llmProvider, provider);
       assert.equal(assistant.getStatus().provider, provider);
-      if (provider !== 'gemini') {
+      if (provider === 'gemini') {
+        assert.deepEqual(
+          await evaluate("[...document.querySelector('.ai-settings-form select').options].map(o=>o.value)"),
+          ['models/gemini-3.8-flash', 'models/gemini-4-hydrogen'],
+        );
+      } else {
         const expected = provider === 'openai' ? 'gpt-5.6-luna' : 'deepseek-flash';
         assert.equal(assistant.getStatus().model, expected);
         assert.deepEqual(await evaluate("[...document.querySelector('.ai-settings-form select').options].map(o=>o.value)"), [expected]);

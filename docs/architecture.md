@@ -1,6 +1,6 @@
 # Architecture
 
-The repository baseline implements an offline-first, Bring-Your-Own-Data (BYOD) practice workbench. It provides shared TypeScript contracts, transactional SQLite storage (schema v10), a local Fastify loopback API, a multi-provider LLM assistant tier (Gemini, OpenAI, DeepSeek), and a bilingual React web client, and a Windows Tauri host with a private Node 24.15.0 runtime.
+The repository baseline implements an offline-first, Bring-Your-Own-Data (BYOD) practice workbench. It provides shared TypeScript contracts, transactional SQLite storage (schema v10), a local Fastify loopback API, a multi-provider LLM assistant tier (Gemini, OpenAI, DeepSeek), a bilingual React web client, and Windows x64 / Apple Silicon macOS Tauri hosts with a private Node 24.15.0 runtime.
 
 The interactive diagram predates the native shell and shows the shared application core; the current native boundary is described below. For an interactive SVG diagram with dark/light themes, search, pan/zoom, and guided views, see the [Interactive Architecture Diagram](diagrams/architecture.html).
 
@@ -49,7 +49,7 @@ flowchart TD
 - **`packages/database`**: High-performance SQLite engine (`DatabaseSync`) managing schema migrations (supported v3–v9 to v10), preflight validation, atomic multi-table writes, point-in-time backups via native Node SQLite backup, daily backup pruning, problem notes store, planning store, dashboard query layer, and offline restore.
 - **`packages/domain`**: Pure algorithmic domain logic for deterministic quota calculation (largest remainder), review candidate selection, streak calculation, yearly heatmap matrix generation, and activity pagination.
 - **`apps/server`**: Local Fastify API bound to `127.0.0.1`. Exposes `/api/v1` endpoints for catalog, imports, practice records, progress snapshots, recommendation planning, problem notes, read-only dashboard overview and activity stream, and multi-provider LLM assistant with write serialization mutex and static SPA hosting.
-- **`apps/desktop`**: Rust host and NSIS packaging. Owns native file destinations, parsed external URL launching, session secrets, bounded startup/health checks, and a Job-bound Node child. See [desktop lifecycle and storage](desktop.md).
+- **`apps/desktop`**: Rust host with Windows NSIS and Apple Silicon macOS `.app`/`.dmg` packaging. Owns native file destinations, parsed external URL launching (`ShellExecuteW` on Windows, `/usr/bin/open` on macOS), session secrets, bounded startup/health checks, and sidecar lifecycle ownership (Windows Job Object / macOS `ManagedChild` cleanup, Dock reopen, and `Cmd+Q` shutdown). See [desktop lifecycle and storage](desktop.md).
 - **`apps/web`**: React/Vite desktop SPA with four primary destinations and contextual workspaces. App owns the single `useDailyPlan` controller and a small React context for mutation invalidation, timezone and shared practice overlays. Hash navigation uses existing React state; visited workspaces retain drafts, filters and scroll. `PracticeEditor`, `Dialog`, `Field`, `Feedback` and `Pagination` are shared; catalog ingestion and progress ingestion have independent ownership. CSS variables define warm light/dark palettes, spacing and motion. Statistics alone hosts full Recharts analysis.
 
 ## Ingestion pipeline

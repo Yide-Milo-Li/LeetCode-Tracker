@@ -2,6 +2,7 @@
  * Google Gemini provider adapter using official @google/genai SDK.
  */
 import { GoogleGenAI } from '@google/genai';
+import { defaultGeminiModel, normalizeGeminiModel } from '../../../../../packages/contracts/src/sync.ts';
 import { BaseLLMProvider } from './base.ts';
 import type {
   GenerateContentParams,
@@ -28,7 +29,7 @@ export class GeminiProvider extends BaseLLMProvider {
   constructor(options: GeminiProviderOptions = {}) {
     super();
     this.apiKey = options.apiKey ?? process.env.GEMINI_API_KEY;
-    this.defaultModel = options.defaultModel || process.env.GEMINI_MODEL || 'models/gemini-3.5-flash';
+    this.defaultModel = options.defaultModel || normalizeGeminiModel(process.env.GEMINI_MODEL) || defaultGeminiModel;
     this.generateContentFn = options.generateContentFn;
   }
 
@@ -38,7 +39,7 @@ export class GeminiProvider extends BaseLLMProvider {
       this.apiKey = config.apiKey ? config.apiKey.trim() : undefined;
     }
     if (config.defaultModel !== undefined) {
-      this.defaultModel = config.defaultModel ? config.defaultModel.trim() : 'models/gemini-3.5-flash';
+      this.defaultModel = config.defaultModel ? config.defaultModel.trim() : defaultGeminiModel;
     }
   }
 

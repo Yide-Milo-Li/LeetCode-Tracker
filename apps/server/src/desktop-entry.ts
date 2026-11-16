@@ -160,8 +160,18 @@ export async function startDesktopServer(): Promise<void> {
   }
 }
 
+/** Resolve symlinked entrypoint paths so macOS `/var` -> `/private/var` matches `import.meta.filename`. */
+function isDirectEntrypoint(entryArg: string | undefined, modulePath: string): boolean {
+  if (!entryArg) return false;
+  try {
+    return fs.realpathSync(entryArg) === fs.realpathSync(modulePath);
+  } catch {
+    return path.resolve(entryArg) === path.resolve(modulePath);
+  }
+}
+
 // Automatically start when executed directly
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.meta.filename)) {
+if (isDirectEntrypoint(process.argv[1], import.meta.filename)) {
   startDesktopServer().catch((err) => {
     process.stderr.write(`Fatal error in desktop server: ${String(err)}\n`);
     process.exit(1);

@@ -15,6 +15,23 @@ async function api(method,path,body) {
   return JSON.parse(response.body);
 }
 
+/** Navigate via the sidebar button and confirm both the hash route and view container are active. */
+async function navigateTo(ariaLabel, expectedHash, viewSelector) {
+  const navButton = await browser.$(`button[aria-label="${ariaLabel}"]`);
+  await navButton.waitForDisplayed();
+  await navButton.click();
+  const view = await browser.$(viewSelector);
+  await view.waitForDisplayed();
+  await browser.waitUntil(async () => (await browser.execute(() => window.location.hash)) === expectedHash);
+  return view;
+}
+
+/** Verify no visible error alert banner rendered inside the given view. */
+async function assertNoViewErrors(view) {
+  const alerts = await view.$$('[role="alert"], .feedback.error');
+  assert.equal(alerts.length, 0, 'Expected no error alerts in active view');
+}
+
 describe('macOS native profile migration',()=>{
   it('starts, migrates a Windows fixture, renders Settings and persists through reload',async()=>{
     await browser.waitUntil(async()=>{
@@ -42,5 +59,78 @@ describe('macOS native profile migration',()=>{
     const state=await api('GET','/bundle/export?version=3');
     assert.equal(state.tables.problems.length,fixture.tables.problems.length);
     assert.deepEqual(state.tables.practice_records,fixture.tables.practice_records);
+  });
+
+  it('verifies v1.2.0 knowledge profile API and Today, Problems, Statistics, and Notes views', async () => {
+    const profile = await api('GET', '/knowledge-profile');
+    assert.equal(profile.analysisVersion, 'profile-v1');
+    assert.equal(profile.windowDays, 30);
+    assert.ok(Array.isArray(profile.topics), 'knowledge-profile topics should be an array');
+    assert.ok(profile.topics.some((topic) => topic.tagSlug === 'array'));
+
+    const todayView = await navigateTo('Today', '#today', '#view-today');
+    const todayProblem = await todayView.$('.today-problems .today-problem');
+    await todayProblem.waitForDisplayed();
+    const progressBar = await todayView.$('.target-meter[role="progressbar"]');
+    await progressBar.waitForDisplayed();
+    assert.equal(await progressBar.getAttribute('aria-label'), 'Today completion progress');
+    assert.ok((await progressBar.$$('.target-meter-seg')).length >= 1);
+    const rhythmSummary = await todayView.$('.rhythm-summary');
+    await rhythmSummary.waitForDisplayed();
+    assert.match(await rhythmSummary.getText(), /Records on \d+ of 7 days/);
+    assert.equal((await todayView.$$('.rhythm-chart-wrap .rhythm-day-col')).length, 7);
+    const todayTitleLink = await todayProblem.$('a.problem-title-link');
+    await todayTitleLink.waitForDisplayed();
+    assert.match(await todayTitleLink.getText(), /Synthetic 数组/);
+    assert.equal(await todayTitleLink.getAttribute('href'), 'https://leetcode.com/problems/synthetic/');
+    assert.equal(await todayTitleLink.getAttribute('target'), '_blank');
+
+    const todayTimerBtn = await todayProblem.$('button[aria-label^="Start timer:"]');
+    await todayTimerBtn.waitForDisplayed();
+    await todayTimerBtn.click();
+    const timerPill = await browser.$('section.practice-timer-pill');
+    await timerPill.waitForDisplayed();
+    assert.match(await timerPill.getText(), /Synthetic 数组/);
+    const discardTimerBtn = await timerPill.$('button[aria-label="Discard timer"]');
+    await discardTimerBtn.waitForDisplayed();
+    await discardTimerBtn.click();
+    await timerPill.waitForExist({ reverse: true });
+    await assertNoViewErrors(todayView);
+
+    const problemsView = await navigateTo('Problems', '#problems', '#view-problems');
+    const catalogRow = await problemsView.$('table.problem-table tbody tr');
+    await catalogRow.waitForDisplayed();
+    assert.match(await catalogRow.getText(), /Synthetic 数组/);
+    const catalogTimerBtn = await catalogRow.$('button[aria-label^="Start timer:"]');
+    await catalogTimerBtn.waitForDisplayed();
+    assert.match(await catalogTimerBtn.getAttribute('aria-label'), /Synthetic 数组/);
+    const catalogExtLink = await catalogRow.$('a[href="https://leetcode.com/problems/synthetic/"]');
+    await catalogExtLink.waitForDisplayed();
+    await assertNoViewErrors(problemsView);
+
+    const statisticsView = await navigateTo('Progress', '#statistics', '#view-statistics');
+    await (await statisticsView.$('.dashboard-view-container')).waitForDisplayed();
+    await (await statisticsView.$('.heatmap-card')).waitForDisplayed();
+    const trendCard = await statisticsView.$('.progress-insights-grid section.trend-card');
+    await trendCard.waitForDisplayed();
+    const masteryCard = await statisticsView.$('.progress-insights-grid section.distribution-card.mastery-card');
+    await masteryCard.waitForDisplayed();
+    assert.match(await masteryCard.getText(), /Mastery/);
+    await browser.waitUntil(async () => (await masteryCard.$$('.mastery-row-track[role="meter"]')).length >= 4);
+    const topicInsights = await statisticsView.$('.topic-insights');
+    await topicInsights.waitForDisplayed();
+    await (await statisticsView.$('.topic-difficulty-pills')).waitForDisplayed();
+    assert.match(await topicInsights.getText(), /Array/);
+    await assertNoViewErrors(statisticsView);
+
+    const notesView = await navigateTo('Notes', '#notes', '#view-notes');
+    await (await notesView.$('.notes-workspace-view')).waitForDisplayed();
+    const noteCard = await notesView.$('.notes-problem-card');
+    await noteCard.waitForDisplayed();
+    assert.match(await noteCard.getText(), /Synthetic 数组/);
+    const noteTextarea = await notesView.$('.notes-detail-pane textarea');
+    await noteTextarea.waitForDisplayed();
+    await browser.waitUntil(async () => /Synthetic note/.test(await noteTextarea.getValue()));
+    await assertNoViewErrors(notesView);
   });
 });

@@ -1,6 +1,6 @@
 # Desktop workflow guide
 
-The same desktop UI runs in the Windows 1.1.0 app and source-mode browsers. Native mode shows recoverable startup status, uses native dialogs for exports, and opens allowed external links in the system browser. See [installation and runtime behavior](desktop.md).
+The same desktop UI runs in the Windows and Apple Silicon macOS desktop apps as well as source-mode browsers. Native mode shows recoverable startup status, uses native dialogs for exports, and opens allowed external links in the system browser. See [installation and runtime behavior](desktop.md).
 
 ## Four places to work
 
@@ -94,7 +94,7 @@ Existing strategies display the planner's actual rounded counts. Saving without 
 
 The Notes Workspace provides a filterable master list, formatting toolbar, and Edit / Split / Preview modes for problem reflections, complexity notes, code snippets, and knowledge exports. Its preview supports a lightweight Markdown subset; math is styled as text rather than typeset by a full LaTeX engine.
 
-- **Focus and save**: Ctrl/Cmd+\ toggles Notes focus mode; Ctrl/Cmd+S saves the active draft. Focus mode starts off. The practice timeline can be expanded separately.
+- **Focus and save**: `Ctrl+\` / `⌘\` toggles Notes focus mode; `Ctrl+S` / `⌘S` saves the active draft (the UI automatically displays `⌘S` and `⌘\` on macOS). Focus mode starts off. The practice timeline can be expanded separately.
 - **Unsaved changes**: Selecting another problem offers Save and switch, Discard and switch, or Cancel. Saving must succeed before switching; Cancel preserves the current draft.
 - **Quick copy**: The Copy menu exposes Obsidian and Notion card formats.
 
@@ -108,8 +108,9 @@ The Notes Workspace provides a filterable master list, formatting toolbar, and E
 
 ## Desktop launcher
 
-For Windows desktop usage without manual terminal commands:
-- Double-click `start.bat` from the repository root, or run `npm run desktop`.
-- **Port detection**: Probes `127.0.0.1:3000`. If LeetCode Tracker is already running, it opens your default browser immediately and avoids duplicate startup to prevent SQLite lease collisions.
+For source-mode desktop usage without manual multi-step terminal commands:
+- **Windows**: Double-click `start.bat` from the repository root, or run `npm run desktop`.
+- **macOS (Apple Silicon / POSIX)**: Run `npm run desktop:mac`, `./scripts/start-desktop.sh`, or `npm run desktop` (pass `PORT=3001` to override the default port).
+- **Port detection**: Probes `127.0.0.1:3000` (or custom `PORT`). If LeetCode Tracker is already running, it opens your default browser immediately and avoids duplicate startup to prevent SQLite lease collisions. If another unrelated service holds the port, it reports the conflict and exits cleanly.
 - **Service bootstrap**: If not already running, it ensures production frontend assets exist (building via `npm run build` if needed), starts the local Fastify service, awaits loopback readiness, and opens your default browser to `http://127.0.0.1:3000`.
-- **Explicit shutdown**: Press `Ctrl+C` in the console window to trigger graceful shutdown, releasing the database lease and closing the database cleanly.
+- **Explicit shutdown**: Press `Ctrl+C` in the terminal/console window to trigger graceful shutdown, releasing the database lease and closing the database cleanly.

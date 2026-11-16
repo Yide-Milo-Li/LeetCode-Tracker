@@ -7,24 +7,37 @@
 <p align="center">
   <a href="https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.2.0"><img src="https://img.shields.io/badge/release-1.2.0-blue?style=flat-square" alt="Release 1.2.0"></a>
   <a href="docs/desktop.md"><img src="https://img.shields.io/badge/desktop-Windows%20x64%20%2B%20macOS%20ARM64-455a64?style=flat-square" alt="Windows x64 and macOS ARM64"></a>
-  <a href="tests/README.md"><img src="https://img.shields.io/badge/tests-427%20JS%20%2B%207%20Rust-brightgreen?style=flat-square" alt="427 JavaScript and 7 Rust tests"></a>
+  <a href="tests/README.md"><img src="https://img.shields.io/badge/tests-430%20JS%20%2B%207%20Rust-brightgreen?style=flat-square" alt="430 JavaScript and 7 Rust tests"></a>
   <a href="docs/architecture.md"><img src="https://img.shields.io/badge/sqlite-schema%20v10-003b57?style=flat-square" alt="SQLite schema v10"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT License"></a>
 </p>
 
 A local-first desktop workbench for algorithm practice: bring your own JSONL catalog, plan a weekly routine, record practice, review progress, and keep problem notes together. The interface supports English and Simplified Chinese, desktop windows at 1024px and above, ten theme palettes, and keyboard navigation.
 
-Release 1.2.0 packages the React interface, Fastify API, SQLite engine, and a private Node.js 24 runtime in a Tauri Windows application. Phase 21 adds an Apple Silicon macOS 14+ internal `.app`/`.dmg` build with the same local-first data model. **End users do not need to install Node.js, npm, Git, or Rust.**
+Release 1.2.0 (plus `994f516` UI refinements on `main`) packages the React interface, Fastify API, SQLite engine, and a private Node.js 24 runtime into native Tauri desktop apps for **Windows x64** and **Apple Silicon macOS 14+** (`aarch64-apple-darwin` internal `.app`/`.dmg` build) with the same local-first data model. **End users do not need to install Node.js, npm, Git, or Rust.**
 
 ## Download and start
 
-1. Open [Release 1.2.0](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.2.0) and download **LeetCode-Tracker_1.2.0_x64-setup.exe**. The release also includes `SHA256SUMS.txt`.
-2. Run the per-user Windows x64 installer, then launch LeetCode Tracker from the Start Menu.
-3. Open **Problems → Import problems**, upload or paste your JSON Lines catalog, review the preview, and confirm the import.
-4. Open **Today → Study schedule** to choose your days, daily counts, difficulty quotas, and review options.
-5. Optionally configure an AI provider under **Settings**. Catalog browsing, manual practice, notes, statistics, and local planning remain available without an API key.
+### Windows (x64)
 
-The installer is **unsigned**. Microsoft WebView2 is required; if it is missing, the installer downloads its bootstrapper, which requires internet access. Windows 11 x64 is the primary target; clean-machine installation, Windows 10 compatibility, and upgrade/downgrade acceptance have not completed the full verification matrix. See [installation, data paths, and troubleshooting](docs/desktop.md) and [1.2.0 release notes](docs/releases/1.2.0.md).
+1. Open [Release 1.2.0](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.2.0) and download **LeetCode-Tracker_1.2.0_x64-setup.exe** (with `SHA256SUMS.txt`).
+2. Run the per-user Windows x64 installer, then launch **LeetCode Tracker** from the Start Menu.
+
+### macOS (Apple Silicon, macOS 14+)
+
+- **Packaged app (internal `.dmg` / `.app`)**:
+  1. Open `LeetCode Tracker_1.2.0_aarch64.dmg` (built via `npm run desktop:build:mac` or the `desktop-macos` CI workflow artifact) and drag **LeetCode Tracker.app** into **Applications**.
+  2. Because the macOS bundle is **ad-hoc signed and unnotarized**, if macOS shows a Gatekeeper warning on first launch, open **System Settings → Privacy & Security** and click **Open Anyway** (or right-click **LeetCode Tracker.app → Open**).
+  3. Closing the red window button hides the window while keeping the app running in the Dock; click the Dock icon to reopen, or press `Cmd+Q` to quit and stop the local backend cleanly.
+- **Source-mode one-command launch** (if running from a checkout with Node.js): run `npm run desktop:mac` (or `./scripts/start-desktop.sh` / `npm run desktop`), which checks port `3000`, builds missing web assets, starts the Fastify server, and opens your default browser.
+
+### First-run setup (Windows & macOS)
+
+1. Open **Problems → Import problems**, upload or paste your JSON Lines catalog, review the preview, and confirm the import.
+2. Open **Today → Study schedule** to choose your days, daily counts, difficulty quotas, and review options.
+3. Optionally configure an AI provider under **Settings** (or import a **Snapshot Bundle v3** under **Settings → Import Migration** when moving a profile between Windows and macOS). Catalog browsing, manual practice, notes, statistics, and local planning remain available without an API key.
+
+The Windows installer is **unsigned** and requires Microsoft WebView2 (the installer downloads its bootstrapper if missing, which requires internet access). Windows 11 x64 is the primary Windows target; clean-machine installation, Windows 10 compatibility, Apple notarization, and non-developer Mac Gatekeeper UX have not completed the full acceptance matrix. See [installation, data paths, and troubleshooting](docs/desktop.md) and [1.2.0 release notes](docs/releases/1.2.0.md).
 
 ### Bring your own catalog
 
@@ -68,6 +81,8 @@ Ten palettes, a high-contrast option, English/Chinese text, and light/dark/syste
 | `n` | Open manual practice entry |
 | `?` | Show keyboard help |
 | `Esc` | Dismiss the active overlay |
+| `⌘S` / `Ctrl+S` | Save active note in Notes workspace |
+| `⌘\` / `Ctrl+\` | Toggle Notes focus mode |
 
 See the [workflow guide](docs/desktop-workflow.md) for input guards and context-specific actions. Mobile UI is outside the supported scope.
 
@@ -86,7 +101,7 @@ See the [workflow guide](docs/desktop-workflow.md) for input guards and context-
 
 ## Data and optional AI
 
-- The installed desktop profile stores SQLite and backups under `%LOCALAPPDATA%\com.leetcodetracker.desktop\`. It does not automatically adopt a source checkout's `.local` database.
+- The installed desktop profile stores SQLite and backups under `%LOCALAPPDATA%\com.leetcodetracker.desktop\` on Windows or `~/Library/Application Support/com.leetcodetracker.desktop/` on macOS. It does not automatically adopt a source checkout's `.local` database.
 - API keys are stored in local SQLite settings without operating-system credential encryption. Raw database backups can contain keys; keep them private.
 - AI features send task-relevant inputs to the selected provider or configured gateway. These can include candidate problem metadata, strategy/override text, or pasted progress text. AI-assisted progress import requires a working provider and has no deterministic formatting fallback.
 - Portable Snapshot Bundle v3 (schema v10) is the complete one-time Windows ↔ macOS migration path for the catalog, saved practice progress, history, notes, plans, review state, and non-sensitive settings. It excludes provider keys, preserves keys already configured on the target, validates references before writing, and replaces the target business profile only after confirmation. Legacy v1 bundles remain partial restore files; v2 imports remain supported and map missing outcome feedback to unknown.
@@ -95,7 +110,7 @@ Read [AI provider behavior](docs/llm-providers.md) and the [security policy](SEC
 
 ## Run from source
 
-Source mode requires **Node.js >=24.15.0 <25** and npm. It uses a desktop browser and is separate from the packaged Windows app:
+Source mode targets **Node.js >=24.15.0 <25** and npm (newer Node versions such as Homebrew `v26.x` on macOS emit an `EBADENGINE` warning during `npm ci`, while native macOS packaging downloads and bundles the pinned Node `24.15.0` runtime). It uses a desktop browser and is separate from the packaged desktop apps:
 
 ```sh
 git clone https://github.com/Yide-Milo-Li/LeetCode-Tracker.git
@@ -105,9 +120,9 @@ npm run build
 npm start
 ```
 
-Open [the local workbench](http://127.0.0.1:3000). On Windows, `start.bat` / `npm run desktop` are source-mode launch helpers, not the native installer. Source mode supports optional `.env` configuration; the packaged host supplies its own database path, port, and private session credentials. Configure installed-app providers in Settings.
+Open [the local workbench](http://127.0.0.1:3000), or use the source-mode launcher (`npm run desktop` on Windows/macOS, `start.bat` on Windows, or `npm run desktop:mac` / `./scripts/start-desktop.sh` on macOS) to check ports, build if needed, start Fastify, and open your browser automatically. Source mode supports optional `.env` configuration; the packaged host supplies its own database path, port, and private session credentials. Configure installed-app providers in Settings.
 
-For a native Windows build, install the Rust/MSVC toolchain and run `npm run desktop:build`. On Apple Silicon macOS 14+, run `npm run desktop:build:mac` for the internal ad-hoc `.app`/`.dmg` package. The [desktop guide](docs/desktop.md) lists prerequisites, outputs, migration steps, and checks. macOS packages remain internal CI artifacts; this public release distributes Windows x64. Notarization and physical-Mac acceptance remain pending.
+For a native Windows build, install the Rust/MSVC toolchain and run `npm run desktop:build`. On Apple Silicon macOS 14+, install Xcode Command Line Tools and the Rust toolchain (`aarch64-apple-darwin`) and run `npm run desktop:build:mac` to produce `LeetCode Tracker.app` and `LeetCode Tracker_1.2.0_aarch64.dmg`. See the [desktop guide](docs/desktop.md) for prerequisites, outputs, migration steps, and checks. Public GitHub releases currently distribute Windows x64; macOS packages remain internal ad-hoc builds until notarization and external-Mac acceptance are complete.
 
 ## Architecture and verification
 
@@ -120,13 +135,13 @@ flowchart LR
     Host --> OS[Native save dialog and browser URL handler]
 ```
 
-The host validates the startup handshake, owns the sidecar process through a Windows Job Object, and waits for graceful shutdown before enforcing its deadline. Browser source mode uses HTTP directly. See [architecture](docs/architecture.md).
+The host validates the startup handshake, owns the sidecar process (with a Windows Job Object on Windows and bounded graceful stdin shutdown plus `Drop` termination on macOS), and waits for graceful shutdown before enforcing its deadline. Browser source mode uses HTTP directly. See [architecture](docs/architecture.md).
 
-The current local verification passed **418 JavaScript/Web/sidecar tests and 7 Rust tests**, TypeScript checking, documentation links, Rust formatting/clippy, and Windows installer packaging. These are automated/local results. They do not establish clean-VM installation, complete native UI/upgrade acceptance, live-provider availability, or performance guarantees. [Status](docs/status.md) separates current evidence from historical phase results; [CI](https://github.com/Yide-Milo-Li/LeetCode-Tracker/actions) reports remote runs independently.
+The current Apple Silicon macOS verification passed **430 JavaScript/Web/sidecar tests (285 backend + 144 Web DOM + 1 isolated sidecar), 7 Rust tests, and 2/2 WKWebView E2E specs**, TypeScript checking, documentation links, Rust formatting/clippy, headless Chrome `verify:phase24`, and `.app`/`.dmg` packaging (prior Windows `1.2.0` checks verified NSIS packaging). These are automated/local results; they do not establish clean-VM installation, notarized Gatekeeper UX, live-provider availability, or performance guarantees. [Status](docs/status.md) separates current evidence from historical phase results; [CI](https://github.com/Yide-Milo-Li/LeetCode-Tracker/actions) reports remote runs independently.
 
 ## Documentation
 
-- [Documentation index](docs/README.md) · [Desktop installation](docs/desktop.md) · [Release 1.1.0 notes](docs/releases/1.1.0.md)
+- [Documentation index](docs/README.md) · [Desktop installation](docs/desktop.md) · [Release 1.2.0 notes](docs/releases/1.2.0.md)
 - [Data format](docs/data-format.md) · [AI providers](docs/llm-providers.md) · [Topic insights](docs/topic-practice-insights.md)
 - [Architecture](docs/architecture.md) · [Applications](apps/README.md) · [Shared packages](packages/README.md)
 - [Tests](tests/README.md) · [Scripts](scripts/README.md) · [Roadmap](docs/roadmap.md)

@@ -20,21 +20,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { CatalogStore } from '../packages/database/src/store.ts';
 import { buildApp } from '../apps/server/src/app.ts';
 import { GeminiAssistant } from '../apps/server/src/gemini.ts';
-
-/** Locate installed Google Chrome binary on Windows. */
-function findChromeExecutable(): string {
-  const paths = [
-    process.env.CHROME_BIN,
-    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-    path.join(process.env.LOCALAPPDATA || '', 'Google\\Chrome\\Application\\chrome.exe'),
-  ].filter(Boolean) as string[];
-
-  for (const p of paths) {
-    if (fs.existsSync(p)) return p;
-  }
-  throw new Error('Google Chrome executable was not found. Please install Chrome or set CHROME_BIN.');
-}
+import { findChromeExecutable, loadOptionalEnv } from './find-chrome.ts';
 
 /** Lightweight CDP client using Node 24 native WebSocket. */
 class CdpSession {
@@ -88,6 +74,7 @@ class CdpSession {
 }
 
 async function runRealDataBrowserVerification() {
+  loadOptionalEnv();
   console.log('================================================================');
   console.log('  Phase 15: Headless Browser Performance & Rendering Test 🖥️    ');
   console.log('================================================================');

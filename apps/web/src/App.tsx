@@ -26,6 +26,8 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.ts';
 import { Feedback, PageHeader, Tooltip } from './components/ui.tsx';
 import type { ThemePalette } from '../../../packages/contracts/src/sync.ts';
 
+const brandIcon = new URL('./assets/brand-icon.svg', import.meta.url).href;
+
 /** Lazy-load heavy contextual workspaces and charting views to optimize desktop bundle size. */
 const DashboardView = React.lazy(() =>
   import('./components/DashboardView.tsx').then((m) => ({ default: m.DashboardView })),
@@ -297,9 +299,7 @@ export function App() {
                 navigate('today');
               }}
             >
-              <span className="brand-mark">
-                <BookOpen size={21} />
-              </span>
+              <img className="brand-mark" src={brandIcon} alt="" width="36" height="36" />
               {sidebarExpanded && (
                 <span className="brand-title">
                   LeetCode<span>Tracker</span>

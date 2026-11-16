@@ -22,7 +22,7 @@ const { WorkspaceContext } = await import('../apps/web/src/workspace.tsx');
 
 afterEach(() => { cleanup(); mock.restoreAll(); });
 
-it('offers only Luna and V4.1 Flash even when legacy models were saved', async () => {
+it('offers only Luna, V4.1 Flash, and supported Gemini models even when legacy models were saved', async () => {
   for (const [provider, model] of [['openai', 'gpt-5.6-luna'], ['deepseek', 'deepseek-flash']] as const) {
   mock.method(api, 'getSettings', async () => ({ language: 'en', theme: 'light', timezone: 'UTC', updatedAt: 1,
     llmProvider: provider, [`${provider}Model`]: 'old-model', [`${provider}FallbackModels`]: ['old-backup'] }));
@@ -35,6 +35,21 @@ it('offers only Luna and V4.1 Flash even when legacy models were saved', async (
   cleanup();
   mock.restoreAll();
   }
+
+  mock.method(api, 'getSettings', async () => ({
+    language: 'en',
+    theme: 'light',
+    timezone: 'UTC',
+    updatedAt: 1,
+    llmProvider: 'gemini',
+    geminiModel: 'models/gemini-3.5-flash',
+    geminiFallbackModels: ['models/gemini-3.7-flash'],
+  }));
+  await act(async () => { render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} />); });
+  const geminiSelect = screen.getByLabelText('Preferred Model') as HTMLSelectElement;
+  assert.deepEqual([...geminiSelect.options].map(option => option.value), ['models/gemini-3.8-flash', 'models/gemini-4-hydrogen']);
+  assert.equal(geminiSelect.value, 'models/gemini-3.8-flash');
+  assert.equal(screen.queryByLabelText('Custom Model Identifier'), null);
 });
 
 it('keeps provider drafts independent, remasks switched keys and saves empty fallback chains', async () => {
@@ -500,7 +515,7 @@ it('configures Gemini API key with default dots masking, eye icon toggle, and mo
     timezone: 'UTC',
     geminiApiKey: 'AIzaSyExistingKey123',
     geminiModel: 'models/gemini-3.8-flash',
-    geminiFallbackModels: ['models/gemini-3.7-flash'],
+    geminiFallbackModels: ['models/gemini-4-hydrogen'],
     updatedAt: 1,
   }));
 
@@ -563,22 +578,22 @@ it('configures Gemini API key with default dots masking, eye icon toggle, and mo
   const modelSelect = screen.getByLabelText('Preferred Model') as HTMLSelectElement;
   assert.ok(modelSelect);
   await act(async () => {
-    fireEvent.change(modelSelect, { target: { value: 'models/gemini-3.7-flash' } });
+    fireEvent.change(modelSelect, { target: { value: 'models/gemini-4-hydrogen' } });
   });
-  assert.equal(modelSelect.value, 'models/gemini-3.7-flash');
+  assert.equal(modelSelect.value, 'models/gemini-4-hydrogen');
 
   // Verify that the newly selected primary model is disabled in candidate chips and pruned from fallbacks
-  const chip37 = screen.getByRole('button', { name: 'gemini-3.7-flash' });
-  assert.equal(chip37.hasAttribute('disabled'), true);
+  const chipHydrogen = screen.getByRole('button', { name: 'gemini-4-hydrogen' });
+  assert.equal(chipHydrogen.hasAttribute('disabled'), true);
 
   // 6. Test Candidate model chip toggle
-  const chip36 = screen.getByRole('button', { name: 'gemini-3.6-flash' });
-  assert.ok(chip36);
-  assert.equal(chip36.getAttribute('aria-pressed'), 'false');
+  const chipFlash = screen.getByRole('button', { name: 'gemini-3.8-flash' });
+  assert.ok(chipFlash);
+  assert.equal(chipFlash.getAttribute('aria-pressed'), 'false');
   await act(async () => {
-    fireEvent.click(chip36);
+    fireEvent.click(chipFlash);
   });
-  assert.equal(chip36.getAttribute('aria-pressed'), 'true');
+  assert.equal(chipFlash.getAttribute('aria-pressed'), 'true');
 
   // 7. Test Save AI settings
   assert.equal(updateCalls.mock.callCount(), 0);
@@ -589,8 +604,8 @@ it('configures Gemini API key with default dots masking, eye icon toggle, and mo
   assert.equal(updateCalls.mock.callCount(), 1);
   const sentPayload = updateCalls.mock.calls[0].arguments[0];
   assert.equal(sentPayload.geminiApiKey, 'AIzaSyPastedKey456');
-  assert.equal(sentPayload.geminiModel, 'models/gemini-3.7-flash');
-  assert.deepEqual(sentPayload.geminiFallbackModels, ['models/gemini-3.6-flash']);
+  assert.equal(sentPayload.geminiModel, 'models/gemini-4-hydrogen');
+  assert.deepEqual(sentPayload.geminiFallbackModels, ['models/gemini-3.8-flash']);
   assert.ok(screen.getByText('AI settings saved'));
 
   // 8. Test Connection button

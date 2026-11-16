@@ -21,7 +21,7 @@ import {
 class MockGeminiAssistant implements IGeminiAssistant {
   public configured: boolean = true;
   public model: string = 'models/gemini-3.8-flash';
-  public fallbackModels: string[] = ['models/gemini-3.7-flash', 'models/gemini-3.6-flash'];
+  public fallbackModels: string[] = ['models/gemini-4-hydrogen'];
   public shouldFail: boolean = false;
   public failureCode: string = 'GEMINI_UNAVAILABLE';
   public failureStatus: number = 503;
@@ -267,7 +267,7 @@ describe('Practice & Progress API Endpoints', () => {
       const statusBody = JSON.parse(statusRes.payload);
       assert.equal(statusBody.configured, true);
       assert.equal(statusBody.model, 'models/gemini-3.8-flash');
-      assert.deepEqual(statusBody.fallbackModels, ['models/gemini-3.7-flash', 'models/gemini-3.6-flash']);
+      assert.deepEqual(statusBody.fallbackModels, ['models/gemini-4-hydrogen']);
 
       // 2. Format raw text
       const formatRes = await app.inject({

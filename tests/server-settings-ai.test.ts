@@ -31,7 +31,7 @@ describe('Server Settings & Gemini AI Configuration (/api/v1/settings)', () => {
       payload: {
         geminiApiKey: 'AIzaSyTestKey123',
         geminiModel: 'models/gemini-3.8-flash',
-        geminiFallbackModels: ['models/gemini-3.7-flash', 'models/gemini-3.6-flash'],
+        geminiFallbackModels: ['models/gemini-4-hydrogen'],
       },
     });
 
@@ -39,7 +39,7 @@ describe('Server Settings & Gemini AI Configuration (/api/v1/settings)', () => {
     const patchBody = JSON.parse(patchRes.payload);
     assert.equal(patchBody.geminiApiKey, 'AIzaSyTestKey123');
     assert.equal(patchBody.geminiModel, 'models/gemini-3.8-flash');
-    assert.deepEqual(patchBody.geminiFallbackModels, ['models/gemini-3.7-flash', 'models/gemini-3.6-flash']);
+    assert.deepEqual(patchBody.geminiFallbackModels, ['models/gemini-4-hydrogen']);
 
     // Subsequent GET returns persisted values from SQLite settings table
     const getRes = await app.inject({ method: 'GET', url: '/api/v1/settings' });
@@ -47,7 +47,7 @@ describe('Server Settings & Gemini AI Configuration (/api/v1/settings)', () => {
     const getBody = JSON.parse(getRes.payload);
     assert.equal(getBody.geminiApiKey, 'AIzaSyTestKey123');
     assert.equal(getBody.geminiModel, 'models/gemini-3.8-flash');
-    assert.deepEqual(getBody.geminiFallbackModels, ['models/gemini-3.7-flash', 'models/gemini-3.6-flash']);
+    assert.deepEqual(getBody.geminiFallbackModels, ['models/gemini-4-hydrogen']);
   });
 
   it('dynamically hot reloads running geminiAssistant on settings update', async () => {
@@ -79,16 +79,16 @@ describe('Server Settings & Gemini AI Configuration (/api/v1/settings)', () => {
       url: '/api/v1/settings',
       payload: {
         geminiApiKey: 'new-key-abc',
-        geminiModel: 'models/gemini-3.7-flash',
-        geminiFallbackModels: ['models/gemini-3.5-flash-lite'],
+        geminiModel: 'models/gemini-4-hydrogen',
+        geminiFallbackModels: ['models/gemini-3.8-flash'],
       },
     });
 
     assert.equal(patchRes.statusCode, 200);
     assert.equal(updatedConfigs.length, 1);
     assert.equal(updatedConfigs[0].apiKey, 'new-key-abc');
-    assert.equal(updatedConfigs[0].model, 'models/gemini-3.7-flash');
-    assert.deepEqual(updatedConfigs[0].fallbackModels, ['models/gemini-3.5-flash-lite']);
+    assert.equal(updatedConfigs[0].model, 'models/gemini-4-hydrogen');
+    assert.deepEqual(updatedConfigs[0].fallbackModels, ['models/gemini-3.8-flash']);
   });
 
   it('tests Gemini API connection with testConnection method', async () => {
@@ -149,7 +149,7 @@ describe('Server Settings & Gemini AI Configuration (/api/v1/settings)', () => {
       url: '/api/v1/settings',
       payload: {
         geminiModel: 'models/gemini-3.8-flash',
-        geminiFallbackModels: ['models/gemini-3.7-flash', 'models/gemini-3.8-flash'],
+        geminiFallbackModels: ['models/gemini-4-hydrogen', 'models/gemini-3.8-flash'],
       },
     });
     assert.equal(overlapRes.statusCode, 400);
@@ -162,12 +162,50 @@ describe('Server Settings & Gemini AI Configuration (/api/v1/settings)', () => {
       url: '/api/v1/settings',
       payload: {
         geminiModel: 'models/gemini-3.8-flash',
-        geminiFallbackModels: ['models/gemini-3.7-flash', 'models/gemini-3.7-flash'],
+        geminiFallbackModels: ['models/gemini-4-hydrogen', 'models/gemini-4-hydrogen'],
       },
     });
     assert.equal(dupFallbackRes.statusCode, 400);
     const dupBody = JSON.parse(dupFallbackRes.payload);
     assert.match(dupBody.message, /Fallback models cannot contain duplicate entries/);
+  });
+
+  it('rejects unsupported Gemini models across settings and connection test endpoints', async () => {
+    const db = new DatabaseSync(':memory:');
+    const store = new CatalogStore(db, { skipBackup: true });
+    const app = await buildApp({ store, disableStatic: true });
+
+    const invalidPrimary = await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/settings',
+      payload: { geminiModel: 'models/gemini-3.5-flash' },
+    });
+    assert.equal(invalidPrimary.statusCode, 400);
+    assert.equal(invalidPrimary.json().error, 'INVALID_SETTINGS');
+
+    const invalidFallback = await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/settings',
+      payload: { geminiFallbackModels: ['models/gemini-3.7-flash'] },
+    });
+    assert.equal(invalidFallback.statusCode, 400);
+    assert.equal(invalidFallback.json().error, 'INVALID_SETTINGS');
+
+    const invalidTestGemini = await app.inject({
+      method: 'POST',
+      url: '/api/v1/settings/test-gemini',
+      payload: { apiKey: 'test-key', model: 'models/gemini-3.5-flash' },
+    });
+    assert.equal(invalidTestGemini.statusCode, 400);
+    assert.equal(invalidTestGemini.json().error, 'INVALID_SETTINGS');
+
+    const invalidTestLlm = await app.inject({
+      method: 'POST',
+      url: '/api/v1/settings/test-llm',
+      payload: { provider: 'gemini', apiKey: 'test-key', model: 'models/gemini-3.7-flash' },
+    });
+    assert.equal(invalidTestLlm.statusCode, 400);
+    assert.equal(invalidTestLlm.json().error, 'INVALID_SETTINGS');
   });
 });
 

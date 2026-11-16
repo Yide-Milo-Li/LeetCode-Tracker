@@ -196,6 +196,10 @@ export function NotesWorkspace({
 }: NotesWorkspaceProps) {
   const t = translations[lang];
   const zh = lang === 'zh';
+  const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform ?? '');
+  const zenModeTitle = isMac
+    ? (zh ? '专注模式快捷键 (⌘\\)' : 'Zen Mode Shortcut (⌘\\)')
+    : (zh ? '专注模式快捷键 (Ctrl+\\)' : 'Zen Mode Shortcut (Ctrl+\\)');
 
   // Filters state
   const [scope, setScope] = useState<'practiced' | 'all'>('practiced');
@@ -597,7 +601,7 @@ export function NotesWorkspace({
               type="button"
               className={`btn btn-secondary btn-sm ${zenMode ? 'active' : ''}`}
               onClick={() => setZenMode((z) => !z)}
-              title={zh ? '专注模式快捷键 (Ctrl+\\)' : 'Zen Mode Shortcut (Ctrl+\\)'}
+              title={zenModeTitle}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -1052,7 +1056,7 @@ export function NotesWorkspace({
                     type="button"
                     className={`btn btn-secondary btn-sm ${zenMode ? 'active' : ''}`}
                     onClick={() => setZenMode((z) => !z)}
-                    title={zh ? '专注模式快捷键 (Ctrl+\\)' : 'Zen Mode Shortcut (Ctrl+\\)'}
+                    title={zenModeTitle}
                     style={{
                       display: 'inline-flex',
                       alignItems: 'center',
@@ -1224,7 +1228,7 @@ export function NotesWorkspace({
                       <Save size={13} />
                       <span>{savingNote ? t.savingNote : t.saveNote}</span>
                       <span style={{ fontSize: '0.6875rem', opacity: 0.75 }}>
-                        {/Mac/.test(navigator.platform) ? '(⌘S)' : '(Ctrl+S)'}
+                        {isMac ? '(⌘S)' : '(Ctrl+S)'}
                       </span>
                     </button>
                   </div>

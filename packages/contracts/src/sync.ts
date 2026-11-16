@@ -286,6 +286,31 @@ export type CatalogStats = z.infer<typeof catalogStatsSchema>;
 /** Application model choices for providers with a single supported selection. */
 export const fixedProviderModels = { openai: 'gpt-5.6-luna', deepseek: 'deepseek-flash' } as const;
 
+/** Supported Gemini model identifiers. */
+export const supportedGeminiModels = [
+  'models/gemini-3.8-flash',
+  'models/gemini-4-hydrogen',
+] as const;
+export type SupportedGeminiModel = (typeof supportedGeminiModels)[number];
+export const defaultGeminiModel: SupportedGeminiModel = 'models/gemini-3.8-flash';
+export const defaultGeminiFallbackModels: readonly SupportedGeminiModel[] = ['models/gemini-4-hydrogen'];
+
+/** Normalize a Gemini model string to its canonical `models/...` identifier, or null if unsupported. */
+export function normalizeGeminiModel(model?: string | null): SupportedGeminiModel | null {
+  if (!model) return null;
+  const trimmed = model.trim();
+  if (!trimmed) return null;
+  const canonical = trimmed.startsWith('models/') ? trimmed : `models/${trimmed}`;
+  return (supportedGeminiModels as readonly string[]).includes(canonical)
+    ? (canonical as SupportedGeminiModel)
+    : null;
+}
+
+/** Check whether a model string is one of the supported Gemini models. */
+export function isSupportedGeminiModel(model?: string | null): boolean {
+  return normalizeGeminiModel(model) !== null;
+}
+
 /** Supported custom theme palettes for desktop UI. */
 export const themePaletteSchema = z.enum([
   'default',
@@ -329,17 +354,26 @@ export const userSettingsSchema = z.object({
 export type UserSettings = z.infer<typeof userSettingsSchema>;
 
 /** Helper validator for primary vs fallback model duplication. */
-function hasDuplicateWithPrimary(primary?: string | null, fallbacks?: string[] | null): boolean {
-  if (primary && fallbacks) {
-    return fallbacks.includes(primary);
+function hasDuplicateWithPrimary(
+  primary?: string | null,
+  fallbacks?: string[] | null,
+  normalize: (model: string) => string = (m) => m
+): boolean {
+  const normPrimary = primary ? normalize(primary) : '';
+  if (normPrimary && fallbacks) {
+    return fallbacks.map(normalize).includes(normPrimary);
   }
   return false;
 }
 
 /** Helper validator for unique entries in fallback model list. */
-function hasUniqueFallbacks(fallbacks?: string[] | null): boolean {
+function hasUniqueFallbacks(
+  fallbacks?: string[] | null,
+  normalize: (model: string) => string = (m) => m
+): boolean {
   if (fallbacks && fallbacks.length > 0) {
-    return new Set(fallbacks).size === fallbacks.length;
+    const normalized = fallbacks.map(normalize);
+    return new Set(normalized).size === normalized.length;
   }
   return true;
 }
@@ -380,9 +414,13 @@ export const updateSettingsInputSchema = z.object({
   data.deepseekBaseUrl !== undefined ||
   data.deepseekFallbackModels !== undefined, {
   message: 'At least one setting must be provided',
-}).refine(data => !hasDuplicateWithPrimary(data.geminiModel, data.geminiFallbackModels), {
+}).refine(data => !data.geminiModel || !data.geminiModel.trim() || isSupportedGeminiModel(data.geminiModel), {
+  message: 'Unsupported Gemini model. Allowed models: models/gemini-3.8-flash, models/gemini-4-hydrogen',
+}).refine(data => !data.geminiFallbackModels || data.geminiFallbackModels.every(m => isSupportedGeminiModel(m)), {
+  message: 'Unsupported Gemini fallback model. Allowed models: models/gemini-3.8-flash, models/gemini-4-hydrogen',
+}).refine(data => !hasDuplicateWithPrimary(data.geminiModel, data.geminiFallbackModels, m => normalizeGeminiModel(m) ?? m.trim()), {
   message: 'Primary model and fallback models cannot contain duplicate entries (Gemini)',
-}).refine(data => hasUniqueFallbacks(data.geminiFallbackModels), {
+}).refine(data => hasUniqueFallbacks(data.geminiFallbackModels, m => normalizeGeminiModel(m) ?? m.trim()), {
   message: 'Fallback models cannot contain duplicate entries (Gemini)',
 }).refine(data => !hasDuplicateWithPrimary(data.openaiModel, data.openaiFallbackModels), {
   message: 'Primary model and fallback models cannot contain duplicate entries (OpenAI)',

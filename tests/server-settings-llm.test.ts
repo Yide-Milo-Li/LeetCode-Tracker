@@ -43,7 +43,7 @@ describe('Multi-Provider LLM Settings & Server Endpoints (/api/v1/settings)', ()
       payload: {
         geminiApiKey: 'AIzaSyGeminiKey',
         geminiModel: 'models/gemini-3.8-flash',
-        geminiFallbackModels: ['models/gemini-3.7-flash'],
+        geminiFallbackModels: ['models/gemini-4-hydrogen'],
       },
     });
 
@@ -85,7 +85,7 @@ describe('Multi-Provider LLM Settings & Server Endpoints (/api/v1/settings)', ()
     // Gemini intact
     assert.equal(finalBody.geminiApiKey, 'AIzaSyGeminiKey');
     assert.equal(finalBody.geminiModel, 'models/gemini-3.8-flash');
-    assert.deepEqual(finalBody.geminiFallbackModels, ['models/gemini-3.7-flash']);
+    assert.deepEqual(finalBody.geminiFallbackModels, ['models/gemini-4-hydrogen']);
 
     // OpenAI intact
     assert.equal(finalBody.openaiApiKey, 'sk-openai-test-key');

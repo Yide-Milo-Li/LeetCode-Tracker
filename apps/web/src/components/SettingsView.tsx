@@ -2,7 +2,14 @@ import { ExportLink } from './ExportLink.tsx';
 /** Application preferences only; catalog and progress imports live in their respective workspaces. */
 import React, { useEffect, useRef, useState } from 'react';
 import { Eye, EyeOff, Copy, Check, ClipboardPaste, Download, Upload, Archive, Database, AlertTriangle } from 'lucide-react';
-import { fixedProviderModels, type ThemePalette } from '../../../../packages/contracts/src/sync.ts';
+import {
+  defaultGeminiFallbackModels,
+  defaultGeminiModel,
+  fixedProviderModels,
+  normalizeGeminiModel,
+  supportedGeminiModels,
+  type ThemePalette,
+} from '../../../../packages/contracts/src/sync.ts';
 import { api } from '../api.ts';
 import { snapshotBundleSchema, type SnapshotBundle } from '../../../../packages/contracts/src/notes.ts';
 import { MAX_BUNDLE_BYTES } from '../../../../packages/contracts/src/migration.ts';
@@ -127,15 +134,7 @@ export const PALETTE_OPTIONS: PaletteOption[] = [
 export type ProviderType = 'gemini' | 'openai' | 'deepseek';
 
 export const PROVIDER_PRESET_MODELS: Record<ProviderType, string[]> = {
-  gemini: [
-    'models/gemini-3.8-flash',
-    'models/gemini-3.7-flash',
-    'models/gemini-3.6-flash',
-    'models/gemini-3.5-flash',
-    'models/gemini-3.5-flash-lite',
-    'models/gemini-2.5-flash',
-    'models/gemini-2.5-pro',
-  ],
+  gemini: [...supportedGeminiModels],
   openai: [fixedProviderModels.openai],
   deepseek: [fixedProviderModels.deepseek],
 };
@@ -167,11 +166,10 @@ export function SettingsView({
 
   // Gemini state
   const [geminiApiKey, setGeminiApiKey] = useState('');
-  const [geminiPrimaryModel, setGeminiPrimaryModel] = useState('models/gemini-3.8-flash');
+  const [geminiPrimaryModel, setGeminiPrimaryModel] = useState<string>(defaultGeminiModel);
   const [geminiIsCustomPrimary, setGeminiIsCustomPrimary] = useState(false);
   const [geminiFallbackModels, setGeminiFallbackModels] = useState<string[]>([
-    'models/gemini-3.7-flash',
-    'models/gemini-3.6-flash',
+    ...defaultGeminiFallbackModels,
   ]);
 
   // OpenAI state
@@ -262,14 +260,20 @@ export function SettingsView({
 
             // Gemini
             if (settings.geminiApiKey !== undefined) setGeminiApiKey(settings.geminiApiKey ?? '');
-            const effGemini = settings.geminiModel ?? 'models/gemini-3.8-flash';
-            if (settings.geminiModel) {
-              setGeminiPrimaryModel(settings.geminiModel);
-              setGeminiIsCustomPrimary(!PROVIDER_PRESET_MODELS.gemini.includes(settings.geminiModel));
-            }
+            const effGemini = normalizeGeminiModel(settings.geminiModel) ?? defaultGeminiModel;
+            setGeminiPrimaryModel(effGemini);
+            setGeminiIsCustomPrimary(false);
             if (settings.geminiFallbackModels) {
               setGeminiFallbackModels(
-                [...new Set(settings.geminiFallbackModels)].filter((m) => m !== effGemini)
+                [...new Set(
+                  settings.geminiFallbackModels
+                    .map((m) => normalizeGeminiModel(m))
+                    .filter((m): m is NonNullable<typeof m> => m !== null)
+                )].filter((m) => m !== effGemini)
+              );
+            } else {
+              setGeminiFallbackModels(
+                defaultGeminiFallbackModels.filter((m) => m !== effGemini)
               );
             }
 
@@ -829,36 +833,8 @@ export function SettingsView({
                   {provider === 'openai' ? 'GPT-5.6 Luna' : provider === 'deepseek' ? 'DeepSeek V4.1 Flash' : m.replace('models/', '')}{idx === 0 ? (zh ? '（推荐）' : ' (Recommended)') : ''}
                 </option>
               ))}
-              {provider === 'gemini' && <option value="custom">{t.customModelOption}</option>}
             </select>
           </Field>
-
-          {/* Custom primary model input when custom option is selected */}
-          {provider === 'gemini' && currentIsCustomPrimary && (
-            <Field label={zh ? '自定义模型名称' : 'Custom Model Identifier'}>
-              <input
-                type="text"
-                value={currentPrimaryModel}
-                onChange={(e) => {
-                  dirtyAi.current = true;
-                  const newCustom = e.target.value;
-                  setCurrentPrimaryModel(newCustom);
-                  if (newCustom.trim()) {
-                    setCurrentFallbackModels((prev) => prev.filter((item) => item !== newCustom.trim()));
-                  }
-                  setAiSaved(false);
-                  setTestResult(null);
-                }}
-                placeholder={
-                  provider === 'gemini'
-                    ? 'models/gemini-custom'
-                    : provider === 'openai'
-                    ? 'gpt-4o'
-                    : 'deepseek-chat'
-                }
-              />
-            </Field>
-          )}
 
           {/* Candidate fallback models chips */}
           {provider === 'gemini' && <div className="form-field">

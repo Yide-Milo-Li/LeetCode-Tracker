@@ -15,15 +15,24 @@ const rules: Rules = { dailyCount: 1, difficulty: { Easy: 100, Medium: 0, Hard: 
 
 afterEach(() => mock.restoreAll());
 
-it('application configuration pins the single OpenAI and DeepSeek models over legacy settings', async () => {
-  for (const [provider, model] of [['openai', 'gpt-5.6-luna'], ['deepseek', 'deepseek-flash']] as const) {
+it('application configuration pins supported Gemini, OpenAI and DeepSeek models over legacy settings', async () => {
+  for (const [provider, model, storedFallback, expectedFallback] of [
+    ['gemini', 'models/gemini-3.8-flash', ['models/gemini-3.7-flash', 'models/gemini-4-hydrogen'], ['models/gemini-4-hydrogen']],
+    ['openai', 'gpt-5.6-luna', ['old-backup'], []],
+    ['deepseek', 'deepseek-flash', ['old-backup'], []],
+  ] as const) {
   const store = new CatalogStore(new DatabaseSync(':memory:'), { skipBackup: true });
-  await store.updateSettings({ llmProvider: provider, [`${provider}ApiKey`]: 'synthetic', [`${provider}Model`]: 'old-model', [`${provider}FallbackModels`]: ['old-backup'] });
+  await store.updateSettings({
+    llmProvider: provider,
+    [`${provider}ApiKey`]: 'synthetic',
+    [`${provider}Model`]: provider === 'gemini' ? 'models/gemini-3.5-flash' : 'old-model',
+    [`${provider}FallbackModels`]: [...storedFallback],
+  });
   const app = await buildApp({ store, disableStatic: true });
   try {
     const response = await app.inject({ method: 'GET', url: '/api/v1/progress-imports/status' });
     assert.equal(response.json().model, model);
-    assert.deepEqual(response.json().fallbackModels, []);
+    assert.deepEqual(response.json().fallbackModels, [...expectedFallback]);
   } finally { await app.close(); store.db.close(); }
   }
 });

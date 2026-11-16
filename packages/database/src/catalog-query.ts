@@ -7,6 +7,7 @@ import {
   catalogProblemSchema,
   catalogQuerySchema,
   importSummarySchema,
+  normalizeGeminiModel,
   themePaletteSchema,
   type CatalogProblem,
   type CatalogQueryInput,
@@ -482,6 +483,9 @@ export function updateUserSettingsTransaction(
       baseUrlInput?: string | null,
       fallbacksInput?: string[] | null
     ) => {
+      const normalizeModelValue = (value: string) =>
+        prefix === 'gemini' ? (normalizeGeminiModel(value) ?? value.trim()) : value.trim();
+
       if (keyInput !== undefined) {
         updateStmt.run(`${prefix}_api_key`, keyInput ? keyInput.trim() : '', now);
       }
@@ -490,16 +494,19 @@ export function updateUserSettingsTransaction(
       }
 
       const effectiveModel = modelInput !== undefined
-        ? (modelInput ? modelInput.trim() : null)
-        : (db.prepare(`SELECT value FROM settings WHERE key = '${prefix}_model'`).get() as { value: string } | undefined)?.value?.trim() || null;
+        ? (modelInput && modelInput.trim() ? normalizeModelValue(modelInput) : null)
+        : (() => {
+            const raw = (db.prepare(`SELECT value FROM settings WHERE key = '${prefix}_model'`).get() as { value: string } | undefined)?.value?.trim();
+            return raw ? normalizeModelValue(raw) : null;
+          })();
 
       if (modelInput !== undefined) {
-        updateStmt.run(`${prefix}_model`, modelInput ? modelInput.trim() : '', now);
+        updateStmt.run(`${prefix}_model`, effectiveModel ?? '', now);
       }
 
       if (fallbacksInput !== undefined) {
         const sanitized = fallbacksInput
-          ? [...new Set(fallbacksInput.map(s => s.trim()).filter(Boolean))]
+          ? [...new Set(fallbacksInput.map(s => normalizeModelValue(s)).filter(Boolean))]
               .filter(m => !effectiveModel || m !== effectiveModel)
           : null;
         const serialized = JSON.stringify(sanitized ?? []);
@@ -509,9 +516,12 @@ export function updateUserSettingsTransaction(
         if (existingFbRow?.value) {
           try {
             const parsed = JSON.parse(existingFbRow.value);
-            if (Array.isArray(parsed) && parsed.includes(effectiveModel)) {
-              const pruned = parsed.filter(m => m !== effectiveModel);
-              updateStmt.run(`${prefix}_fallback_models`, pruned.length > 0 ? JSON.stringify(pruned) : '', now);
+            if (Array.isArray(parsed)) {
+              const normalizedExisting = parsed.map(m => normalizeModelValue(String(m)));
+              if (normalizedExisting.includes(effectiveModel)) {
+                const pruned = normalizedExisting.filter(m => m !== effectiveModel);
+                updateStmt.run(`${prefix}_fallback_models`, pruned.length > 0 ? JSON.stringify(pruned) : '', now);
+              }
             }
           } catch {
             // ignore

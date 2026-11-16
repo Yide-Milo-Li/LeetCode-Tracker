@@ -11,20 +11,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { CatalogStore } from '../packages/database/src/store.ts';
 import { buildApp } from '../apps/server/src/app.ts';
 import { fallbackPlanContent, type IGeminiAssistant } from '../apps/server/src/gemini.ts';
-
-function findChrome(): string {
-  const paths = [
-    process.env.CHROME_BIN,
-    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-    path.join(process.env.LOCALAPPDATA || '', 'Google\\Chrome\\Application\\chrome.exe'),
-  ].filter(Boolean) as string[];
-
-  for (const p of paths) {
-    if (fs.existsSync(p)) return p;
-  }
-  throw new Error('Google Chrome executable was not found.');
-}
+import { findChromeExecutable } from './find-chrome.ts';
 
 class CdpClient {
   private ws: WebSocket;
@@ -156,7 +143,7 @@ async function main() {
   console.log(`[Verify] Backend server listening at http://${host}:${port}`);
 
   // 3. Launch Chrome
-  const chromeBin = findChrome();
+  const chromeBin = findChromeExecutable();
   const chromeProcess: ChildProcess = spawn(
     chromeBin,
     [

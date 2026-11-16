@@ -1,10 +1,10 @@
 # Testing boundaries
 
-## Release 1.2.0 verification baseline
+## Release 1.2.0 + macOS port (`994f516` `HEAD`) verification baseline
 
-The current local suite passes **427 JavaScript/Web/sidecar tests (285 backend/platform + 141 Web DOM + 1 isolated bundle) and 7 Rust tests**. Older phase counts below are historical. Typecheck, docs, Rust fmt/clippy and Windows packaging were also checked. Remote CI and real native acceptance are separate; see [current status](../docs/status.md) and [release notes](../docs/releases/1.2.0.md).
+The current Apple Silicon macOS suite passes **430 JavaScript/Web/sidecar tests (285 backend/platform + 144 Web DOM + 1 isolated bundle), 7 Rust tests, and 2/2 isolated WKWebView E2E specs** (prior Windows `v1.2.0` verification passed 420 / 427 JS/Web/sidecar tests + 7 Rust tests). Older phase counts below are historical. Typecheck, docs, Rust fmt/clippy, macOS `.app`/`.dmg` packaging, headless Chrome `verify:phase24`, and Windows NSIS packaging were also checked. Remote CI and manual Gatekeeper/clean-VM acceptance are separate; see [current status](../docs/status.md) and [release notes](../docs/releases/1.2.0.md).
 
-Run `npm test` for the current complete local suite. `npm run test:web` runs the 141 rendered web component tests separately. The older 289-test breakdown below is historical. `npm run check` includes TypeScript and TSX test files (`tsc --noEmit`). Tests use in-memory or temporary databases and never require private data, credentials, remote services, or `apps/web/dist`.
+Run `npm test` for the current complete local suite. `npm run test:web` runs the 144 rendered web component tests separately. The older 289-test breakdown below is historical. `npm run check` includes TypeScript and TSX test files (`tsc --noEmit`). Tests use in-memory or temporary databases and never require private data, credentials, remote services, or `apps/web/dist`.
 
 Coverage includes:
 
@@ -34,7 +34,7 @@ npm run test:live
 
 This dedicated test suite (`tests/live-gemini-verification.test.ts`):
 - Requires an active `GEMINI_API_KEY` (or Google Cloud Application Default Credentials) in the environment.
-- Executes real upstream model calls (`models/gemini-3.5-flash`, `models/gemini-3.5-flash-lite`, `models/gemini-3.6-flash`, `models/gemini-3.7-flash`).
+- Executes real upstream model calls (`models/gemini-3.8-flash`, `models/gemini-4-hydrogen`).
 - Strictly asserts non-local model execution (`assert.notEqual(result.model, 'local')`), eliminating false positives from local deterministic fallbacks.
 - Verifies structured candidate problem selection with natural-language preferences, bilingual reasoning, bilingual encouragement generation, and natural-language override prompt parsing (`parseOverridePrompt`).
 - Enforces rate-limiting cooldown intervals between calls to comply with free-tier requests-per-minute (RPM) limits.
@@ -58,13 +58,19 @@ Build first with `npm run build`. The current command runs `scripts/verify-refac
 - Fails on captured JavaScript exceptions, console errors or external page requests; warnings remain separately visible in the manifest. Failure/empty/rest/setup/shortage and expired-preview responses are controlled fixtures, distinct from real API-backed successful writes. Gemini failure recovery uses manual candidates, not a claimed live-provider response.
 - Records running/settled overlay animation state and checks reduced motion through actual interaction. Screenshot geometry alone is not evidence of smooth motion, assistive-technology compatibility or frame-rate performance.
 
-The old Phase 5 browser script and its 19-image report are historical and are not run by the current command. Browser acceptance is Chrome on this Windows host; it does not establish live-provider, cross-browser, phone or release validation.
+The old Phase 5 browser script and its 19-image report are historical and are not run by the current command. All browser verification scripts resolve Google Chrome across `CHROME_BIN` (auto-loading optional `.env`), standard macOS `/Applications/Google Chrome.app` paths, and Windows paths via `scripts/find-chrome.ts`. Browser checks do not establish live-provider, cross-browser, phone or release validation.
 
 ## Private fixture check
 
 The optional test requires an explicit path to the local 4,046-record fixture and imports into memory only:
 
+```sh
+# macOS / Linux
+PRIVATE_BACKUP_PATH=/path/to/backup-4046.jsonl npm run test:private
+```
+
 ```powershell
+# Windows PowerShell
 $env:PRIVATE_BACKUP_PATH = 'D:\path\to\backup-4046.jsonl'
 npm run test:private
 ```
@@ -85,7 +91,7 @@ The default suite explicitly includes sample-gated topic analytics, fixed/adapti
 
 ## Native desktop regression boundaries
 
-`npm test` includes transport/export contract tests, bundle secret-preservation tests, social-catalog seeding, and a fresh standalone sidecar test. The latter copies the backend bundle into a temporary directory with no repository dependencies; set `DESKTOP_TEST_NODE` to the prepared private Node executable on Windows. The Windows CI job does this explicitly. Rust tests cover parsed URL boundaries, atomic export failure/replacement, ready-handshake validation, noisy pipes, startup/shutdown deadlines, and a delayed write during shutdown. See [desktop build commands](../docs/desktop.md).
+`npm test` includes transport/export contract tests, bundle secret-preservation tests, social-catalog seeding, and a fresh standalone sidecar test. The latter copies the backend bundle into a temporary directory with no repository dependencies; set `DESKTOP_TEST_NODE` to the prepared private Node executable (`apps/desktop/src-tauri/binaries/node-aarch64-apple-darwin` on Apple Silicon macOS, or `node-x86_64-pc-windows-msvc.exe` on Windows). CI jobs do this explicitly. Rust tests cover parsed URL boundaries, atomic export failure/replacement, ready-handshake validation, noisy pipes, startup/shutdown deadlines, and a delayed write during shutdown. See [desktop build commands](../docs/desktop.md).
 
 These checks are synthetic automation, not native save-dialog interaction, clean-VM installation, complete data migration, or the WebView2 UI acceptance matrix. A configured CI job is not evidence of a successful remote run.
 
