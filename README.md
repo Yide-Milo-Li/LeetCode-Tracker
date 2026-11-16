@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.2.0"><img src="https://img.shields.io/badge/release-1.2.0-blue?style=flat-square" alt="Release 1.2.0"></a>
   <a href="docs/desktop.md"><img src="https://img.shields.io/badge/desktop-Windows%20x64%20%2B%20macOS%20ARM64-455a64?style=flat-square" alt="Windows x64 and macOS ARM64"></a>
-  <a href="tests/README.md"><img src="https://img.shields.io/badge/tests-476%20JS%20%2B%207%20Rust-brightgreen?style=flat-square" alt="476 JavaScript and 7 Rust tests"></a>
+  <a href="tests/README.md"><img src="https://img.shields.io/badge/tests-479%20JS%20%2B%207%20Rust-brightgreen?style=flat-square" alt="479 JavaScript and 7 Rust tests"></a>
   <a href="docs/architecture.md"><img src="https://img.shields.io/badge/sqlite-schema%20v12-003b57?style=flat-square" alt="SQLite schema v12"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT License"></a>
 </p>

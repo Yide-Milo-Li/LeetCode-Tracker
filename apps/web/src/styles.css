@@ -4548,6 +4548,9 @@ input.form-input[aria-invalid="true"] { border-color: var(--danger); outline-col
   gap: 6px;
 }
 .palette-name {
+  /* Long names truncate; min-width lets the flex item shrink below its text width. */
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 13px;
   font-weight: 600;
   color: var(--text-main);
@@ -4556,6 +4559,9 @@ input.form-input[aria-invalid="true"] { border-color: var(--danger); outline-col
   white-space: nowrap;
 }
 .palette-badge {
+  /* Never shrink or wrap: CJK labels would otherwise stack one character per line. */
+  flex: none;
+  white-space: nowrap;
   font-size: 11px;
   font-family: monospace;
   padding: 1px 6px;
@@ -5577,7 +5583,7 @@ html.dark .notes-diff-badge.Hard {
   gap: 8px;
 }
 .palette-preview img {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   flex: none;
 }

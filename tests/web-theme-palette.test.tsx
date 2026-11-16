@@ -18,6 +18,7 @@ const React = await import('react');
 const { render, fireEvent, screen, act, cleanup } = await import('@testing-library/react');
 const { api } = await import('../apps/web/src/api.ts');
 const { SettingsView, PALETTE_OPTIONS } = await import('../apps/web/src/components/SettingsView.tsx');
+const { applyAppIcon, brandIconUrl, iconColors } = await import('../apps/web/src/brand-icons.ts');
 
 afterEach(() => {
   cleanup();
@@ -287,3 +288,20 @@ it('switching mode while in default palette updates theme without resetting pale
   assert.equal(chosenPalette, null);
 });
 
+it('tints the app icon per palette and keeps the original artwork for the default light palette', () => {
+  const urls = new Set(PALETTE_OPTIONS.map((option) => brandIconUrl(option.id, option.type === 'dark')));
+  assert.equal(urls.size, PALETTE_OPTIONS.length, 'every palette gets a distinct icon');
+  assert.equal(iconColors('default', false).tile, '#3c5a44');
+  assert.notEqual(iconColors('default', true).plate, iconColors('default', false).plate);
+  const midnight = iconColors('midnight-oled', true);
+  assert.equal(midnight.tile, '#10b981');
+  assert.equal(midnight.stroke, '#000000', 'dark palettes draw dark strokes on a bright tile');
+  const svg = decodeURIComponent(brandIconUrl('dracula', true).split(',')[1]);
+  assert.match(svg, /fill="#bd93f9"/);
+});
+
+it('points the favicon at the active palette icon outside the desktop host', async () => {
+  await applyAppIcon('nord', true);
+  const link = document.querySelector('link[rel="icon"]') as HTMLLinkElement;
+  assert.equal(link.getAttribute('href'), brandIconUrl('nord', true));
+});

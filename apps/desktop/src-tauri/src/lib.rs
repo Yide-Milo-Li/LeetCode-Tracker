@@ -346,6 +346,56 @@ async fn export_data_file(
     Ok(true)
 }
 
+/// Largest icon payload accepted from the webview (a 512 px PNG is far smaller).
+const MAX_APP_ICON_BYTES: usize = 1024 * 1024;
+
+/// Replace the running app icon with a palette-tinted PNG rendered by the web UI.
+///
+/// Windows updates the main window and taskbar icon; macOS updates the Dock icon until the app
+/// quits (the bundled icon returns on the next launch until the palette is applied again).
+/// Empty, oversized or undecodable payloads are rejected and leave the current icon unchanged.
+#[tauri::command]
+fn set_app_icon(app: AppHandle, png: Vec<u8>) -> Result<(), String> {
+    if png.is_empty() || png.len() > MAX_APP_ICON_BYTES {
+        return Err("Invalid icon".into());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        app.run_on_main_thread(move || set_dock_icon(&png))
+            .map_err(|_| "Could not update the Dock icon")?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let image = tauri::image::Image::from_bytes(&png).map_err(|_| "Invalid icon")?;
+        if let Some(window) = app.get_webview_window("main") {
+            window
+                .set_icon(image)
+                .map_err(|_| "Could not update the window icon")?;
+        }
+        Ok(())
+    }
+}
+
+/// Set the Dock icon from PNG bytes; must run on the main thread. Undecodable data is ignored.
+#[cfg(target_os = "macos")]
+fn set_dock_icon(png: &[u8]) {
+    use objc2::{AnyThread, MainThreadMarker};
+    use objc2_app_kit::{NSApplication, NSImage};
+    use objc2_foundation::NSData;
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let data = NSData::with_bytes(png);
+    if let Some(image) = NSImage::initWithData(NSImage::alloc(), &data) {
+        #[allow(unused_unsafe)]
+        unsafe {
+            NSApplication::sharedApplication(mtm).setApplicationIconImage(Some(&image));
+        }
+    }
+}
+
 /// Open an allowlisted URL as OS data, never as shell code.
 #[tauri::command]
 fn open_external(url: String) -> Result<(), String> {
@@ -419,7 +469,8 @@ pub fn run() {
             export_data_file,
             open_external,
             get_desktop_status,
-            retry_sidecar
+            retry_sidecar,
+            set_app_icon
         ])
         .build(tauri::generate_context!())
         .expect("Could not initialize the desktop window")

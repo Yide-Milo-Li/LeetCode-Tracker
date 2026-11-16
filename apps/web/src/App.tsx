@@ -24,11 +24,11 @@ import { PracticeTimerPill } from './components/PracticeTimer.tsx';
 import { ShortcutHelpModal } from './components/ShortcutHelpModal.tsx';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.ts';
 import { SetupGate } from './components/SetupGuide.tsx';
+import { applyAppIcon, brandIconUrl } from './brand-icons.ts';
 import type { SettingsSection } from './components/SettingsView.tsx';
 import { Feedback, PageHeader, Tooltip } from './components/ui.tsx';
 import type { ThemePalette } from '../../../packages/contracts/src/sync.ts';
 
-const brandIcon = new URL('./assets/brand-icon.svg', import.meta.url).href;
 
 /** Lazy-load heavy contextual workspaces and charting views to optimize desktop bundle size. */
 const DashboardView = React.lazy(() =>
@@ -98,6 +98,7 @@ export function App() {
   const [lang, setLang] = useState<Language>('en');
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
   const [palette, setPalette] = useState<ThemePalette>('default');
+  const [resolvedDark, setResolvedDark] = useState(false);
   const [timezone, setTimezone] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   const [focusRequest,setFocusRequest]=useState(0);
@@ -216,6 +217,7 @@ export function App() {
       const dark = theme === 'dark' || (theme === 'system' && media.matches);
       document.documentElement.classList.toggle('dark', dark);
       document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+      setResolvedDark(dark);
     };
     apply();
     media.addEventListener('change', apply);
@@ -226,6 +228,10 @@ export function App() {
     }
     return () => media.removeEventListener('change', apply);
   }, [theme, palette]);
+  // The favicon and the native window/Dock icon follow the palette and the effective mode.
+  useEffect(() => {
+    void applyAppIcon(palette, resolvedDark);
+  }, [palette, resolvedDark]);
   useEffect(() => {
     document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
   }, [lang]);
@@ -302,7 +308,7 @@ export function App() {
                 navigate('today');
               }}
             >
-              <img className="brand-mark" src={brandIcon} alt="" width="36" height="36" />
+              <img className="brand-mark" src={brandIconUrl(palette, resolvedDark)} alt="" width="36" height="36" />
               {sidebarExpanded && (
                 <span className="brand-title">
                   LeetCode<span>Tracker</span>
@@ -591,6 +597,7 @@ export function App() {
                   onLanguageChange={(language) => persistPreference({ language })}
                   onThemeChange={(theme) => persistPreference({ theme })}
                   currentTheme={theme}
+                  resolvedDark={resolvedDark}
                   onPaletteChange={(palette) => persistPreference({ palette })}
                   currentPalette={palette}
                   onTimezoneSaved={setTimezone}
