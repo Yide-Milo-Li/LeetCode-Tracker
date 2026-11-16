@@ -37,7 +37,7 @@ export function sha256(data: Uint8Array): string {
 export async function prepareDesktopRuntime(target: RuntimeTarget): Promise<void> {
   const root = path.resolve(import.meta.dirname, '..');
   const spec = RUNTIMES[target];
-  const cache = path.join(root, '.local/runtime-cache', target);
+  const cache = path.join(root, '.local/runtime-cache', NODE_VERSION, target);
   const out = path.join(root, 'apps/desktop/src-tauri/binaries', spec.output);
   fs.mkdirSync(cache, { recursive: true });
   fs.mkdirSync(path.dirname(out), { recursive: true });

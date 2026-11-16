@@ -112,7 +112,7 @@ Read [AI provider behavior](docs/llm-providers.md) and the [security policy](SEC
 
 ## Run from source
 
-Source mode requires **Node.js >=26.13.0 <27** and npm. It uses a desktop browser and is separate from the packaged desktop apps:
+Source mode requires **Node.js >=26.13.0 <27** (pinned in `.node-version`) and npm. It uses a desktop browser and is separate from the packaged desktop apps:
 
 ```sh
 git clone https://github.com/Yide-Milo-Li/LeetCode-Tracker.git
@@ -132,7 +132,7 @@ For a native Windows build, install the Rust/MSVC toolchain and run `npm run des
 flowchart LR
     UI[React desktop UI] -->|Tauri IPC| Host[Tauri Rust host]
     Host -->|Authenticated loopback HTTP| API[Fastify and private Node 26]
-    API --> DB[(Local SQLite v12)]
+    API --> DB[(Local SQLite v13)]
     API -. Optional requests .-> AI[Selected AI provider]
     Host --> OS[Native save dialog and browser URL handler]
 ```

@@ -34,7 +34,7 @@ Write-Host "=====================================================" -ForegroundCo
 # 1. Verify Node.js
 if (-not (Get-Command "node" -ErrorAction SilentlyContinue)) {
   Write-Host "Error: Node.js is not found in PATH." -ForegroundColor Red
-  Write-Host "Please install Node.js 26.x from https://nodejs.org/" -ForegroundColor Yellow
+  Write-Host "Please install Node.js 26.13.0 or later in the 26.x series from https://nodejs.org/" -ForegroundColor Yellow
   Read-Host "Press Enter to exit..."
   exit 1
 }
@@ -55,6 +55,12 @@ if (-not $PSBoundParameters.ContainsKey('Port')) {
 } elseif ($Port -lt 1 -or $Port -gt 65535) {
   Write-Host "Error: Invalid PORT '$Port'. Expected an integer between 1 and 65535." -ForegroundColor Red
   Read-Host "Press Enter to exit..."
+  exit 1
+}
+
+$nodeVersion = [version](& node -p "process.versions.node")
+if ($LASTEXITCODE -ne 0 -or $nodeVersion -lt [version]'26.13.0' -or $nodeVersion.Major -ne 26) {
+  Write-Host "Error: Node.js >=26.13.0 <27 is required; found $nodeVersion." -ForegroundColor Red
   exit 1
 }
 

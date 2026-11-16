@@ -3,7 +3,7 @@
  * into a standalone, production-ready ECMAScript module (ESM).
  *
  * Uses esbuild to package all workspace packages and external npm dependencies
- * while keeping Node.js 24 native built-ins (node:sqlite, node:fs, etc.) external.
+ * while keeping Node.js 26 native built-ins (node:sqlite, node:fs, etc.) external.
  */
 import * as path from 'node:path';
 import * as fs from 'node:fs';
@@ -27,7 +27,7 @@ async function bundleDesktopServer(): Promise<void> {
     entryPoints: [entryPoint],
     bundle: true,
     platform: 'node',
-    target: 'node24',
+    target: 'node26',
     format: 'esm',
     outfile,
     define:{__TRACKER_WORKSPACE_HTML__:JSON.stringify(workspaceHtml)},
@@ -70,7 +70,7 @@ async function bundleDesktopServer(): Promise<void> {
     entryPoints: [proxyEntryPoint],
     bundle: true,
     platform: 'node',
-    target: 'node24',
+    target: 'node26',
     format: 'esm',
     outfile: proxyOutfile,
     sourcemap: false,

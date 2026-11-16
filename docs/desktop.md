@@ -1,6 +1,6 @@
 # Desktop Application & Distribution Guide
 
-LeetCode Tracker provides native desktop packages for **Windows 11 x64** (`LeetCode-Tracker_1.3.0_x64-setup.exe`, NSIS installer) and **Apple Silicon macOS 14+** (`LeetCode-Tracker_1.3.0_aarch64.dmg`, ad-hoc signed `.app`/`.dmg`). Both platforms run the exact same local-first React UI, Fastify `/api/v1` service, SQLite v12 storage engine, and bundled private **Node.js 26.13.0** runtime. End users have **zero requirement** to install Node.js, npm, Git, or Rust.
+Release 1.3.0 provides native desktop packages for **Windows 11 x64** (`LeetCode-Tracker_1.3.0_x64-setup.exe`, NSIS installer) and **Apple Silicon macOS 14+** (`LeetCode-Tracker_1.3.0_aarch64.dmg`, ad-hoc signed `.app`/`.dmg`). Both use the local-first React UI, Fastify `/api/v1` service, SQLite v12 storage and bundled private **Node.js 26.13.0** runtime. End users have **zero requirement** to install Node.js, npm, Git, or Rust. The merged development candidate uses schema v13 and has not inherited macOS acceptance.
 
 Download installers and `SHA256SUMS.txt` from [Release 1.3.0](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.3.0). Automated boundary tests and local/CI packaging do not establish clean-VM Windows installation, populated-profile upgrade/downgrade compatibility, Windows 10 compatibility, Apple notarization, or the full WebView2/Gatekeeper acceptance matrix; see the [1.3.0 release notes](releases/1.3.0.md).
 
@@ -148,6 +148,8 @@ To build the standalone Windows installer from source on a Windows development m
 - Visual Studio 2022/2026 with C++ Build Tools (`VC.Tools.x86.x64`)
 - Rust `stable-x86_64-pc-windows-msvc` (via rustup)
 - NSIS 3.x (`winget install NSIS.NSIS -e`)
+
+Use MSVC for the `x86_64-pc-windows-msvc` target. If the shell inherits generic `CC`/`CXX` overrides for MinGW, remove those overrides in the build shell before the Cargo checks and installer build (`Remove-Item Env:CC, Env:CXX -ErrorAction SilentlyContinue`). Cargo then discovers MSVC; no global environment change is needed.
 
 #### Build Commands
 ```powershell

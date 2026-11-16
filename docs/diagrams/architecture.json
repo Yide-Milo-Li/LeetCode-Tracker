@@ -59,7 +59,7 @@
       "id": "fastify-server",
       "type": "backend",
       "label": "Fastify API Server",
-      "sublabel": "Node 24 / Loopback :3000",
+      "sublabel": "Node 26 / Loopback :3000",
       "pos": [270, 206],
       "size": [150, 56],
       "tag": "127.0.0.1 Only"
@@ -210,7 +210,7 @@
       "title": "BYOD & ACID Storage",
       "items": [
         "100% user-supplied JSONL without crawlers or account scrapers",
-        "Native Node 24 SQLite DatabaseSync with WAL and schema v10",
+        "Native Node 26 SQLite DatabaseSync with WAL and schema v11",
         "Pre-import safety snapshots and automated 14-day retention"
       ]
     }

@@ -10,7 +10,7 @@ import { createServerApplication } from '../apps/server/src/application-factory.
  *    Open Activity History Drawer -> Undo Completion -> Keyboard Focus Navigation.
  * 4. Captures screenshot evidence and execution metrics to `.local/evidence/phase5-desktop/`.
  *
- * Uses native Node 24 WebSocket and Chrome DevTools Protocol (CDP) against headless Chrome.
+ * Uses native Node 26 WebSocket and Chrome DevTools Protocol (CDP) against headless Chrome.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import * as path from 'node:path';
@@ -79,7 +79,7 @@ async function seedVerificationDatabase(db: DatabaseSync, store: CatalogStore) {
   });
 }
 
-/** Lightweight CDP client using Node 24 native WebSocket. */
+/** Lightweight CDP client using Node 26 native WebSocket. */
 class CdpSession {
   private ws: WebSocket;
   private messageId = 0;

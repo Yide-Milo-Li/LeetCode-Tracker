@@ -1,5 +1,5 @@
 /**
- * OpenAI provider adapter using Node native global fetch.
+ * OpenAI provider adapter using Node 26 native global fetch.
  * Implements standard OpenAI Chat Completions API with structured JSON mode.
  * Zero external npm dependencies.
  */

@@ -1,6 +1,6 @@
 /**
  * Consistent offline database backup, integrity verification, and restore manager.
- * Uses Node.js 24 native SQLite backup API without network overhead or third-party drivers.
+ * Uses Node.js 26 native SQLite backup API without network overhead or third-party drivers.
  */
 import { DatabaseSync, backup } from 'node:sqlite';
 import * as fs from 'node:fs';

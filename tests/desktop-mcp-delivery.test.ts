@@ -4,11 +4,12 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, copyFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { createServer } from 'node:net';
 import { McpController } from '../apps/server/src/mcp/config.ts';
 import {createHash} from 'node:crypto';
+import { NODE_VERSION } from '../scripts/prepare-desktop-runtime.ts';
 
 test('delivered proxy uses only the private runtime and explicit library configuration', { timeout: 30000 }, async () => {
   const root = mkdtempSync(join(tmpdir(), 'tracker-delivery-'));
@@ -17,6 +18,7 @@ test('delivered proxy uses only the private runtime and explicit library configu
   const node = join(install, process.platform === 'win32' ? 'node.exe' : 'node');
   const prepared = resolve('apps/desktop/src-tauri/binaries/node-x86_64-pc-windows-msvc.exe');
   copyFileSync(process.env.DESKTOP_TEST_NODE ?? (process.platform === 'win32' && existsSync(prepared) ? prepared : process.execPath), node);
+  assert.equal(execFileSync(node, ['--version'], { encoding: 'utf8', windowsHide: true }).trim(), `v${NODE_VERSION}`);
   for (const name of ['desktop-server.mjs', 'desktop-mcp-proxy.mjs']) copyFileSync(resolve('apps/server/dist', name), join(install, name));
   const manifest = JSON.parse(readFileSync(resolve('apps/desktop/src-tauri/tauri.conf.json'), 'utf8'));
   assert.equal(manifest.bundle.resources['../../server/dist/desktop-mcp-proxy.mjs'], 'desktop-mcp-proxy.mjs');

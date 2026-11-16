@@ -23,7 +23,7 @@ import { buildApp } from '../apps/server/src/app.ts';
 import { GeminiAssistant } from '../apps/server/src/gemini.ts';
 import { findChromeExecutable, loadOptionalEnv } from './find-chrome.ts';
 
-/** Lightweight CDP client using Node 24 native WebSocket. */
+/** Lightweight CDP client using Node 26 native WebSocket. */
 class CdpSession {
   private ws: WebSocket;
   private messageId = 0;
