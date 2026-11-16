@@ -2,7 +2,7 @@
 
 In the installed Windows app, configure providers in Settings. The host supplies startup paths/session state through a private stream and removes inherited provider API keys; it does not load a checkout `.env`. Environment defaults below describe source mode. AI requests send task-relevant metadata and user instructions or progress text to the configured endpoint.
 
-Settings supports Gemini, OpenAI and DeepSeek. Supported models are:
+Settings → AI assistant supports Gemini, OpenAI and DeepSeek; model, fallback, reasoning and base URL controls sit under **Advanced: model and endpoint**. Supported models are:
 
 - **Google Gemini**: `models/gemini-3.8-flash` (default) and `models/gemini-4-hydrogen`, with fallback-chain selection between those two and no custom-model input.
 - **OpenAI**: `gpt-6-luna` (GPT-6 Luna, default) and `gpt-6.1-terra` (GPT-6.1 Terra), with no custom-model or fallback-model controls.

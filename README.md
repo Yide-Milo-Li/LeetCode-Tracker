@@ -33,9 +33,8 @@ Release 1.2.0 (plus `994f516` UI refinements on `main`) packages the React inter
 
 ### First-run setup (Windows & macOS)
 
-1. Open **Problems → Import problems**, upload or paste your JSON Lines catalog, review the preview, and confirm the import.
-2. Open **Today → Study schedule** to choose your days, daily counts, difficulty quotas, and review options.
-3. Optionally configure an AI provider under **Settings** (or import a **Snapshot Bundle v3** under **Settings → Import Migration** when moving a profile between Windows and macOS). Catalog browsing, manual practice, notes, statistics, and local planning remain available without an API key.
+1. Follow the three-step setup guide that opens on **Today**: confirm your timezone, import your JSON Lines catalog, and pick a study rhythm (a weekday preset, or your own schedule). Any step can be skipped and finished later from **Settings**, **Problems → Import problems**, or **Today → Study schedule**.
+2. Optionally configure an AI provider under **Settings → AI assistant**, or import a **Snapshot Bundle v3** under **Settings → Data → Import migration file** when moving a profile between Windows and macOS. Catalog browsing, manual practice, notes, statistics, and local planning remain available without an API key.
 
 The Windows installer is **unsigned** and requires Microsoft WebView2 (the installer downloads its bootstrapper if missing, which requires internet access). Windows 11 x64 is the primary Windows target; clean-machine installation, Windows 10 compatibility, Apple notarization, and non-developer Mac Gatekeeper UX have not completed the full acceptance matrix. See [installation, data paths, and troubleshooting](docs/desktop.md) and [1.2.0 release notes](docs/releases/1.2.0.md).
 

@@ -43,12 +43,13 @@ it('renders all 10 theme palettes in SettingsView gallery', async () => {
         onLanguageChange={() => {}}
         onThemeChange={() => {}}
         onPaletteChange={() => {}}
+        section="appearance"
       />
     );
   });
 
   // Verify radiogroup exists
-  const group = screen.getByRole('radiogroup', { name: 'Personalized Themes' });
+  const group = screen.getByRole('radiogroup', { name: 'Color palette' });
   assert.ok(group);
 
   // Check that all 10 options from PALETTE_OPTIONS are present
@@ -87,6 +88,7 @@ it('switching to a dark palette automatically activates dark mode', async () => 
         onPaletteChange={(pal) => {
           chosenPalette = pal;
         }}
+        section="appearance"
       />
     );
   });
@@ -129,6 +131,7 @@ it('switching to a light palette automatically activates light mode', async () =
         onPaletteChange={(pal) => {
           chosenPalette = pal;
         }}
+        section="appearance"
       />
     );
   });
@@ -164,6 +167,7 @@ it('renders Light, Dark, and System options in Interface Mode and respects syste
         onLanguageChange={() => {}}
         onThemeChange={() => {}}
         onPaletteChange={() => {}}
+        section="appearance"
       />
     );
   });
@@ -180,7 +184,7 @@ it('renders Light, Dark, and System options in Interface Mode and respects syste
   assert.equal(systemBtn.getAttribute('aria-pressed'), 'true');
 });
 
-it('switching mode while in a personalized theme resets palette to default', async () => {
+it('switching mode keeps a matching palette and resets an incompatible one', async () => {
   const settings = {
     language: 'en' as const,
     theme: 'dark' as const,
@@ -206,6 +210,7 @@ it('switching mode while in a personalized theme resets palette to default', asy
         onPaletteChange={(pal) => {
           chosenPalette = pal;
         }}
+        section="appearance"
       />
     );
   });
@@ -219,7 +224,7 @@ it('switching mode while in a personalized theme resets palette to default', asy
   assert.equal(chosenTheme, 'light');
   assert.equal(chosenPalette, 'default');
 
-  // Reset trackers and test clicking Dark while in Dracula
+  // Dracula is already a dark palette, so choosing Dark keeps it
   chosenTheme = null;
   chosenPalette = null;
   const darkBtn = screen.getByRole('button', { name: 'Dark' });
@@ -228,7 +233,7 @@ it('switching mode while in a personalized theme resets palette to default', asy
   });
 
   assert.equal(chosenTheme, 'dark');
-  assert.equal(chosenPalette, 'default');
+  assert.equal(chosenPalette, null);
 
   // Reset trackers and test clicking System while in Dracula
   chosenTheme = null;
@@ -268,6 +273,7 @@ it('switching mode while in default palette updates theme without resetting pale
         onPaletteChange={(pal) => {
           chosenPalette = pal;
         }}
+        section="appearance"
       />
     );
   });

@@ -23,6 +23,8 @@ import { PracticeWorkspace } from './components/PracticeWorkspace.tsx';
 import { PracticeTimerPill } from './components/PracticeTimer.tsx';
 import { ShortcutHelpModal } from './components/ShortcutHelpModal.tsx';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.ts';
+import { SetupGate } from './components/SetupGuide.tsx';
+import type { SettingsSection } from './components/SettingsView.tsx';
 import { Feedback, PageHeader, Tooltip } from './components/ui.tsx';
 import type { ThemePalette } from '../../../packages/contracts/src/sync.ts';
 
@@ -101,6 +103,7 @@ export function App() {
   const [focusRequest,setFocusRequest]=useState(0);
   const [selectedNoteProblem, setSelectedNoteProblem] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('general');
   const [practiceQueue, setPracticeQueue] = useState<PracticeRequest[]>([]);
   const practice = practiceQueue[0];
   const [outcomes, setOutcomes] = useState<PracticeOutcome[]>([]);
@@ -499,11 +502,29 @@ export function App() {
           <React.Suspense fallback={<WorkspaceFallback label={zh ? '加载中…' : 'Loading…'} />}>
             {visited.has('today') && (
               <div hidden={view !== 'today'} id="view-today">
-                <TodayPlanView
+                <SetupGate
                   lang={lang}
-                  planController={plan}
-                  onNavigateToSettings={() => navigate('settings')}
-                />
+                  theme={theme}
+                  palette={palette}
+                  onLanguageChange={(language) => persistPreference({ language })}
+                  onThemeChange={(theme) => persistPreference({ theme })}
+                  onPaletteChange={(palette) => persistPreference({ palette })}
+                  onTimezoneSaved={setTimezone}
+                  onFinish={() => void plan.refresh()}
+                  onOpenAiSettings={() => {
+                    setSettingsSection('ai');
+                    navigate('settings');
+                  }}
+                >
+                  <TodayPlanView
+                    lang={lang}
+                    planController={plan}
+                    onNavigateToSettings={() => {
+                      setSettingsSection('general');
+                      navigate('settings');
+                    }}
+                  />
+                </SetupGate>
               </div>
             )}
             {visited.has('schedule') && (
@@ -573,6 +594,8 @@ export function App() {
                   onPaletteChange={(palette) => persistPreference({ palette })}
                   currentPalette={palette}
                   onTimezoneSaved={setTimezone}
+                  section={settingsSection}
+                  onSectionChange={setSettingsSection}
                 />
               </div>
             )}

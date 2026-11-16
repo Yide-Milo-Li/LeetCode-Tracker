@@ -20,6 +20,7 @@ Object.assign(globalThis, {
   IS_REACT_ACT_ENVIRONMENT: true,
 });
 Object.defineProperty(globalThis, 'navigator', { configurable: true, value: dom.window.navigator });
+Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: dom.window.localStorage });
 Object.defineProperty(window, 'scrollTo', { value: () => {} });
 const mediaListeners = new Set<() => void>();
 let systemDark = false;
@@ -99,6 +100,8 @@ function deferred<T>() {
 beforeEach(() => {
   location.hash = '';
   window.sessionStorage.clear();
+  // These regressions exercise an established workspace, not the first-run guide.
+  localStorage.setItem('leetcode_tracker_setup_done', 'true');
   records = [];
   systemDark = false;
   preferences = { language: 'en', theme: 'light', timezone: 'UTC', updatedAt: 0 };

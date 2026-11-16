@@ -18,8 +18,21 @@ import { PageHeader, Feedback, InfoPopover } from './ui.tsx';
 import { CatalogPreviewSummary } from './CatalogPreviewSummary.tsx';
 import { CatalogImportHistory } from './CatalogImportHistory.tsx';
 
-/** Keep preview responses bound to the current input and serialize commit interaction. */
-export function CatalogImportWorkspace({ lang }: { lang: Language }) {
+/**
+ * Keep preview responses bound to the current input and serialize commit interaction.
+ *
+ * @param embedded Render only the import stage (no page header or audit history), e.g. inside the setup guide.
+ * @param onCommitted Called after a commit is durably confirmed, with the server summary.
+ */
+export function CatalogImportWorkspace({
+  lang,
+  embedded = false,
+  onCommitted,
+}: {
+  lang: Language;
+  embedded?: boolean;
+  onCommitted?: (summary: ImportSummary) => void;
+}) {
   const t = translations[lang];
   const workspace = useWorkspace();
   const [historyPage, setHistoryPage] = useState(1);
@@ -189,6 +202,7 @@ export function CatalogImportWorkspace({ lang }: { lang: Language }) {
       if (fileInputRef.current) fileInputRef.current.value = '';
       // Successful catalog writes invalidate every dependent local view.
       workspace.notifyMutation();
+      onCommitted?.(summary);
       if (historyPage === 1) void loadHistory();
       else setHistoryPage(1);
     } catch (err) {
@@ -215,13 +229,15 @@ export function CatalogImportWorkspace({ lang }: { lang: Language }) {
 
   return (
     <div>
-      <PageHeader
-        title={lang === 'zh' ? '导入题库' : 'Import problems'}
-        back={{
-          label: lang === 'zh' ? '返回题库' : 'Back to problems',
-          run: () => workspace.navigate('problems'),
-        }}
-      />
+      {!embedded && (
+        <PageHeader
+          title={lang === 'zh' ? '导入题库' : 'Import problems'}
+          back={{
+            label: lang === 'zh' ? '返回题库' : 'Back to problems',
+            run: () => workspace.navigate('problems'),
+          }}
+        />
+      )}
       {/* User-owned JSONL ingestion remains separate from progress imports. */}
       <div className="import-stage">
         <InfoPopover label={lang === 'zh' ? 'JSONL 格式说明' : 'JSONL format help'} content={<p>{t.workbenchDesc}</p>} />
@@ -360,7 +376,7 @@ export function CatalogImportWorkspace({ lang }: { lang: Language }) {
       </div>
 
       {/* 4. Import History Section */}
-      <CatalogImportHistory
+      {!embedded && <CatalogImportHistory
         history={history}
         lang={lang}
         timezone={workspace.timezone}
@@ -377,7 +393,7 @@ export function CatalogImportWorkspace({ lang }: { lang: Language }) {
             .catch((err) => setHistoryError(String(err.message)));
         }}
         onCloseResult={() => setResult(null)}
-      />
+      />}
     </div>
   );
 }

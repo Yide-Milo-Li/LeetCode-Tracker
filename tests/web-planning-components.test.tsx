@@ -224,7 +224,7 @@ it('renders setup view when timezone is not configured and triggers navigation c
   });
 
   assert.ok(screen.getByText('Timezone Setup Required'));
-  const settingsBtn = screen.getByRole('button', { name: /Settings/i });
+  const settingsBtn = screen.getByRole('button', { name: 'Set timezone' });
   fireEvent.click(settingsBtn);
   assert.equal(navigated, true);
 });

@@ -1,7 +1,6 @@
-import { ExportLink } from './ExportLink.tsx';
-/** Application preferences only; catalog and progress imports live in their respective workspaces. */
+/** Application preferences, grouped into four tabs; catalog and progress imports live in their own workspaces. */
 import React, { useEffect, useRef, useState } from 'react';
-import { Eye, EyeOff, Copy, Check, ClipboardPaste, Download, Upload, Archive, Database, AlertTriangle } from 'lucide-react';
+import { Eye, EyeOff, Download, Upload, Archive, AlertTriangle, ChevronDown } from 'lucide-react';
 import {
   defaultGeminiFallbackModels,
   defaultGeminiModel,
@@ -24,17 +23,26 @@ import { clearPracticeIntents } from '../practice-service.ts';
 import { translations, type Language } from '../i18n.ts';
 import { brandIconUrl } from '../brand-icons.ts';
 import { useWorkspace } from '../workspace.tsx';
+import { ExportLink } from './ExportLink.tsx';
+import { TimezoneField } from './TimezoneField.tsx';
 import { PageHeader, Feedback, Field, InfoPopover } from './ui.tsx';
+
+export type ThemeMode = 'light' | 'dark' | 'system';
+export type SettingsSection = 'general' | 'appearance' | 'ai' | 'data';
+const SECTIONS: SettingsSection[] = ['general', 'appearance', 'ai', 'data'];
 
 interface SettingsViewProps {
   lang: Language;
   onLanguageChange: (lang: Language) => void;
-  onThemeChange: (theme: 'light' | 'dark' | 'system') => void;
-  currentTheme: 'light' | 'dark' | 'system';
+  onThemeChange: (theme: ThemeMode) => void;
+  currentTheme: ThemeMode;
   resolvedDark?: boolean;
   onPaletteChange?: (palette: ThemePalette) => void;
   currentPalette?: ThemePalette;
   onTimezoneSaved?: (zone: string | null) => void;
+  /** Controlled tab; omit to let the view manage its own. */
+  section?: SettingsSection;
+  onSectionChange?: (section: SettingsSection) => void;
 }
 
 export interface PaletteOption {
@@ -153,7 +161,20 @@ const OPENAI_MODEL_LABELS: Record<string, string> = {
   'gpt-6.1-terra': 'GPT-6.1 Terra',
 };
 
-/** Keep the timezone and AI drafts intact on background refresh; only explicit save changes preferences. */
+
+/**
+ * Keep a palette only while it matches the requested mode.
+ *
+ * The default palette adapts to both modes. A light or dark palette survives a switch to its own
+ * mode; anything else (including "system", whose effective mode can change) falls back to default.
+ */
+export function paletteForMode(palette: ThemePalette, mode: ThemeMode): ThemePalette {
+  if (palette === 'default') return palette;
+  const type = PALETTE_OPTIONS.find((option) => option.id === palette)?.type;
+  return type === mode ? palette : 'default';
+}
+
+/** Keep AI drafts intact on background refresh; only explicit save changes stored credentials. */
 export function SettingsView({
   lang,
   onLanguageChange,
@@ -163,21 +184,28 @@ export function SettingsView({
   onPaletteChange = () => {},
   currentPalette = 'default',
   onTimezoneSaved,
+  section: controlledSection,
+  onSectionChange,
 }: SettingsViewProps) {
   const t = translations[lang];
   const workspace = useWorkspace();
   const zh = lang === 'zh';
 
-  // Timezone state
-  const [zone, setZone] = useState(workspace.timezone ?? '');
-  const [error, setError] = useState('');
-  const [saved, setSaved] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const dirty = useRef(false);
+  const [ownSection, setOwnSection] = useState<SettingsSection>('general');
+  const section = controlledSection ?? ownSection;
+  const selectSection = (next: SettingsSection) => {
+    setOwnSection(next);
+    onSectionChange?.(next);
+  };
+
+  const [loadError, setLoadError] = useState('');
 
   // Multi-provider AI configuration state
   const [aiLoaded, setAiLoaded] = useState(false);
   const [provider, setProvider] = useState<ProviderType>('gemini');
+  /** Provider whose key is persisted and in use; null means plans use local recommendations. */
+  const [activeProvider, setActiveProvider] = useState<ProviderType | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Gemini state
   const [geminiApiKey, setGeminiApiKey] = useState('');
@@ -212,7 +240,6 @@ export function SettingsView({
 
   // Shared AI form & action state
   const [showApiKey, setShowApiKey] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [savingAi, setSavingAi] = useState(false);
   const [aiSaved, setAiSaved] = useState(false);
   const [aiError, setAiError] = useState('');
@@ -275,6 +302,14 @@ export function SettingsView({
   };
   const currentSupportedEfforts = getSupportedReasoningEfforts(provider, currentPrimaryModel);
   const currentDefaultEffort = getDefaultReasoningEffort(provider, currentPrimaryModel);
+  const providerName = (id: ProviderType) => (id === 'gemini' ? 'Gemini' : id === 'openai' ? 'OpenAI' : 'DeepSeek');
+
+  /** Any edit to the visible AI draft invalidates the last save/test confirmation. */
+  const markAiDirty = () => {
+    dirtyAi.current = true;
+    setAiSaved(false);
+    setTestResult(null);
+  };
 
   // Bundle export / import state
   const [importingBundle, setImportingBundle] = useState(false);
@@ -288,115 +323,63 @@ export function SettingsView({
     api
       .getSettings()
       .then((settings) => {
-        if (active) setAiLoaded(true);
-        if (active) {
-          if (!dirty.current) setZone(settings.timezone ?? '');
-          if (!dirtyAi.current) {
-            if (settings.llmProvider) {
-              setProvider(settings.llmProvider);
-            }
-
-            // Gemini
-            if (settings.geminiApiKey !== undefined) setGeminiApiKey(settings.geminiApiKey ?? '');
-            const effGemini = normalizeGeminiModel(settings.geminiModel) ?? defaultGeminiModel;
-            setGeminiPrimaryModel(effGemini);
-            setGeminiIsCustomPrimary(false);
-            setGeminiReasoningEffort(
-              resolveModelReasoningEffort('gemini', effGemini, settings.geminiReasoningEffort)
-            );
-            if (settings.geminiFallbackModels) {
-              setGeminiFallbackModels(
-                [...new Set(
-                  settings.geminiFallbackModels
-                    .map((m) => normalizeGeminiModel(m))
-                    .filter((m): m is NonNullable<typeof m> => m !== null)
-                )].filter((m) => m !== effGemini)
-              );
-            } else {
-              setGeminiFallbackModels(
-                defaultGeminiFallbackModels.filter((m) => m !== effGemini)
-              );
-            }
-
-            // OpenAI
-            if (settings.openaiApiKey !== undefined) setOpenaiApiKey(settings.openaiApiKey ?? '');
-            // Ignore legacy model choices outside the supported OpenAI models.
-            const effOpenai = normalizeOpenaiModel(settings.openaiModel) ?? defaultOpenaiModel;
-            setOpenaiPrimaryModel(effOpenai);
-            setOpenaiIsCustomPrimary(false);
-            setOpenaiFallbackModels([]);
-            setOpenaiReasoningEffort(
-              resolveModelReasoningEffort('openai', effOpenai, settings.openaiReasoningEffort)
-            );
-            if (settings.openaiBaseUrl !== undefined) setOpenaiBaseUrl(settings.openaiBaseUrl ?? '');
-
-            // DeepSeek
-            if (settings.deepseekApiKey !== undefined) setDeepseekApiKey(settings.deepseekApiKey ?? '');
-            // Legacy DeepSeek choices must not reactivate an unsupported model.
-            setDeepseekPrimaryModel(fixedProviderModels.deepseek);
-            setDeepseekIsCustomPrimary(false);
-            setDeepseekFallbackModels([]);
-            setDeepseekReasoningEffort(
-              resolveModelReasoningEffort('deepseek', fixedProviderModels.deepseek, settings.deepseekReasoningEffort)
-            );
-            if (settings.deepseekBaseUrl !== undefined) setDeepseekBaseUrl(settings.deepseekBaseUrl ?? '');
-
-          }
+        if (!active) return;
+        setAiLoaded(true);
+        const savedProvider = settings.llmProvider ?? 'gemini';
+        const savedKey =
+          savedProvider === 'gemini' ? settings.geminiApiKey : savedProvider === 'openai' ? settings.openaiApiKey : settings.deepseekApiKey;
+        setActiveProvider(savedKey ? savedProvider : null);
+        if (dirtyAi.current) return;
+        if (settings.llmProvider) {
+          setProvider(settings.llmProvider);
         }
+
+        // Gemini
+        if (settings.geminiApiKey !== undefined) setGeminiApiKey(settings.geminiApiKey ?? '');
+        const effGemini = normalizeGeminiModel(settings.geminiModel) ?? defaultGeminiModel;
+        setGeminiPrimaryModel(effGemini);
+        setGeminiIsCustomPrimary(false);
+        setGeminiReasoningEffort(resolveModelReasoningEffort('gemini', effGemini, settings.geminiReasoningEffort));
+        if (settings.geminiFallbackModels) {
+          setGeminiFallbackModels(
+            [...new Set(
+              settings.geminiFallbackModels
+                .map((m) => normalizeGeminiModel(m))
+                .filter((m): m is NonNullable<typeof m> => m !== null)
+            )].filter((m) => m !== effGemini)
+          );
+        } else {
+          setGeminiFallbackModels(defaultGeminiFallbackModels.filter((m) => m !== effGemini));
+        }
+
+        // OpenAI
+        if (settings.openaiApiKey !== undefined) setOpenaiApiKey(settings.openaiApiKey ?? '');
+        // Ignore legacy model choices outside the supported OpenAI models.
+        const effOpenai = normalizeOpenaiModel(settings.openaiModel) ?? defaultOpenaiModel;
+        setOpenaiPrimaryModel(effOpenai);
+        setOpenaiIsCustomPrimary(false);
+        setOpenaiFallbackModels([]);
+        setOpenaiReasoningEffort(resolveModelReasoningEffort('openai', effOpenai, settings.openaiReasoningEffort));
+        if (settings.openaiBaseUrl !== undefined) setOpenaiBaseUrl(settings.openaiBaseUrl ?? '');
+
+        // DeepSeek
+        if (settings.deepseekApiKey !== undefined) setDeepseekApiKey(settings.deepseekApiKey ?? '');
+        // Legacy DeepSeek choices must not reactivate an unsupported model.
+        setDeepseekPrimaryModel(fixedProviderModels.deepseek);
+        setDeepseekIsCustomPrimary(false);
+        setDeepseekFallbackModels([]);
+        setDeepseekReasoningEffort(
+          resolveModelReasoningEffort('deepseek', fixedProviderModels.deepseek, settings.deepseekReasoningEffort)
+        );
+        if (settings.deepseekBaseUrl !== undefined) setDeepseekBaseUrl(settings.deepseekBaseUrl ?? '');
       })
       .catch((err) => {
-        if (active) setError(String(err.message));
+        if (active) setLoadError(String(err.message));
       });
     return () => {
       active = false;
     };
   }, []);
-
-  /** Validate IANA names locally and wait for server persistence before publishing the new timezone. */
-  async function saveZone(event: React.FormEvent) {
-    event.preventDefault();
-    setSaving(true);
-    setError('');
-    setSaved(false);
-    try {
-      if (zone.trim()) new Intl.DateTimeFormat('en', { timeZone: zone.trim() });
-      const settings = await api.updateSettings({ timezone: zone.trim() || null });
-      onTimezoneSaved?.(settings.timezone);
-      workspace.notifyMutation();
-      setSaved(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  /** Copy API key to clipboard with visual confirmation. */
-  async function handleCopyApiKey() {
-    if (!currentApiKey) return;
-    try {
-      await navigator.clipboard.writeText(currentApiKey);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Clipboard write failed or unpermitted
-    }
-  }
-
-  /** Paste API key from clipboard into draft. */
-  async function handlePasteApiKey() {
-    try {
-      const text = await navigator.clipboard.readText();
-      if (text) {
-        dirtyAi.current = true;
-        setCurrentApiKey(text.trim());
-        setAiSaved(false);
-        setTestResult(null);
-      }
-    } catch {
-      // Clipboard read failed or unpermitted
-    }
-  }
 
   /** Save multi-provider AI keys and models to local SQLite settings. */
   async function saveAiConfig(event: React.FormEvent) {
@@ -439,6 +422,7 @@ export function SettingsView({
       setGeminiFallbackModels(cleanGeminiFb);
       setOpenaiFallbackModels(cleanOpenaiFb);
       setDeepseekFallbackModels(cleanDeepseekFb);
+      setActiveProvider(currentApiKey.trim() ? provider : null);
       workspace.notifyMutation();
       setAiSaved(true);
       dirtyAi.current = false;
@@ -540,646 +524,525 @@ export function SettingsView({
     }
   }
 
+  const sectionLabel: Record<SettingsSection, string> = {
+    general: zh ? '通用' : 'General',
+    appearance: zh ? '外观' : 'Appearance',
+    ai: zh ? 'AI 助手' : 'AI assistant',
+    data: zh ? '数据' : 'Data',
+  };
+
   return (
     <div className="settings-view">
       <PageHeader title={zh ? '设置' : 'Settings'} />
+      {loadError && <Feedback>{loadError}</Feedback>}
 
-      {/* Language row */}
-      <section className="preference-row">
-        <div>
-          <h2>{t.langLabel}</h2>
-        </div>
-        <div className="segmented-control" aria-label={t.langLabel}>
-          <button aria-pressed={lang === 'zh'} onClick={() => onLanguageChange('zh')}>
-            简体中文
-          </button>
-          <button aria-pressed={lang === 'en'} onClick={() => onLanguageChange('en')}>
-            English
-          </button>
-        </div>
-      </section>
-
-      {/* Theme Mode row */}
-      <section className="preference-row">
-        <div>
-          <h2>{t.themeModeLabel}</h2>
-          <InfoPopover
-            label={zh ? '模式说明' : 'Mode help'}
-            content={<p>{zh ? '在浅色模式、深色模式或跟随系统之间切换。' : 'Switch between light, dark, or system display modes.'}</p>}
-          />
-        </div>
-        <div className="segmented-control" aria-label={t.themeModeLabel}>
-          {(['light', 'dark', 'system'] as const).map((mode) => (
-            <button
-              key={mode}
-              aria-pressed={currentTheme === mode}
-              onClick={() => {
-                // When in a custom palette, switching mode reverts back to the default palette.
-                if (currentPalette && currentPalette !== 'default') {
-                  onPaletteChange('default');
-                }
-                onThemeChange(mode);
-              }}
-            >
-              {mode === 'light' ? t.themeLight : mode === 'dark' ? t.themeDark : t.themeSystem}
-            </button>
-          ))}
-        </div>
-      </section>
-
-      {/* Custom Theme Palettes Gallery */}
-      <section className="preference-row palette-selection-section">
-        <div>
-          <h2>{t.paletteLabel}</h2>
-          <p className="muted">{t.paletteDesc}</p>
-        </div>
-        <div className="palette-grid" role="radiogroup" aria-label={t.paletteLabel}>
-          {PALETTE_OPTIONS.map((pal) => {
-            const isSelected = currentPalette === pal.id;
-            return (
-              <button
-                key={pal.id}
-                type="button"
-                role="radio"
-                aria-checked={isSelected}
-                className={`palette-card ${isSelected ? 'active' : ''}`}
-                onClick={() => {
-                  onPaletteChange(pal.id);
-                  if (pal.type === 'dark' && currentTheme !== 'dark') {
-                    onThemeChange('dark');
-                  } else if (pal.type === 'light' && currentTheme !== 'light' && pal.id !== 'default') {
-                    onThemeChange('light');
-                  }
-                }}
-              >
-                <div className="palette-preview">
-                  <div className="palette-swatches">
-                    <span style={{ backgroundColor: pal.canvas }} title="Canvas" />
-                    <span style={{ backgroundColor: pal.surface }} title="Surface" />
-                    <span style={{ backgroundColor: pal.primary }} title="Primary" />
-                    <span style={{ backgroundColor: pal.accent }} title="Accent" />
-                  </div>
-                  <img src={brandIconUrl(pal.id, resolvedDark)} alt="" width="40" height="40" />
-                </div>
-                <div className="palette-meta">
-                  <span className="palette-name">{t[pal.nameKey] as string}</span>
-                  <span className={`palette-badge ${pal.type}`}>
-                    {pal.type === 'dark' ? (zh ? '暗色' : 'Dark') : (zh ? '浅色' : 'Light')}
-                  </span>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </section>
-
-      {/* Timezone row */}
-      <section className="preference-row">
-        <div>
-          <h2>{t.timezoneLabel}</h2>
-          <p className="muted">
-            {zh
-              ? '用于今日计划和活动日期统计。更改不会改写原始记录时间。'
-              : 'Used for daily plans and activity dates. Changing it preserves original record times.'}
-          </p>
-        </div>
-        <form className="timezone-form" onSubmit={saveZone}>
-          <Field label={zh ? 'IANA 时区' : 'IANA timezone'}>
-            <input
-              list="timezone-options"
-              value={zone}
-              onChange={(e) => {
-                dirty.current = true;
-                setZone(e.target.value);
-                setSaved(false);
-              }}
-              placeholder={zh ? '尚未配置' : 'Not configured'}
-            />
-          </Field>
-          <datalist id="timezone-options">
-            {[
-              'UTC',
-              'Asia/Shanghai',
-              'Asia/Tokyo',
-              'America/Los_Angeles',
-              'America/New_York',
-              'Europe/London',
-              'Europe/Paris',
-            ].map((z) => (
-              <option key={z} value={z} />
-            ))}
-          </datalist>
-          <div className="action-row">
-            <button
-              type="button"
-              className="text-link"
-              onClick={() => {
-                dirty.current = true;
-                setZone(Intl.DateTimeFormat().resolvedOptions().timeZone);
-                setSaved(false);
-              }}
-            >
-              {zh ? '使用浏览器建议' : 'Use browser suggestion'}
-            </button>
-            <button className="btn btn-primary" disabled={saving}>
-              {saving ? '…' : zh ? '保存时区' : 'Save timezone'}
-            </button>
-          </div>
-          {error && <Feedback>{error}</Feedback>}
-          {saved && <Feedback tone="success">{zh ? '时区已保存' : 'Timezone saved'}</Feedback>}
-        </form>
-      </section>
-
-      {/* Multi-provider AI Assistant Configuration row */}
-      <section className="preference-row">
-        <div>
-          <h2>{t.geminiSettingsTitle}</h2>
-          <p className="muted">{t.geminiSettingsDesc}</p>
-          <InfoPopover
-            label={zh ? 'AI 配置说明' : 'AI configuration help'}
-            content={
-              <div>
-                <p>
-                  {zh
-                    ? 'API 密钥及模型配置保存在本地 SQLite 数据库中，仅在生成计划与导入分析时向所选 AI 服务商发送请求。'
-                    : 'API keys and model choices are saved locally in your SQLite database, used only for planning and progress formatting.'}
-                </p>
-                <p>
-                  {zh
-                    ? '各提供商（Gemini、OpenAI、DeepSeek）的配置独立持久化，切换提供商不会清除其他提供商已保存的密钥。'
-                    : 'Configurations for Gemini, OpenAI, and DeepSeek are stored independently. Switching providers preserves existing keys.'}
-                </p>
-                <p>
-                  {zh
-                    ? '密钥默认以圆点掩码保护，点击眼睛图标随时切换查看明文。'
-                    : 'API keys are masked with dots by default. Click the eye icon to toggle visibility.'}
-                </p>
-              </div>
-            }
-          />
-        </div>
-
-        <form className="ai-settings-form" onSubmit={saveAiConfig}>
-          <fieldset className="ai-settings-form" disabled={!aiLoaded || savingAi || testingAi} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
-          {/* AI Provider Segmented Control */}
-          <div className="form-field">
-            <span>{t.aiProviderLabel}</span>
-            <div className="segmented-control" aria-label={t.aiProviderLabel}>
-              <button
-                type="button"
-                aria-pressed={provider === 'gemini'}
-                onClick={() => {
-                  dirtyAi.current = true;
-                  setProvider('gemini');
-                  setShowApiKey(false);
-                  setCopied(false);
-                  setAiSaved(false);
-                  setTestResult(null);
-                }}
-              >
-                {t.providerGemini}
-              </button>
-              <button
-                type="button"
-                aria-pressed={provider === 'openai'}
-                onClick={() => {
-                  dirtyAi.current = true;
-                  setProvider('openai');
-                  setShowApiKey(false);
-                  setCopied(false);
-                  setAiSaved(false);
-                  setTestResult(null);
-                }}
-              >
-                {t.providerOpenAI}
-              </button>
-              <button
-                type="button"
-                aria-pressed={provider === 'deepseek'}
-                onClick={() => {
-                  dirtyAi.current = true;
-                  setProvider('deepseek');
-                  setShowApiKey(false);
-                  setCopied(false);
-                  setAiSaved(false);
-                  setTestResult(null);
-                }}
-              >
-                {t.providerDeepSeek}
-              </button>
-            </div>
-          </div>
-
-          {/* API Key field with eye toggle */}
-          <Field label={`${t.apiKeyLabel} (${provider === 'gemini' ? 'Gemini' : provider === 'openai' ? 'OpenAI' : 'DeepSeek'})`}>
-            <div className="input-with-action">
-              <input
-                type={showApiKey ? 'text' : 'password'}
-                value={currentApiKey}
-                onChange={(e) => {
-                  dirtyAi.current = true;
-                  setCurrentApiKey(e.target.value);
-                  setAiSaved(false);
-                  setTestResult(null);
-                }}
-                placeholder={
-                  provider === 'gemini'
-                    ? t.apiKeyPlaceholder
-                    : provider === 'openai'
-                    ? (zh ? '输入或粘贴您的 OpenAI API 密钥...' : 'Enter or paste your OpenAI API key...')
-                    : (zh ? '输入或粘贴您的 DeepSeek API 密钥...' : 'Enter or paste your DeepSeek API key...')
-                }
-                autoComplete="off"
-                spellCheck={false}
-              />
-              <button
-                type="button"
-                className="icon-action-btn"
-                onClick={() => setShowApiKey((prev) => !prev)}
-                aria-label={showApiKey ? t.hideApiKey : t.showApiKey}
-                title={showApiKey ? t.hideApiKey : t.showApiKey}
-              >
-                {showApiKey ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
-              </button>
-            </div>
-          </Field>
-
-          {/* Quick API Key Copy / Paste / Clear bar */}
-          <div className="api-key-actions">
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={handleCopyApiKey}
-              disabled={!currentApiKey}
-              title={t.copyApiKey}
-            >
-              {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
-              <span>{copied ? t.keyCopied : t.copyApiKey}</span>
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={handlePasteApiKey}
-              title={t.pasteApiKey}
-            >
-              <ClipboardPaste size={14} aria-hidden="true" />
-              <span>{t.pasteApiKey}</span>
-            </button>
-            {currentApiKey && (
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => {
-                  dirtyAi.current = true;
-                  setCurrentApiKey('');
-                  setAiSaved(false);
-                  setTestResult(null);
-                }}
-                title={t.clearApiKey}
-              >
-                <span>{t.clearApiKey}</span>
-              </button>
-            )}
-          </div>
-
-          {/* Base URL field for OpenAI and DeepSeek */}
-          {provider !== 'gemini' && (
-            <Field label={t.baseUrlLabel}>
-              <input
-                type="text"
-                value={currentBaseUrl}
-                onChange={(e) => {
-                  dirtyAi.current = true;
-                  setCurrentBaseUrl(e.target.value);
-                  setAiSaved(false);
-                  setTestResult(null);
-                }}
-                placeholder={
-                  provider === 'openai'
-                    ? 'https://api.openai.com/v1'
-                    : 'https://api.deepseek.com'
-                }
-              />
-            </Field>
-          )}
-
-          {/* Preferred Model selection */}
-          <Field label={t.preferredModelLabel}>
-            <select
-              value={currentIsCustomPrimary ? 'custom' : currentPrimaryModel}
-              onChange={(e) => {
-                dirtyAi.current = true;
-                setAiSaved(false);
-                setTestResult(null);
-                if (e.target.value === 'custom') {
-                  setCurrentIsCustomPrimary(true);
-                  if (currentPresetModels.includes(currentPrimaryModel)) {
-                    setCurrentPrimaryModel('');
-                  }
-                } else {
-                  const selectedModel = e.target.value;
-                  setCurrentIsCustomPrimary(false);
-                  setCurrentPrimaryModel(selectedModel);
-                  setCurrentFallbackModels((prev) => prev.filter((item) => item !== selectedModel));
-                  if (provider === 'gemini') {
-                    const nextSupported = getSupportedReasoningEfforts('gemini', selectedModel);
-                    if (!nextSupported.includes(geminiReasoningEffort)) {
-                      setGeminiReasoningEffort(getDefaultReasoningEffort('gemini', selectedModel));
-                    }
-                  } else if (provider === 'openai') {
-                    const nextSupported = getSupportedReasoningEfforts('openai', selectedModel);
-                    if (!nextSupported.includes(openaiReasoningEffort)) {
-                      setOpenaiReasoningEffort(getDefaultReasoningEffort('openai', selectedModel));
-                    }
-                  }
-                }
-              }}
-            >
-              {currentPresetModels.map((m, idx) => (
-                <option key={m} value={m}>
-                  {provider === 'openai' ? (OPENAI_MODEL_LABELS[m] ?? m) : provider === 'deepseek' ? 'DeepSeek V4.1 Flash' : m.replace('models/', '')}{idx === 0 ? (zh ? '（推荐）' : ' (Recommended)') : ''}
-                </option>
-              ))}
-            </select>
-          </Field>
-
-          {/* Reasoning Effort selection (tailored per provider & model) */}
-          <Field
-            label={t.reasoningEffortLabel}
-            hint={
-              provider === 'gemini'
-                ? (zh
-                    ? '通过 thinkingConfig.thinkingLevel 控制 Gemini 思考深度。'
-                    : 'Controls Gemini reasoning depth via thinkingConfig.thinkingLevel.')
-                : provider === 'openai'
-                ? (zh
-                    ? `通过 reasoning_effort 控制 ${OPENAI_MODEL_LABELS[currentPrimaryModel] ?? currentPrimaryModel} 推理强度。`
-                    : `Controls ${OPENAI_MODEL_LABELS[currentPrimaryModel] ?? currentPrimaryModel} reasoning depth via reasoning_effort.`)
-                : (zh
-                    ? '通过 reasoning_effort 与 thinking 开关控制 DeepSeek V4.1 Flash 思考模式。'
-                    : 'Controls DeepSeek V4.1 Flash thinking mode via reasoning_effort and thinking.')
-            }
+      <div className="page-tabs" role="tablist" aria-label={zh ? '设置分组' : 'Settings sections'}>
+        {SECTIONS.map((id, index) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            id={`settings-tab-${id}`}
+            aria-selected={section === id}
+            aria-controls={`settings-panel-${id}`}
+            tabIndex={section === id ? 0 : -1}
+            onClick={() => selectSection(id)}
+            onKeyDown={(e) => {
+              if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+              e.preventDefault();
+              const next = SECTIONS[(index + (e.key === 'ArrowRight' ? 1 : SECTIONS.length - 1)) % SECTIONS.length];
+              selectSection(next);
+              setTimeout(() => document.getElementById(`settings-tab-${next}`)?.focus(), 0);
+            }}
           >
-            <select
-              aria-label={t.reasoningEffortLabel}
-              value={currentReasoningEffort}
-              onChange={(e) => {
-                dirtyAi.current = true;
-                setAiSaved(false);
-                setTestResult(null);
-                setCurrentReasoningEffort(e.target.value as ReasoningEffort);
-              }}
-            >
-              {currentSupportedEfforts.map((effort) => {
-                const labelText =
-                  provider === 'gemini'
-                    ? effort.toUpperCase()
-                    : provider === 'deepseek'
-                    ? effort === 'none'
-                      ? 'none (thinking: disabled)'
-                      : `${effort} (thinking: enabled)`
-                    : effort === 'none'
-                    ? (zh ? 'none（关闭推理）' : 'none (no reasoning)')
-                    : effort;
-                const defaultBadge = effort === currentDefaultEffort ? (zh ? '（默认）' : ' (Default)') : '';
-                return (
-                  <option key={effort} value={effort}>
-                    {labelText}{defaultBadge}
-                  </option>
-                );
-              })}
-            </select>
-          </Field>
+            {sectionLabel[id]}
+          </button>
+        ))}
+      </div>
 
-          {/* Candidate fallback models chips */}
-          {provider === 'gemini' && <div className="form-field">
-            <span>{t.candidateModelsLabel}</span>
-            <small>{t.candidateModelsDesc}</small>
-            <div className="candidate-chips" role="group" aria-label={t.candidateModelsLabel}>
-              {currentPresetModels.map((m) => {
-                const isSelected = currentFallbackModels.includes(m);
-                const isPrimary = m === currentPrimaryModel.trim();
+      {section === 'general' && (
+        <div role="tabpanel" id="settings-panel-general" aria-labelledby="settings-tab-general" className="settings-panel">
+          <section className="preference-row">
+            <div className="preference-label">
+              <h2>{t.langLabel}</h2>
+            </div>
+            <div className="segmented-control" aria-label={t.langLabel}>
+              <button aria-pressed={lang === 'zh'} onClick={() => onLanguageChange('zh')}>
+                简体中文
+              </button>
+              <button aria-pressed={lang === 'en'} onClick={() => onLanguageChange('en')}>
+                English
+              </button>
+            </div>
+          </section>
+
+          <section className="preference-row">
+            <div className="preference-label">
+              <h2>{t.timezoneLabel}</h2>
+              <p>
+                {zh
+                  ? '决定"今天"从何时开始，用于每日计划和活动日期。更改不会改写已有记录的时间。'
+                  : 'Decides when "today" starts for daily plans and activity dates. Existing record times are kept.'}
+              </p>
+            </div>
+            <TimezoneField lang={lang} value={workspace.timezone} onSaved={(zone) => onTimezoneSaved?.(zone)} hideLabel />
+          </section>
+        </div>
+      )}
+
+      {section === 'appearance' && (
+        <div role="tabpanel" id="settings-panel-appearance" aria-labelledby="settings-tab-appearance" className="settings-panel">
+          <section className="preference-row">
+            <div className="preference-label">
+              <h2>{t.themeModeLabel}</h2>
+              <p>{zh ? '跟随系统时，配色会回到默认主题。' : 'Following the system uses the default palette.'}</p>
+            </div>
+            <div className="segmented-control" aria-label={t.themeModeLabel}>
+              {(['light', 'dark', 'system'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  aria-pressed={currentTheme === mode}
+                  onClick={() => {
+                    // Keep a palette that already matches the new mode; otherwise fall back to default.
+                    const nextPalette = paletteForMode(currentPalette, mode);
+                    if (nextPalette !== currentPalette) onPaletteChange(nextPalette);
+                    onThemeChange(mode);
+                  }}
+                >
+                  {mode === 'light' ? t.themeLight : mode === 'dark' ? t.themeDark : t.themeSystem}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="preference-row is-stacked">
+            <div className="preference-label">
+              <h2>{t.paletteLabel}</h2>
+              <p>{t.paletteDesc}</p>
+            </div>
+            <div className="palette-grid" role="radiogroup" aria-label={t.paletteLabel}>
+              {PALETTE_OPTIONS.map((pal) => {
+                const isSelected = currentPalette === pal.id;
                 return (
                   <button
-                    key={m}
+                    key={pal.id}
                     type="button"
-                    className={`candidate-chip ${isSelected ? 'active' : ''}`}
-                    aria-pressed={isSelected}
-                    disabled={isPrimary}
+                    role="radio"
+                    aria-checked={isSelected}
+                    className={`palette-card ${isSelected ? 'active' : ''}`}
                     onClick={() => {
-                      if (isPrimary) return;
-                      dirtyAi.current = true;
-                      setAiSaved(false);
-                      setTestResult(null);
-                      setCurrentFallbackModels((prev) =>
-                        prev.includes(m)
-                          ? prev.filter((item) => item !== m)
-                          : [...prev, m].filter((item) => item !== currentPrimaryModel.trim())
-                      );
+                      onPaletteChange(pal.id);
+                      if (pal.type === 'dark' && currentTheme !== 'dark') {
+                        onThemeChange('dark');
+                      } else if (pal.type === 'light' && currentTheme !== 'light' && pal.id !== 'default') {
+                        onThemeChange('light');
+                      }
                     }}
                   >
-                    {m.replace('models/', '')}
+                    <div className="palette-preview" aria-hidden="true">
+                      <div className="palette-swatches">
+                        <span style={{ backgroundColor: pal.canvas }} />
+                        <span style={{ backgroundColor: pal.surface }} />
+                        <span style={{ backgroundColor: pal.primary }} />
+                        <span style={{ backgroundColor: pal.accent }} />
+                      </div>
+                      <img src={brandIconUrl(pal.id, resolvedDark)} alt="" width="40" height="40" />
+                    </div>
+                    <div className="palette-meta">
+                      <span className="palette-name">{t[pal.nameKey] as string}</span>
+                      <span className={`palette-badge ${pal.type}`}>
+                        {pal.id === 'default' ? (zh ? '自适应' : 'Auto') : pal.type === 'dark' ? (zh ? '暗色' : 'Dark') : (zh ? '浅色' : 'Light')}
+                      </span>
+                    </div>
                   </button>
                 );
               })}
             </div>
-
-            {/* Fallback chain preview */}
-            <div className="fallback-chain-preview">
-              <span className="chain-label">{t.fallbackChainLabel}:</span>
-              <span className="chain-path">
-                <strong>{currentPrimaryModel.replace('models/', '') || '(none)'}</strong>
-                {currentFallbackModels.length > 0 &&
-                  currentFallbackModels.map((m) => (
-                    <span key={m} className="chain-step">
-                      {' → '}{m.replace('models/', '')}
-                    </span>
-                  ))}
-              </span>
-            </div>
-          </div>}
-
-          {/* Save & Test Action Row */}
-          <div className="action-row">
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={handleTestConnection}
-              disabled={testingAi || !currentApiKey.trim()}
-            >
-              {testingAi ? t.testingAi : t.testAiConnection}
-            </button>
-            <button className="btn btn-primary" disabled={savingAi}>
-              {savingAi ? '…' : t.saveAiSettings}
-            </button>
-          </div>
-
-          {aiError && <Feedback tone="error">{aiError}</Feedback>}
-          {aiSaved && <Feedback tone="success">{t.aiSettingsSaved}</Feedback>}
-          {testResult && (
-            <Feedback tone={testResult.ok ? 'success' : 'error'}>
-              {testResult.ok
-                ? t.testAiSuccess.replace('{model}', testResult.model || currentPrimaryModel)
-                : `${t.testAiFailed}: ${testResult.message}`}
-            </Feedback>
-          )}
-        </fieldset>
-        </form>
-      </section>
-
-      {/* Data Management & Portable Snapshots row */}
-      <section className="preference-row">
-        <div>
-          <h2>{t.dataManagementTitle}</h2>
-          <p className="muted">{t.dataManagementDesc}</p>
-          <InfoPopover
-            label={zh ? '数据安全与迁移说明' : 'Data portability help'}
-            content={
-              <div>
-                <p>
-                  {zh
-                    ? '所有做题记录、笔记与配置保存在本地 SQLite 中，完全离线运行。'
-                    : 'All practice logs, notes, and settings reside in your local SQLite database, 100% offline.'}
-                </p>
-                <p>
-                  {zh
-                    ? '执行还原前，系统会自动在本地生成一份时间戳安全快照（.db.bak），确保随时可回退，零数据丢失风险。'
-                    : 'Before restoring a bundle, the system automatically creates a timestamped safety SQLite backup (.db.bak) for zero data loss.'}
-                </p>
-              </div>
-            }
-          />
+          </section>
         </div>
+      )}
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {/* Bundle Export & Import */}
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '12px',
-              padding: '16px',
-              backgroundColor: 'var(--surface-muted)',
-              borderRadius: '8px',
-              border: '1px solid var(--border)',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600 }}>
-              <Database size={18} />
-              <span>{zh ? '跨设备完整迁移' : 'Complete Device Migration'}</span>
-            </div>
-            <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--text-muted)' }}>
-              {zh ? '一个文件包含题库、做题进度、笔记、学习计划和设置，可在 Windows 与 Mac 间双向导入。API Key 不会导出，请在新设备重新填写。'
-                : 'One file contains your catalog, progress, notes, study plans and settings. Import it on Windows or Mac. API keys are excluded; configure them on the new device.'}
-            </p>
-
-            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
-              <ExportLink
-                lang={lang}
-                onExport={() => api.exportBundleFile()}
-                href={api.getBundleExportUrl()}
-                className="btn btn-primary btn-sm"
-                download
-              >
-                <Download size={14} />
-                <span>{zh ? '导出完整迁移包' : 'Export Complete Migration'}</span>
-              </ExportLink>
-
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => bundleFileInputRef.current?.click()}
-                disabled={importingBundle}
-              >
-                <Upload size={14} />
-                <span>{importingBundle ? (zh ? '正在还原…' : 'Restoring…') : zh ? '导入迁移包' : 'Import Migration'}</span>
-              </button>
-
-              <input
-                ref={bundleFileInputRef}
-                type="file"
-                accept=".json,application/json"
-                style={{ display: 'none' }}
-                onChange={handleSelectBundleFile}
+      {section === 'ai' && (
+        <div role="tabpanel" id="settings-panel-ai" aria-labelledby="settings-tab-ai" className="settings-panel">
+          <section className="preference-row">
+            <div className="preference-label">
+              <h2>{t.geminiSettingsTitle}</h2>
+              <InfoPopover
+                label={zh ? 'AI 配置说明' : 'AI configuration help'}
+                content={
+                  <div>
+                    <p>
+                      {zh
+                        ? 'API 密钥及模型配置保存在本地 SQLite 数据库中，仅在生成计划与导入分析时向所选 AI 服务商发送请求。'
+                        : 'API keys and model choices are saved locally in your SQLite database, used only for planning and progress formatting.'}
+                    </p>
+                    <p>
+                      {zh
+                        ? '各提供商的配置独立保存，切换提供商不会清除其他提供商已保存的密钥。'
+                        : 'Each provider keeps its own configuration. Switching providers preserves existing keys.'}
+                    </p>
+                  </div>
+                }
               />
+              <p>{t.geminiSettingsDesc}</p>
+              <p className={`ai-status ${activeProvider ? 'is-on' : ''}`} role="status">
+                {activeProvider
+                  ? zh
+                    ? `正在使用 ${providerName(activeProvider)}`
+                    : `Using ${providerName(activeProvider)}`
+                  : zh
+                    ? '未配置：使用本地推荐'
+                    : 'Not configured: using local recommendations'}
+              </p>
             </div>
 
-            {/* Pending restore confirmation prompt */}
-            {pendingBundle && (
-              <div
-                style={{
-                  padding: '12px 14px',
-                  backgroundColor: 'var(--warning-subtle)',
-                  borderRadius: '6px',
-                  border: '1px solid var(--warning)',
-                  marginTop: '8px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '8px',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600, color: 'var(--text-primary)' }}>
-                  <AlertTriangle size={16} />
-                  <span>{zh ? '确认替换当前设备的数据？' : 'Replace This Device’s Data?'}</span>
+            <form className="ai-settings-form" onSubmit={saveAiConfig}>
+              <fieldset className="ai-settings-form settings-fieldset" disabled={!aiLoaded || savingAi || testingAi}>
+                <div className="form-field">
+                  <span>{t.aiProviderLabel}</span>
+                  <div className="segmented-control" aria-label={t.aiProviderLabel}>
+                    {(['gemini', 'openai', 'deepseek'] as const).map((id) => (
+                      <button
+                        key={id}
+                        type="button"
+                        aria-pressed={provider === id}
+                        onClick={() => {
+                          markAiDirty();
+                          setProvider(id);
+                          setShowApiKey(false);
+                        }}
+                      >
+                        {id === 'gemini' ? t.providerGemini : id === 'openai' ? t.providerOpenAI : t.providerDeepSeek}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <p style={{ margin: 0 }}>
-                  {pendingBundle.version === 2
-                    ? `${zh ? '完整迁移' : 'Complete migration'} · v${pendingBundle.appVersion} · ${pendingBundle.tables.problems.length} ${zh ? '题目' : 'problems'} · ${pendingBundle.tables.practice_records.length} ${zh ? '练习记录' : 'practice records'} · ${pendingBundle.tables.progress_snapshots.length} ${zh ? '进度记录' : 'progress snapshots'} · ${pendingBundle.tables.problem_notes.length} ${zh ? '笔记' : 'notes'}`
-                    : zh ? '旧版 v1：仅部分恢复，不包含题库或完整历史。请先确保本机已有对应题库。' : 'Legacy v1: partial restore only; no catalog or complete history. The matching catalog must already exist.'}
-                </p>
-                <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
-                  {zh
-                    ? '这不是合并操作。确认后会先备份当前数据库，再替换相应数据；失败将保留原库。目标设备已有 API Key 保留。请先保存未完成编辑，成功后页面会重新加载。'
-                    : 'This replaces data; it does not merge devices. A safety backup is created before writing, and failed restores preserve the original database. Local API keys remain. Save unfinished edits first; the app reloads after success.'}
-                </p>
-                <div style={{ display: 'flex', gap: '8px' }}>
+
+                <Field label={`${t.apiKeyLabel} (${providerName(provider)})`}>
+                  <div className="input-with-action">
+                    <input
+                      type={showApiKey ? 'text' : 'password'}
+                      value={currentApiKey}
+                      onChange={(e) => {
+                        markAiDirty();
+                        setCurrentApiKey(e.target.value);
+                      }}
+                      placeholder={
+                        provider === 'gemini'
+                          ? t.apiKeyPlaceholder
+                          : provider === 'openai'
+                          ? (zh ? '输入或粘贴您的 OpenAI API 密钥...' : 'Enter or paste your OpenAI API key...')
+                          : (zh ? '输入或粘贴您的 DeepSeek API 密钥...' : 'Enter or paste your DeepSeek API key...')
+                      }
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                    <button
+                      type="button"
+                      className="icon-action-btn"
+                      onClick={() => setShowApiKey((prev) => !prev)}
+                      aria-label={showApiKey ? t.hideApiKey : t.showApiKey}
+                      title={showApiKey ? t.hideApiKey : t.showApiKey}
+                    >
+                      {showApiKey ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
+                    </button>
+                  </div>
+                </Field>
+
+                <button
+                  type="button"
+                  className="disclosure-toggle"
+                  aria-expanded={showAdvanced}
+                  aria-controls="ai-advanced-options"
+                  onClick={() => setShowAdvanced((open) => !open)}
+                >
+                  <ChevronDown size={16} aria-hidden="true" />
+                  {zh ? '高级选项：模型与接口地址' : 'Advanced: model and endpoint'}
+                </button>
+
+                {showAdvanced && (
+                  <div id="ai-advanced-options" className="advanced-options">
+                    {provider !== 'gemini' && (
+                      <Field label={t.baseUrlLabel}>
+                        <input
+                          type="text"
+                          value={currentBaseUrl}
+                          onChange={(e) => {
+                            markAiDirty();
+                            setCurrentBaseUrl(e.target.value);
+                          }}
+                          placeholder={provider === 'openai' ? 'https://api.openai.com/v1' : 'https://api.deepseek.com'}
+                        />
+                      </Field>
+                    )}
+
+                    <Field label={t.preferredModelLabel}>
+                      <select
+                        value={currentIsCustomPrimary ? 'custom' : currentPrimaryModel}
+                        onChange={(e) => {
+                          markAiDirty();
+                          if (e.target.value === 'custom') {
+                            setCurrentIsCustomPrimary(true);
+                            if (currentPresetModels.includes(currentPrimaryModel)) {
+                              setCurrentPrimaryModel('');
+                            }
+                          } else {
+                            const selectedModel = e.target.value;
+                            setCurrentIsCustomPrimary(false);
+                            setCurrentPrimaryModel(selectedModel);
+                            setCurrentFallbackModels((prev) => prev.filter((item) => item !== selectedModel));
+                            // Keep the reasoning effort only while the newly selected model supports it.
+                            if (provider === 'gemini') {
+                              if (!getSupportedReasoningEfforts('gemini', selectedModel).includes(geminiReasoningEffort)) {
+                                setGeminiReasoningEffort(getDefaultReasoningEffort('gemini', selectedModel));
+                              }
+                            } else if (provider === 'openai') {
+                              if (!getSupportedReasoningEfforts('openai', selectedModel).includes(openaiReasoningEffort)) {
+                                setOpenaiReasoningEffort(getDefaultReasoningEffort('openai', selectedModel));
+                              }
+                            }
+                          }
+                        }}
+                      >
+                        {currentPresetModels.map((m, idx) => (
+                          <option key={m} value={m}>
+                            {provider === 'openai' ? (OPENAI_MODEL_LABELS[m] ?? m) : provider === 'deepseek' ? 'DeepSeek V4.1 Flash' : m.replace('models/', '')}{idx === 0 ? (zh ? '（推荐）' : ' (Recommended)') : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+
+                    <Field
+                      label={t.reasoningEffortLabel}
+                      hint={
+                        provider === 'gemini'
+                          ? (zh
+                              ? '通过 thinkingConfig.thinkingLevel 控制 Gemini 思考深度。'
+                              : 'Controls Gemini reasoning depth via thinkingConfig.thinkingLevel.')
+                          : provider === 'openai'
+                          ? (zh
+                              ? `通过 reasoning_effort 控制 ${OPENAI_MODEL_LABELS[currentPrimaryModel] ?? currentPrimaryModel} 推理强度。`
+                              : `Controls ${OPENAI_MODEL_LABELS[currentPrimaryModel] ?? currentPrimaryModel} reasoning depth via reasoning_effort.`)
+                          : (zh
+                              ? '通过 reasoning_effort 与 thinking 开关控制 DeepSeek V4.1 Flash 思考模式。'
+                              : 'Controls DeepSeek V4.1 Flash thinking mode via reasoning_effort and thinking.')
+                      }
+                    >
+                      <select
+                        aria-label={t.reasoningEffortLabel}
+                        value={currentReasoningEffort}
+                        onChange={(e) => {
+                          markAiDirty();
+                          setCurrentReasoningEffort(e.target.value as ReasoningEffort);
+                        }}
+                      >
+                        {currentSupportedEfforts.map((effort) => {
+                          const labelText =
+                            provider === 'gemini'
+                              ? effort.toUpperCase()
+                              : provider === 'deepseek'
+                              ? effort === 'none'
+                                ? 'none (thinking: disabled)'
+                                : `${effort} (thinking: enabled)`
+                              : effort === 'none'
+                              ? (zh ? 'none（关闭推理）' : 'none (no reasoning)')
+                              : effort;
+                          const defaultBadge = effort === currentDefaultEffort ? (zh ? '（默认）' : ' (Default)') : '';
+                          return (
+                            <option key={effort} value={effort}>
+                              {labelText}{defaultBadge}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </Field>
+
+                    {provider === 'gemini' && (
+                      <div className="form-field">
+                        <span>{t.candidateModelsLabel}</span>
+                        <small>{t.candidateModelsDesc}</small>
+                        <div className="candidate-chips" role="group" aria-label={t.candidateModelsLabel}>
+                          {currentPresetModels.map((m) => {
+                            const isSelected = currentFallbackModels.includes(m);
+                            const isPrimary = m === currentPrimaryModel.trim();
+                            return (
+                              <button
+                                key={m}
+                                type="button"
+                                className={`candidate-chip ${isSelected ? 'active' : ''}`}
+                                aria-pressed={isSelected}
+                                disabled={isPrimary}
+                                onClick={() => {
+                                  if (isPrimary) return;
+                                  markAiDirty();
+                                  setCurrentFallbackModels((prev) =>
+                                    prev.includes(m)
+                                      ? prev.filter((item) => item !== m)
+                                      : [...prev, m].filter((item) => item !== currentPrimaryModel.trim())
+                                  );
+                                }}
+                              >
+                                {m.replace('models/', '')}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <div className="fallback-chain-preview">
+                          <span className="chain-label">{t.fallbackChainLabel}:</span>
+                          <span className="chain-path">
+                            <strong>{currentPrimaryModel.replace('models/', '') || '(none)'}</strong>
+                            {currentFallbackModels.map((m) => (
+                              <span key={m} className="chain-step">
+                                {' → '}{m.replace('models/', '')}
+                              </span>
+                            ))}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="action-row">
                   <button
                     type="button"
-                    className="btn btn-primary btn-sm"
-                    onClick={() => void handleConfirmRestore()}
-                    disabled={importingBundle}
+                    className="btn btn-secondary"
+                    onClick={handleTestConnection}
+                    disabled={testingAi || !currentApiKey.trim()}
                   >
-                    {importingBundle ? '…' : zh ? '确认并还原' : 'Confirm & Restore'}
+                    {testingAi ? t.testingAi : t.testAiConnection}
                   </button>
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => setPendingBundle(null)}
-                    disabled={importingBundle}
-                  >
-                    {zh ? '取消' : 'Cancel'}
+                  <button className="btn btn-primary" disabled={savingAi}>
+                    {savingAi ? '…' : t.saveAiSettings}
                   </button>
                 </div>
+
+                {aiError && <Feedback tone="error">{aiError}</Feedback>}
+                {aiSaved && <Feedback tone="success">{t.aiSettingsSaved}</Feedback>}
+                {testResult && (
+                  <Feedback tone={testResult.ok ? 'success' : 'error'}>
+                    {testResult.ok
+                      ? t.testAiSuccess.replace('{model}', testResult.model || currentPrimaryModel)
+                      : `${t.testAiFailed}: ${testResult.message}`}
+                  </Feedback>
+                )}
+              </fieldset>
+            </form>
+          </section>
+        </div>
+      )}
+
+      {section === 'data' && (
+        <div role="tabpanel" id="settings-panel-data" aria-labelledby="settings-tab-data" className="settings-panel">
+          <section className="preference-row">
+            <div className="preference-label">
+              <h2>{zh ? '跨设备迁移' : 'Move to another device'}</h2>
+              <InfoPopover
+                label={zh ? '数据安全与迁移说明' : 'Data portability help'}
+                content={
+                  <div>
+                    <p>
+                      {zh
+                        ? '所有做题记录、笔记与配置保存在本地 SQLite 中，完全离线运行。'
+                        : 'All practice logs, notes, and settings reside in your local SQLite database, 100% offline.'}
+                    </p>
+                    <p>
+                      {zh
+                        ? '执行还原前，系统会自动在本地生成一份时间戳安全快照，确保随时可回退。'
+                        : 'Before restoring a bundle, the app creates a timestamped safety backup so you can always roll back.'}
+                    </p>
+                  </div>
+                }
+              />
+              <p>
+                {zh
+                  ? '一个文件包含题库、进度、笔记、学习安排和设置，可在 Windows 与 Mac 间互相导入。API Key 不会导出。'
+                  : 'One file holds your catalog, progress, notes, study schedule and settings. Works across Windows and Mac. API keys are not exported.'}
+              </p>
+            </div>
+
+            <div className="settings-stack">
+              <div className="action-row">
+                <ExportLink
+                  lang={lang}
+                  onExport={() => api.exportBundleFile()}
+                  href={api.getBundleExportUrl()}
+                  className="btn btn-primary"
+                  download
+                >
+                  <Download size={16} />
+                  <span>{zh ? '导出迁移包' : 'Export migration file'}</span>
+                </ExportLink>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => bundleFileInputRef.current?.click()}
+                  disabled={importingBundle}
+                >
+                  <Upload size={16} />
+                  <span>{importingBundle ? (zh ? '正在还原…' : 'Restoring…') : zh ? '导入迁移包' : 'Import migration file'}</span>
+                </button>
+                <input
+                  ref={bundleFileInputRef}
+                  type="file"
+                  accept=".json,application/json"
+                  hidden
+                  onChange={handleSelectBundleFile}
+                />
               </div>
-            )}
 
-            {bundleSuccess && <Feedback tone="success">{bundleSuccess}</Feedback>}
-            {bundleError && <Feedback tone="error">{bundleError}</Feedback>}
-          </div>
+              {pendingBundle && (
+                <div className="restore-confirm" role="alertdialog" aria-labelledby="restore-confirm-title">
+                  <div className="restore-confirm-title" id="restore-confirm-title">
+                    <AlertTriangle size={16} aria-hidden="true" />
+                    <span>{zh ? '确认替换当前设备的数据？' : 'Replace This Device’s Data?'}</span>
+                  </div>
+                  <p>
+                    {pendingBundle.version === 2
+                      ? `${zh ? '完整迁移' : 'Complete migration'} · v${pendingBundle.appVersion} · ${pendingBundle.tables.problems.length} ${zh ? '题目' : 'problems'} · ${pendingBundle.tables.practice_records.length} ${zh ? '练习记录' : 'practice records'} · ${pendingBundle.tables.progress_snapshots.length} ${zh ? '进度记录' : 'progress snapshots'} · ${pendingBundle.tables.problem_notes.length} ${zh ? '笔记' : 'notes'}`
+                      : zh ? '旧版 v1：仅部分恢复，不包含题库或完整历史。请先确保本机已有对应题库。' : 'Legacy v1: partial restore only; no catalog or complete history. The matching catalog must already exist.'}
+                  </p>
+                  <p className="restore-confirm-note">
+                    {zh
+                      ? '这不是合并操作。确认后会先备份当前数据库，再替换相应数据；失败将保留原库。目标设备已有 API Key 保留。请先保存未完成编辑，成功后页面会重新加载。'
+                      : 'This replaces data; it does not merge devices. A safety backup is created before writing, and failed restores preserve the original database. Local API keys remain. Save unfinished edits first; the app reloads after success.'}
+                  </p>
+                  <div className="action-row">
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => void handleConfirmRestore()}
+                      disabled={importingBundle}
+                    >
+                      {importingBundle ? '…' : zh ? '确认并还原' : 'Confirm & Restore'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => setPendingBundle(null)}
+                      disabled={importingBundle}
+                    >
+                      {zh ? '取消' : 'Cancel'}
+                    </button>
+                  </div>
+                </div>
+              )}
 
-          {/* External Knowledge Base Export */}
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '12px',
-              padding: '16px',
-              backgroundColor: 'var(--surface-muted)',
-              borderRadius: '8px',
-              border: '1px solid var(--border)',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600 }}>
-              <Archive size={18} />
-              <span>{zh ? '知识库导出（Obsidian & Notion）' : 'Knowledge Base Export (Obsidian & Notion)'}</span>
+              {bundleSuccess && <Feedback tone="success">{bundleSuccess}</Feedback>}
+              {bundleError && <Feedback tone="error">{bundleError}</Feedback>}
             </div>
-            <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--text-muted)' }}>
-              {zh
-                ? '一键导出支持本地双向链接的 Obsidian 题库与 Markdown 笔记骨架包，或 Notion 双结构化 CSV 表格。'
-                : 'Export complete Obsidian vault skeleton archive (.zip) and Notion CSV tables.'}
-            </p>
+          </section>
 
-            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+          <section className="preference-row">
+            <div className="preference-label">
+              <h2>{zh ? '导出到笔记工具' : 'Export to note apps'}</h2>
+              <p>
+                {zh
+                  ? 'Obsidian 题库与笔记骨架（.zip），或 Notion 可导入的 CSV 表格。'
+                  : 'An Obsidian vault of problems and note skeletons (.zip), or CSV tables for Notion.'}
+              </p>
+            </div>
+            <div className="action-row">
               <ExportLink
                 lang={lang}
                 onExport={() => api.exportObsidianZip('all', lang)}
@@ -1190,7 +1053,6 @@ export function SettingsView({
                 <Archive size={14} />
                 <span>{t.exportObsidianVault}</span>
               </ExportLink>
-
               <ExportLink
                 lang={lang}
                 onExport={() => api.exportNotionCsv('summary')}
@@ -1201,7 +1063,6 @@ export function SettingsView({
                 <Download size={14} />
                 <span>{t.exportNotionSummary}</span>
               </ExportLink>
-
               <ExportLink
                 lang={lang}
                 onExport={() => api.exportNotionCsv('history')}
@@ -1213,9 +1074,9 @@ export function SettingsView({
                 <span>{t.exportNotionHistory}</span>
               </ExportLink>
             </div>
-          </div>
+          </section>
         </div>
-      </section>
+      )}
     </div>
   );
 }

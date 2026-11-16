@@ -266,7 +266,7 @@ test('Desktop bundled server lifecycle, session auth, and data persistence', asy
       },
       body: JSON.stringify({
         llmProvider: 'openai',
-        openaiModel: 'gpt-4o',
+        openaiModel: 'gpt-6.1-terra',
       }),
     });
     assert.equal(patchRes.status, 200);

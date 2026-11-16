@@ -111,6 +111,22 @@ function TodayPlanViewInner({
       active = false;
     };
   }, [workspace.revision, strategyRetry]);
+  // An empty catalog leaves plans nothing to pick from; say so instead of showing a bare rest day.
+  const [catalogEmpty, setCatalogEmpty] = useState(false);
+  useEffect(() => {
+    let active = true;
+    api
+      .getCatalogStats()
+      .then((stats) => {
+        if (active) setCatalogEmpty(stats.totalProblems === 0);
+      })
+      .catch(() => {
+        // Catalog views report their own failures; this hint is best-effort.
+      });
+    return () => {
+      active = false;
+    };
+  }, [workspace.revision]);
   const plan = controller.ensureResult?.plan;
   const completed = plan?.items.filter((item) => item.completed).length ?? 0;
   const strategy = strategies?.find((s) => s.id === plan?.strategyId);
@@ -247,6 +263,14 @@ function TodayPlanViewInner({
           {controller.error || localError}
         </Feedback>
       )}
+      {catalogEmpty && controller.ensureResult?.status !== 'setup' && (
+        <Feedback tone="info">
+          {zh ? '题库还是空的，每日计划暂时没有题目可选。' : 'Your problem catalog is empty, so daily plans have nothing to pick from.'}{' '}
+          <button className="text-link" onClick={() => workspace.navigate('catalog-import')}>
+            {zh ? '导入题库' : 'Import problems'}
+          </button>
+        </Feedback>
+      )}
       {controller.loading && !plan ? (
         <div className="plan-skeleton" role="status">
           <RefreshCw className="spin" size={20} />
@@ -263,7 +287,7 @@ function TodayPlanViewInner({
           <h2>{t.setupTimezoneTitle}</h2>
           <p>{t.setupTimezoneDesc}</p>
           <button className="btn btn-primary" onClick={onNavigateToSettings}>
-            {t.navSettings}
+            {zh ? '设置时区' : 'Set timezone'}
           </button>
         </section>
       ) : controller.ensureResult?.status === 'rest' ? (

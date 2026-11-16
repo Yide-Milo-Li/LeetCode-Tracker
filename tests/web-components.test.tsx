@@ -29,7 +29,10 @@ it('offers only supported OpenAI, DeepSeek, and Gemini models even when legacy m
   ] as const) {
   mock.method(api, 'getSettings', async () => ({ language: 'en', theme: 'light', timezone: 'UTC', updatedAt: 1,
     llmProvider: provider, [`${provider}Model`]: 'old-model', [`${provider}FallbackModels`]: ['old-backup'] }));
-  await act(async () => { render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} />); });
+  await act(async () => { render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} section="ai" />); });
+  // Model choices are advanced options and stay folded until asked for.
+  assert.equal(screen.queryByLabelText('Preferred Model'), null);
+  fireEvent.click(screen.getByRole('button', { name: 'Advanced: model and endpoint' }));
   const select = screen.getByLabelText('Preferred Model') as HTMLSelectElement;
   assert.deepEqual([...select.options].map(option => option.value), [...options]);
   assert.equal(select.value, defaultModel);
@@ -48,7 +51,8 @@ it('offers only supported OpenAI, DeepSeek, and Gemini models even when legacy m
     geminiModel: 'models/gemini-3.5-flash',
     geminiFallbackModels: ['models/gemini-3.7-flash'],
   }));
-  await act(async () => { render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} />); });
+  await act(async () => { render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} section="ai" />); });
+  fireEvent.click(screen.getByRole('button', { name: 'Advanced: model and endpoint' }));
   const geminiSelect = screen.getByLabelText('Preferred Model') as HTMLSelectElement;
   assert.deepEqual([...geminiSelect.options].map(option => option.value), ['models/gemini-3.8-flash', 'models/gemini-4-hydrogen']);
   assert.equal(geminiSelect.value, 'models/gemini-3.8-flash');
@@ -63,6 +67,8 @@ it('keeps provider drafts independent, remasks switched keys and saves empty fal
   const writes = mock.method(api, 'updateSettings', async (payload: any) => ({ ...initial, ...payload }));
   const probes = mock.method(api, 'testLlmConnection', async () => ({ ok: true, model: 'synthetic' }));
   await act(async () => { render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} />); });
+  fireEvent.click(screen.getByRole('tab', { name: 'AI assistant' }));
+  assert.match(screen.getByRole('status').textContent!, /Using Gemini/);
   fireEvent.click(screen.getByRole('button', { name: 'Show key' }));
   fireEvent.click(screen.getByRole('button', { name: 'OpenAI' }));
   const key = screen.getByLabelText('API Key (OpenAI)') as HTMLInputElement;
@@ -467,7 +473,7 @@ it('formats raw text, reviews preview diff with conflict override, and commits i
   assert.match(screen.getByRole('status').textContent!, /Progress imported/);
 });
 
-it('updates and persists timezone preference in SettingsView', async () => {
+it('persists a timezone as soon as one is picked in SettingsView', async () => {
   mock.method(api, 'getImportHistory', async () => ({ total: 0, items: [] }));
   mock.method(api, 'getSettings', async () => ({
     language: 'en',
@@ -487,30 +493,21 @@ it('updates and persists timezone preference in SettingsView', async () => {
     render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} />)
   );
 
-  const timezoneSelect = screen.getByLabelText('IANA timezone') as HTMLInputElement;
-  assert.ok(timezoneSelect);
+  const timezoneSelect = screen.getByLabelText('Timezone') as HTMLSelectElement;
+  assert.equal(timezoneSelect.tagName, 'SELECT');
+  // Only complete IANA zones are offered, so free-form drafts can no longer exist.
+  assert.ok([...timezoneSelect.options].some((option) => option.value === 'Asia/Shanghai'));
 
   await act(async () => {
     fireEvent.change(timezoneSelect, { target: { value: 'Asia/Shanghai' } });
   });
 
-  assert.equal(updateCalls.mock.callCount(), 0, 'Changing the draft must not save before confirmation');
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save timezone' })); });
   assert.equal(updateCalls.mock.callCount(), 1);
   assert.deepEqual(updateCalls.mock.calls[0].arguments[0], { timezone: 'Asia/Shanghai' });
+  assert.ok(screen.getByText('Saved'));
 });
 
 it('configures Gemini API key with default dots masking, eye icon toggle, and model selection', async () => {
-  let copiedText = '';
-  Object.assign(navigator, {
-    clipboard: {
-      writeText: async (text: string) => {
-        copiedText = text;
-      },
-      readText: async () => 'AIzaSyPastedKey456',
-    },
-  });
-
   mock.method(api, 'getImportHistory', async () => ({ total: 0, items: [] }));
   mock.method(api, 'getSettings', async () => ({
     language: 'en',
@@ -535,7 +532,7 @@ it('configures Gemini API key with default dots masking, eye icon toggle, and mo
   mock.method(api, 'testGeminiConnection', async () => ({ ok: true, model: 'models/gemini-3.8-flash' }));
 
   await act(async () => {
-    render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} />);
+    render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} section="ai" />);
   });
 
   // 1. Verify default masking as dots (type="password")
@@ -562,20 +559,16 @@ it('configures Gemini API key with default dots masking, eye icon toggle, and mo
   });
   assert.equal(apiKeyInput.type, 'password');
 
-  // 3. Test Copy API key button
-  const copyBtn = screen.getByRole('button', { name: 'Copy key' });
-  await act(async () => {
-    fireEvent.click(copyBtn);
-  });
-  assert.equal(copiedText, 'AIzaSyExistingKey123');
-  assert.ok(screen.getByText('Copied!'));
-
-  // 4. Test Paste API key button
-  const pasteBtn = screen.getByRole('button', { name: 'Paste from clipboard' });
-  await act(async () => {
-    fireEvent.click(pasteBtn);
-  });
+  // 3. The key field has no copy/paste extras; replacing it is ordinary input
+  assert.equal(screen.queryByRole('button', { name: 'Copy key' }), null);
+  fireEvent.change(apiKeyInput, { target: { value: 'AIzaSyPastedKey456' } });
   assert.equal(apiKeyInput.value, 'AIzaSyPastedKey456');
+
+  // 4. Model options live behind the advanced disclosure
+  const advanced = screen.getByRole('button', { name: 'Advanced: model and endpoint' });
+  assert.equal(advanced.getAttribute('aria-expanded'), 'false');
+  fireEvent.click(advanced);
+  assert.equal(advanced.getAttribute('aria-expanded'), 'true');
 
   // 5. Test Preferred Model dropdown
   const modelSelect = screen.getByLabelText('Preferred Model') as HTMLSelectElement;
@@ -661,9 +654,11 @@ it('renders vendor-specific reasoning effort choices for OpenAI and DeepSeek', a
   }));
 
   await act(async () => {
-    render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} />);
+    render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} section="ai" />);
   });
 
+  // Model and reasoning controls live behind the advanced disclosure.
+  fireEvent.click(screen.getByRole('button', { name: 'Advanced: model and endpoint' }));
   const openaiModelSelect = screen.getByLabelText('Preferred Model') as HTMLSelectElement;
   assert.deepEqual([...openaiModelSelect.options].map(o => o.value), ['gpt-6-luna', 'gpt-6.1-terra']);
   await act(async () => {
