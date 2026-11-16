@@ -27,7 +27,8 @@ export interface AssistantApi {
   attach(subject: AssistantSubject): void;
   /** Follow the current view's selection (e.g. the open note) without moving focus. */
   setContextSubject(subject: AssistantSubject): void;
-  detach(): void;
+  /** Clear immediately, or only if an acknowledged snapshot still owns the context. */
+  detach(expected?: AssistantSubject | null): void;
   /** Post a prompt to the host conversation. Rejects with the host's failure. */
   send(text: string): Promise<void>;
 }
@@ -126,7 +127,9 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     setSubject(next);
     focusComposer.current();
   }, []);
-  const detach = useCallback(() => setSubject(null), []);
+  const detach = useCallback((expected?: AssistantSubject | null) => {
+    setSubject((current) => expected === undefined || current === expected ? null : current);
+  }, []);
   const value = useMemo<AssistantInternal | null>(
     () =>
       conversation && available
@@ -179,6 +182,8 @@ export function AssistantDock({ view, lang }: { view: string; lang: Language }) 
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState<{ tone: 'sent' | 'error'; message: string } | null>(null);
+  const draft = useRef({ text, subject: assistant?.subject ?? null });
+  draft.current = { text, subject: assistant?.subject ?? null };
   useEffect(() => {
     if (!assistant) return;
     // Defer until the attached subject has rendered into the composer.
@@ -196,13 +201,17 @@ export function AssistantDock({ view, lang }: { view: string; lang: Language }) 
   const suggestions = assistantSuggestions(view, subject, lang);
   const deliver = async (prompt: string) => {
     if (!prompt.trim() || sending) return;
+    const submitted = draft.current;
     setSending(true);
     setStatus(null);
     try {
       await assistant.send(prompt);
-      setText('');
-      assistant.detach();
-      setStatus({ tone: 'sent', message: zh ? `已发送到 ${label}，回复会显示在对话中。` : `Sent to ${label}. The reply appears in the conversation.` });
+      // A late acknowledgement must not clear or mark newer input/context as sent.
+      if (draft.current.text === submitted.text && draft.current.subject === submitted.subject) {
+        setText((current) => current === submitted.text ? '' : current);
+        assistant.detach(submitted.subject);
+        setStatus({ tone: 'sent', message: zh ? `已发送到 ${label}，回复会显示在对话中。` : `Sent to ${label}. The reply appears in the conversation.` });
+      }
     } catch (error) {
       // Keep the typed text so the user can retry.
       setStatus({ tone: 'error', message: (zh ? '发送失败：' : 'Could not send: ') + (error instanceof Error ? error.message : String(error)) });

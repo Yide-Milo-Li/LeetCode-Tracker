@@ -446,3 +446,42 @@ test('conversation host sends contextual prompts, attaches a Today problem and k
     assert.equal(f.store.planning.plans()[0].items.length,3);
   }finally{view.unmount();host.dispose();await f.close();}
 });
+
+test('late conversation acknowledgement preserves newer text and problem context',async()=>{
+  const {writeFixture}=await import('./fixtures/agent-write.ts'),{createToolTrackerClient}=await import('../packages/workspace/src/hosts/tool-client.ts'),{AssistantProvider,AssistantDock,AssistantAskButton}=await import('../packages/workspace/src/assistant.tsx'),{waitFor}=await import('@testing-library/react');
+  const f=await writeFixture('full_access');
+  const sent:string[]=[];let acknowledge!:()=>void;
+  const host=createWorkspaceHost({id:'conversation-ack-race',conversation:{label:'ChatGPT',available:()=>true,send:text=>{sent.push(text);return new Promise<void>(resolve=>{acknowledge=resolve;});}}});
+  const api=createToolTrackerClient(f.call,host);
+  const view=render(<WorkspaceProvider client={api} host={host}><AssistantProvider>
+    <AssistantAskButton lang="en" subject={{kind:'problem',questionFrontendId:'1',title:'First problem'}}/>
+    <AssistantAskButton lang="en" subject={{kind:'problem',questionFrontendId:'2',title:'Next problem'}}/>
+    <AssistantDock view="today" lang="en"/>
+  </AssistantProvider></WorkspaceProvider>);
+  try{
+    const dock=within(view.container).getByRole('region',{name:'Ask ChatGPT'});
+    const field=within(dock).getByRole('textbox') as HTMLTextAreaElement;
+    fireEvent.click(within(view.container).getByRole('button',{name:'Ask ChatGPT: #1 First problem'}));
+    fireEvent.change(field,{target:{value:'First question'}});
+    fireEvent.click(within(dock).getByRole('button',{name:'Send to ChatGPT'}));
+    assert.deepEqual(sent,['About #1 First problem: First question']);
+    // A host acknowledgement belongs to the submitted snapshot, not a later draft.
+    fireEvent.change(field,{target:{value:'A follow-up question'}});
+    await act(async()=>acknowledge());
+    assert.equal(field.value,'A follow-up question');
+    assert.match(dock.textContent!,/#1 First problem/);
+    assert.doesNotMatch(dock.textContent!,/Sent to ChatGPT/);
+    fireEvent.click(within(dock).getByRole('button',{name:'Send to ChatGPT'}));
+    fireEvent.click(within(view.container).getByRole('button',{name:'Ask ChatGPT: #2 Next problem'}));
+    fireEvent.change(field,{target:{value:'Keep this new draft'}});
+    await act(async()=>acknowledge());
+    assert.equal(field.value,'Keep this new draft');assert.match(dock.textContent!,/#2 Next problem/);
+    assert.doesNotMatch(dock.textContent!,/Sent to ChatGPT/);
+    fireEvent.click(within(dock).getByRole('button',{name:'Send to ChatGPT'}));
+    assert.deepEqual(sent,['About #1 First problem: First question','About #1 First problem: A follow-up question','About #2 Next problem: Keep this new draft']);
+    await act(async()=>acknowledge());
+    await waitFor(()=>assert.equal(field.value,''));
+    assert.equal(within(dock).queryByRole('button',{name:'Remove problem context'}),null);
+    assert.match(dock.textContent!,/Sent to ChatGPT/);
+  }finally{view.unmount();host.dispose();await f.close();}
+});
