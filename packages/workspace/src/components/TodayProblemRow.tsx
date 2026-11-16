@@ -11,6 +11,7 @@ import { useWorkspace } from '../workspace.tsx';
 import { Feedback, InfoPopover, Tooltip } from './ui.tsx';
 import { PracticeTimerButton } from './PracticeTimer.tsx';
 import { QuickCopyButtons } from './QuickCopyButtons.tsx';
+import { AssistantAskButton } from '../assistant.tsx';
 
 export interface TodayProblemRowProps {
   item: PlanItem;
@@ -181,6 +182,10 @@ export function TodayProblemRow({
       </div>
 
       <div className="problem-actions">
+        <AssistantAskButton
+          lang={lang}
+          subject={{ kind: 'problem', questionFrontendId: item.problem.questionFrontendId, title: item.problem.title }}
+        />
         <div className="notes-dropdown" ref={noteMenuRef} style={{ position: 'relative', display: 'inline-block' }}>
           <Tooltip text={t.noteButtonLabel} position="top" disabled={isNoteMenuOpen}>
             <button

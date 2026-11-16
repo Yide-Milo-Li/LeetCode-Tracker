@@ -5,11 +5,26 @@ export interface WorkspaceExpansionResult {
   mode?:string;
   reason?:string;
 }
+/** Host chrome (for example a docked composer) that overlaps the frame, in CSS pixels. */
+export interface WorkspaceSafeArea {top:number;right:number;bottom:number;left:number}
 export interface WorkspaceDisplayState {
   mode?:string;
   availability:'unknown'|'available'|'unsupported';
   pending:boolean;
   result?:WorkspaceExpansionResult;
+  safeArea?:WorkspaceSafeArea;
+}
+/**
+ * Optional bridge into the host conversation. `send` posts a user-visible message to the
+ * host chat; it never writes Tracker data. `available()` is re-read on every render because
+ * hosts negotiate the capability after connection.
+ */
+export interface WorkspaceConversation {
+  /** Host display name shown beside the composer, such as "ChatGPT". */
+  label:string;
+  available():boolean;
+  /** Rejects when the host declines or fails to deliver the message. */
+  send(text:string):Promise<void>;
 }
 /** Host services and events contain no HTTP, Tauri or SDK implementation. */
 export type WorkspaceEvent =
@@ -44,6 +59,7 @@ export interface WorkspaceHost {
   saveRecoveryState(state:Record<string,unknown>):void;
   displayState():WorkspaceDisplayState;
   expand?():Promise<WorkspaceExpansionResult>;
+  conversation?:WorkspaceConversation;
   subscribe(listener:(event:WorkspaceEvent)=>void):()=>void;
   emit(event:WorkspaceEvent):void;
   dispose():void;
@@ -66,6 +82,7 @@ export interface HostOptions {
   recoveryState?:()=>Record<string,unknown>;
   saveRecoveryState?:(state:Record<string,unknown>)=>void;
   expand?:()=>Promise<WorkspaceExpansionResult>;
+  conversation?:WorkspaceConversation;
 }
 /** Host lifetime owns its subscriptions, while the provider owns rendering subscriptions. */
 export function createWorkspaceHost(options:HostOptions):WorkspaceHost {
@@ -86,6 +103,7 @@ export function createWorkspaceHost(options:HostOptions):WorkspaceHost {
     recoveryState:options.recoveryState??(()=>recovery),
     saveRecoveryState:options.saveRecoveryState??(value=>{recovery=value;}),
     expand:options.expand,
+    conversation:options.conversation,
     displayState:()=>display,
     subscribe:listener=>{if(disposed)throw new Error('Workspace host is disposed');listeners.add(listener);return ()=>{listeners.delete(listener);};},
     dispose:()=>{disposed=true;listeners.clear();},

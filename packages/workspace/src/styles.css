@@ -5317,22 +5317,54 @@
   position: fixed !important;
 }
 
-/* Embedded shell extends the existing desktop palette and typography. */
-.tracker-workspace .embedded-shell { background:var(--canvas); color:var(--text-main); min-height:100vh; font:14px/1.5 system-ui,sans-serif; }
-.tracker-workspace .embedded-nav { display:flex; align-items:center; gap:32px; padding:18px 32px; border-bottom:1px solid var(--border-color); background:var(--surface); }
-.tracker-workspace .embedded-nav>div { display:flex; gap:8px; }
-.tracker-workspace .embedded-nav .btn { display:flex; align-items:center; gap:8px; }
-.tracker-workspace .embedded-nav [aria-current='page'] { background:var(--selected); color:var(--primary); }
-.tracker-workspace .embedded-brand { font-size:17px; letter-spacing:-.4px; }
-.tracker-workspace .embedded-connection { margin-left:auto; color:var(--text-muted); font-size:12px; }
-.tracker-workspace .embedded-home { max-width:1100px; margin:0 auto; padding:60px 40px; }
-.tracker-workspace .embedded-home h1 { font-size:40px; line-height:1.15; letter-spacing:-1.3px; margin:0 0 16px; }
-.tracker-workspace .embedded-summary { padding:28px 32px; margin:36px 0 22px; border:1px solid var(--border-color); border-radius:12px; background:var(--surface); }
-.tracker-workspace .embedded-summary h2 { font-size:18px; margin:0 0 16px; }
-.tracker-workspace .embedded-summary>strong { font-size:32px; }
-.tracker-workspace .embedded-shortcuts { display:grid; grid-template-columns:1fr 1fr; gap:22px; }
-.tracker-workspace .embedded-shortcut { display:flex; flex-direction:column; align-items:flex-start; gap:12px; padding:28px 32px; text-align:left; background:var(--surface); border:1px solid var(--border-color); border-radius:12px; color:var(--text-main); cursor:pointer; font:inherit; }
-.tracker-workspace .embedded-shortcut strong { font-size:18px; }.tracker-workspace .embedded-shortcut span { color:var(--text-muted); }
-.tracker-workspace .embedded-shortcut:hover { border-color:var(--primary); }.tracker-workspace .embedded-page { padding:32px; }
-.tracker-workspace .embedded-page-heading { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; }
+/* Chat-host shell reuses the desktop sidebar/main layout, contained in the host frame. */
+.tracker-workspace .embedded-shell { display:flex; align-items:flex-start; min-height:100vh; background:var(--canvas); color:var(--text-main); }
+.tracker-workspace .embedded-shell > .sidebar { position:sticky; inset:auto; top:0; flex:none; height:100vh; padding-top:calc(24px + var(--host-safe-top, 0px)); }
+.tracker-workspace .embedded-shell > .main-content,
+.tracker-workspace .embedded-shell > .sidebar.expanded ~ .main-content { flex:1; min-width:0; margin-left:0; padding-top:calc(44px + var(--host-safe-top, 0px)); padding-bottom:calc(64px + var(--host-safe-bottom, 0px)); display:flex; flex-direction:column; }
+.tracker-workspace .embedded-shell > .main-content:has(> .assistant-dock) { padding-bottom:0; }
+.tracker-workspace .embedded-row-actions { display:inline-flex; align-items:center; gap:4px; }
+.tracker-workspace .embedded-row-actions .btn-icon { width:30px; height:30px; }
+.tracker-workspace .activity-table tr.revoked td { color:var(--text-muted); }
+
+/* Host presence replaces desktop-only preference tools in the sidebar footer. */
+.tracker-workspace .host-presence { display:flex; align-items:center; gap:10px; min-height:40px; padding:4px; border-radius:var(--radius); color:var(--text-muted); }
+.tracker-workspace .sidebar.collapsed .host-presence { justify-content:center; }
+.tracker-workspace .host-presence-mark { position:relative; display:grid; place-items:center; width:32px; height:32px; flex:none; border-radius:50%; background:var(--surface); border:1px solid var(--border-color); color:var(--primary); }
+.tracker-workspace .host-presence-mark::after { content:''; position:absolute; right:-1px; bottom:-1px; width:9px; height:9px; border-radius:50%; background:var(--text-muted); box-shadow:0 0 0 2px var(--muted-surface); }
+.tracker-workspace .host-presence.online .host-presence-mark::after { background:var(--success, #3f8f5a); }
+.tracker-workspace .host-presence-text { display:flex; flex-direction:column; min-width:0; line-height:1.25; font-size:12px; }
+.tracker-workspace .host-presence-text strong { color:var(--text-main); font-size:13px; font-weight:600; }
+
+/* Conversation composer: docked under the page, above any host chrome (safe-area inset). */
+.tracker-workspace .assistant-dock { position:sticky; bottom:0; z-index:5; width:100%; max-width:760px; margin:auto auto 0; padding:44px 0 calc(20px + var(--host-safe-bottom, 0px)); display:flex; flex-direction:column; gap:10px; background:linear-gradient(to bottom, transparent, var(--canvas) 36px); }
+.tracker-workspace .assistant-suggestions { display:flex; flex-wrap:wrap; gap:8px; }
+.tracker-workspace .assistant-chip { display:inline-flex; align-items:center; gap:6px; padding:6px 12px; border:1px solid var(--border-color); border-radius:999px; background:var(--surface); color:var(--text-main); font:inherit; font-size:13px; cursor:pointer; transition:border-color var(--enter) ease, background-color var(--enter) ease; }
+.tracker-workspace .assistant-chip svg { color:var(--primary); }
+.tracker-workspace .assistant-chip:hover:not(:disabled) { border-color:var(--primary); background:var(--selected); }
+.tracker-workspace .assistant-chip:disabled { opacity:.6; cursor:default; }
+.tracker-workspace .assistant-composer { display:flex; align-items:flex-end; gap:8px; padding:8px 8px 8px 10px; border:1px solid var(--border-color); border-radius:20px; background:var(--surface); box-shadow:var(--shadow-md); transition:border-color var(--enter) ease; }
+.tracker-workspace .assistant-composer:focus-within { border-color:var(--primary); }
+.tracker-workspace .assistant-avatar { display:grid; place-items:center; width:28px; height:28px; flex:none; border-radius:50%; background:var(--selected); color:var(--primary); }
+.tracker-workspace .assistant-subject { display:inline-flex; align-items:center; gap:4px; flex:none; max-width:40%; height:28px; padding:0 4px 0 10px; border-radius:999px; background:var(--selected); color:var(--primary); font-size:12px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.tracker-workspace .assistant-subject button { display:grid; place-items:center; width:20px; height:20px; padding:0; border:0; border-radius:50%; background:transparent; color:inherit; cursor:pointer; }
+.tracker-workspace .assistant-subject button:hover { background:var(--surface); }
+.tracker-workspace .assistant-composer textarea { flex:1; min-width:0; min-height:28px; max-height:160px; padding:4px 2px; border:0; outline:none; resize:none; background:transparent; color:var(--text-main); font:inherit; line-height:20px; box-shadow:none; }
+.tracker-workspace .assistant-send { display:grid; place-items:center; width:30px; height:30px; flex:none; padding:0; border:0; border-radius:50%; background:var(--primary); color:var(--surface); cursor:pointer; transition:opacity var(--enter) ease; }
+.tracker-workspace .assistant-send:disabled { opacity:.35; cursor:default; }
+.tracker-workspace .assistant-status { margin:0; padding:0 14px; color:var(--text-muted); font-size:12px; }
+.tracker-workspace .assistant-status.error { color:var(--danger, #c0392b); }
+.tracker-workspace .assistant-ask svg { color:var(--primary); }
+/* One extra row action in chat hosts: widen the grid instead of adding a third row. */
+.tracker-workspace .problem-actions:has(.assistant-ask) { grid-template-columns:repeat(4, 38px); }
+
+/* Narrow inline frame: compact chat card that offers to expand the workspace. */
+.tracker-workspace .embedded-inline-card { display:flex; flex-direction:column; gap:12px; margin:12px; padding:20px; border:1px solid var(--border-color); border-radius:var(--radius-lg); background:var(--surface); color:var(--text-main); }
+.tracker-workspace .embedded-inline-card header { display:flex; align-items:center; gap:10px; }
+.tracker-workspace .embedded-inline-card h1 { margin:0; font-size:16px; }
+.tracker-workspace .embedded-inline-card p { margin:0; color:var(--text-muted); }
+.tracker-workspace .embedded-inline-card .btn { align-self:flex-start; }
+@media (prefers-reduced-motion: reduce) {
+  .tracker-workspace .assistant-chip, .tracker-workspace .assistant-composer, .tracker-workspace .assistant-send { transition:none; }
+}
 .tracker-workspace .embedded-draft-status { padding:8px 16px; color:var(--text-muted); font-size:12px; }

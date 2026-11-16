@@ -277,3 +277,39 @@ test('concurrent expansion requests share one pending negotiation', async () => 
   } finally {await workspace.dispose();await bridge.close();}
 });
 
+test('conversation bridge follows the negotiated message capability and surfaces host refusals', async () => {
+  for (const supported of [true, false]) {
+    const app = new App({name:'conversation-'+supported,version:'1'}, {}, {autoResize:false});
+    const workspace = createChatGPTWorkspace(app, 'formal');
+    const bridge = new AppBridge(null, {name:'synthetic host',version:'1'}, {serverTools:{}, ...(supported?{message:{text:{}}}:{})}, {hostContext:{displayMode:'fullscreen'}});
+    const received:unknown[] = [];
+    let refuse = false;
+    bridge.onmessage = async (params) => { received.push(params); return refuse ? {isError:true} : {}; };
+    const [a,b] = pair();
+    try {
+      assert.equal(workspace.host.conversation?.label, 'ChatGPT');
+      await bridge.connect(b); await workspace.connect(a); workspace.renderReady();
+      assert.equal(workspace.host.conversation?.available(), supported);
+      if (!supported) continue;
+      await workspace.host.conversation!.send('Give me a hint for #1 Problem 1');
+      assert.deepEqual(received, [{role:'user',content:[{type:'text',text:'Give me a hint for #1 Problem 1'}]}]);
+      refuse = true;
+      await assert.rejects(workspace.host.conversation!.send('again'), /declined/);
+    } finally {await workspace.dispose(); await bridge.close();}
+    assert.equal(workspace.host.conversation?.available(), false);
+  }
+});
+
+test('host safe-area insets reach the display state for the docked composer', async () => {
+  const app = new App({name:'safe-area',version:'1'}, {}, {autoResize:false});
+  const workspace = createChatGPTWorkspace(app, 'formal');
+  const bridge = new AppBridge(null, {name:'synthetic host',version:'1'}, {serverTools:{}}, {hostContext:{displayMode:'fullscreen',safeAreaInsets:{top:0,right:0,bottom:96,left:0}}});
+  const [a,b] = pair();
+  try {
+    await bridge.connect(b); await workspace.connect(a);
+    assert.deepEqual(workspace.host.displayState().safeArea, {top:0,right:0,bottom:96,left:0});
+    await bridge.sendHostContextChange({safeAreaInsets:{top:12,right:0,bottom:0,left:0}});
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(workspace.host.displayState().safeArea?.top, 12);
+  } finally {await workspace.dispose(); await bridge.close();}
+});
