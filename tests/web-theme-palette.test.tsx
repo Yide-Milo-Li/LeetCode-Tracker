@@ -18,11 +18,13 @@ const React = await import('react');
 const { render, fireEvent, screen, act, cleanup } = await import('@testing-library/react');
 const { api } = await import('../apps/web/src/api.ts');
 const { SettingsView, PALETTE_OPTIONS } = await import('../apps/web/src/components/SettingsView.tsx');
-const { applyAppIcon, brandIconUrl, iconColors } = await import('../apps/web/src/brand-icons.ts');
+const { applyAppIcon, brandIconUrl, iconColors, resetNativeIconCache } = await import('../apps/web/src/brand-icons.ts');
 
 afterEach(() => {
   cleanup();
   mock.restoreAll();
+  resetNativeIconCache();
+  Reflect.deleteProperty(dom.window, '__TAURI_INTERNALS__');
 });
 
 it('renders all 10 theme palettes in SettingsView gallery', async () => {
@@ -304,4 +306,129 @@ it('points the favicon at the active palette icon outside the desktop host', asy
   await applyAppIcon('nord', true);
   const link = document.querySelector('link[rel="icon"]') as HTMLLinkElement;
   assert.equal(link.getAttribute('href'), brandIconUrl('nord', true));
+});
+
+it('renders SVG at requested target dimensions while preserving the 1024 viewBox', () => {
+  const svg32 = decodeURIComponent(brandIconUrl('tokyo-night', true, 32).split(',')[1]);
+  assert.match(svg32, /viewBox="0 0 1024 1024" width="32" height="32"/);
+});
+
+it('rasterizes each host target size directly from SVG when running inside Tauri', async () => {
+  const originalImage = globalThis.Image;
+  const decodedUrls: string[] = [];
+  const canvasSizes: number[] = [];
+  const invokes: Array<{ cmd: string; args: unknown }> = [];
+
+  class MockImage {
+    decoding = '';
+    src = '';
+    async decode() {
+      decodedUrls.push(this.src);
+    }
+  }
+
+  Object.assign(globalThis, { Image: MockImage });
+  mock.method(dom.window.HTMLCanvasElement.prototype, 'getContext', function () {
+    return {
+      drawImage(_img: unknown, _x: number, _y: number, width: number, height: number) {
+        assert.equal(width, height);
+        canvasSizes.push(width);
+      },
+    };
+  });
+  mock.method(dom.window.HTMLCanvasElement.prototype, 'toBlob', function (
+    this: HTMLCanvasElement,
+    callback: (blob: Blob | null) => void,
+  ) {
+    callback(new Blob([new Uint8Array([this.width & 0xff, (this.width >> 8) & 0xff])]));
+  });
+
+  (dom.window as unknown as { __TAURI_INTERNALS__: unknown }).__TAURI_INTERNALS__ = {
+    invoke: async (cmd: string, args?: unknown) => {
+      invokes.push({ cmd, args });
+      if (cmd === 'get_icon_target_sizes') {
+        return { platform: 'windows', small: 20, big: 40, sizes: [16, 20, 32, 40, 256] };
+      }
+      return undefined;
+    },
+  };
+
+  try {
+    await applyAppIcon('dracula', true);
+
+    assert.deepEqual(canvasSizes, [16, 20, 32, 40, 256]);
+    for (const size of [16, 20, 32, 40, 256]) {
+      assert.ok(
+        decodedUrls.some((url) => decodeURIComponent(url).includes(`width="${size}" height="${size}"`)),
+        `expected SVG rasterized at ${size}px`,
+      );
+    }
+
+    assert.equal(invokes.length, 2);
+    assert.equal(invokes[0].cmd, 'get_icon_target_sizes');
+    assert.equal(invokes[1].cmd, 'set_app_icon');
+    const payload = invokes[1].args as { png: number[]; variants: Array<{ size: number; png: number[] }> };
+    assert.deepEqual(
+      payload.variants.map((v) => v.size),
+      [16, 20, 32, 40, 256],
+    );
+    assert.deepEqual(payload.png, [256 & 0xff, (256 >> 8) & 0xff]);
+  } finally {
+    if (originalImage === undefined) {
+      Reflect.deleteProperty(globalThis, 'Image');
+    } else {
+      Object.assign(globalThis, { Image: originalImage });
+    }
+  }
+});
+
+it('falls back to 512 px when an older desktop host lacks get_icon_target_sizes', async () => {
+  const originalImage = globalThis.Image;
+  const canvasSizes: number[] = [];
+  const invokes: Array<{ cmd: string; args: unknown }> = [];
+
+  class MockImage {
+    decoding = '';
+    src = '';
+    async decode() {}
+  }
+
+  Object.assign(globalThis, { Image: MockImage });
+  mock.method(dom.window.HTMLCanvasElement.prototype, 'getContext', () => ({
+    drawImage(_img: unknown, _x: number, _y: number, width: number) {
+      canvasSizes.push(width);
+    },
+  }));
+  mock.method(dom.window.HTMLCanvasElement.prototype, 'toBlob', function (
+    this: HTMLCanvasElement,
+    callback: (blob: Blob | null) => void,
+  ) {
+    callback(new Blob([new Uint8Array([1, 2, 3])]));
+  });
+
+  (dom.window as unknown as { __TAURI_INTERNALS__: unknown }).__TAURI_INTERNALS__ = {
+    invoke: async (cmd: string, args?: unknown) => {
+      if (cmd === 'get_icon_target_sizes') {
+        throw new Error('Command get_icon_target_sizes not found');
+      }
+      invokes.push({ cmd, args });
+      return undefined;
+    },
+  };
+
+  try {
+    await applyAppIcon('catppuccin-mocha', true);
+    assert.deepEqual(canvasSizes, [512]);
+    assert.equal(invokes.length, 1);
+    assert.equal(invokes[0].cmd, 'set_app_icon');
+    const payload = invokes[0].args as { png: number[]; variants: Array<{ size: number; png: number[] }> };
+    assert.deepEqual(payload.png, [1, 2, 3]);
+    assert.deepEqual(payload.variants, [{ size: 512, png: [1, 2, 3] }]);
+  } finally {
+    if (originalImage === undefined) {
+      Reflect.deleteProperty(globalThis, 'Image');
+    } else {
+      Object.assign(globalThis, { Image: originalImage });
+    }
+  }
 });

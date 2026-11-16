@@ -75,11 +75,11 @@ export function iconColors(palette: ThemePalette, dark: boolean): IconColors {
 }
 
 /** Render the mark as SVG markup; geometry matches `assets/brand-icon.svg`. */
-export function iconSvg(colors: IconColors): string {
+export function iconSvg(colors: IconColors, size = 1024): string {
   const cell = (x: number, y: number, fill: string) =>
     `<rect x="${x}" y="${y}" width="112" height="112" rx="25" fill="${fill}"/>`;
   return [
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">',
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="${size}" height="${size}">`,
     `<rect x="28" y="28" width="968" height="968" rx="230" fill="${colors.plate}"/>`,
     `<rect x="175" y="175" width="674" height="674" rx="154" fill="${colors.tile}"/>`,
     cell(284, 284, colors.cellA),
@@ -95,13 +95,42 @@ export function iconSvg(colors: IconColors): string {
 }
 
 /** Icon URL for a palette in the given mode, as an inline SVG data URL. */
-export function brandIconUrl(palette: ThemePalette, dark: boolean): string {
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(iconSvg(iconColors(palette, dark)))}`;
+export function brandIconUrl(palette: ThemePalette, dark: boolean, size = 1024): string {
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(iconSvg(iconColors(palette, dark), size))}`;
 }
 
-/** Edge length of the PNG sent to the desktop host; large enough for Retina Dock icons. */
-const NATIVE_ICON_SIZE = 512;
+/** Default fallback PNG edge length when the host does not report target sizes (e.g. macOS Retina Dock). */
+const FALLBACK_NATIVE_ICON_SIZE = 512;
 let lastNativeIcon = '';
+
+interface TauriBridge {
+  invoke: <T = unknown>(cmd: string, args?: unknown) => Promise<T>;
+}
+
+/** Reset deduplication state in unit tests. */
+export function resetNativeIconCache(): void {
+  lastNativeIcon = '';
+}
+
+/** Query the host for OS-specific icon sizes; falls back to 512 px for older hosts. */
+async function resolveTargetSizes(tauri: TauriBridge): Promise<number[]> {
+  try {
+    const info = await tauri.invoke<{ sizes?: unknown }>('get_icon_target_sizes');
+    if (info && Array.isArray(info.sizes)) {
+      const valid = Array.from(
+        new Set(
+          info.sizes.filter(
+            (n): n is number => typeof n === 'number' && Number.isInteger(n) && n > 0 && n <= 1024,
+          ),
+        ),
+      ).sort((a, b) => a - b);
+      if (valid.length > 0) return valid;
+    }
+  } catch {
+    // Older desktop host without `get_icon_target_sizes`; fall back to single high-res PNG.
+  }
+  return [FALLBACK_NATIVE_ICON_SIZE];
+}
 
 /** Rasterize an SVG data URL to PNG bytes in the webview. Resolves null when canvas is unavailable. */
 async function rasterize(url: string, size: number): Promise<Uint8Array | null> {
@@ -122,8 +151,9 @@ async function rasterize(url: string, size: number): Promise<Uint8Array | null> 
 /**
  * Apply the palette icon everywhere outside React: the favicon and, on desktop, the native icon.
  *
- * Native failures are swallowed: an older host without `set_app_icon`, or a webview that cannot
- * rasterize, keeps its bundled icon. Repeated calls with the same icon do not reach the host.
+ * Each host-requested target size is rasterized directly from SVG so Windows `ICON_SMALL` and
+ * `ICON_BIG` stay crisp without downscaling blur. Native failures are swallowed so older hosts
+ * or webviews without canvas support keep their bundled icon.
  */
 export async function applyAppIcon(palette: ThemePalette, dark: boolean): Promise<void> {
   if (typeof document === 'undefined') return;
@@ -140,12 +170,26 @@ export async function applyAppIcon(palette: ThemePalette, dark: boolean): Promis
   if (!isTauri() || url === lastNativeIcon) return;
   lastNativeIcon = url;
   try {
-    const png = await rasterize(url, NATIVE_ICON_SIZE);
-    if (!png || url !== lastNativeIcon) return;
-    const tauri = (window as unknown as {
-      __TAURI_INTERNALS__: { invoke: (cmd: string, args?: unknown) => Promise<unknown> };
-    }).__TAURI_INTERNALS__;
-    await tauri.invoke('set_app_icon', { png: Array.from(png) });
+    const tauri = (window as unknown as { __TAURI_INTERNALS__: TauriBridge }).__TAURI_INTERNALS__;
+    const targetSizes = await resolveTargetSizes(tauri);
+    if (url !== lastNativeIcon) return;
+
+    const rasterized = await Promise.all(
+      targetSizes.map(async (size) => {
+        const bytes = await rasterize(brandIconUrl(palette, dark, size), size);
+        return bytes ? { size, png: Array.from(bytes) } : null;
+      }),
+    );
+    if (url !== lastNativeIcon) return;
+
+    const variants = rasterized.filter((item): item is { size: number; png: number[] } => item !== null);
+    if (variants.length === 0) {
+      lastNativeIcon = '';
+      return;
+    }
+
+    const fallbackPng = variants[variants.length - 1].png;
+    await tauri.invoke('set_app_icon', { png: fallbackPng, variants });
   } catch {
     // Keep the bundled icon; allow a later palette change to retry.
     if (lastNativeIcon === url) lastNativeIcon = '';

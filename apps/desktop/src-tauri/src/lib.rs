@@ -1,4 +1,5 @@
 //! Desktop host: native authorization, private sidecar ownership and recoverable startup.
+mod icon;
 mod process;
 mod security;
 
@@ -37,6 +38,8 @@ struct DesktopState {
     starting: AtomicBool,
     exiting: AtomicBool,
     exports: tokio::sync::Mutex<()>,
+    #[cfg(windows)]
+    win_icons: Mutex<icon::WindowsIconState>,
 }
 
 impl Default for DesktopState {
@@ -49,6 +52,8 @@ impl Default for DesktopState {
             starting: AtomicBool::new(false),
             exiting: AtomicBool::new(false),
             exports: tokio::sync::Mutex::new(()),
+            #[cfg(windows)]
+            win_icons: Mutex::new(icon::WindowsIconState::default()),
         }
     }
 }
@@ -346,28 +351,42 @@ async fn export_data_file(
     Ok(true)
 }
 
-/// Largest icon payload accepted from the webview (a 512 px PNG is far smaller).
-const MAX_APP_ICON_BYTES: usize = 1024 * 1024;
+/// Report OS-preferred target icon sizes so the webview can rasterize SVG directly at each size.
+#[tauri::command]
+fn get_icon_target_sizes(app: AppHandle) -> icon::IconTargetSizes {
+    icon::target_sizes_for_window(&app)
+}
 
-/// Replace the running app icon with a palette-tinted PNG rendered by the web UI.
+/// Replace the running app icon with palette-tinted PNGs rendered by the web UI.
 ///
-/// Windows updates the main window and taskbar icon; macOS updates the Dock icon until the app
-/// quits (the bundled icon returns on the next launch until the palette is applied again).
+/// Windows selects exact target-size variants for `ICON_SMALL` (titlebar) and `ICON_BIG` (taskbar
+/// and Alt+Tab) via Win32 `WM_SETICON`; macOS updates the Dock icon until the app quits.
 /// Empty, oversized or undecodable payloads are rejected and leave the current icon unchanged.
 #[tauri::command]
-fn set_app_icon(app: AppHandle, png: Vec<u8>) -> Result<(), String> {
-    if png.is_empty() || png.len() > MAX_APP_ICON_BYTES {
-        return Err("Invalid icon".into());
-    }
+fn set_app_icon(
+    app: AppHandle,
+    png: Option<Vec<u8>>,
+    variants: Option<Vec<icon::IconVariantInput>>,
+) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        app.run_on_main_thread(move || set_dock_icon(&png))
+        let bytes = icon::pick_macos_png(png, variants)?;
+        app.run_on_main_thread(move || set_dock_icon(&bytes))
             .map_err(|_| "Could not update the Dock icon")?;
         Ok(())
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
     {
-        let image = tauri::image::Image::from_bytes(&png).map_err(|_| "Invalid icon")?;
+        let decoded = icon::decode_variants(png, variants)?;
+        icon::apply_windows_icons(&app, decoded)
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let decoded = icon::decode_variants(png, variants)?;
+        let Some(best) = icon::select_variant_for_size(&decoded, 256) else {
+            return Err("Invalid icon".into());
+        };
+        let image = tauri::image::Image::new_owned(best.rgba.clone(), best.width, best.height);
         if let Some(window) = app.get_webview_window("main") {
             window
                 .set_icon(image)
@@ -470,11 +489,23 @@ pub fn run() {
             open_external,
             get_desktop_status,
             retry_sidecar,
+            get_icon_target_sizes,
             set_app_icon
         ])
         .build(tauri::generate_context!())
         .expect("Could not initialize the desktop window")
         .run(|app, event| {
+            #[cfg(windows)]
+            if let tauri::RunEvent::WindowEvent {
+                label,
+                event: tauri::WindowEvent::ScaleFactorChanged { .. },
+                ..
+            } = &event
+            {
+                if label == "main" {
+                    icon::refresh_windows_icons_for_dpi(app);
+                }
+            }
             #[cfg(target_os = "macos")]
             match &event {
                 tauri::RunEvent::WindowEvent {
