@@ -1,0 +1,26 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "design-system-font",
+        "value": "sfmono-regular",
+        "files": [
+          "apps/web/src/styles.css"
+        ],
+        "createdAt": "2026-11-16T02:34:39.691Z",
+        "reason": "Agent: existing monospace font is intentional for keyboard shortcuts, problem IDs, and code blocks"
+      },
+      {
+        "rule": "design-system-font",
+        "value": "roboto",
+        "files": [
+          "scripts/generate-social-assets-zh.ts"
+        ],
+        "createdAt": "2026-11-16T03:42:59.344Z",
+        "reason": "Agent: existing standalone social-image generator uses Roboto as a platform fallback, outside the desktop UI typography system"
+      }
+    ]
+  }
+}
