@@ -110,9 +110,15 @@ describe('Live External Gemini Verification Gate', () => {
       selection.selectedQuestionIds.length > 0,
       'Real Gemini selection must select at least one problem'
     );
+    // Phase 39: the model only ranks the supplied slate; local allocation applies dailyCount afterwards.
     assert.ok(
-      selection.selectedQuestionIds.length <= rules.dailyCount,
-      'Selected count must not exceed requested count'
+      selection.selectedQuestionIds.length <= syntheticCandidates.length,
+      'Ranked count must not exceed the candidate slate'
+    );
+    assert.equal(
+      new Set(selection.selectedQuestionIds).size,
+      selection.selectedQuestionIds.length,
+      'Ranked IDs must be unique'
     );
 
     // Verify each selected problem exists in candidates

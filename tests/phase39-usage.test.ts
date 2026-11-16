@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { normalizeUsage, sumUsage } from '../apps/server/src/llm/usage.ts';
 import { createDiagnosticSink, emitDiagnostic, type DiagnosticTrace, type LLMTrace } from '../apps/server/src/llm/diagnostics.ts';
-import { LLMAssistant } from '../apps/server/src/llm/assistant.ts';
+import { LLMAssistant, withReasoningAllowance } from '../apps/server/src/llm/assistant.ts';
 import { OpenAIProvider } from '../apps/server/src/llm/providers/openai.ts';
 import { problem, rules } from './phase16-fixtures.ts';
 
@@ -95,4 +95,12 @@ it('sends supported output limits only to known endpoints and retains mocked rep
     assert.equal(body.max_completion_tokens, expected === 'max_completion_tokens' ? 128 : undefined);
     assert.equal(body.max_tokens, expected === 'max_tokens' ? 128 : undefined);
   }
+});
+
+it('reserves reasoning headroom so thinking models do not truncate a capped answer', () => {
+  assert.equal(withReasoningAllowance(undefined, 'high'), undefined);
+  assert.equal(withReasoningAllowance(224, undefined), 224);
+  assert.equal(withReasoningAllowance(224, 'none'), 224);
+  assert.equal(withReasoningAllowance(224, 'medium'), 224 + 4096);
+  assert.ok(withReasoningAllowance(224, 'max')! > withReasoningAllowance(224, 'high')!);
 });

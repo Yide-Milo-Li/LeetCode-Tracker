@@ -66,6 +66,26 @@ async function generateWithAbort(provider: ILLMProvider, params: import('./types
  * Main LLMAssistant orchestrator managing provider dispatch, credential hot reload,
  * multi-tier model fallbacks, and deterministic local degradation.
  */
+/**
+ * Reasoning tokens that a thinking model may spend before its visible answer, by effort level.
+ *
+ * Gemini `maxOutputTokens`, OpenAI `max_completion_tokens` and DeepSeek `max_tokens` all count
+ * reasoning tokens, so a cap sized only for the JSON answer truncates it whenever reasoning is on.
+ */
+const REASONING_ALLOWANCE: Record<ReasoningEffort, number> = {
+  none: 0, low: 1024, medium: 4096, high: 8192, xhigh: 16384, max: 32768,
+};
+
+/**
+ * Grow a visible-answer token cap by the reasoning allowance for `effort`.
+ *
+ * Returns undefined when no cap was requested; an unknown or absent effort adds nothing.
+ */
+export function withReasoningAllowance(visibleTokens: number | undefined, effort: ReasoningEffort | undefined): number | undefined {
+  if (visibleTokens === undefined) return undefined;
+  return visibleTokens + (effort ? REASONING_ALLOWANCE[effort] ?? 0 : 0);
+}
+
 export class LLMAssistant implements ILLMAssistant {
   private activeProviderType: LLMProviderType;
   private readonly providers: Record<LLMProviderType, ILLMProvider>;
@@ -93,7 +113,7 @@ export class LLMAssistant implements ILLMAssistant {
     let status: 'ok' | 'failed' | 'timeout' = 'failed';
     let usage = normalizeUsage(provider.providerId);
     try {
-      const result = await generateWithAbort(provider, params);
+      const result = await generateWithAbort(provider, { ...params, maxOutputTokens: withReasoningAllowance(params.maxOutputTokens, params.reasoningEffort) });
       usage = result.usage ?? usage;
       if (result.text && result.text.length > 256 * 1024) throw new Error('Provider output exceeded the task limit');
       status = 'ok'; return result;
