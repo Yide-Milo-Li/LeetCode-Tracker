@@ -278,9 +278,9 @@ it('renders active daily plan and triggers single problem item replacement', asy
   assert.ok(document.querySelector('.today-view .page-description')?.textContent);
   assert.ok(screen.getByRole('heading', { name: /70\. Climbing Stairs/ }));
   assert.ok(screen.getByRole('heading', { name: /198\. House Robber/ }));
-  const progress = screen.getByRole('progressbar') as HTMLProgressElement;
-  assert.equal(progress.value, 1);
-  assert.equal(progress.max, 2);
+  const progress = screen.getByRole('progressbar');
+  assert.equal(progress.getAttribute('aria-valuenow'), '1');
+  assert.equal(progress.getAttribute('aria-valuemax'), '2');
 
   // Trigger replace on the first (uncompleted) item
   const replaceBtn = screen

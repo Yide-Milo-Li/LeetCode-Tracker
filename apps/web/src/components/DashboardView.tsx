@@ -12,7 +12,6 @@ import {
   CheckCircle2,
   Circle,
   FileText,
-  Clock,
   ChevronRight,
   AlertTriangle,
   RefreshCw,
@@ -28,6 +27,7 @@ import {
   YAxis,
   Tooltip as RechartsTooltip,
   CartesianGrid,
+  ReferenceDot,
 } from 'recharts';
 import { api, type DashboardResponse, type RecentActivityItem, type YearlyActivityDay, type TagMasteryReport, type KnowledgeProfileReport } from '../api.ts';
 import type { UseDailyPlanReturn } from '../hooks/useDailyPlan.ts';
@@ -37,6 +37,7 @@ import { useWorkspace } from '../workspace.tsx';
 import { IconButton, Feedback } from './ui.tsx';
 import { DashboardKpiGrid } from './DashboardKpiGrid.tsx';
 import { DashboardDistributions } from './DashboardDistributions.tsx';
+import { TopicInsights } from './TopicInsights.tsx';
 import { RecentActivitySection } from './RecentActivitySection.tsx';
 
 interface DashboardViewProps {
@@ -153,6 +154,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   useEffect(() => {
     fetchDashboard(selectedYear);
   }, [selectedYear, fetchDashboard, workspace.revision]);
+
+  // 30-day trend: label only the first, middle and last day so the axis stays quiet.
+  const trendDays = data?.trend30Days ?? [];
+  const trendTicks = trendDays.length
+    ? [...new Set([0, Math.floor((trendDays.length - 1) / 2), trendDays.length - 1])].map((i) => trendDays[i].date)
+    : [];
+  // Trend dates are local calendar days; format in UTC so the label never shifts by a day.
+  const formatTrendDate = (date: string) =>
+    new Date(`${date}T00:00:00Z`).toLocaleDateString(lang === 'zh' ? 'zh-CN' : 'en-US', {
+      day: 'numeric',
+      month: 'short',
+      timeZone: 'UTC',
+    });
+  const reduceMotion = useMemo(
+    () => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true,
+    [],
+  );
 
   // Year choices (current year and past 2 years)
   const currentCalYear = new Date().getFullYear();
@@ -425,95 +443,114 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
-      {/* 30-Day Activity Trend Chart */}
-      <div className="trend-card">
-        <div className="u-display-flex u-align-items-center u-gap-0-5rem u-margin-bottom-0-5rem">
-          <Clock className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-          <h2 className="u-font-size-1rem u-font-weight-700 u-margin-0">{t.trend30DaysTitle}</h2>
-        </div>
-
-        <div className="chart-legend">
-          <span>
-            <i className="legend-active" />
-            {t.trendActiveProblems}
-          </span>
-          <span>
-            <i className="legend-completed" />
-            {t.trendSolvedProblems}
-          </span>
-        </div>
-        <div className="trend-chart-wrapper">
-          {active && data?.trend30Days && data.trend30Days.length > 0 ? (
-            <ResponsiveContainer width="100%" height="100%" minHeight={260}>
-              <AreaChart data={data.trend30Days} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(156, 163, 175, 0.2)" />
-                <XAxis
-                  dataKey="date"
-                  tickFormatter={(d) => d.slice(5)}
-                  stroke="var(--text-muted)"
-                  fontSize={13}
-                  tickLine={false}
-                />
-                <YAxis allowDecimals={false} stroke="var(--text-muted)" fontSize={13} tickLine={false} />
-                <RechartsTooltip
-                  content={({ active, payload, label }) => {
-                    if (active && payload && payload.length) {
+      {/* 30-day trend beside the mastery overview */}
+      <div className="progress-insights-grid">
+        <section className="trend-card" aria-labelledby="trend-card-title">
+          <div className="insight-card-head">
+            <div>
+              <h2 id="trend-card-title">{t.trend30DaysTitle}</h2>
+              <p>{lang === 'zh' ? '完成题数与当天活跃题数的对比' : 'Solved problems against problems you touched'}</p>
+            </div>
+            <div className="chart-legend">
+              <span>
+                <i className="legend-completed" />
+                {t.trendSolvedProblems}
+              </span>
+              <span>
+                <i className="legend-active" />
+                {t.trendActiveProblems}
+              </span>
+            </div>
+          </div>
+          <div className="trend-chart-wrapper">
+            {active && trendDays.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%" minHeight={240}>
+                <AreaChart data={trendDays} margin={{ top: 10, right: 28, left: -16, bottom: 0 }}>
+                  <CartesianGrid vertical={false} stroke="var(--border-color)" />
+                  <XAxis
+                    dataKey="date"
+                    ticks={trendTicks}
+                    interval={0}
+                    tickFormatter={formatTrendDate}
+                    axisLine={false}
+                    tickLine={false}
+                    tickMargin={8}
+                  />
+                  <YAxis allowDecimals={false} axisLine={false} tickLine={false} width={40} />
+                  <RechartsTooltip
+                    cursor={{ stroke: 'var(--outline)', strokeWidth: 1 }}
+                    content={({ active, payload, label }) => {
+                      if (!active || !payload?.length) return null;
+                      const point = payload[0]?.payload as { activeCount: number; completedCount: number };
                       return (
-                        <div className="u-padding-0-5rem-0-75rem u-background-color-bg-card u-border-1px-solid-border-color u-border-radius-radius u-box-shadow-shadow-md u-font-size-13px">
-                          <div className="u-font-weight-600 u-color-text-main">{label}</div>
-                          <div className="u-color-primary u-margin-top-0-2rem">
-                            {t.trendActiveProblems}: {payload[0]?.value}
+                        <div className="trend-tooltip">
+                          <div className="trend-tooltip-date">{formatTrendDate(String(label))}</div>
+                          <div className="trend-tooltip-row is-solved">
+                            {t.trendSolvedProblems}: <strong className="num-tabular">{point.completedCount}</strong>
                           </div>
-                          <div className="u-color-success">
-                            {t.trendSolvedProblems}: {payload[1]?.value}
+                          <div className="trend-tooltip-row">
+                            {t.trendActiveProblems}: <strong className="num-tabular">{point.activeCount}</strong>
                           </div>
                         </div>
                       );
-                    }
-                    return null;
-                  }}
-                />
-                <Area
-                  isAnimationActive={false}
-                  type="monotone"
-                  dataKey="activeCount"
-                  name={t.trendActiveProblems}
-                  stroke="var(--text-muted)"
-                  strokeDasharray="5 3"
-                  strokeWidth={2}
-                  fillOpacity={1}
-                  fill="var(--muted-surface)"
-                />
-                <Area
-                  isAnimationActive={false}
-                  type="monotone"
-                  dataKey="completedCount"
-                  name={t.trendSolvedProblems}
-                  stroke="var(--primary)"
-                  strokeWidth={2}
-                  fillOpacity={1}
-                  fill="var(--selected)"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="u-height-100 u-display-flex u-align-items-center u-justify-content-center u-font-size-13px u-color-text-muted">
-              {t.noProblems}
-            </div>
-          )}
-        </div>
+                    }}
+                  />
+                  <Area
+                    isAnimationActive={false}
+                    type="linear"
+                    dataKey="activeCount"
+                    name={t.trendActiveProblems}
+                    stroke="var(--text-muted)"
+                    strokeDasharray="4 4"
+                    strokeWidth={1.5}
+                    fill="none"
+                    activeDot={false}
+                  />
+                  <Area
+                    isAnimationActive={!reduceMotion}
+                    animationDuration={700}
+                    animationEasing="ease-out"
+                    type="linear"
+                    dataKey="completedCount"
+                    name={t.trendSolvedProblems}
+                    stroke="var(--primary)"
+                    strokeWidth={2}
+                    strokeLinejoin="round"
+                    fill="var(--primary)"
+                    fillOpacity={0.08}
+                    activeDot={{ r: 4, fill: 'var(--primary)', stroke: 'var(--surface)', strokeWidth: 2 }}
+                  />
+                  <ReferenceDot
+                    x={trendDays[trendDays.length - 1].date}
+                    y={trendDays[trendDays.length - 1].completedCount}
+                    r={3.5}
+                    fill="var(--primary)"
+                    stroke="none"
+                    ifOverflow="visible"
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="u-height-100 u-display-flex u-align-items-center u-justify-content-center u-font-size-13px u-color-text-muted">
+                {t.noProblems}
+              </div>
+            )}
+          </div>
+        </section>
+
+        <DashboardDistributions data={data} lang={lang} masteryReport={masteryReport} />
       </div>
 
-      {/* Difficulty & Top Tags Distributions */}
       {masteryLoading && <p role="status">{t.insightLoading}</p>}
       {masteryError && <Feedback retry={{label:t.retry,run:()=>setSourceRetry(v=>v+1)}}>{t.insightLoadError}</Feedback>}
-      <DashboardDistributions
-        data={data}
-        lang={lang}
-        masteryReport={masteryReport}
-        profileReport={profileReport}
-        onNavigateToStrategies={onNavigateToStrategies}
-      />
+      {masteryReport && (
+        <TopicInsights
+          report={masteryReport}
+          profileReport={profileReport}
+          lang={lang}
+          onConfigure={onNavigateToStrategies}
+        />
+      )}
 
       {/* Recent Activities Section & History Drawer Trigger */}
       <RecentActivitySection
