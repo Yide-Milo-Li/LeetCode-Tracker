@@ -2,7 +2,7 @@
 
 This entry is explicit and separate from desktop startup. It opens a new temporary SQLite database and backup directory with eight generated synthetic exercises. It never reads `.env`, a personal profile, provider keys, or a shipped catalog. Both hosts must connect to this same running lab.
 
-From the repository root with Node 24.15.x:
+From the repository root with the project-pinned Node 26.13.0 runtime:
 
 ```powershell
 npm ci
