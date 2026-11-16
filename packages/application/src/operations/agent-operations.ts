@@ -40,9 +40,21 @@ export function createAgentOperations(context: ApplicationContext) {
     return { ...op, status, resultJson: result ? JSON.stringify(result) : op.resultJson,
       fullPayloadJson: null, confirmationNonce: null, updatedAt: Date.now() };
   }
+  /** A confirmation must still name the same catalog target the user was shown. */
+  function previewTargetIsCurrent(op: AgentOperationRecord): boolean {
+    try {
+      const payload = JSON.parse(op.fullPayloadJson ?? 'null') as PreparedChange | null;
+      if (!payload) return false;
+      if (payload.type !== 'create_practice' && payload.type !== 'save_note') return true;
+      const frontendId = payload.type === 'create_practice' ? payload.record?.questionFrontendId : payload.frontendId;
+      if (!frontendId) return false;
+      const problem = store.getProblem(frontendId, 'frontendId');
+      return Boolean(problem && payload.preview?.target === `Problem ${problem.questionFrontendId}: ${problem.title}`);
+    } catch { return false; }
+  }
   function live(op: AgentOperationRecord): AgentOperationRecord {
     if (op.status !== 'pending') return op;
-    let valid = Date.now() < op.expiresAt && op.libraryGeneration === store.getLibraryGeneration();
+    let valid = Date.now() < op.expiresAt && op.libraryGeneration === store.getLibraryGeneration() && previewTargetIsCurrent(op);
     try { validateGrant(op); } catch { valid = false; }
     if (valid) return op;
     store.transitionAgentOperation(terminal(op, 'expired'));
@@ -258,7 +270,8 @@ export function createAgentOperations(context: ApplicationContext) {
       const current = store.getAgentOperationByHandle(op.id)!;
       if (checkStatus && current.status !== 'pending') conflict('OPERATION_NOT_PENDING', 'Operation was invalidated while waiting.');
       validateGrant(current);
-      if (Date.now() >= current.expiresAt || current.libraryGeneration !== store.getLibraryGeneration()) conflict('OPERATION_EXPIRED', 'Operation expired or library changed.');
+      // After the receipt is applied the ledger drops its payload; retain the validated pending snapshot for the final check.
+      if (Date.now() >= current.expiresAt || current.libraryGeneration !== store.getLibraryGeneration() || !previewTargetIsCurrent(op)) conflict('OPERATION_EXPIRED', 'Operation expired or its preview target changed.');
       if (payload.plan && (localDate(Date.now(), payload.plan.timezone) !== payload.plan.date || (store.getSettings().timezone ?? 'UTC') !== payload.plan.timezone)) conflict('STALE_PLAN', 'Plan date or timezone changed.');
     };
     try {
@@ -314,7 +327,8 @@ export function createAgentOperations(context: ApplicationContext) {
       // Rollback has completed. Preserve invalidation; failed operations cannot retry a mutation.
       const current = store.getAgentOperationByHandle(op.id);
       if (current?.status === 'pending') {
-        try { store.transitionAgentOperation(terminal(current, 'failed', { error: (error as { code?: string }).code ?? 'OPERATION_FAILED' })); } catch { /* Storage failure leaves a non-applied, rolled-back operation. */ }
+        const code = (error as { code?: string }).code ?? 'OPERATION_FAILED';
+        try { store.transitionAgentOperation(terminal(current, code === 'OPERATION_EXPIRED' ? 'expired' : 'failed', { error: code })); } catch { /* Storage failure leaves a non-applied, rolled-back operation. */ }
       }
       throw error;
     }
