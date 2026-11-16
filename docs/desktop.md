@@ -10,6 +10,14 @@ The historical published 1.0.0 Windows host can fail before readiness because Ta
 
 ---
 
+## Isolated acceptance in the current Windows account
+
+The production Windows executable supports `--acceptance-profile <name>` for disposable acceptance runs with the same installed binary. For example, launch `leetcode-tracker-desktop.exe --acceptance-profile phase38-r3`. Names start with a lowercase letter, contain 1–48 lowercase letters, digits or single internal hyphens, and end with a letter or digit. A missing, malformed or repeated profile option exits before application initialization; it never falls back to the personal library.
+
+The runtime adds `.acceptance.<name>` to the configured application identifier before initializing Tauri. SQLite, backups, MCP configuration, Tunnel files, the WebView profile and the native instance lock use that identity. On Windows, `phase38-r3` therefore uses `%LOCALAPPDATA%\com.leetcodetracker.desktop.acceptance.phase38-r3`. Relaunch with the same name for restart/reconnection checks; another name selects another empty library. Ordinary launches keep their existing production identity. The window title identifies the acceptance profile, and acceptance runs cannot change the production launch-at-login registration.
+
+Import synthetic data using the normal BYOD preview/commit flow and provision dedicated host grants and Tunnel credentials. Existing production credentials and libraries are not copied. Keep the exact executable/installer hash with the profile name in the evidence. An extracted executable establishes packaged-native evidence only; installation claims require executing the installed files. Profile parsing tests, package inspection and local diagnostics do not establish actual ChatGPT Windows/Web connectivity or three-host acceptance.
+
 ## 1. Installation & Getting Started
 
 ### 1.1 Windows 11 x64

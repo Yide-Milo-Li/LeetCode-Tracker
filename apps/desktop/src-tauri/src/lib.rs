@@ -2,6 +2,7 @@
 mod icon;
 mod lifecycle;
 mod process;
+mod profile;
 mod security;
 mod tunnel;
 mod tunnel_key;
@@ -671,7 +672,7 @@ pub fn ensure_main_window(app: &AppHandle) -> Result<tauri::WebviewWindow, Strin
         return Ok(window);
     }
     let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
-        .title("LeetCode Tracker")
+        .title(app.state::<profile::LaunchProfile>().window_title())
         .inner_size(1280.0, 800.0)
         .min_inner_size(1024.0, 700.0)
         .resizable(true)
@@ -904,11 +905,18 @@ fn cancel_exit(state: State<'_, DesktopState>) {
 
 #[tauri::command]
 fn get_autostart_status(app: AppHandle) -> Result<bool, String> {
+    if app.state::<profile::LaunchProfile>().is_acceptance() {
+        return Ok(false);
+    }
     app.autolaunch().is_enabled().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn set_autostart_status(app: AppHandle, enabled: bool) -> Result<(), String> {
+    // Acceptance runs must never change the production login registration.
+    if app.state::<profile::LaunchProfile>().is_acceptance() {
+        return Err("AUTOSTART_DISABLED_FOR_ACCEPTANCE_PROFILE".into());
+    }
     let autolaunch = app.autolaunch();
     if enabled {
         autolaunch.enable().map_err(|e| e.to_string())?;
@@ -1106,7 +1114,14 @@ async fn diagnose_tunnel(app: AppHandle) -> Result<String, String> {
 
 /// Initialize the host and delay final exit until sidecar writes finish or the deadline expires.
 pub fn run() {
-    let builder = tauri::Builder::default();
+    let profile =
+        profile::LaunchProfile::parse(std::env::args_os().skip(1)).unwrap_or_else(|error| {
+            eprintln!("{error}");
+            std::process::exit(2);
+        });
+    let mut context = tauri::generate_context!();
+    context.config_mut().identifier = profile.identifier(&context.config().identifier);
+    let builder = tauri::Builder::default().manage(profile);
     #[cfg(feature = "desktop-e2e")]
     let builder = builder
         .plugin(tauri_plugin_wdio::init())
@@ -1162,7 +1177,7 @@ pub fn run() {
             retry_tunnel,
             diagnose_tunnel
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("Could not initialize the desktop application")
         .run(|app, event| {
             #[cfg(windows)]
