@@ -26,6 +26,14 @@ async function navigateTo(ariaLabel, expectedHash, viewSelector) {
   return view;
 }
 
+/** Select the Settings Data tab, which holds the migration export/import controls. */
+async function openDataTab() {
+  const tab = await browser.$('#settings-tab-data');
+  await tab.waitForDisplayed();
+  await tab.click();
+  await (await browser.$('#settings-panel-data')).waitForDisplayed();
+}
+
 /** Verify no visible error alert banner rendered inside the given view. */
 async function assertNoViewErrors(view) {
   const alerts = await view.$$('[role="alert"], .feedback.error');
@@ -47,12 +55,15 @@ describe('macOS native profile migration',()=>{
     await settings.waitForDisplayed(); await settings.click();
     const view=await browser.$('#view-settings');
     await view.waitForDisplayed();
+    // Settings is tabbed; migration controls live on the Data tab.
+    await openDataTab();
     assert.match(await view.getText(),/导出完整迁移包/);
     assert.match(await view.getText(),/导入迁移包/);
     await api('PATCH','/settings',{language:'en',theme:'light'});
     await browser.refresh();
     const english=await browser.$('button[aria-label="Settings"]');
     await english.waitForDisplayed();await english.click();
+    await openDataTab();
     assert.match(await (await browser.$('#view-settings')).getText(),/Export Complete Migration/);
     mkdirSync(evidenceDir,{recursive:true});
     await browser.saveScreenshot(path.join(evidenceDir,'macos-settings.png'));
