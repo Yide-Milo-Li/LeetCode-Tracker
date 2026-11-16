@@ -7,6 +7,7 @@ import { CatalogStore } from '../packages/database/src/store.ts';
 import { PlanningService } from '../apps/server/src/planning-service.ts';
 import { fallbackPlanContent, type IGeminiAssistant } from '../apps/server/src/gemini.ts';
 import type { Rules } from '../packages/contracts/src/recommendations.ts';
+import { localDate } from '../packages/contracts/src/time.ts';
 import type { DiagnosticTrace } from '../apps/server/src/llm/diagnostics.ts';
 
 const base: Rules = { dailyCount: 2, difficulty: { Easy: 100, Medium: 0, Hard: 0 }, tags: [], premium: false, reviewEnabled: false, reviewPercent: null, preference: '' };
@@ -85,7 +86,7 @@ it('reuses validated intent only within the same profile, revisions, calendar an
     await preview(); assert.equal(calls, 4);
     first.service.clearTransientState(); await preview(); assert.equal(calls, 5);
     await second.service.previewDailyPlanOverride({ prompt: 'Prefer iterative solutions' }); assert.equal(calls, 6);
-    const nextDay = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    const nextDay = localDate(Date.now() + 86400000, 'Asia/Tokyo');
     await first.service.previewDailyPlanOverride({ prompt: 'Prefer iterative solutions', date: nextDay }); assert.equal(calls, 7);
   } finally { first.db.close(); second.db.close(); }
 });
