@@ -82,7 +82,7 @@ export interface GenerateContentParams {
   timeoutMs?: number;
   reasoningEffort?: ReasoningEffort;
   maxOutputTokens?: number;
-  purpose?: 'progress_import' | 'override_parse' | 'semantic_rank' | 'coaching' | 'note_format';
+  purpose?: 'progress_import' | 'override_parse' | 'semantic_rank' | 'coaching' | 'note_format' | 'operation-review';
 }
 
 /** Raw result from a provider content generation call. */

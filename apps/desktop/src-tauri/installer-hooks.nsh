@@ -1,6 +1,29 @@
 ; Preserve library data. Remove only an autostart value pointing to this installation.
 Var TrackerForeignRun
 Var TrackerOwnedRun
+
+; Connected stdio clients can retain node.exe after the tray Runtime exits.
+; Check write access before replacing any files; never terminate unrelated Node processes.
+!macro NSIS_HOOK_PREINSTALL
+  Push $R0
+  tracker_runtime_write_check:
+    IfFileExists "$INSTDIR\node.exe" 0 tracker_runtime_write_ready
+    ClearErrors
+    FileOpen $R0 "$INSTDIR\node.exe" a
+    IfErrors tracker_runtime_write_blocked
+    FileClose $R0
+    Goto tracker_runtime_write_ready
+  tracker_runtime_write_blocked:
+    IfSilent tracker_runtime_write_abort
+    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "The installed private Runtime is in use or is not writable.$\r$\n$\r$\nExit LeetCode Tracker from its tray menu and disconnect connected MCP clients before retrying.$\r$\n$\r$\nFile: $INSTDIR\node.exe" IDRETRY tracker_runtime_write_check
+  tracker_runtime_write_abort:
+    Pop $R0
+    SetErrorLevel 1
+    Abort "Private Runtime is unavailable for replacement."
+  tracker_runtime_write_ready:
+    Pop $R0
+!macroend
+
 !macro NSIS_HOOK_PREUNINSTALL
   StrCpy $TrackerForeignRun ""
   StrCpy $TrackerOwnedRun 0

@@ -446,10 +446,13 @@ export const PromptOverrideModal: React.FC<PromptOverrideModalProps> = ({
           reviewPolicy: 'Review policy', personalDurationCalibration: 'Personal duration shadow experiment', timeBudgetMinutes: 'Time budget (minutes)',
         };
 
-  function formatRuleValue(key: string, value: any, baseRules?: Rules | null): React.ReactNode {
+  // Each column owns its complete rule context; edited totals must not rewrite the baseline.
+  const afterRules = { ...preview?.base, ...preview?.rules, ...Object.fromEntries(Object.entries(draft).filter(([, value]) => value !== undefined)) };
+  function formatRuleValue(key: string, value: any, rules?: Partial<Rules> | null): React.ReactNode {
     if (value === undefined || value === null) return '—';
     if (key === 'difficulty') {
-      const total = typeof draft.dailyCount === 'number' ? draft.dailyCount : baseRules?.dailyCount ?? 0;
+      if (typeof rules?.dailyCount !== 'number') return '—';
+      const total = rules.dailyCount;
       const countsObj =
         typeof value === 'object' && 'Easy' in value
           ? difficultyCounts({ dailyCount: total, difficulty: value } as Rules)
@@ -833,7 +836,7 @@ export const PromptOverrideModal: React.FC<PromptOverrideModalProps> = ({
                       <tr key={key}>
                         <td>{ruleLabels[key] ?? key}</td>
                         <td>{formatRuleValue(key, preview.base?.[key], preview.base)}</td>
-                        <td>{formatRuleValue(key, draft[key] ?? preview.rules?.[key], preview.base)}</td>
+                        <td>{formatRuleValue(key, afterRules[key], afterRules)}</td>
                       </tr>
                     ))}
                 </tbody>

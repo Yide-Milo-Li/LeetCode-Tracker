@@ -56,7 +56,9 @@ export function PracticeRecordCard({
     setSaving(true);
     setError('');
     try {
-      const saved = await api.revokePracticeRecord(record.id, record.revision);
+      const generation = api.getReadGeneration?.(record);
+      const preconditions: [] | [number] = generation === undefined ? [] : [generation];
+      const saved = await api.revokePracticeRecord(record.id, record.revision, ...preconditions);
       workspace.notifyMutation(saved);
       onChange(saved);
       setConfirming(false);

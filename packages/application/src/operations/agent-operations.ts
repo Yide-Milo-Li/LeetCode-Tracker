@@ -68,11 +68,12 @@ export function createAgentOperations(context: ApplicationContext) {
     const generation = store.getLibraryGeneration();
     const args = normalizedArgs;
     const type = params.toolName.replace(/^tracker_/, '');
+    if(type.endsWith('_practice')&&args.expectedLibraryGeneration!==undefined&&args.expectedLibraryGeneration!==generation)conflict('LIBRARY_GENERATION_MISMATCH','Library changed; reload before preparing practice.');
     const preview: AgentOperationPreview = { action: type, target: '', libraryGeneration: generation, changes: [], cascades: [] };
     const payload: PreparedChange = { type, preview, ceilings: {} };
     const text = (key: string) => String(args[key] ?? '').trim();
     if (type === 'create_practice') {
-      const { operationId: _operationId, ...input } = args;
+      const { operationId: _operationId, expectedLibraryGeneration:_generation, ...input } = args;
       payload.record = createPracticeRecordSchema.parse({ ...input, questionFrontendId: text('questionFrontendId') });
       const problem = store.getProblem(payload.record.questionFrontendId, 'frontendId');
       if (!problem) conflict('PROBLEM_NOT_FOUND', 'Problem is absent from the catalog.');
@@ -88,7 +89,7 @@ export function createAgentOperations(context: ApplicationContext) {
       payload.expectedRevision = current.revision;
       preview.target = `Practice ${current.id} (Problem ${current.questionFrontendId})`;
       if (type === 'update_practice') {
-        const { operationId: _id, practiceId: _practice, ...patch } = args;
+        const { operationId: _id, practiceId: _practice, expectedLibraryGeneration:_generation, ...patch } = args;
         payload.patch = updatePracticeRecordSchema.parse(patch);
         const resolved = resolvePracticeUpdate(payload.patch, current);
         const after = { ...current, ...payload.patch, completed:resolved.finalCompleted, practicedAt:resolved.practicedAt,

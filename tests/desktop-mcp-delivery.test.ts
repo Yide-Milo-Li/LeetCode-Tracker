@@ -8,6 +8,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { createServer } from 'node:net';
 import { McpController } from '../apps/server/src/mcp/config.ts';
+import {createHash} from 'node:crypto';
 
 test('delivered proxy uses only the private runtime and explicit library configuration', { timeout: 30000 }, async () => {
   const root = mkdtempSync(join(tmpdir(), 'tracker-delivery-'));
@@ -51,13 +52,19 @@ test('delivered proxy uses only the private runtime and explicit library configu
     const config = await manage('config'); assert.equal(config.aiAccessPaused, true); assert.deepEqual(config.clients, []);
     assert.equal(config.connection.nodePath, node); assert.equal(config.connection.configPath, configPath);
     const { client } = await manage('clients', 'POST', { name: 'Synthetic Codex' }); await manage('config', 'PATCH', { aiAccessPaused: false });
-    const reply = await new Promise<string>((resolve, reject) => {
+    const proxyRequest = (method:string,params:object) => new Promise<string>((resolve, reject) => {
       const proxy = spawn(node, [join(install, 'desktop-mcp-proxy.mjs'), '--config', configPath, '--client', client.id], { cwd: install, env: environment, stdio: ['pipe', 'pipe', 'pipe'] });
       let output = ''; proxy.stdout.on('data', data => { output += data; }); proxy.stderr.resume(); proxy.once('error', reject);
       proxy.once('close', code => { if (code === 0) resolve(output); else reject(new Error('Private proxy failed')); });
-      proxy.stdin.end(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'tracker_status', arguments: {} } }) + '\n');
+      proxy.stdin.end(JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) + '\n');
     });
+    const reply=await proxyRequest('tools/call',{name:'tracker_status',arguments:{}});
     assert.equal(JSON.parse(reply).result.structuredContent.readOnly, true);
+    const listed=JSON.parse(await proxyRequest('resources/list',{})).result.resources;
+    const resource=JSON.parse(await proxyRequest('resources/read',{uri:listed[0].uri})).result.contents[0];
+    assert.match(resource.text,/<script type="module">/);assert.match(resource.text,/tracker-root/);
+    assert.ok(resource.uri.includes(createHash('sha256').update(resource.text).digest('hex').slice(0,16)));
+    assert.deepEqual(resource._meta['openai/ui'].availableDisplayModes,['fullscreen']);
     const second = launch(); const conflict = await second.ready;
     assert.equal(conflict.code, 'DATABASE_IN_USE'); await stop(second.child);
     await stop(first.child); assert.equal(existsSync(payload.dbPath + '.lock'), false);

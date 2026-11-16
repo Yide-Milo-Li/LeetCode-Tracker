@@ -15,8 +15,8 @@ const mutationMessage=(error:unknown,fallback:string)=>error instanceof Operatio
 export interface UseDailyPlanReturn {
   /** Indicates initial load of today's plan is in progress. */
   loading: boolean;
-  /** Complete ensure result returned by the backend. */
-  ensureResult: EnsureResult | null;
+  /** Backend state or a read-only presentation state; opening an embed never generates a plan. */
+  ensureResult: DailyPlanState | null;
   /** Active daily plan instance if status is 'ready'. */
   plan: DailyPlan | null;
   /** Error message if ensuring, loading, or mutating failed. */
@@ -49,6 +49,8 @@ export interface UseDailyPlanReturn {
   onPracticeLogged: (record?: PracticeRecord) => Promise<void>;
 }
 
+export type DailyPlanState = EnsureResult | { status: 'uncreated' | 'no-schedule'; plan: null };
+
 /**
  * Shared hook to manage daily plan lifecycle at application scope.
  * Prevents redundant generation calls on tab switches and synchronizes state between
@@ -61,7 +63,7 @@ export function useDailyPlan(environmentOverride?:WorkspaceEnvironment): UseDail
   const api = environment.client;
 
   const [loading, setLoading] = useState(true);
-  const [ensureResult, setEnsureResult] = useState<EnsureResult | null>(null);
+  const [ensureResult, setEnsureResult] = useState<DailyPlanState | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [replacingItemId, setReplacingItemId] = useState<string | null>(null);
@@ -103,9 +105,17 @@ export function useDailyPlan(environmentOverride?:WorkspaceEnvironment): UseDail
         ? await api.ensureDailyPlan()
         : await (async () => {
           const settings=await api.getSettings();
-          const date=new Intl.DateTimeFormat('en-CA',{timeZone:settings.timezone??'UTC',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+          if(!settings.timezone)return {status:'setup' as const,plan:null};
+          const date=new Intl.DateTimeFormat('en-CA',{timeZone:settings.timezone,year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(Date.now()));
           const plan=(await api.getPlans(date))[0];
-          return plan ? {status:'ready' as const,plan,generated:false} : {status:'rest' as const,plan:null};
+          if (plan) return {status:'ready' as const,plan};
+          const strategies = (await api.getStrategies()).filter(strategy => !strategy.deleted);
+          if (!strategies.length) return {status:'no-schedule' as const,plan:null};
+          // The weekday belongs to the user's calendar date, not the browser's local zone.
+          const weekday = new Date(`${date}T12:00:00Z`).getUTCDay();
+          return strategies.some(strategy => strategy.weekdays.includes(weekday))
+            ? {status:'uncreated' as const,plan:null}
+            : {status:'rest' as const,plan:null};
         })();
       if (revision === changeRevision.current) {
         setEnsureResult(result);

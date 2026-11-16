@@ -31,6 +31,7 @@ import { type ProblemNoteSummary, type PracticeRecord, NOTE_TEMPLATES, hasMeanin
 import { translations, type Language } from '../i18n.ts';
 import { OperationStateError, operationMessage } from '../client.ts';
 import { problemNoteSchema } from '../../../contracts/src/notes.ts';
+import {createDraftSession} from '../draft-session.ts';
 import { PageHeader, Feedback, Field, Pagination, Dialog } from './ui.tsx';
 import { QuickCopyButtons } from './QuickCopyButtons.tsx';
 
@@ -224,6 +225,7 @@ export function NotesWorkspace({
 
   // Selected problem state
   const [selectedId, setSelectedId] = useState<string | null>(initialFrontendId ?? null);
+  useEffect(()=>{if(!selectedId)return;const active=environment.host.recoveryState().view==='notes';environment.host.saveRecoveryState({...environment.host.recoveryState(),noteFrontendId:selectedId,...(active?{targetId:selectedId}: {})});if(active)environment.host.emit({type:'selection',view:'notes',targetId:selectedId});},[selectedId,environment.host]);
 
   // Phase 30: Unsaved note switch guard state
   const [pendingTargetId, setPendingTargetId] = useState<string | null>(null);
@@ -240,6 +242,16 @@ export function NotesWorkspace({
   const [savingNote, setSavingNote] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState('');
+  const recovery=useRef<ReturnType<typeof createDraftSession>|null>(null);
+  const [draftStatus,setDraftStatus]=useState('');
+  useEffect(()=>{
+    if(!api.drafts||!selectedId||loadingNote||noteLoadError||!recovery.current)return;
+    let active=true;
+    const session=recovery.current;
+    setDraftStatus(zh?'草稿尚未保留':'Draft not yet retained');
+    const timer=setTimeout(()=>{void session.write(noteContent===savedContent?null:noteContent,savedRevision,savedGeneration).then(()=>{if(active)setDraftStatus(noteContent===savedContent?'':zh?'草稿已保留':'Draft retained');}).catch(e=>{if(active)setDraftStatus(String(e.message));});},250);
+    return()=>{active=false;clearTimeout(timer);};
+  },[api,selectedId,noteContent,savedContent,savedRevision,savedGeneration,loadingNote,noteLoadError,zh,environment.connected]);
   useEffect(()=>environment.host.subscribe(event=>{
     if(event.type!=='operation'||event.operation.target!==`note:${selectedId}`)return;
     if(event.operation.status==='applied'){
@@ -391,7 +403,7 @@ export function NotesWorkspace({
       } else {
         // If not in current items page (e.g. jumped from external view), fetch summary asynchronously
         api
-          .listNotes({ search: selectedId, limit: 1 })
+          .listNotes({ frontendId: selectedId, scope:'all', limit: 1 })
           .then((res) => {
             if (!active) return;
             const found = res.items.find((it) => it.questionFrontendId === selectedId);
@@ -466,18 +478,24 @@ export function NotesWorkspace({
     setSaveSuccess(false);
     setSaveError('');
     setNoteLoadError(false);
+    recovery.current=null;setDraftStatus('');
 
     // Fetch note content
     api
       .getNote(selectedId)
-      .then((res) => {
+      .then(async (res) => {
         if (!active) return;
         const content = res.note?.content ?? '';
-        setNoteContent(content);
+        const session=api.drafts?createDraftSession(api.drafts,'note',selectedId):null;
+        const restored=session?await session.read():null;
+        if(!active)return;
+        recovery.current=session;
+        setNoteContent(restored?.draft?.content??content);
         setSavedContent(content);
         setSavedRevision(res.note?.revision ?? 0);
-        setSavedGeneration(res.libraryGeneration); setRemoteNote(null);
-        setExternalChange(false);
+        const conflict=Boolean(restored?.draft&&(restored.draft.baseRevision!==(res.note?.revision??0)||restored.draft.libraryGeneration!==res.libraryGeneration));
+        setSavedGeneration(res.libraryGeneration); setRemoteNote(conflict?{content,revision:res.note?.revision??0,libraryGeneration:res.libraryGeneration}:null);
+        setExternalChange(conflict);
       })
       .catch(() => {
         if (active) {
@@ -518,6 +536,7 @@ export function NotesWorkspace({
   const isBlank = noteContent.trim().length === 0;
   const hasMeaningful = hasMeaningfulNoteContent(noteContent);
   const canSave =
+    environment.host.capabilities.noteEditing &&
     !loadingNote &&
     !savingNote &&
     !noteLoadError &&
@@ -682,13 +701,14 @@ export function NotesWorkspace({
   }, [initialFrontendId, selectedId, hasUnsavedChanges, onClearInitialFrontendId]);
 
   /** Discard unsaved modifications and switch to the pending target problem. */
-  const handleDiscardAndSwitch = useCallback(() => {
+  const handleDiscardAndSwitch = useCallback(async () => {
     if (!pendingTargetId) return;
+    try{await recovery.current?.closeAndDelete();}catch(e){setSaveError(String(e));return;}
     const target = pendingTargetId;
     setShowUnsavedModal(false);
     setPendingTargetId(null);
     setSelectedId(target);
-  }, [pendingTargetId]);
+  }, [pendingTargetId,savedRevision,savedGeneration]);
 
   /** Cancel switching and stay on the current problem note. */
   const handleCancelSwitch = useCallback(() => {
@@ -704,12 +724,13 @@ export function NotesWorkspace({
 
   return (
     <div ref={root} className="notes-workspace-view" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {draftStatus&&<div role="status" className="embedded-draft-status">{draftStatus}</div>}
       {externalChange && (
         <div
           role="status"
           style={{
             padding: '8px 16px',
-            backgroundColor: 'var(--warning-subtle, #fef7e0)',
+            backgroundColor: 'var(--warning-bg)',
             borderBottom: '1px solid var(--warning, #f9ab00)',
             color: 'var(--text-primary)',
             fontSize: '0.875rem',
@@ -736,7 +757,7 @@ export function NotesWorkspace({
       )}
       <PageHeader
         title={t.notesWorkspaceTitle}
-        description={t.notesWorkspaceDesc}
+        description={environment.host.capabilities.exports?t.notesWorkspaceDesc:zh?'整理题解、复杂度分析与练习反思。':'Solutions, complexity analysis, and practice reflections.'}
         actions={
           <div style={{ display: 'flex', gap: '8px' }}>
             <button
@@ -1343,7 +1364,7 @@ export function NotesWorkspace({
                   </div>
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    {saveSuccess && (
+                    {saveSuccess && !isModified && (
                       <span style={{ color: 'var(--primary)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
                         <Check size={13} />
                         <span>{noteContent.trim().length === 0 ? t.noteClearedSuccess : t.noteSaved}</span>
@@ -1592,6 +1613,7 @@ export function NotesWorkspace({
                     <textarea
                       ref={textareaRef}
                       rows={16}
+                      readOnly={!environment.host.capabilities.noteEditing}
                       disabled={loadingNote || noteLoadError}
                       value={noteContent}
                       onChange={(e) => setNoteContent(e.target.value)}

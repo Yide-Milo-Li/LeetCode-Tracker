@@ -3256,6 +3256,40 @@
   font-size: 14px;
   max-width: 340px;
 }
+/* Settings columns must shrink before localized controls wrap inside their card. */
+.tracker-workspace .settings-view .preference-row > * {
+  min-width: 0;
+}
+.tracker-workspace .settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.tracker-workspace .settings-actions > .btn {
+  max-width: 100%;
+  white-space: normal;
+  text-align: center;
+}
+.tracker-workspace .settings-actions > div {
+  min-width: 0;
+}
+.tracker-workspace .tunnel-settings .form-field > input,
+.tracker-workspace .tunnel-settings .form-field > select {
+  width: 100%;
+}
+.tracker-workspace .settings-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.tracker-workspace .settings-checkbox > input {
+  flex-shrink: 0;
+  margin: 3px 0 0;
+}
 .tracker-workspace .segmented-control,
 .tracker-workspace .nav-tabs {
   display: inline-flex;
@@ -3296,6 +3330,25 @@
 .tracker-workspace .timezone-form {
   display: grid;
   gap: 12px;
+}
+.tracker-workspace .timezone-picker {
+  position: relative;
+  min-width: 0;
+}
+.tracker-workspace .timezone-picker > input {
+  padding-right: 36px;
+}
+/* Keep the native datalist hit target; its baseline-aligned glyph is replaced visually. */
+.tracker-workspace .timezone-picker > input::-webkit-calendar-picker-indicator {
+  opacity: 0;
+}
+.tracker-workspace .timezone-picker-chevron {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  pointer-events: none;
 }
 /* Desktop widths only. Table/heatmap scroll is local; the navigation never becomes a mobile menu. */
 @media (max-width: 1199px) {
@@ -5611,3 +5664,22 @@
   height: 28px;
   flex: none;
 }
+/* Embedded shell extends the existing desktop palette and typography. */
+.tracker-workspace .embedded-shell { background:var(--canvas); color:var(--text-main); min-height:100vh; font:14px/1.5 system-ui,sans-serif; }
+.tracker-workspace .embedded-nav { display:flex; align-items:center; gap:32px; padding:18px 32px; border-bottom:1px solid var(--border-color); background:var(--surface); }
+.tracker-workspace .embedded-nav>div { display:flex; gap:8px; }
+.tracker-workspace .embedded-nav .btn { display:flex; align-items:center; gap:8px; }
+.tracker-workspace .embedded-nav [aria-current='page'] { background:var(--selected); color:var(--primary); }
+.tracker-workspace .embedded-brand { font-size:17px; letter-spacing:-.4px; }
+.tracker-workspace .embedded-connection { margin-left:auto; color:var(--text-muted); font-size:12px; }
+.tracker-workspace .embedded-home { max-width:1100px; margin:0 auto; padding:60px 40px; }
+.tracker-workspace .embedded-home h1 { font-size:40px; line-height:1.15; letter-spacing:-1.3px; margin:0 0 16px; }
+.tracker-workspace .embedded-summary { padding:28px 32px; margin:36px 0 22px; border:1px solid var(--border-color); border-radius:12px; background:var(--surface); }
+.tracker-workspace .embedded-summary h2 { font-size:18px; margin:0 0 16px; }
+.tracker-workspace .embedded-summary>strong { font-size:32px; }
+.tracker-workspace .embedded-shortcuts { display:grid; grid-template-columns:1fr 1fr; gap:22px; }
+.tracker-workspace .embedded-shortcut { display:flex; flex-direction:column; align-items:flex-start; gap:12px; padding:28px 32px; text-align:left; background:var(--surface); border:1px solid var(--border-color); border-radius:12px; color:var(--text-main); cursor:pointer; font:inherit; }
+.tracker-workspace .embedded-shortcut strong { font-size:18px; }.tracker-workspace .embedded-shortcut span { color:var(--text-muted); }
+.tracker-workspace .embedded-shortcut:hover { border-color:var(--primary); }.tracker-workspace .embedded-page { padding:32px; }
+.tracker-workspace .embedded-page-heading { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; }
+.tracker-workspace .embedded-draft-status { padding:8px 16px; color:var(--text-muted); font-size:12px; }

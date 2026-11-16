@@ -1,5 +1,6 @@
 /** Recovery storage regressions use isolated files and never touch a user's library. */
 import { test } from 'node:test';
+import {createDraftSession} from '../packages/workspace/src/draft-session.ts';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -12,6 +13,17 @@ import { openTrackerRuntime, type TrackerRuntime } from '../packages/application
 const context = { store: { getLibraryGeneration: () => 1 } } as ApplicationContext;
 const identity = ['client', 'widget', 'note', '1'] as const;
 const input = { clientId: identity[0], workspaceInstanceId: identity[1], entityType: identity[2], entityId: identity[3], content: 'original', expectedDraftRevision: 0 };
+
+test('editor cancellation consumes acknowledged writes and cannot be undone by queued autosaves',async()=>{
+  let value:string|null=null,revision=0,release!:()=>void;
+  const pending=new Promise<void>(done=>{release=done;});
+  const api={get:async()=>({revision,draft:null}),set:async(_type:string,_id:string,content:string,expected:number)=>{await pending;assert.equal(expected,revision);value=content;return {revision:++revision,draft:null};},delete:async(_type:string,_id:string,expected:number)=>{assert.equal(expected,revision);value=null;return {revision:++revision,draft:null};}};
+  const session=createDraftSession(api,'practice','manual');await session.read();
+  const writing=session.write('first draft',0,1);await Promise.resolve();
+  const queued=session.write('stale queued draft',0,1),closing=session.closeAndDelete();release();
+  await Promise.all([writing,queued,closing]);await session.write('late effect',0,1);
+  assert.equal(value,null);assert.equal(revision,2);
+});
 function removeFixture(dir: string) {
   assert.equal(dirname(resolve(dir)), resolve(tmpdir()));
   assert.ok(dir.startsWith(join(tmpdir(), 'tracker-drafts-')));

@@ -1,0 +1,13 @@
+# Acceptance evidence
+
+Run `npm run acceptance:check -- --matrix <results.json> --candidate <candidate.json>` to validate a dated round. This command reads files and returns a nonzero status for invalid claims; it never updates a report or closes a gap.
+
+Both files use `schemaVersion: 1`. Paths are relative to their containing JSON file. Candidate fields are `name`, `sourceManifest` (path, SHA-256 and optional bytes), `sourceRoot`, `sourceFingerprint` (SHA-256 of the manifest entries serialized with JSON.stringify), and `artifacts`. Each source entry has path, bytes and SHA-256. Artifacts have those fields plus a kind: formal-html, sidecar, proxy, private-node, tunnel or nsis. Include every distributed Tunnel resource and preserve the extraction comparison separately. Candidate sources must exclude local evidence, databases and credentials.
+
+The matrix declares its candidate, environments (id, candidate and description), results and engineering logs. An unresolved result needs id, status, reason and nextStep. A passed field result additionally needs candidate, environment, provenance (`computer_use` or `manual_field`), actual, executedAt and evidence. A scoped pass requires acceptedScope and remainingScope. It cannot close a G item.
+
+Each evidence entry has path, SHA-256, optional bytes, type, candidate and environment. Field evidence includes a PNG/JPEG `ui-screenshot` and JSON `observation` carrying the same identity. Business writes additionally require the original operationId, a JSON `runtime-receipt` with matching operationId and applied status, and a JSON `runtime-readback` with matching operationId, persisted=true, matchesReceipt=true and an independent connectionId. The collector must compare actual payloads before asserting those flags. The validator verifies the record's consistency, not the truth of an observer's statements.
+
+Engineering entries have name, candidate and log (path, SHA-256 and optional bytes). Node and Rust test totals are parsed from actual log summaries. Engineering, synthetic and test-source evidence cannot establish a passed field case. Preserve raw transcripts and screenshots so a reviewer can inspect the observations. Live provider, actual host, isolated native, installed product and synthetic protocol scopes remain distinct.
+
+The retired `update-phase38-matrix-results.mjs` assigned fixed totals and promoted synthetic tests into field results. Its original is archived in the dated local repair evidence. Historical reports remain available; corrected rounds explicitly identify their predecessor and superseded assertions. See [implementation status](status.md).

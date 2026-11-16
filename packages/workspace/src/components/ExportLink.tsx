@@ -12,6 +12,7 @@ export function ExportLink({ onExport, lang, children, ...props }: ExportLinkPro
   const {host} = useWorkspaceEnvironment();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState(false);
+  if(!host.capabilities.exports)return null;
 
   /** Only the native action intercepts the click; repeated clicks cannot open concurrent save dialogs. */
   async function handleClick(event: MouseEvent<HTMLAnchorElement>) {

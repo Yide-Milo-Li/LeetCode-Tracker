@@ -182,10 +182,10 @@ const practiceApi = {
     return request<PracticeRecord>(`/practice-records/${encodeURIComponent(id)}`);
   },
 
-  createPracticeRecord(input: CreatePracticeRecordInput): Promise<PracticeRecord> {
+  createPracticeRecord(input: CreatePracticeRecordInput, expectedLibraryGeneration?: number): Promise<PracticeRecord> {
     return request<PracticeRecord>('/practice-records', {
       method: 'POST',
-      body: JSON.stringify(input),
+      body: JSON.stringify({ ...input, ...(expectedLibraryGeneration === undefined ? {} : { expectedLibraryGeneration }) }),
     });
   },
 
@@ -201,16 +201,19 @@ const practiceApi = {
     return request(`/practice-records${qs ? `?${qs}` : ''}`);
   },
 
-  updatePracticeRecord(id: string, input: UpdatePracticeRecordInput): Promise<PracticeRecord> {
+  updatePracticeRecord(id: string, input: UpdatePracticeRecordInput, expectedLibraryGeneration?: number): Promise<PracticeRecord> {
     return request<PracticeRecord>(`/practice-records/${id}`, {
       method: 'PATCH',
-      body: JSON.stringify(input),
+      body: JSON.stringify({ ...input, ...(expectedLibraryGeneration === undefined ? {} : { expectedLibraryGeneration }) }),
     });
   },
 
-  revokePracticeRecord(id: string, expectedRevision?: number): Promise<PracticeRecord> {
+  revokePracticeRecord(id: string, expectedRevision?: number, expectedLibraryGeneration?: number): Promise<PracticeRecord> {
+    const params = new URLSearchParams();
+    if (expectedRevision !== undefined) params.set('expectedRevision', String(expectedRevision));
+    if (expectedLibraryGeneration !== undefined) params.set('expectedLibraryGeneration', String(expectedLibraryGeneration));
     return request<PracticeRecord>(
-      `/practice-records/${encodeURIComponent(id)}${expectedRevision === undefined ? '' : `?expectedRevision=${expectedRevision}`}`,
+      `/practice-records/${encodeURIComponent(id)}${params.size ? `?${params}` : ''}`,
       { method: 'DELETE' }
     );
   },
@@ -414,6 +417,7 @@ const notesApi = {
     if (query.difficulty && query.difficulty !== 'all') params.set('difficulty', query.difficulty);
     if (query.hasNote && query.hasNote !== 'all') params.set('hasNote', query.hasNote);
     if (query.scope) params.set('scope', query.scope);
+    if (query.frontendId) params.set('frontendId', query.frontendId);
     if (query.tag) params.set('tag', query.tag);
     const qs = params.toString();
     return request<{ items: ProblemNoteSummary[]; total: number }>(`/notes${qs ? `?${qs}` : ''}`);

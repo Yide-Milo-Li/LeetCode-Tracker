@@ -3,6 +3,8 @@ mod icon;
 mod lifecycle;
 mod process;
 mod security;
+mod tunnel;
+mod tunnel_key;
 
 use rand::RngCore;
 use serde::Serialize;
@@ -50,6 +52,7 @@ struct DesktopState {
     exports: tokio::sync::Mutex<()>,
     #[cfg(windows)]
     win_icons: Mutex<icon::WindowsIconState>,
+    tunnel: Mutex<tunnel::TunnelManager>,
 }
 
 impl Default for DesktopState {
@@ -72,6 +75,7 @@ impl Default for DesktopState {
             exports: tokio::sync::Mutex::new(()),
             #[cfg(windows)]
             win_icons: Mutex::new(icon::WindowsIconState::default()),
+            tunnel: Mutex::new(tunnel::TunnelManager::default()),
         }
     }
 }
@@ -106,6 +110,9 @@ impl DesktopState {
             "config",
             Some(serde_json::json!({"aiAccessPaused":paused})),
         )?;
+        if paused {
+            self.tunnel.lock().unwrap().stop();
+        }
         *self.ai_paused.lock().unwrap() = Some(paused);
         Ok(())
     }
@@ -268,6 +275,7 @@ fn set_status(app: &AppHandle, name: &str, code: Option<&str>) {
 }
 /// Reap the old owner before acquiring the same database lease again.
 fn stop_service(state: &DesktopState) {
+    state.tunnel.lock().unwrap().stop();
     state.connection.lock().unwrap().take();
     *state.ai_paused.lock().unwrap() = None;
     if let Some(mut child) = state.child.lock().unwrap().take() {
@@ -374,6 +382,11 @@ fn begin_startup(app: AppHandle) {
                     .as_ref()
                     .filter(|j| j["configuredPort"].is_number())
                     .and_then(|j| j["aiAccessPaused"].as_bool());
+                state
+                    .tunnel
+                    .lock()
+                    .unwrap()
+                    .tick(&app, mcp.as_ref().unwrap_or(&serde_json::Value::Null));
                 let label = mcp.as_ref().map_or_else(
                     || "MCP 不可用 / MCP unavailable".to_string(),
                     |j| {
@@ -857,6 +870,7 @@ fn force_exit_app(app: &AppHandle) {
         return;
     }
     state.connection.lock().unwrap().take();
+    state.tunnel.lock().unwrap().stop();
     *state.status.lock().unwrap() = DesktopStatus {
         state: "exiting".into(),
         message: None,
@@ -950,6 +964,146 @@ async fn set_ai_access_status(app: AppHandle, paused: bool) -> Result<(), String
     .map_err(|_| "MCP_UNAVAILABLE".to_string())?
 }
 
+#[tauri::command]
+async fn get_tunnel_status(app: AppHandle) -> Result<tunnel::Status, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        Ok(app
+            .state::<DesktopState>()
+            .tunnel
+            .lock()
+            .unwrap()
+            .status(&app))
+    })
+    .await
+    .map_err(|_| "TUNNEL_UNAVAILABLE".to_string())?
+}
+#[tauri::command]
+async fn configure_tunnel(
+    app: AppHandle,
+    configuration: tunnel::Configuration,
+    key_path: Option<String>,
+    reuse_credential: Option<bool>,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<DesktopState>();
+        let grants = state.mcp_request(reqwest::Method::GET, "config", None)?;
+        let result = state.tunnel.lock().unwrap().configure(
+            &app,
+            configuration,
+            key_path,
+            reuse_credential.unwrap_or(false),
+            &grants,
+        );
+        result
+    })
+    .await
+    .map_err(|_| "TUNNEL_UNAVAILABLE".to_string())?
+}
+/// Native entry returns a boolean acknowledgement; the renderer never receives the key or a key path.
+#[tauri::command]
+async fn prompt_tunnel_key(app: AppHandle, lang: String) -> Result<bool, String> {
+    #[cfg(windows)]
+    {
+        let parent = app
+            .get_webview_window("main")
+            .ok_or("TUNNEL_KEY_DIALOG_FAILED")?
+            .hwnd()
+            .map_err(|_| "TUNNEL_KEY_DIALOG_FAILED")?
+            .0 as usize;
+        tauri::async_runtime::spawn_blocking(move || {
+            let key = tunnel_key::prompt(parent as _, lang == "zh")?;
+            if let Some(key) = key {
+                app.state::<DesktopState>()
+                    .tunnel
+                    .lock()
+                    .unwrap()
+                    .stage_key(key);
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        })
+        .await
+        .map_err(|_| "TUNNEL_KEY_DIALOG_FAILED".to_owned())?
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (app, lang);
+        Err("TUNNEL_UNSUPPORTED".into())
+    }
+}
+
+/// The native file picker is a compatibility path; selected filenames never cross IPC.
+#[tauri::command]
+async fn import_tunnel_key(app: AppHandle) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(file) = app
+            .dialog()
+            .file()
+            .set_title("Import Tunnel runtime key / 导入 Tunnel 运行密钥")
+            .blocking_pick_file()
+        else {
+            return Ok(false);
+        };
+        let path = file.into_path().map_err(|_| "TUNNEL_KEY_INVALID")?;
+        if std::fs::metadata(&path)
+            .map_err(|_| "TUNNEL_KEY_MISSING")?
+            .len()
+            > 8192
+        {
+            return Err("TUNNEL_KEY_INVALID".into());
+        }
+        let key = tunnel_key::Secret::parse(
+            std::fs::read_to_string(path).map_err(|_| "TUNNEL_KEY_INVALID")?,
+        )?;
+        app.state::<DesktopState>()
+            .tunnel
+            .lock()
+            .unwrap()
+            .stage_key(key);
+        Ok(true)
+    })
+    .await
+    .map_err(|_| "TUNNEL_KEY_DIALOG_FAILED".to_owned())?
+}
+
+/// Restart the proof window without counting native health checks as host business calls.
+#[tauri::command]
+async fn begin_tunnel_verification(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<DesktopState>();
+        let grants = state.mcp_request(reqwest::Method::GET, "config", None)?;
+        let result = state
+            .tunnel
+            .lock()
+            .unwrap()
+            .begin_verification(&app, &grants);
+        result
+    })
+    .await
+    .map_err(|_| "TUNNEL_UNAVAILABLE".to_owned())?
+}
+#[tauri::command]
+async fn retry_tunnel(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<DesktopState>().tunnel.lock().unwrap().retry();
+        Ok(())
+    })
+    .await
+    .map_err(|_| "TUNNEL_UNAVAILABLE".to_string())?
+}
+#[tauri::command]
+async fn diagnose_tunnel(app: AppHandle) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<DesktopState>();
+        let mcp = state.mcp_request(reqwest::Method::GET, "status", None)?;
+        let diagnostic = state.tunnel.lock().unwrap().start_diagnostic(&app, &mcp)?;
+        diagnostic.run()
+    })
+    .await
+    .map_err(|_| "TUNNEL_UNAVAILABLE".to_string())?
+}
+
 /// Initialize the host and delay final exit until sidecar writes finish or the deadline expires.
 pub fn run() {
     let builder = tauri::Builder::default();
@@ -999,7 +1153,14 @@ pub fn run() {
             get_autostart_status,
             set_autostart_status,
             get_ai_access_status,
-            set_ai_access_status
+            set_ai_access_status,
+            get_tunnel_status,
+            configure_tunnel,
+            prompt_tunnel_key,
+            import_tunnel_key,
+            begin_tunnel_verification,
+            retry_tunnel,
+            diagnose_tunnel
         ])
         .build(tauri::generate_context!())
         .expect("Could not initialize the desktop application")

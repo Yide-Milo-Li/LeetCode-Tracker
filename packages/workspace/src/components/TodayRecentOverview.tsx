@@ -137,13 +137,13 @@ export function TodayRecentOverview({ lang, embedded = false }: TodayRecentOverv
                 : 'Set a timezone to assign daily activity'
               : ''}
         </span>
-        <button
+        {environment.host.capabilities.autoEnsure&&<button
           type="button"
           className="rhythm-link-btn"
           onClick={() => workspace.navigate('statistics')}
         >
           <span>{zh ? '查看完整统计 →' : 'View full statistics →'}</span>
-        </button>
+        </button>}
       </div>
 
       {error && (

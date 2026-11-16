@@ -150,6 +150,7 @@ export function listProblemNoteSummaries(
   const query = problemNoteListQuerySchema.parse(rawQuery);
   const params: (string | number)[] = [];
   const whereClauses: string[] = [];
+  if(query.frontendId){whereClauses.push('p.frontend_question_id = ?');params.push(query.frontendId);}
 
   // Filter by scope: 'practiced' strictly requires active manual practice or active import snapshot.
   // Mere existence of notes does not classify a problem as practiced.

@@ -14,6 +14,7 @@ import { TodayGoalOverview } from './TodayGoalOverview.tsx';
 import { TodayProblemRow } from './TodayProblemRow.tsx';
 import { QuickNoteDrawer } from './QuickNoteDrawer.tsx';
 import type { RecommendationFeedbackReason } from '../../../contracts/src/recommendations.ts';
+import {OperationStateError,operationMessage} from '../client.ts';
 
 interface TodayPlanViewProps {
   lang: Language;
@@ -41,8 +42,18 @@ function TodayPlanViewInner({
   const workspace = useWorkspace();
   const quote = useEncouragement({ timeZone: workspace.timezone, lang });
   const [override, setOverride] = useState(false);
+  const [creating,setCreating]=useState(false);
+  const creationLock=useRef(false);
+  /** Embedded opening is read-only; this button is the explicit creation intent. */
+  async function createToday(){
+    if(creationLock.current)return;creationLock.current=true;setCreating(true);setLocalError('');
+    try{const result=await api.ensureDailyPlan();if(result.plan){controller.onOverrideCommitted(result.plan);workspace.notifyMutation();}}
+    catch(error){setLocalError(error instanceof OperationStateError?operationMessage(error,lang):error instanceof Error?error.message:String(error));}
+    finally{creationLock.current=false;setCreating(false);}
+  }
   const [versions, setVersions] = useState<DailyPlan[] | null>(null);
   const [localError, setLocalError] = useState('');
+  useEffect(()=>environment.host.subscribe(event=>{if(event.type==='operation'&&event.operation.target==='plan:create'&&event.operation.status==='applied')setLocalError('');}),[environment.host]);
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<Set<string>>(new Set());
   const [recentCompletions, setRecentCompletions] = useState<Set<string>>(new Set());
@@ -125,7 +136,7 @@ function TodayPlanViewInner({
         completed: true,
         practicedAt: new Date().toISOString(),
         timePrecision: 'datetime',
-      });
+      }, api.getReadGeneration?.(item.problem));
       if (elapsedMinutes != null) clearPendingMinutes(item.problem.questionFrontendId);
       setRecentCompletions((ids) => new Set([...ids, item.id]));
       const timer = setTimeout(() => {
@@ -212,7 +223,7 @@ function TodayPlanViewInner({
           ) : undefined
         }
         actions={
-          <button disabled={!environment.host.capabilities.planEditing} className="btn btn-secondary" onClick={() => workspace.navigate('schedule')}>
+          environment.host.capabilities.autoEnsure&&<button disabled={!environment.host.capabilities.planEditing} className="btn btn-secondary" onClick={() => workspace.navigate('schedule')}>
             <CalendarDays size={16} />
             {zh ? '学习安排' : 'Study schedule'}
           </button>
@@ -256,11 +267,19 @@ function TodayPlanViewInner({
           </div>
           <h2>{t.setupTimezoneTitle}</h2>
           <p>{t.setupTimezoneDesc}</p>
-          <button disabled={!environment.host.capabilities.planEditing} className="btn btn-primary" onClick={onNavigateToSettings}>
+          {environment.host.capabilities.autoEnsure?<button disabled={!environment.host.capabilities.planEditing} className="btn btn-primary" onClick={onNavigateToSettings}>
             {zh ? '设置时区' : 'Set timezone'}
+          </button>:<p>{zh?'请在 Tracker 桌面设置中配置时区。':'Configure your timezone in Tracker desktop Settings.'}</p>}
+        </section>
+      ) : controller.ensureResult?.status === 'uncreated' ? (
+        <section className="empty-state">
+          <h2>{zh ? '今日计划尚未创建' : 'Today’s plan has not been created'}</h2>
+          <p>{zh ? '今日学习安排已就绪。创建计划后开始练习。' : 'Today’s study schedule is ready. Create your plan to begin.'}</p>
+          <button className="btn btn-primary" disabled={!environment.host.capabilities.planEditing || creating} onClick={() => void createToday()}>
+            {creating ? (zh ? '创建中…' : 'Creating…') : t.createTemporaryPlan}
           </button>
         </section>
-      ) : controller.ensureResult?.status === 'rest' ? (
+      ) : controller.ensureResult?.status === 'rest' || controller.ensureResult?.status === 'no-schedule' ? (
         <>
           <TodayGoalOverview lang={lang} plan={plan ?? null} strategy={strategy} showRecent={environment.host.capabilities.practice} />
           <section className="empty-state">
@@ -268,22 +287,23 @@ function TodayPlanViewInner({
               <Coffee size={40} className="text-muted" />
             </div>
             <h2>
-              {strategies?.length === 0 ? (zh ? '还没有学习安排' : 'No study schedule yet') : t.restDayTitle}
+              {controller.ensureResult?.status === 'no-schedule' || strategies?.length === 0 ? (zh ? '还没有学习安排' : 'No study schedule yet') : t.restDayTitle}
             </h2>
             <p>
-              {strategies?.length === 0
+              {controller.ensureResult?.status === 'no-schedule' || strategies?.length === 0
                 ? zh
                   ? '选择适合自己的节奏，配置后再开始。'
                   : 'Choose your study rhythm when you’re ready.'
                 : t.restDayDesc}
             </p>
             <div className="action-row">
-              <button disabled={!environment.host.capabilities.planEditing} className="btn btn-primary" onClick={() => workspace.navigate('schedule')}>
+              {environment.host.capabilities.autoEnsure&&<button disabled={!environment.host.capabilities.planEditing} className="btn btn-primary" onClick={() => workspace.navigate('schedule')}>
                 {zh ? '设置学习安排' : 'Set study schedule'}
-              </button>
-              <button disabled={!environment.host.capabilities.planEditing} className="btn btn-secondary" onClick={() => setOverride(true)}>
-                {t.createTemporaryPlan}
-              </button>
+              </button>}
+              {environment.host.capabilities.autoEnsure && <button disabled={!environment.host.capabilities.planEditing||creating} className="btn btn-secondary" onClick={() => setOverride(true)}>
+                {creating?(zh?'创建中…':'Creating…'):t.createTemporaryPlan}
+              </button>}
+              {!environment.host.capabilities.autoEnsure && controller.ensureResult?.status === 'no-schedule' && <p>{zh ? '请在 Tracker 桌面设置中配置学习安排。' : 'Configure a study schedule in Tracker desktop Settings.'}</p>}
             </div>
           </section>
         </>

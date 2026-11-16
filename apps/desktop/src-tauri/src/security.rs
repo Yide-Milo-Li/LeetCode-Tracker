@@ -49,10 +49,23 @@ pub fn external_url(value: &str) -> Result<Url, String> {
         || !url.username().is_empty()
         || url.password().is_some()
         || url.port().is_some()
-        || !matches!(
+        || !(matches!(
             url.host_str(),
             Some("leetcode.com" | "leetcode.cn" | "github.com")
-        )
+        ) || (url.query().is_none()
+            && url.fragment().is_none()
+            && matches!(
+                (url.host_str(), url.path()),
+                (
+                    Some("platform.openai.com"),
+                    "/settings/organization/tunnels" | "/api-keys"
+                ) | (Some("chatgpt.com"), "/plugins")
+                    | (
+                        Some("developers.openai.com"),
+                        "/api/docs/guides/custom-mcp-server"
+                            | "/api/docs/guides/secure-mcp-tunnels"
+                    )
+            )))
     {
         return Err("External URL is not allowed".into());
     }
@@ -130,6 +143,24 @@ mod tests {
         }
         // Query separators stay data passed to ShellExecuteW, never shell commands.
         assert!(external_url("https://leetcode.com/?a=1&b=2").is_ok());
+        for url in [
+            "https://platform.openai.com/settings/organization/tunnels",
+            "https://platform.openai.com/api-keys",
+            "https://chatgpt.com/plugins",
+            "https://developers.openai.com/api/docs/guides/custom-mcp-server",
+            "https://developers.openai.com/api/docs/guides/secure-mcp-tunnels",
+        ] {
+            assert!(external_url(url).is_ok());
+        }
+        for url in [
+            "https://platform.openai.com/api-keys?token=secret",
+            "https://platform.openai.com/api-keys#secret",
+            "https://chatgpt.com/other",
+            "https://developers.openai.com/api/docs/guides/custom-mcp-server/evil",
+            "https://platform.openai.com.evil.test/api-keys",
+        ] {
+            assert!(external_url(url).is_err());
+        }
         for path in [
             "/api/v1/../../secret",
             "/api/v1/%2e%2e/secret",

@@ -88,7 +88,9 @@ export class OpenAIProvider extends BaseLLMProvider {
 
   /** Send one structured request; reject transport or missing-content failures. */
   public async generateContent(params: GenerateContentParams): Promise<GenerateContentOutput> {
-    const effort = resolveModelReasoningEffort(
+    const review = this.providerId === 'deepseek' && params.purpose === 'operation-review';
+    // Security reviews use a bounded, non-thinking response even when ordinary tasks use reasoning.
+    const effort = review ? 'none' : resolveModelReasoningEffort(
       this.providerId,
       params.model,
       params.reasoningEffort ?? this.defaultReasoningEffort
@@ -105,7 +107,7 @@ export class OpenAIProvider extends BaseLLMProvider {
           responseSchema: params.responseSchema,
           abortSignal: params.abortSignal,
           reasoningEffort: effort,
-          maxOutputTokens: params.maxOutputTokens,
+          maxOutputTokens: review ? 2048 : params.maxOutputTokens,
         },
       });
       return { text: response.text, model: params.model, provider: this.providerId, usage: normalizeUsage(this.providerId, response.usage) };
@@ -129,7 +131,7 @@ export class OpenAIProvider extends BaseLLMProvider {
         : {}),
       // Unknown gateways keep their existing protocol; never retry an incompatible budget field.
       ...(params.maxOutputTokens && this.baseUrl === 'https://api.openai.com/v1' ? { max_completion_tokens: params.maxOutputTokens } : {}),
-      ...(params.maxOutputTokens && this.providerId === 'deepseek' ? { max_tokens: params.maxOutputTokens } : {}),
+      ...(this.providerId === 'deepseek' && review ? { max_tokens: 2048 } : params.maxOutputTokens && this.providerId === 'deepseek' ? { max_tokens: params.maxOutputTokens } : {}),
     };
 
     const response = await this.fetchFn(endpoint, {

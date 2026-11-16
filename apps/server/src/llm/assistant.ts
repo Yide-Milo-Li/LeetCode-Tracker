@@ -926,11 +926,11 @@ Evaluate the concrete before/after changes and cascade effects against user inte
       const res = await generateWithAbort(provider, {
         model: targetModel, systemInstruction,
         prompt: JSON.stringify(params.operation), responseSchema: reviewOperationResponseSchema,
-        abortSignal: signal, timeoutMs: 20_000,
+        abortSignal: signal, timeoutMs: 20_000, purpose: 'operation-review',
       });
       const parsed = reviewResponseSchema.omit({ auditMetadata: true }).strict().safeParse(JSON.parse(res.text?.trim() || '{}'));
       if (!parsed.success) return { decision: 'require_confirmation', riskLevel: 'medium', reason: 'Review model returned invalid response; manual confirmation required.', auditMetadata: { provider: providerType, model: targetModel, durationMs: Date.now() - startTime } };
-      return { ...parsed.data, auditMetadata: { provider: providerType, model: targetModel, durationMs: Date.now() - startTime } };
+      return { ...parsed.data, auditMetadata: { provider: providerType, model: res.model, durationMs: Date.now() - startTime } };
     } finally { clearTimeout(timeoutHandle); }
   }
 }

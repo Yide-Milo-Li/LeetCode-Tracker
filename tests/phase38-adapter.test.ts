@@ -15,6 +15,50 @@ import { startMcpServer } from '../apps/server/src/mcp/server.ts';
 import { WORKSPACE_RESOURCE_URI } from '../apps/server/src/mcp/workspace-html.ts';
 import { practiceRecordSchema } from '../packages/contracts/src/practice.ts';
 
+test('Runtime journal recovers a committed lost response after the UI is recreated, without exposing its body to the host',async()=>{
+  const f=await setup();let state:Record<string,unknown>={},writes=0,lost=true;
+  const host=()=>createWorkspaceHost({id:'durable-widget',capabilities:{durableDrafts:true},recoveryState:()=>state,saveRecoveryState:value=>{state=value;}});
+  const first=host();
+  const api=createToolTrackerClient(async(name,args)=>{const result=await f.call(name,args);if(name==='tracker_save_note'){writes++;if(lost){lost=false;throw new Error('Synthetic dropped response');}}return result;},first);
+  try{
+    await assert.rejects(api.upsertNote('1','Runtime-only recovery body',0,1),OperationStateError);
+    assert.equal(writes,1);assert.doesNotMatch(JSON.stringify(state),/Runtime-only recovery body/);
+    first.dispose();const second=host(),restored=createToolTrackerClient(f.call,second);let applied=false;
+    second.subscribe(event=>{if(event.type==='operation'&&event.operation.status==='applied')applied=true;});
+    await restored.initializeRecovery();await restored.recoverOperations();
+    assert.equal(applied,true);assert.equal((await restored.getNote('1')).note?.revision,1);assert.deepEqual(state.operations,[]);assert.equal(writes,1);assert.equal(f.getModelCalls(),0);second.dispose();
+  }finally{first.dispose();await f.close();}
+});
+
+test('journal persistence precedes one shared concurrent write and preserves the full note limit',async()=>{
+  const f=await setup();let state:Record<string,unknown>={},writes=0;
+  const host=createWorkspaceHost({id:'durable-race',capabilities:{durableDrafts:true},recoveryState:()=>state,saveRecoveryState:value=>{state=value;}});
+  const api=createToolTrackerClient(async(name,args)=>{if(name==='tracker_save_note')writes++;return f.call(name,args);},host);
+  try{const content='x"'.repeat(50000);const values=await Promise.all([api.upsertNote('1',content,0,1),api.upsertNote('1',content,0,1)]);assert.equal(writes,1);assert.equal(values[0].note.content,content);assert.equal(values[1].note.revision,1);}
+  finally{host.dispose();await f.close();}
+});
+
+test('a failed recovery write prevents business dispatch',async()=>{
+  const f=await setup();let writes=0;
+  const host=createWorkspaceHost({id:'durable-failed',capabilities:{durableDrafts:true}});
+  const api=createToolTrackerClient(async(name,args)=>{if(name==='tracker_workspace_draft')throw new Error('Synthetic recovery disk failure');if(name==='tracker_save_note')writes++;return f.call(name,args);},host);
+  try{await assert.rejects(api.upsertNote('1','unsaved synthetic note',0,1),/recovery disk failure/);assert.equal(writes,0);assert.equal((await api.getNote('1')).note,null);}
+  finally{host.dispose();await f.close();}
+});
+
+test('practice creation and editing reject a library replacement after the UI read',async()=>{
+  const f=await setup(),api=createToolTrackerClient(f.call,f.host);let writes=0;
+  const guarded=createToolTrackerClient(async(name,args)=>{if(['tracker_create_practice','tracker_update_practice'].includes(name))writes++;return f.call(name,args);},f.host);
+  try{
+    await guarded.getWorkspaceProblem!('1');
+    const original=await api.createPracticeRecord({questionFrontendId:'1',completed:false,practicedAt:'2026-09-20',timePrecision:'date'});
+    await guarded.getPracticeRecord(original.id);f.db.prepare("UPDATE catalog_meta SET value='2' WHERE key='library_generation'").run();
+    await assert.rejects(guarded.createPracticeRecord({questionFrontendId:'1',completed:false,practicedAt:'2026-09-20',timePrecision:'date'}),{code:'LIBRARY_GENERATION_MISMATCH'});
+    await assert.rejects(guarded.updatePracticeRecord(original.id,{notes:'stale',expectedRevision:original.revision}),{code:'LIBRARY_GENERATION_MISMATCH'});
+    assert.equal(writes,0);assert.equal((await api.getPracticeRecords()).total,1);
+  }finally{await f.close();}
+});
+
 async function setup(mode:'full_access'|'model_review'='full_access', fileDatabase=false){
   const f=await writeFixture(mode,fileDatabase);
   const sdk=new Client({name:'formal-ui-regression',version:'1'});
@@ -28,7 +72,8 @@ test('formal adapter supplies numeric paging, filters, details, plan versions an
   try{
     assert.equal((await api.listNotes({scope:'all',page:2,limit:3,tag:'array'})).items.length,3);
     assert.ok((await api.getDashboard(2026)).yearlyActivity);
-    await assert.rejects(api.getCatalog(),{code:'HOST_CAPABILITY_UNAVAILABLE'});
+    assert.ok((await api.getCatalog({limit:3})).items.length<=3);
+    assert.deepEqual((await api.listNotes({scope:'all',frontendId:'11',limit:1})).items.map(item=>item.questionFrontendId),['11']);
     await assert.rejects(api.ensureDailyPlan({timezone:'Europe/London'}),{code:'INVALID_INPUT'});
     const created=await api.ensureDailyPlan();assert.equal(created.status,'ready');assert.ok(created.plan);
     const initial=created.plan!;assert.equal((await api.getPlanVersions(initial.id))[0].id,initial.id);
@@ -58,6 +103,7 @@ test('SDK discovers the real UI resource and keeps App-only data out of model re
   try{
     const list=await f.sdk.listTools();
     assert.equal((list.tools.find(t=>t.name==='tracker_open_workspace')!._meta?.ui as {resourceUri:string}).resourceUri,WORKSPACE_RESOURCE_URI);
+    assert.deepEqual((list.tools.find(t=>t.name==='tracker_open_workspace')!._meta?.['openai/ui'] as {entrypoints:unknown[]}).entrypoints,[{type:'global'},{type:'thread'}]);
     for(const name of ['tracker_workspace_query','tracker_workspace_draft'])assert.deepEqual((list.tools.find(t=>t.name===name)!._meta?.ui as {visibility:string[]}).visibility,['app']);
     const resource=await f.sdk.readResource({uri:WORKSPACE_RESOURCE_URI});assert.ok('text' in resource.contents[0]);assert.match(resource.contents[0].text,/<script type="module">/);
     const args={workspaceInstanceId:'authenticated-ui',entityType:'note',entityId:'1'};
@@ -92,7 +138,7 @@ for(const status of ['rejected','cancelled','expired','failed'] as const)test(`f
       }
       await api.recoverOperations();
     }
-    assert.equal(states.at(-1),status);assert.equal(refreshes,0);assert.equal(f.store.getProblemNote('1'),null);
+    assert.equal(states.at(-1),status);assert.equal(refreshes,0);assert.equal(f.store.getProblemNote('1'),null);assert.equal(f.getModelCalls(),1);
   }finally{off();await f.close();}
 });
 

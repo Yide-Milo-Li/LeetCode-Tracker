@@ -2,3 +2,28 @@
 
 /* Browser document sizing belongs to the desktop host, outside the shared root. */
 html, body, #root { margin: 0; min-width: 0; height: 100%; }
+
+/* Setup follows the existing settings palette and fits desktop window resizing. */
+.tunnel-settings { min-width: 0; }
+.plugin-hosts { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+.plugin-hosts .muted { font-size: .875rem; }
+.plugin-steps { display: flex; gap: 4px; flex-wrap: wrap; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+.plugin-steps button { display: flex; align-items: center; gap: 6px; padding: 8px; border: 0; border-radius: 8px; background: transparent; color: var(--text-secondary); font: inherit; font-size: .8125rem; cursor: pointer; }
+.plugin-steps button span { font-variant-numeric: tabular-nums; }
+.plugin-steps button[aria-current="step"] { background: var(--surface-muted); color: var(--text-primary); font-weight: 600; }
+.plugin-steps button:hover:not(:disabled) { background: var(--surface-muted); }
+.plugin-steps button:disabled { cursor: default; opacity: .6; }
+.plugin-step-body { min-height: 280px; padding: 20px 0; }
+.plugin-step-body h3 { margin: 0 0 16px; font-size: 1rem; }
+.plugin-step-body p { max-width: 72ch; line-height: 1.6; }
+.plugin-step-body .form-field { display: flex; flex-direction: column; gap: 8px; max-width: 420px; margin-bottom: 16px; }
+.plugin-step-body .settings-checkbox { align-items: flex-start; line-height: 1.5; margin: 16px 0; }
+.plugin-step-body details { margin-top: 20px; }
+.plugin-step-body summary, .plugin-advanced > summary { cursor: pointer; color: var(--text-secondary); }
+.plugin-navigation { display: flex; justify-content: space-between; gap: 12px; border-top: 1px solid var(--border); padding-top: 16px; }
+.plugin-summary { display: grid; grid-template-columns: minmax(110px, 1fr) 3fr; gap: 12px; font-size: .875rem; }
+.plugin-summary dt { color: var(--text-secondary); }
+.plugin-summary dd { margin: 0; overflow-wrap: anywhere; }
+.plugin-checks { padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.plugin-checks li { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.plugin-advanced-body { display: flex; flex-direction: column; gap: 16px; padding-top: 16px; }

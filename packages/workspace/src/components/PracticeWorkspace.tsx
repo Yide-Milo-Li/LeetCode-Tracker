@@ -39,7 +39,7 @@ export function PracticeWorkspace({
   // Recovery belongs to one editing attempt; saving or cancelling must consume it.
   const [draft, setDraft] = useState('draft' in request ? request.draft : undefined);
   const [editing, setEditing] = useState<{ record: PracticeRecord } | null>(
-    request.mode === 'enrich' || (request.mode === 'detail' && request.draft)
+    request.mode === 'enrich' || (request.mode === 'detail' && (request.draft||request.restoreEditing))
       ? { record: request.record }
       : null,
   );

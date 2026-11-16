@@ -17,6 +17,7 @@ import {
   type ThemePalette,
 } from '../../../../packages/contracts/src/sync.ts';
 import { api, mcpApi, type McpSettingsConfig, type McpClientCredential, type McpStatus, type McpClientMode, type PendingAgentOperation } from '../api.ts';
+import { TunnelSettings } from './TunnelSettings.tsx';
 import { snapshotBundleSchema, type SnapshotBundle } from '../../../../packages/contracts/src/notes.ts';
 import { MAX_BUNDLE_BYTES } from '../../../../packages/contracts/src/migration.ts';
 import { clearPracticeIntents } from '../practice-service.ts';
@@ -154,10 +155,29 @@ export function SettingsView({
       polling = true;
       void (async () => {
         try {
-          const [status,versions] = await Promise.all([mcpApi.getStatus(),api.getBusinessVersions()]);
+          const [status,versions,config] = await Promise.all([
+            mcpApi.getStatus(),api.getBusinessVersions(),mcpApi.getConfig().catch(()=>null),
+          ]);
           if (!active) return;
           setMcpStatus(status);
-          setMcpConfig(current => current ? {...current,aiAccessPaused:status.aiAccessPaused}:current);
+          setMcpConfig(current => {
+            if (!current) return current;
+            const freshAccess = config && (config.accessRevision ?? 0) >= (current.accessRevision ?? 0);
+            // Merge display metadata only; an old read cannot resurrect connections or overwrite drafts.
+            const authoritative = config && (config.accessRevision ?? 0) > (current.accessRevision ?? 0);
+            const clients = authoritative ? config.clients : current.clients.map(client => {
+              const refreshed = config?.clients.find(candidate => candidate.id === client.id);
+              if (!refreshed || refreshed.createdAt !== client.createdAt ||
+                  refreshed.credentialVersion !== client.credentialVersion ||
+                  refreshed.revoked !== client.revoked || refreshed.mode !== client.mode) return client;
+              const timestamp = Math.max(client.lastSuccessfulCallAt ?? 0, refreshed.lastSuccessfulCallAt ?? 0);
+              return timestamp === (client.lastSuccessfulCallAt ?? 0)
+                ? client : {...client,lastSuccessfulCallAt:timestamp || null};
+            });
+            return {...current,clients,
+              accessRevision:freshAccess ? config.accessRevision : current.accessRevision,
+              aiAccessPaused:freshAccess ? config.aiAccessPaused : current.aiAccessPaused};
+          });
           if (previousApprovals !== versions.approvals) {
             const res=await mcpApi.listPendingOperations();
             if (active) setPendingOperations(res.operations);
@@ -919,11 +939,11 @@ export function SettingsView({
       {/* AI Connection (MCP) row */}
       <section className="preference-row">
         <div>
-          <h2>{zh ? 'AI 连接' : 'AI Connection'}</h2>
+          <h2>{zh ? 'Plugin / AI 连接' : 'Plugin / AI Connection'}</h2>
           <p className="muted">
             {zh
-              ? '通过标准 Model Context Protocol (MCP) 允许外部 AI 只读检索做题记录与学习进度。'
-              : 'Connect external AI tools via official read-only Model Context Protocol (MCP).'}
+              ? '通过连接向导接入 ChatGPT；其他客户端可使用高级手动配置。'
+              : 'Connect ChatGPT with guided setup; other clients can use advanced manual configuration.'}
           </p>
           <InfoPopover
             label={zh ? 'AI 连接与安全说明' : 'AI connection & security help'}
@@ -931,13 +951,13 @@ export function SettingsView({
               <div>
                 <p>
                   {zh
-                    ? '提供 9 个只读工具（题库检索、题目详情、今日计划、练习记录、笔记摘要与分段、进度概览），不开放任何写入或修改能力。'
-                    : 'Provides 9 read-only tools (search, problem details, today plan, practice records, notes chunking, progress). No write capabilities.'}
+                    ? '默认只读。模型审核模式评估写入风险；Full access 允许支持的练习、笔记与计划写入，需确认的操作仍由你确认。'
+                    : 'Read only by default. Model review evaluates write risk; Full access permits supported practice, note and plan writes, retaining required confirmations.'}
                 </p>
                 <p>
                   {zh
-                    ? '外部 AI 查询不消耗您的 Gemini/OpenAI API 额度，全部由外部客户端与本地只读服务交互。'
-                    : 'External AI queries do not use your tracker API quota; they run via external client tokens.'}
+                    ? '只读查询由外部客户端发起；模型审核与需要 AI 的业务操作会使用 LCT 中配置的提供商。'
+                    : 'Read-only queries originate from the external client; model review and AI business actions use the provider configured in LCT.'}
                 </p>
                 <p>
                   {zh
@@ -950,11 +970,12 @@ export function SettingsView({
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <TunnelSettings lang={lang} config={mcpConfig} runtime={mcpStatus} onConfig={setMcpConfig}/>
           {/* Global Pause Card */}
           <div
             style={{
               padding: '16px',
-              backgroundColor: mcpConfig?.aiAccessPaused ? 'var(--warning-subtle, #fef7e0)' : 'var(--surface-muted)',
+              backgroundColor: mcpConfig?.aiAccessPaused ? 'var(--warning-bg)' : 'var(--surface-muted)',
               borderRadius: '8px',
               border: `1px solid ${mcpConfig?.aiAccessPaused ? 'var(--warning, #f9ab00)' : 'var(--border)'}`,
               display: 'flex',
@@ -972,7 +993,7 @@ export function SettingsView({
                   fontSize: '0.8125rem',
                   padding: '2px 8px',
                   borderRadius: '12px',
-                  backgroundColor: !mcpStatus || mcpStatus.state !== 'ready' ? 'var(--surface-muted)' : mcpConfig?.aiAccessPaused ? 'var(--warning-subtle, #fef7e0)' : 'var(--success-subtle, #e6f4ea)',
+                  backgroundColor: !mcpStatus || mcpStatus.state !== 'ready' ? 'var(--surface-muted)' : mcpConfig?.aiAccessPaused ? 'var(--warning-bg)' : 'var(--success-bg)',
                   color: !mcpStatus || mcpStatus.state !== 'ready' ? 'var(--text-muted)' : mcpConfig?.aiAccessPaused ? 'var(--warning, #b06000)' : 'var(--success, #137333)',
                   fontWeight: 600,
                 }}
@@ -985,8 +1006,8 @@ export function SettingsView({
               {mcpConfig?.aiAccessPaused
                 ? (zh ? '当前已全局暂停外部 AI 访问。所有外部 MCP 请求将收到拦截提示，无法读取题库、笔记与做题历史。'
                   : 'External AI access is paused. External MCP clients receive a paused notice and cannot read your data.')
-                : (zh ? '外部 AI 可通过持有有效凭证的专用连接只读检索你的做题数据。你可以随时从托盘或在此处暂停。'
-                  : 'External AI clients can query study data using valid connection tokens. You can pause anytime here or from the tray.')}
+                : (zh ? '外部 AI 可按照专用连接的访问模式读取或修改支持的数据。你可以随时从托盘或在此处暂停。'
+                  : 'External AI clients can read or modify supported data according to their connection mode. You can pause anytime here or from the tray.')}
             </p>
 
             <div>
@@ -1002,6 +1023,9 @@ export function SettingsView({
             </div>
           </div>
 
+          <details id="plugin-manual-setup" className="plugin-advanced">
+          <summary>{zh ? '高级：端口、连接凭证与手动接入' : 'Advanced: port, credentials and manual setup'}</summary>
+          <div className="plugin-advanced-body">
           {/* MCP Server Endpoint & Port Config */}
           <div
             style={{
@@ -1034,7 +1058,7 @@ export function SettingsView({
               </button>
             </div>
 
-            <form onSubmit={handleSavePort} style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', marginTop: '4px' }}>
+            <form className="settings-actions" onSubmit={handleSavePort} style={{ alignItems: 'flex-end', marginTop: '4px' }}>
               <div style={{ flex: 1, maxWidth: '180px' }}>
                 <label style={{ display: 'block', fontSize: '0.8125rem', marginBottom: '4px', color: 'var(--text-muted)' }}>
                   {zh ? '监听端口 (Port)' : 'Port'}
@@ -1236,11 +1260,11 @@ export function SettingsView({
                         >
                           {mcpConfig?.connection ? <>
                             <div>
-                              <strong>Codex Desktop — config.toml</strong>
+                              <strong>Codex Desktop — config.toml ({zh ? '自动配置待办' : 'automatic setup planned'})</strong>
                               <pre style={{overflowX:'auto'}}>{'[mcp_servers.leetcode_tracker]\ncommand = '+JSON.stringify(mcpConfig.connection.nodePath)+'\nargs = '+JSON.stringify([mcpConfig.connection.proxyPath,'--config',mcpConfig.connection.configPath,'--client',client.id])}</pre>
                             </div>
                             <div>
-                              <strong>DSH — cordis.patch.yml</strong>
+                              <strong>DSH — cordis.patch.yml ({zh ? '自动配置待办' : 'automatic setup planned'})</strong>
                               <pre style={{overflowX:'auto'}}>{'- insert:\n    - id: tracker-readonly\n      name: "@deepseek-ai/dsh-mcp-client"\n      config:\n        serverName: leetcode_tracker\n        transport: stdio\n        command: '+JSON.stringify(mcpConfig.connection.nodePath)+'\n        args: '+JSON.stringify([mcpConfig.connection.proxyPath,'--config',mcpConfig.connection.configPath,'--client',client.id])}</pre>
                             </div>
                             <div>
@@ -1248,7 +1272,7 @@ export function SettingsView({
                               <pre style={{overflowX:'auto'}}>{JSON.stringify({mcpServers:{'leetcode-tracker':{command:mcpConfig.connection.nodePath,args:[mcpConfig.connection.proxyPath,'--config',mcpConfig.connection.configPath,'--client',client.id]}}},null,2)}</pre>
                             </div>
                           </> : <p>{zh ? '运行时路径不可用，请重新加载设置。' : 'Runtime paths unavailable. Reload Settings.'}</p>}
-                          <div>
+                          {!isDesktop && <div>
                             <strong>{zh ? 'ChatGPT 网页版 — Secure MCP Tunnel' : 'ChatGPT Web — Secure MCP Tunnel'}</strong>
                             <p>{zh ? '从官方发布页安装 tunnel-client。在 Platform 创建 Tunnel，并关联目标 ChatGPT workspace。控制面凭证由 Tunnel 管理。将复制的 Tracker Token 保存为私有文本文件，内容为 Bearer 加空格和 Token。普通请求与启动探测使用同一文件；请在 Tracker 中明确恢复 AI 访问。轮换后更新该文件并重启 Tunnel。' : 'Install official tunnel-client, create a Tunnel in Platform and associate its ChatGPT workspace. Tunnel owns its control-plane credential. Save the copied Tracker Token in a private text file as Bearer, a space and the Token. Use the same file for calls and startup probes; explicitly resume AI access in Tracker. After rotation, update the file and restart Tunnel.'}</p>
                             <a href="https://developers.openai.com/api/docs/guides/secure-mcp-tunnels" target="_blank" rel="noreferrer">{zh ? '官方 Tunnel 指南' : 'Official Tunnel guide'}</a>
@@ -1256,7 +1280,7 @@ export function SettingsView({
                               'tunnel-client doctor --profile tracker --explain --mcp.extra-headers "Authorization: file:C:/private/tracker-auth.txt" --mcp.discovery-extra-headers "Authorization: file:C:/private/tracker-auth.txt"\n'+
                               'tunnel-client run --profile tracker --mcp.extra-headers "Authorization: file:C:/private/tracker-auth.txt" --mcp.discovery-extra-headers "Authorization: file:C:/private/tracker-auth.txt"'}</pre>
                             <p>{zh ? '在 ChatGPT 开发者模式中创建连接，选择 Tunnel 和同一 Tunnel ID。Tracker 不创建或自动管理 Tunnel。' : 'Create a developer-mode connection in ChatGPT, select Tunnel and the same Tunnel ID. Tracker does not create or manage tunnels.'}</p>
-                          </div>
+                          </div>}
                         </div>
                       )}
                     </div>
@@ -1266,18 +1290,18 @@ export function SettingsView({
             </div>
 
             {/* Create Custom Connection Form */}
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div className="settings-actions">
               {['Codex', 'DSH', 'ChatGPT'].map(name => <button key={name} className="btn btn-secondary btn-sm" disabled={creatingClient || !mcpConfig} onClick={e => void handleCreateClient(e, name)}>
                 {zh ? `创建 ${name} 连接` : `Create ${name} connection`}
               </button>)}
             </div>
-            <form onSubmit={handleCreateClient} style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '6px' }}>
+            <form className="settings-actions" onSubmit={handleCreateClient} style={{ marginTop: '6px' }}>
               <input
                 type="text"
                 placeholder={zh ? '新连接名称（如：Work Laptop Cursor）' : 'Connection Name (e.g. Work Laptop Cursor)'}
                 value={newClientName}
                 onChange={(e) => setNewClientName(e.target.value)}
-                style={{ flex: 1, fontSize: '0.875rem' }}
+                style={{ flex: '1 1 220px', fontSize: '0.875rem' }}
               />
               <button
                 type="submit"
@@ -1292,8 +1316,11 @@ export function SettingsView({
             {mcpError && <Feedback tone="error">{mcpError}</Feedback>}
           </div>
 
+          </div>
+          </details>
           {/* Operation Review Model */}
           <div
+            id="plugin-review-model"
             style={{
               padding: '16px',
               backgroundColor: 'var(--surface-muted)',
@@ -1911,7 +1938,7 @@ export function SettingsView({
                   </div>
                   <p>
                     {pendingBundle.version !== 1
-                      ? `${zh ? '完整迁移' : 'Complete migration'} · v${pendingBundle.appVersion} · ${pendingBundle.tables.problems.length} ${zh ? '题目' : 'problems'} · ${pendingBundle.tables.practice_records.length} ${zh ? '练习记录' : 'practice records'} · ${pendingBundle.tables.progress_snapshots.length} ${zh ? '进度记录' : 'progress snapshots'} · ${pendingBundle.tables.problem_notes.length} ${zh ? '笔记' : 'notes'}`
+                      ? `${zh ? '完整迁移' : 'Complete migration'} · ${zh ? '备份格式' : 'Bundle'} v${pendingBundle.version} · ${zh ? '应用' : 'App'} v${pendingBundle.appVersion} · ${pendingBundle.tables.problems.length} ${zh ? '题目' : 'problems'} · ${pendingBundle.tables.practice_records.length} ${zh ? '练习记录' : 'practice records'} · ${pendingBundle.tables.progress_snapshots.length} ${zh ? '进度记录' : 'progress snapshots'} · ${pendingBundle.tables.problem_notes.length} ${zh ? '笔记' : 'notes'}`
                       : zh ? '旧版 v1：仅部分恢复，不包含题库或完整历史。请先确保本机已有对应题库。' : 'Legacy v1: partial restore only; no catalog or complete history. The matching catalog must already exist.'}
                   </p>
                   <p className="restore-confirm-note">

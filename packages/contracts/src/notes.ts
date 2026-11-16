@@ -70,6 +70,8 @@ export type ProblemNoteSummary = z.infer<typeof problemNoteSummarySchema>;
 
 /** Query options for listing problem notes. */
 export const problemNoteListQuerySchema = z.object({
+  /** Exact imported ID for host navigation; independent of fuzzy search and list pagination. */
+  frontendId: z.string().min(1).max(100).optional(),
   search: z.string().max(100).optional(),
   difficulty: z.enum(['Easy', 'Medium', 'Hard', 'all']).default('all'),
   hasNote: z.enum(['true', 'false', 'all']).default('all'),

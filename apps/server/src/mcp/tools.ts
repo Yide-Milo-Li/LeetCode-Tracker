@@ -79,6 +79,7 @@ export function registerTrackerTools(
           uri: WORKSPACE_RESOURCE_URI,
           mimeType: 'text/html;profile=mcp-app',
           text: html,
+          _meta: { 'openai/ui': { availableDisplayModes: ['fullscreen'], preferredDisplayMode: 'fullscreen' } },
         }],
       };
     },
@@ -741,6 +742,7 @@ export function registerTrackerTools(
       inputSchema: z.object({
         operationId: z.string().min(1).describe('Unique client operation ID for idempotency and audit tracking'),
         questionFrontendId: z.string().min(1).describe('Problem frontend ID (e.g. "1")'),
+        expectedLibraryGeneration: z.number().int().positive().optional(),
         practicedAt: z.string().min(1).describe('Event timestamp in ISO 8601 (e.g. "2026-10-01T10:00:00+08:00")'),
         timePrecision: z.enum(['datetime', 'date']).optional().describe('Time precision (defaults to datetime if time present)'),
         durationMinutes: z.number().int().min(1).max(1440).nullable().optional(),
@@ -762,6 +764,7 @@ export function registerTrackerTools(
       inputSchema: z.object({
         operationId: z.string().min(1).describe('Unique client operation ID for idempotency'),
         practiceId: z.string().min(1).describe('ID of the practice record to update'),
+        expectedLibraryGeneration: z.number().int().positive().optional(),
         expectedRevision: z.number().int().positive().describe('Current revision of the practice record for concurrency protection'),
         durationMinutes: z.number().int().min(1).max(1440).nullable().optional(),
         completed: z.boolean().optional(),
@@ -784,6 +787,7 @@ export function registerTrackerTools(
       inputSchema: z.object({
         operationId: z.string().min(1).describe('Unique client operation ID for idempotency'),
         practiceId: z.string().min(1).describe('ID of the practice record to revoke'),
+        expectedLibraryGeneration: z.number().int().positive().optional(),
         expectedRevision: z.number().int().positive().describe('Current revision of the practice record'),
       }),
     },
@@ -1063,7 +1067,8 @@ export function registerTrackerTools(
     'tracker_open_workspace',
     {
       description: 'Open the interactive LeetCode Tracker workspace in host UI (home, today, practice, or notes view) with optional target entity focus.',
-      _meta: { ui: { resourceUri: WORKSPACE_RESOURCE_URI } },
+      title: 'Tracker workspace',
+      _meta: { ui: { resourceUri: WORKSPACE_RESOURCE_URI }, 'openai/ui': { entrypoints: [{ type: 'global' }, { type: 'thread' }] } },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: z.object({
         view: z.enum(['home', 'today', 'practice', 'notes']).optional().default('home').describe('Initial workspace view to present'),
@@ -1121,10 +1126,14 @@ export function registerTrackerTools(
           'practices',
           'practice',
           'progress',
+          'catalog',
+          'problem',
+          'snapshot_history',
         ]).describe('Fixed workspace query category'),
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Target date in YYYY-MM-DD for today plan query'),
         planId: z.string().optional().describe('Plan ID for plan_versions query'),
         frontendId: z.string().optional().describe('Problem frontend ID for note query'),
+        questionId: z.string().optional(),
         practiceId: z.string().optional().describe('Practice ID for practice query'),
         questionFrontendId: z.string().optional().describe('Problem frontend ID for practices query'),
         scope: z.enum(['all', 'practiced']).optional().describe('Notes scope filter'),
@@ -1141,10 +1150,19 @@ export function registerTrackerTools(
     },
     async (args) => {
       const { kind } = args;
+      const readGeneration=application.businessVersions().libraryGeneration;
       let data: unknown;
       let summary = `Query ${kind} completed`;
 
-      if (kind === 'preferences') {
+      if (kind === 'catalog') {
+        data = await application.catalog.query({search:args.search,page:args.page,limit:args.limit,difficulty:args.difficulty==='all'?undefined:args.difficulty});
+      } else if (kind === 'problem') {
+        if(!args.frontendId)throw new Error('MISSING_FRONTEND_ID');
+        data = await application.catalog.read({}, {frontendId:args.frontendId});
+      } else if (kind === 'snapshot_history') {
+        if(!args.questionId)throw new Error('MISSING_QUESTION_ID');
+        data = await application.progress.snapshotHistory({}, {id:args.questionId});
+      } else if (kind === 'preferences') {
         const settings = await application.settings.get();
         data = {
           timezone: settings.timezone,
@@ -1191,6 +1209,7 @@ export function registerTrackerTools(
       } else if (kind === 'notes') {
         const notesRes = await application.notes.list({
           scope: args.scope,
+          frontendId:args.frontendId,
           search: args.search,
           tag: args.tag,
           difficulty: args.difficulty,
@@ -1234,6 +1253,8 @@ export function registerTrackerTools(
         summary = `Progress statistics: ${dashboard.overview.totalManualPractices} total practices, streak ${dashboard.overview.currentStreak}`;
       }
 
+      // Never attach a replacement library's generation to data read before that replacement.
+      if(application.businessVersions().libraryGeneration!==readGeneration)throw Object.assign(new Error('Reload after a library change.'),{code:'LIBRARY_GENERATION_MISMATCH'});
       return {
         content: [{
           type: 'text' as const,
@@ -1241,7 +1262,7 @@ export function registerTrackerTools(
         }],
         structuredContent: { ok: true, kind, summary },
         _meta: {
-          workspace: { kind, data, libraryGeneration: application.businessVersions().libraryGeneration },
+          workspace: { kind, data, libraryGeneration: readGeneration },
         },
       };
     },
@@ -1274,9 +1295,9 @@ export function registerTrackerTools(
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: z.object({
         action: z.enum(['get', 'set', 'delete']).describe('Draft action: get, set, or delete'),
-        entityType: z.enum(['note', 'practice']).describe('Entity type: note or practice'),
+        entityType: z.enum(['note', 'practice', 'recovery']).describe('Entity type: note, practice, or private operation journal'),
         entityId: z.string().min(1).describe('Entity ID (frontendId for notes, record ID for practice)'),
-        draftContent: z.string().max(100000).optional().describe('Draft Markdown or JSON content for set action'),
+        draftContent: z.string().max(800000).optional().describe('Bounded draft Markdown or private recovery JSON'),
         expectedDraftRevision: z.number().int().nonnegative().optional().describe('Expected draft revision for optimistic concurrency'),
         baseRevision: z.number().int().nonnegative().optional().describe('Base entity revision when draft began'),
         workspaceInstanceId: z.string().min(1).describe('Host workspace/widget instance identifier'),

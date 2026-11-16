@@ -15,7 +15,7 @@ export type View =
 export type PracticeRequest =
   | { mode: 'manual'; problem?: CatalogProblem }
   | { mode: 'enrich'; record: PracticeRecord; draft?: PracticeDraft; elapsedMinutes?: number }
-  | { mode: 'detail'; record: PracticeRecord; draft?: PracticeDraft }
+  | { mode: 'detail'; record: PracticeRecord; draft?: PracticeDraft; restoreEditing?:boolean }
   | { mode: 'evidence'; item: PlanItem };
 /** Retain the submitted fields when an editor closes before its request settles. */
 export interface PracticeDraft {
