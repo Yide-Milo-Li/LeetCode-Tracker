@@ -3,7 +3,20 @@
 The rebased Phase 38 / Phase 39 development source merges the independently developed schema v11 and v12 layouts as schema v13 and uses Bundle v6 to retain both note revisions and recommendation data. Rebase verification and a new candidate build are pending; historical results below apply only to their recorded candidates.
 
 
-## Installed R3 and Codex acceptance — November 15, 2026
+
+## R3 native and Codex confirmation supplement — November 16, 2026
+
+The unchanged installed R3 candidate adds actual native key acceptance/replacement/cancel, compatibility import, real Windows save-failure preservation/retry, configured MCP-port conflict/recovery, explicit pause/resume consent, main-window-close/background reads, and test-grant rotation/revocation/replacement evidence in the same Windows account. Inputs are synthetic; no genuine Tunnel authentication is inferred. All 468 personal-profile hashes remain unchanged; 80 frozen/installed integrity checks pass. The setup matrix now has **2/33 complete native-only requirements (17/20), 13/33 partial requirements**, and no complete new embedded-host shell/conversation pass. Healthy tray Quit, full logical-width wizard coverage and genuine Tunnel lifecycle remain open.
+
+Actual **Codex 0.169.0-alpha.11.1**, requested **gpt-6.1-sol**, performs **16 completed app-server turns / 61 real MCP tool attempts** plus one expected revoked-server startup denial. Model-review pending → desktop Proceed/Reject, actual host cancellation, exact terminal replay, read-only write denial, pause/resume, native credential lifecycle and restarted host/native/SQLite reread pass in their recorded scope. Profile B has exactly **one 23-minute practice / five terminal operations**, revision 1 and integrity ok; the earlier Full access profile's two records/25 attempts remain separate. Native replacement read-only grant creation is now observed; automatic host configuration remains future work.
+
+**R3 field promotion is blocked by a reproduced startup recovery defect:** a recycled former sidecar PID belongs to a later unrelated cmd.exe, but the PID-only lease check falsely reports DATABASE_IN_USE. No source repair, unrelated-process termination or lease/WAL/SHM deletion was performed. A repair requires a new candidate and affected-case replay. This does not establish the older initialization wait's cause.
+
+Codex negotiates MCP **2025-06-18**; Tracker's host-form branch requires **2026-07-28**, so zero native host forms occurred and only desktop fallback/tool cancellation is accepted. Real Gemini review is blocked by **429 RESOURCE_EXHAUSTED, project monthly spending cap**; both requests safely remain pending before explicit rejection. Temporary provider settings and the isolated test snapshot are cleared; final exact-byte scan finds no key in new evidence/test storage. DSH/ChatGPT/Tunnel prerequisites, required independent-review decisions, Skill and aggregate Gate 0 remain incomplete. The source and installer remain 6ccdc943 / a534eb277a4a514cf60921183c54cd427f5a1584aabde0a0a082273e0d2ea08b; existing 645 JS/Web/sidecar + 30 Rust checks are reused for unchanged executable source.
+
+Detailed local report and assertions: .local/evidence/phase38-profile-20261115-r3/native-confirmation-20261115-b/report.md and verification.json. Frozen package readiness is not field acceptance. This is a documentation-only increment; no push/release.
+
+## Historical installed R3 checkpoint — November 15, 2026
 
 Candidate **phase38-profile-20261115-r3** is frozen from **6ccdc943a057349e5e6a3a1cd5a4f490278505dd**, which includes **681bc1269b2ed84158dcd2f1adf8398ad3a4e060**. Its Windows installer is **53,538,245 bytes**, SHA-256 **a534eb277a4a514cf60921183c54cd427f5a1584aabde0a0a082273e0d2ea08b**. The clean source archive has 461 tracked files and matches 345 qualified code/configuration inputs. All 11 extracted resources match; the native executable differs only by the audited Tauri bundle marker. Installation at `D:\LeetCode Tracker` succeeds, and all 12 installed payload files match the frozen extracted payload. The executable build remains 6ccdc94; this documentation increment does not change the package. R1/R2 evidence retains its own source and acceptance scope.
 
