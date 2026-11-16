@@ -55,9 +55,9 @@ describe('Multi-Provider LLM Settings & Server Endpoints (/api/v1/settings)', ()
       payload: {
         llmProvider: 'openai',
         openaiApiKey: 'sk-openai-test-key',
-        openaiModel: 'gpt-4o-mini',
+        openaiModel: 'gpt-6.1-terra',
         openaiBaseUrl: 'https://custom-openai-proxy.internal/v1',
-        openaiFallbackModels: ['gpt-4o'],
+        openaiFallbackModels: ['gpt-6-luna'],
       },
     });
     assert.equal(patchOpenai.statusCode, 200);
@@ -90,9 +90,9 @@ describe('Multi-Provider LLM Settings & Server Endpoints (/api/v1/settings)', ()
 
     // OpenAI intact
     assert.equal(finalBody.openaiApiKey, 'sk-openai-test-key');
-    assert.equal(finalBody.openaiModel, 'gpt-4o-mini');
+    assert.equal(finalBody.openaiModel, 'gpt-6.1-terra');
     assert.equal(finalBody.openaiBaseUrl, 'https://custom-openai-proxy.internal/v1');
-    assert.deepEqual(finalBody.openaiFallbackModels, ['gpt-4o']);
+    assert.deepEqual(finalBody.openaiFallbackModels, ['gpt-6-luna']);
 
     // DeepSeek intact
     assert.equal(finalBody.deepseekApiKey, 'sk-deepseek-test-key');
@@ -111,8 +111,8 @@ describe('Multi-Provider LLM Settings & Server Endpoints (/api/v1/settings)', ()
       method: 'PATCH',
       url: '/api/v1/settings',
       payload: {
-        openaiModel: 'gpt-4o',
-        openaiFallbackModels: ['gpt-4o'],
+        openaiModel: 'gpt-6.1-terra',
+        openaiFallbackModels: ['gpt-6.1-terra'],
       },
     });
     assert.equal(openaiDupPrimary.statusCode, 400);
@@ -122,8 +122,8 @@ describe('Multi-Provider LLM Settings & Server Endpoints (/api/v1/settings)', ()
       method: 'PATCH',
       url: '/api/v1/settings',
       payload: {
-        openaiModel: 'gpt-4o-mini',
-        openaiFallbackModels: ['gpt-4o', 'gpt-4o'],
+        openaiModel: 'gpt-6-luna',
+        openaiFallbackModels: ['gpt-6.1-terra', 'gpt-6.1-terra'],
       },
     });
     assert.equal(openaiDupFallback.statusCode, 400);
@@ -293,6 +293,61 @@ describe('Multi-Provider LLM Settings & Server Endpoints (/api/v1/settings)', ()
     });
     assert.equal(invalidDeepseek.statusCode, 400);
     assert.equal(invalidDeepseek.json().error, 'INVALID_SETTINGS');
+  });
+
+  it('supports gpt-6.1-terra across settings and test-llm while rejecting unsupported OpenAI models', async () => {
+    const db = new DatabaseSync(':memory:');
+    const store = new CatalogStore(db, { skipBackup: true });
+    let testedParams: unknown;
+    const mockAssistant: ILLMAssistant = {
+      formatProgressText: async () => ({ candidates: [], unparsedSnippets: [], model: 'mock' }),
+      getStatus: (): LLMAssistantStatus => ({ configured: true, provider: 'openai', model: 'gpt-6-luna' }),
+      testConnection: async (params) => {
+        testedParams = params;
+        return { ok: true, model: params?.model || 'gpt-6-luna', provider: params?.provider || 'openai' };
+      },
+    };
+    const app = await buildApp({ store, geminiAssistant: mockAssistant, disableStatic: true });
+
+    const validTerra = await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/settings',
+      payload: { llmProvider: 'openai', openaiModel: 'gpt-6.1-terra', openaiReasoningEffort: 'xhigh' },
+    });
+    assert.equal(validTerra.statusCode, 200);
+    assert.equal(validTerra.json().openaiModel, 'gpt-6.1-terra');
+    assert.equal(validTerra.json().openaiReasoningEffort, 'xhigh');
+
+    const invalidPatch = await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/settings',
+      payload: { openaiModel: 'gpt-4o-mini' },
+    });
+    assert.equal(invalidPatch.statusCode, 400);
+    assert.equal(invalidPatch.json().error, 'INVALID_SETTINGS');
+
+    const validProbe = await app.inject({
+      method: 'POST',
+      url: '/api/v1/settings/test-llm',
+      payload: { provider: 'openai', apiKey: 'sk-test', model: 'gpt-6.1-terra', reasoningEffort: 'xhigh' },
+    });
+    assert.equal(validProbe.statusCode, 200);
+    assert.equal(validProbe.json().model, 'gpt-6.1-terra');
+    assert.deepEqual(testedParams, {
+      provider: 'openai',
+      apiKey: 'sk-test',
+      model: 'gpt-6.1-terra',
+      baseUrl: undefined,
+      reasoningEffort: 'xhigh',
+    });
+
+    const invalidProbe = await app.inject({
+      method: 'POST',
+      url: '/api/v1/settings/test-llm',
+      payload: { provider: 'openai', apiKey: 'sk-test', model: 'gpt-4o-mini' },
+    });
+    assert.equal(invalidProbe.statusCode, 400);
+    assert.equal(invalidProbe.json().error, 'INVALID_SETTINGS');
   });
 });
 
@@ -586,11 +641,11 @@ describe('Native HTTP LLM Providers (OpenAI & DeepSeek)', () => {
 
       const openai = new OpenAIProvider({
         apiKey: 'sk-openai',
-        defaultModel: 'gpt-6-luna',
+        defaultModel: 'gpt-6.1-terra',
         defaultReasoningEffort: 'max',
       });
       await openai.generateContent({
-        model: 'gpt-6-luna',
+        model: 'gpt-6.1-terra',
         systemInstruction: 'sys',
         prompt: 'prompt',
         abortSignal: new AbortController().signal,

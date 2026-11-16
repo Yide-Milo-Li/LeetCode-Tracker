@@ -10,7 +10,7 @@ All maintained documentation is English. The implemented desktop interface suppo
 
 - [Architecture](architecture.md): Component structure, write ownership, persistence boundaries, and storage engine.
 - [Interactive visual architecture](diagrams/architecture.html): Standalone explorable HTML architecture diagram with dark/light themes, search, and guided views.
-- [AI provider configuration](llm-providers.md): Multi-provider LLM abstraction (Gemini, OpenAI, DeepSeek), credential isolation, and fallback policies.
+- [AI provider configuration](llm-providers.md): Supported Gemini (`gemini-3.8-flash`, `gemini-4-hydrogen`), OpenAI (`gpt-6-luna`, `gpt-6.1-terra`), and DeepSeek (`deepseek-flash`) models, per-model reasoning effort controls, credential isolation, and fallback policies.
 
 ## Product & Desktop Workflows
 

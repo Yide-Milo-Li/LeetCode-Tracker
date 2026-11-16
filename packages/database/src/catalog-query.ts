@@ -8,6 +8,7 @@ import {
   catalogQuerySchema,
   importSummarySchema,
   normalizeGeminiModel,
+  normalizeOpenaiModel,
   normalizeReasoningEffort,
   resolveModelReasoningEffort,
   themePaletteSchema,
@@ -506,7 +507,11 @@ export function updateUserSettingsTransaction(
       effortInput?: string | null
     ) => {
       const normalizeModelValue = (value: string) =>
-        prefix === 'gemini' ? (normalizeGeminiModel(value) ?? value.trim()) : value.trim();
+        prefix === 'gemini'
+          ? (normalizeGeminiModel(value) ?? value.trim())
+          : prefix === 'openai'
+          ? (normalizeOpenaiModel(value) ?? value.trim())
+          : value.trim();
 
       if (keyInput !== undefined) {
         updateStmt.run(`${prefix}_api_key`, keyInput ? keyInput.trim() : '', now);

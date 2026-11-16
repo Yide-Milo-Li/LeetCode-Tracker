@@ -204,10 +204,16 @@ try {
           await evaluate("[...document.querySelector('.ai-settings-form select').options].map(o=>o.value)"),
           ['models/gemini-3.8-flash', 'models/gemini-4-hydrogen'],
         );
+      } else if (provider === 'openai') {
+        assert.equal(assistant.getStatus().model, 'gpt-6-luna');
+        assert.deepEqual(
+          await evaluate("[...document.querySelector('.ai-settings-form select').options].map(o=>o.value)"),
+          ['gpt-6-luna', 'gpt-6.1-terra'],
+        );
+        assert.equal(await evaluate("Boolean(document.querySelector('.candidate-chips'))"), false);
       } else {
-        const expected = provider === 'openai' ? 'gpt-6-luna' : 'deepseek-flash';
-        assert.equal(assistant.getStatus().model, expected);
-        assert.deepEqual(await evaluate("[...document.querySelector('.ai-settings-form select').options].map(o=>o.value)"), [expected]);
+        assert.equal(assistant.getStatus().model, 'deepseek-flash');
+        assert.deepEqual(await evaluate("[...document.querySelector('.ai-settings-form select').options].map(o=>o.value)"), ['deepseek-flash']);
         assert.equal(await evaluate("Boolean(document.querySelector('.candidate-chips'))"), false);
       }
       await evaluate("document.querySelector('.ai-settings-form').scrollIntoView({block:'start'})");

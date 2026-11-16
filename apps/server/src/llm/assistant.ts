@@ -10,7 +10,9 @@ import type { Bilingual, Rules, RulePatch, Candidate } from '../../../../package
 import {
   defaultGeminiFallbackModels,
   defaultGeminiModel,
+  defaultOpenaiModel,
   normalizeGeminiModel,
+  normalizeOpenaiModel,
   resolveModelReasoningEffort,
   type CatalogProblem,
   type ReasoningEffort,
@@ -91,7 +93,7 @@ export class LLMAssistant implements ILLMAssistant {
     const deepseekOpts = options.providers?.deepseek;
 
     const geminiModel = geminiOpts?.model || (this.activeProviderType === 'gemini' ? options.model : undefined) || normalizeGeminiModel(process.env.GEMINI_MODEL) || defaultGeminiModel;
-    const openaiModel = openaiOpts?.model || (this.activeProviderType === 'openai' ? options.model : undefined) || process.env.OPENAI_MODEL || 'gpt-6-luna';
+    const openaiModel = openaiOpts?.model || (this.activeProviderType === 'openai' ? options.model : undefined) || normalizeOpenaiModel(process.env.OPENAI_MODEL) || defaultOpenaiModel;
     const deepseekModel = deepseekOpts?.model || (this.activeProviderType === 'deepseek' ? options.model : undefined) || process.env.DEEPSEEK_MODEL || 'deepseek-flash';
 
     this.providerConfigs = {

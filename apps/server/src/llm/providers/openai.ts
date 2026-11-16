@@ -3,7 +3,12 @@
  * Implements standard OpenAI Chat Completions API with structured JSON mode.
  * Zero external npm dependencies.
  */
-import { resolveModelReasoningEffort, type ReasoningEffort } from '../../../../../packages/contracts/src/sync.ts';
+import {
+  defaultOpenaiModel,
+  normalizeOpenaiModel,
+  resolveModelReasoningEffort,
+  type ReasoningEffort,
+} from '../../../../../packages/contracts/src/sync.ts';
 import { BaseLLMProvider } from './base.ts';
 import type {
   LLMProviderType,
@@ -41,7 +46,7 @@ export class OpenAIProvider extends BaseLLMProvider {
     super();
     this.providerId = options.providerId || 'openai';
     this.apiKey = options.apiKey ?? (this.providerId === 'openai' ? process.env.OPENAI_API_KEY : undefined);
-    this.defaultModel = options.defaultModel || process.env.OPENAI_MODEL || 'gpt-6-luna';
+    this.defaultModel = options.defaultModel || (this.providerId === 'deepseek' ? (process.env.DEEPSEEK_MODEL || 'deepseek-flash') : (normalizeOpenaiModel(process.env.OPENAI_MODEL) || defaultOpenaiModel));
     this.baseUrl = (options.baseUrl || process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, '');
     const envEffort = this.providerId === 'deepseek'
       ? process.env.DEEPSEEK_REASONING_EFFORT

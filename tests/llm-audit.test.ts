@@ -16,22 +16,23 @@ const rules: Rules = { dailyCount: 1, difficulty: { Easy: 100, Medium: 0, Hard: 
 afterEach(() => mock.restoreAll());
 
 it('application configuration pins supported Gemini, OpenAI and DeepSeek models over legacy settings', async () => {
-  for (const [provider, model, storedFallback, expectedFallback] of [
-    ['gemini', 'models/gemini-3.8-flash', ['models/gemini-3.7-flash', 'models/gemini-4-hydrogen'], ['models/gemini-4-hydrogen']],
-    ['openai', 'gpt-6-luna', ['old-backup'], []],
-    ['deepseek', 'deepseek-flash', ['old-backup'], []],
+  for (const [provider, storedModel, expectedModel, storedFallback, expectedFallback] of [
+    ['gemini', 'models/gemini-3.5-flash', 'models/gemini-3.8-flash', ['models/gemini-3.7-flash', 'models/gemini-4-hydrogen'], ['models/gemini-4-hydrogen']],
+    ['openai', 'old-model', 'gpt-6-luna', ['old-backup'], []],
+    ['openai', 'gpt-6.1-terra', 'gpt-6.1-terra', ['old-backup'], []],
+    ['deepseek', 'old-model', 'deepseek-flash', ['old-backup'], []],
   ] as const) {
   const store = new CatalogStore(new DatabaseSync(':memory:'), { skipBackup: true });
   await store.updateSettings({
     llmProvider: provider,
     [`${provider}ApiKey`]: 'synthetic',
-    [`${provider}Model`]: provider === 'gemini' ? 'models/gemini-3.5-flash' : 'old-model',
+    [`${provider}Model`]: storedModel,
     [`${provider}FallbackModels`]: [...storedFallback],
   });
   const app = await buildApp({ store, disableStatic: true });
   try {
     const response = await app.inject({ method: 'GET', url: '/api/v1/progress-imports/status' });
-    assert.equal(response.json().model, model);
+    assert.equal(response.json().model, expectedModel);
     assert.deepEqual(response.json().fallbackModels, [...expectedFallback]);
   } finally { await app.close(); store.db.close(); }
   }
@@ -46,7 +47,7 @@ it('hot reload keeps inactive keys isolated and clears keys, URLs and fallbacks'
       const res = await app.inject({ method: 'PATCH', url: '/api/v1/settings', payload });
       assert.equal(res.statusCode, 200, res.payload);
     };
-    await patch({ geminiApiKey: 'synthetic-gemini', openaiApiKey: 'synthetic-openai', openaiModel: 'custom', openaiBaseUrl: 'https://gateway.invalid/v1', openaiFallbackModels: ['backup'] });
+    await patch({ geminiApiKey: 'synthetic-gemini', openaiApiKey: 'synthetic-openai', openaiModel: 'gpt-6.1-terra', openaiBaseUrl: 'https://gateway.invalid/v1', openaiFallbackModels: ['backup'] });
     await patch({ llmProvider: 'openai' });
     assert.equal(assistant.getStatus().configured, true);
     await patch({ openaiApiKey: null, openaiBaseUrl: null, openaiFallbackModels: [] });

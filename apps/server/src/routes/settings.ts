@@ -6,6 +6,7 @@ import {
   updateSettingsInputSchema,
   fixedProviderModels,
   normalizeGeminiModel,
+  normalizeOpenaiModel,
   normalizeReasoningEffort,
   type ReasoningEffort,
 } from '../../../../packages/contracts/src/sync.ts';
@@ -99,6 +100,17 @@ export function registerSettingsRoutes(app: FastifyInstance, context: RouteConte
           return reply.status(400).send({
             error: 'INVALID_SETTINGS',
             message: 'Unsupported Gemini model. Allowed models: models/gemini-3.8-flash, models/gemini-4-hydrogen',
+          });
+        }
+        effectiveModel = normalizedModel;
+      }
+    } else if (effectiveProvider === 'openai') {
+      if (model !== undefined) {
+        const normalizedModel = normalizeOpenaiModel(model);
+        if (!normalizedModel) {
+          return reply.status(400).send({
+            error: 'INVALID_SETTINGS',
+            message: 'Unsupported OpenAI model. Allowed models: gpt-6-luna, gpt-6.1-terra',
           });
         }
         effectiveModel = normalizedModel;

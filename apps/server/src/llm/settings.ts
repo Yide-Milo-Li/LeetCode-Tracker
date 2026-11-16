@@ -1,8 +1,10 @@
 /** Resolve persisted overrides identically at startup and after a settings write. */
 import {
   defaultGeminiModel,
+  defaultOpenaiModel,
   fixedProviderModels,
   normalizeGeminiModel,
+  normalizeOpenaiModel,
   resolveModelReasoningEffort,
 } from '../../../../packages/contracts/src/sync.ts';
 import type { CatalogStore } from '../../../../packages/database/src/store.ts';
@@ -32,15 +34,27 @@ export function resolveAssistantSettings(store: CatalogStore): LLMAssistantOptio
           : undefined,
         baseUrl: undefined,
       };
-    } else {
-      providers[provider] = {
-        apiKey: hasRow('api_key') ? settings[`${provider}ApiKey`] ?? '' : undefined,
-        model: fixedProviderModels[provider],
+    } else if (provider === 'openai') {
+      const model = normalizeOpenaiModel(settings.openaiModel)
+        ?? (hasRow('model') && settings.openaiModel ? defaultOpenaiModel : undefined);
+      providers.openai = {
+        apiKey: hasRow('api_key') ? settings.openaiApiKey ?? '' : undefined,
+        model,
         fallbackModels: [],
-        reasoningEffort: hasRow('reasoning_effort') && settings[`${provider}ReasoningEffort`]
-          ? resolveModelReasoningEffort(provider, fixedProviderModels[provider], settings[`${provider}ReasoningEffort`])
+        reasoningEffort: hasRow('reasoning_effort') && settings.openaiReasoningEffort
+          ? resolveModelReasoningEffort('openai', model ?? defaultOpenaiModel, settings.openaiReasoningEffort)
           : undefined,
-        baseUrl: settings[`${provider}BaseUrl`] ?? undefined,
+        baseUrl: settings.openaiBaseUrl ?? undefined,
+      };
+    } else {
+      providers.deepseek = {
+        apiKey: hasRow('api_key') ? settings.deepseekApiKey ?? '' : undefined,
+        model: fixedProviderModels.deepseek,
+        fallbackModels: [],
+        reasoningEffort: hasRow('reasoning_effort') && settings.deepseekReasoningEffort
+          ? resolveModelReasoningEffort('deepseek', fixedProviderModels.deepseek, settings.deepseekReasoningEffort)
+          : undefined,
+        baseUrl: settings.deepseekBaseUrl ?? undefined,
       };
     }
   }

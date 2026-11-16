@@ -311,6 +311,29 @@ export function isSupportedGeminiModel(model?: string | null): boolean {
   return normalizeGeminiModel(model) !== null;
 }
 
+/** Supported OpenAI model identifiers. */
+export const supportedOpenaiModels = [
+  'gpt-6-luna',
+  'gpt-6.1-terra',
+] as const;
+export type SupportedOpenaiModel = (typeof supportedOpenaiModels)[number];
+export const defaultOpenaiModel: SupportedOpenaiModel = 'gpt-6-luna';
+
+/** Normalize an OpenAI model string to its canonical identifier, or null if unsupported. */
+export function normalizeOpenaiModel(model?: string | null): SupportedOpenaiModel | null {
+  if (!model) return null;
+  const trimmed = model.trim().toLowerCase();
+  if (!trimmed) return null;
+  return (supportedOpenaiModels as readonly string[]).includes(trimmed)
+    ? (trimmed as SupportedOpenaiModel)
+    : null;
+}
+
+/** Check whether a model string is one of the supported OpenAI models. */
+export function isSupportedOpenaiModel(model?: string | null): boolean {
+  return normalizeOpenaiModel(model) !== null;
+}
+
 /** All canonical reasoning effort identifiers across providers. */
 export const reasoningEffortLevels = ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type ReasoningEffort = (typeof reasoningEffortLevels)[number];
@@ -508,6 +531,8 @@ export const updateSettingsInputSchema = z.object({
   message: 'Unsupported Gemini model. Allowed models: models/gemini-3.8-flash, models/gemini-4-hydrogen',
 }).refine(data => !data.geminiFallbackModels || data.geminiFallbackModels.every(m => isSupportedGeminiModel(m)), {
   message: 'Unsupported Gemini fallback model. Allowed models: models/gemini-3.8-flash, models/gemini-4-hydrogen',
+}).refine(data => !data.openaiModel || !data.openaiModel.trim() || isSupportedOpenaiModel(data.openaiModel), {
+  message: 'Unsupported OpenAI model. Allowed models: gpt-6-luna, gpt-6.1-terra',
 }).refine(data => !data.geminiReasoningEffort || !data.geminiReasoningEffort.trim() || normalizeReasoningEffort('gemini', data.geminiReasoningEffort, data.geminiModel) !== null, {
   message: 'Unsupported Gemini thinkingLevel for the selected model',
 }).refine(data => !data.openaiReasoningEffort || !data.openaiReasoningEffort.trim() || normalizeReasoningEffort('openai', data.openaiReasoningEffort) !== null, {

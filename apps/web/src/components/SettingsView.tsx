@@ -5,12 +5,15 @@ import { Eye, EyeOff, Copy, Check, ClipboardPaste, Download, Upload, Archive, Da
 import {
   defaultGeminiFallbackModels,
   defaultGeminiModel,
+  defaultOpenaiModel,
   fixedProviderModels,
   getDefaultReasoningEffort,
   getSupportedReasoningEfforts,
   normalizeGeminiModel,
+  normalizeOpenaiModel,
   resolveModelReasoningEffort,
   supportedGeminiModels,
+  supportedOpenaiModels,
   type ReasoningEffort,
   type ThemePalette,
 } from '../../../../packages/contracts/src/sync.ts';
@@ -141,8 +144,13 @@ export type ProviderType = 'gemini' | 'openai' | 'deepseek';
 
 export const PROVIDER_PRESET_MODELS: Record<ProviderType, string[]> = {
   gemini: [...supportedGeminiModels],
-  openai: [fixedProviderModels.openai],
+  openai: [...supportedOpenaiModels],
   deepseek: [fixedProviderModels.deepseek],
+};
+
+const OPENAI_MODEL_LABELS: Record<string, string> = {
+  'gpt-6-luna': 'GPT-6 Luna',
+  'gpt-6.1-terra': 'GPT-6.1 Terra',
 };
 
 /** Keep the timezone and AI drafts intact on background refresh; only explicit save changes preferences. */
@@ -184,12 +192,12 @@ export function SettingsView({
 
   // OpenAI state
   const [openaiApiKey, setOpenaiApiKey] = useState('');
-  const [openaiPrimaryModel, setOpenaiPrimaryModel] = useState<string>(fixedProviderModels.openai);
+  const [openaiPrimaryModel, setOpenaiPrimaryModel] = useState<string>(defaultOpenaiModel);
   const [openaiIsCustomPrimary, setOpenaiIsCustomPrimary] = useState(false);
   const [openaiBaseUrl, setOpenaiBaseUrl] = useState('');
   const [openaiFallbackModels, setOpenaiFallbackModels] = useState<string[]>([]);
   const [openaiReasoningEffort, setOpenaiReasoningEffort] = useState<ReasoningEffort>(
-    () => getDefaultReasoningEffort('openai', fixedProviderModels.openai)
+    () => getDefaultReasoningEffort('openai', defaultOpenaiModel)
   );
 
   // DeepSeek state
@@ -312,12 +320,13 @@ export function SettingsView({
 
             // OpenAI
             if (settings.openaiApiKey !== undefined) setOpenaiApiKey(settings.openaiApiKey ?? '');
-            // Ignore legacy model choices: the application offers only Luna for OpenAI.
-            setOpenaiPrimaryModel(fixedProviderModels.openai);
+            // Ignore legacy model choices outside the supported OpenAI models.
+            const effOpenai = normalizeOpenaiModel(settings.openaiModel) ?? defaultOpenaiModel;
+            setOpenaiPrimaryModel(effOpenai);
             setOpenaiIsCustomPrimary(false);
             setOpenaiFallbackModels([]);
             setOpenaiReasoningEffort(
-              resolveModelReasoningEffort('openai', fixedProviderModels.openai, settings.openaiReasoningEffort)
+              resolveModelReasoningEffort('openai', effOpenai, settings.openaiReasoningEffort)
             );
             if (settings.openaiBaseUrl !== undefined) setOpenaiBaseUrl(settings.openaiBaseUrl ?? '');
 
@@ -877,13 +886,18 @@ export function SettingsView({
                     if (!nextSupported.includes(geminiReasoningEffort)) {
                       setGeminiReasoningEffort(getDefaultReasoningEffort('gemini', selectedModel));
                     }
+                  } else if (provider === 'openai') {
+                    const nextSupported = getSupportedReasoningEfforts('openai', selectedModel);
+                    if (!nextSupported.includes(openaiReasoningEffort)) {
+                      setOpenaiReasoningEffort(getDefaultReasoningEffort('openai', selectedModel));
+                    }
                   }
                 }
               }}
             >
               {currentPresetModels.map((m, idx) => (
                 <option key={m} value={m}>
-                  {provider === 'openai' ? 'GPT-6 Luna' : provider === 'deepseek' ? 'DeepSeek V4.1 Flash' : m.replace('models/', '')}{idx === 0 ? (zh ? '（推荐）' : ' (Recommended)') : ''}
+                  {provider === 'openai' ? (OPENAI_MODEL_LABELS[m] ?? m) : provider === 'deepseek' ? 'DeepSeek V4.1 Flash' : m.replace('models/', '')}{idx === 0 ? (zh ? '（推荐）' : ' (Recommended)') : ''}
                 </option>
               ))}
             </select>
@@ -899,8 +913,8 @@ export function SettingsView({
                     : 'Controls Gemini reasoning depth via thinkingConfig.thinkingLevel.')
                 : provider === 'openai'
                 ? (zh
-                    ? '通过 reasoning_effort 控制 GPT-6 Luna 推理强度。'
-                    : 'Controls GPT-6 Luna reasoning depth via reasoning_effort.')
+                    ? `通过 reasoning_effort 控制 ${OPENAI_MODEL_LABELS[currentPrimaryModel] ?? currentPrimaryModel} 推理强度。`
+                    : `Controls ${OPENAI_MODEL_LABELS[currentPrimaryModel] ?? currentPrimaryModel} reasoning depth via reasoning_effort.`)
                 : (zh
                     ? '通过 reasoning_effort 与 thinking 开关控制 DeepSeek V4.1 Flash 思考模式。'
                     : 'Controls DeepSeek V4.1 Flash thinking mode via reasoning_effort and thinking.')

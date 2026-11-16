@@ -22,14 +22,17 @@ const { WorkspaceContext } = await import('../apps/web/src/workspace.tsx');
 
 afterEach(() => { cleanup(); mock.restoreAll(); });
 
-it('offers only Luna, V4.1 Flash, and supported Gemini models even when legacy models were saved', async () => {
-  for (const [provider, model] of [['openai', 'gpt-6-luna'], ['deepseek', 'deepseek-flash']] as const) {
+it('offers only supported OpenAI, DeepSeek, and Gemini models even when legacy models were saved', async () => {
+  for (const [provider, options, defaultModel] of [
+    ['openai', ['gpt-6-luna', 'gpt-6.1-terra'], 'gpt-6-luna'],
+    ['deepseek', ['deepseek-flash'], 'deepseek-flash'],
+  ] as const) {
   mock.method(api, 'getSettings', async () => ({ language: 'en', theme: 'light', timezone: 'UTC', updatedAt: 1,
     llmProvider: provider, [`${provider}Model`]: 'old-model', [`${provider}FallbackModels`]: ['old-backup'] }));
   await act(async () => { render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} />); });
   const select = screen.getByLabelText('Preferred Model') as HTMLSelectElement;
-  assert.deepEqual([...select.options].map(option => option.value), [model]);
-  assert.equal(select.value, model);
+  assert.deepEqual([...select.options].map(option => option.value), [...options]);
+  assert.equal(select.value, defaultModel);
   assert.equal(screen.queryByLabelText('Custom Model Identifier'), null);
   assert.equal(screen.queryByRole('group', { name: 'Candidate Fallback Models' }), null);
   cleanup();
@@ -661,6 +664,13 @@ it('renders vendor-specific reasoning effort choices for OpenAI and DeepSeek', a
     render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} />);
   });
 
+  const openaiModelSelect = screen.getByLabelText('Preferred Model') as HTMLSelectElement;
+  assert.deepEqual([...openaiModelSelect.options].map(o => o.value), ['gpt-6-luna', 'gpt-6.1-terra']);
+  await act(async () => {
+    fireEvent.change(openaiModelSelect, { target: { value: 'gpt-6.1-terra' } });
+  });
+  assert.equal(openaiModelSelect.value, 'gpt-6.1-terra');
+
   const effortSelect = screen.getByLabelText('Reasoning Effort') as HTMLSelectElement;
   assert.deepEqual([...effortSelect.options].map(o => o.value), ['none', 'low', 'medium', 'high', 'xhigh', 'max']);
   assert.equal(effortSelect.value, 'medium');
@@ -680,6 +690,7 @@ it('renders vendor-specific reasoning effort choices for OpenAI and DeepSeek', a
     fireEvent.click(screen.getByRole('button', { name: 'Save AI settings' }));
   });
   const payload = writes.mock.calls[0].arguments[0];
+  assert.equal(payload.openaiModel, 'gpt-6.1-terra');
   assert.equal(payload.openaiReasoningEffort, 'max');
   assert.equal(payload.deepseekReasoningEffort, 'none');
 });
