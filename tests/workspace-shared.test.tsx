@@ -45,7 +45,7 @@ test('formal rendered note preserves dirty input after recovery persistence fail
   const api=createToolTrackerClient(async(name,args)=>{if(fail&&name==='tracker_workspace_draft'&&args.entityType==='recovery')throw new Error('Synthetic disk failure');if(name==='tracker_save_note')writes++;return f.call(name,args);},host);
   const view=render(<WorkspaceProvider host={host} client={api}><NotesWorkspace lang="en" initialFrontendId="1" onDirtyChange={value=>{dirty=value;}}/></WorkspaceProvider>);
   try {
-    await waitFor(()=>assert.equal(view.container.querySelector('textarea')?.disabled,false));
+    await waitFor(()=>assert.equal(view.container.querySelector('textarea')?.disabled,false),{timeout:10000});
     fail=true;fireEvent.change(view.container.querySelector('textarea')!,{target:{value:'retain failed save'}});
     fireEvent.click(within(view.container).getByRole('button',{name:/Save note/i}));
     await waitFor(()=>assert.match(view.container.textContent!,/Synthetic disk failure/));
@@ -71,7 +71,7 @@ test('formal note save submits one snapshot while newer input remains dirty with
     await waitFor(()=>assert.equal(view.container.querySelector('textarea')?.disabled,false));
     fireEvent.change(view.container.querySelector('textarea')!,{target:{value:'submitted snapshot'}});fireEvent.click(within(view.container).getByRole('button',{name:/Save note/i}));
     await waitFor(()=>assert.equal(submitted.length,1));fireEvent.change(view.container.querySelector('textarea')!,{target:{value:'newer dirty input'}});
-    await act(async()=>release());await waitFor(()=>assert.equal((within(view.container).getByRole('button',{name:/Save note/i}) as HTMLButtonElement).disabled,false));
+    await act(async()=>release());await waitFor(()=>assert.equal((within(view.container).getByRole('button',{name:/Save note/i}) as HTMLButtonElement).disabled,false),{timeout:10000});
     assert.deepEqual(submitted,['submitted snapshot']);assert.equal((await api.getNote('1')).note?.content,'submitted snapshot');assert.equal(f.getModelCalls(),0);
     assert.equal(view.container.querySelector('textarea')!.value,'newer dirty input');assert.equal(dirty,true);assert.doesNotMatch(view.container.textContent!,/Note saved/);
   }finally{view.unmount();host.dispose();await f.close();}

@@ -26,7 +26,7 @@ The default target is `.local/tracker.sqlite`. Supported sources have valid sche
 
 The command uses SQLite snapshots for both source and destination, so committed WAL data is included. It preserves the current destination as `<target>.pre-restore-<unique-id>.sqlite`, restores the selected snapshot, and verifies the result. A failed replacement triggers a rollback attempt; the safety snapshot remains available. Do not manually delete WAL or SHM files to perform recovery.
 
-A `<database>.lock` process lease blocks restore or second-server startup while this application owns the database. Stale leases are reclaimed only when their recorded process no longer exists; malformed leases fail closed. Use the same database path and stop all other SQLite clients before recovery. The lease is not a lock for unrelated tools.
+A `<database>.lock` process lease and persistent `<database>.lock.guard` coordinate restore and current server instances. Windows recovers a complete legacy marker only when its PID no longer exists; incomplete or ambiguous markers fail closed. On non-Windows, stop older application versions before using the current recovery protocol. Do not remove the guard file. Use the same database path and stop all other SQLite clients before recovery. The lease is not a lock for unrelated tools; see the [architecture guide](../docs/architecture.md) for compatibility details.
 
 ## Desktop browser verification script
 

@@ -4,7 +4,19 @@ The rebased Phase 38 / Phase 39 development source merges the independently deve
 
 
 
-## R3 native and Codex confirmation supplement — November 16, 2026
+
+## Lease recovery engineering increment — November 16, 2026
+
+Current source uses a persistent SQLite guard and a Windows exclusive delete-on-close lease marker to protect current ownership and recover after abnormal exit. Windows recovers a complete legacy marker only when its PID is absent; incomplete or ambiguous markers fail closed. The existing R3 reused-PID marker remains blocked and has not been deleted. On non-Windows, stop older versions before starting a current version; the portable branch was simulated on Windows and is not a macOS acceptance result. The Windows implementation depends on Node 26's experimental `node:ffi` and fails closed if unavailable.
+
+On Node 26.13.0 / npm 12.0.2, the passing ordered engineering chain covered **652 tests (450 backend + 200 web + 2 desktop)**, build and documentation checks; Rust/Cargo 1.98.1 passed fmt, **30 library tests** and all-target Clippy. Two prior web-suite runs failed in asynchronous note-editor waits, and a third diagnostic failed one of them. The focused file passed, and extending only those two test waits produced the passing full run; a definitive cause was not established. Earlier failing logs remain in `.local/evidence/phase38-lease-20261116/`. Source qualification does not establish a rebuilt candidate or installed-host acceptance.
+## R3 independent Gemini review retry — November 16, 2026
+
+The unchanged installed R3 candidate (`6ccdc943`, installer SHA-256 `a534eb277a4a514cf60921183c54cd427f5a1584aabde0a0a082273e0d2ea08b`) successfully connected with the replacement Gemini key. Actual Codex and persisted `review_json` show `models/gemini-3.5-flash` **allow** for one synthetic practice and **require_confirmation** for its revocation. The desktop displayed the diff and the operator rejected it; exact Codex replay returned `rejected`. After a same-package restart, desktop and Codex both reread the practice as active, revision 1, with its 17-minute duration; the create remained `applied` and revoke `rejected`. Stopped SQLite held two practices and seven operations with integrity `ok`. The new local evidence report and 26 assertions are in `.local/evidence/phase38-profile-20261115-r3/native-review-retry-20261116/`.
+
+The test key was removed from the isolated main database and backup, with business-table digests and other settings unchanged; exact-byte scans were clear. All 468 personal-profile file hashes and the project `.env` matched before and after. This updates the earlier Gemini quota blocker only for the replacement key and this model; model denial and safety-ceiling override remain unverified. Codex native host-form confirmation, healthy tray Quit, genuine Tunnel, DSH/ChatGPT acceptance and Skill remain open. The R3 PID-reuse defect continues to block field promotion. No separate Windows account or VM was used.
+
+## Historical R3 native and Codex confirmation supplement — November 16, 2026
 
 The unchanged installed R3 candidate adds actual native key acceptance/replacement/cancel, compatibility import, real Windows save-failure preservation/retry, configured MCP-port conflict/recovery, explicit pause/resume consent, main-window-close/background reads, and test-grant rotation/revocation/replacement evidence in the same Windows account. Inputs are synthetic; no genuine Tunnel authentication is inferred. All 468 personal-profile hashes remain unchanged; 80 frozen/installed integrity checks pass. The setup matrix now has **2/33 complete native-only requirements (17/20), 13/33 partial requirements**, and no complete new embedded-host shell/conversation pass. Healthy tray Quit, full logical-width wizard coverage and genuine Tunnel lifecycle remain open.
 

@@ -279,24 +279,16 @@ it('cleanly rejects non-existent restore source without unhandled ENOENT', async
   );
 });
 
-it('safely reclaims 0-byte or corrupted lock files during lease acquisition', (t) => {
+it('preserves unknown or incomplete lease files rather than assuming they are stale', (t) => {
   const directory = scratch(t);
   const dbPath = join(directory, 'target.sqlite');
   const lockPath = `${dbPath}.lock`;
 
-  // 1. Corrupt 0-byte lock file
-  writeFileSync(lockPath, '');
-  const release1 = acquireDatabaseLease(dbPath);
-  assert.ok(existsSync(lockPath));
-  release1();
-  assert.equal(existsSync(lockPath), false);
-
-  // 2. Corrupt non-JSON content
-  writeFileSync(lockPath, '{invalid_json');
-  const release2 = acquireDatabaseLease(dbPath);
-  assert.ok(existsSync(lockPath));
-  release2();
-  assert.equal(existsSync(lockPath), false);
+  for (const content of ['', '{invalid_json']) {
+    writeFileSync(lockPath, content);
+    assert.throws(() => acquireDatabaseLease(dbPath), { code: 'DATABASE_IN_USE' });
+    assert.equal(readFileSync(lockPath, 'utf8'), content);
+  }
 });
 
 it('preserves non-ASCII and Chinese tag names with deterministic slug fallback', async () => {
