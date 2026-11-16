@@ -2,9 +2,13 @@
 
 The rebased Phase 38 / Phase 39 development source merges the independently developed schema v11 and v12 layouts as schema v13 and uses Bundle v6 to retain both note revisions and recommendation data. Rebase verification and a new candidate build are pending; historical results below apply only to their recorded candidates.
 
+## R5 frozen candidate and scoped native/Codex acceptance — November 16, 2026
 
+Candidate `phase38-confirmation-20261116-r5` was built from commit `3786ab8f979306fdb6dc208ddebcd2d8dccd860f`, which contains `681bc12`, using Node 26.13.0 / npm 12.0.2. The 53,546,812-byte Windows installer has SHA-256 `c723d7d239e27fe5247515501141cecf173bf97da2cd02c78123cc24412546d5`. The clean build, extracted-resource audit, ordered 471 backend + 200 web + 2 desktop tests, and 30 Rust library tests with fmt/Clippy are recorded in `.local/evidence/phase38-confirmation-20261116-r5/report.md`. Later documentation-only commits do not change the build input. R5 has not been installed.
 
+The extracted app and isolated same-account synthetic profile exercised actual Codex app-server 0.169.0-alpha.11.1 with scripted form outcomes, read-only rejection, controlled first-response loss and replay, desktop fallback through a capability shim, and rereads after deliberate host/sidecar failures. Real independent `models/gemini-3.5-flash` returned `allow` for one applied creation and `require_confirmation` for a revocation that the test driver declined. Following scoped credential cleanup and a restart, a new Codex process replayed the same creation with its original record and count `2 -> 2`; the desktop displayed it. Empty/invalid input, cancellation and synthetic staging were observed in the extracted wizard UI. The cleanup and audit are recorded beside the R5 report; they do not claim forensic erasure.
 
+These scopes do not establish human-operated confirmation, model `deny` or a safety-ceiling override, saved Tunnel credential bytes, genuine Tunnel calls, or installed lifecycle. Healthy tray Quit was not attempted because the shell/taskbar was not exposed in the accessible inventory. R5 installation/upgrade, the remaining wizard and Tunnel cases, DSH and fresh ChatGPT Windows/Web calls, and `tracker-practice` remain open. The user does not want a separate Windows account or VM. The candidate-ready milestone is complete; integration acceptance, the Skill-inclusive MVP and aggregate Gate 0 remain incomplete. Historical evidence below retains its original candidate and scope.
 
 ## R4 frozen candidate and scoped Codex acceptance — November 16, 2026
 
