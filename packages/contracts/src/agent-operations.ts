@@ -34,7 +34,7 @@ export interface BusinessVersions {
 export interface WorkspaceDraft {
   clientId: string;
   workspaceInstanceId: string;
-  entityType: 'note' | 'practice';
+  entityType: 'note' | 'practice' | 'recovery';
   entityId: string;
   content: string;
   revision: number;
@@ -46,9 +46,10 @@ export interface WorkspaceDraft {
 /** Recovery files are validated separately from business snapshots. */
 export const workspaceDraftSchema = z.object({
   clientId: z.string().min(1), workspaceInstanceId: z.string().min(1),
-  entityType: z.enum(['note', 'practice']), entityId: z.string().min(1),
-  content: z.string().max(100000), revision: z.number().int().positive(),
+  entityType: z.enum(['note', 'practice', 'recovery']), entityId: z.string().min(1),
+  // Recovery journals encode a bounded note plus its immutable operation arguments.
+  content: z.string().max(800000), revision: z.number().int().positive(),
   baseRevision: z.number().int().nonnegative(), libraryGeneration: z.number().int().positive(),
   updatedAt: z.number().int().nonnegative(),
-}).strict();
+}).strict().refine(value=>value.entityType==='recovery'||value.content.length<=100000);
 export interface WorkspaceDraftState { draft: WorkspaceDraft | null; revision: number }

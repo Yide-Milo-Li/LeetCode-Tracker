@@ -1,5 +1,6 @@
 {
   "bundle": {
+    "resources": { "tunnel/": "tunnel/" },
     "targets": ["nsis"],
     "windows": {
       "webviewInstallMode": { "type": "downloadBootstrapper" },

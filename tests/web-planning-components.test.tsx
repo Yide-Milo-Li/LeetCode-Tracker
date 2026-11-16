@@ -207,6 +207,41 @@ function createMockPlan(overrides: Partial<DailyPlan> = {}): DailyPlan {
   };
 }
 
+for (const change of [
+  {before:3,after:2,old:{Easy:100,Medium:0,Hard:0},next:{Easy:100,Medium:0,Hard:0},manual:true},
+  {before:2,after:5,old:{Easy:50,Medium:50,Hard:0},next:{Easy:50,Medium:50,Hard:0}},
+  {before:4,after:4,old:{Easy:50,Medium:50,Hard:0},next:{Easy:0,Medium:50,Hard:50}},
+  {before:3,after:3,old:{Easy:100,Medium:0,Hard:0},next:{Easy:100,Medium:0,Hard:0}},
+]) {
+  it(`renders independent Before/After quotas for ${change.before} to ${change.after}`, async () => {
+    const {difficultyCounts}=await import('../packages/workspace/src/strategy-counts.ts');
+    const plan=createMockPlan();
+    plan.rules={...plan.rules,dailyCount:change.before,difficulty:change.old,reviewEnabled:false,reviewPercent:null};
+    const next={...plan.rules,dailyCount:change.after,difficulty:change.next};
+    const unchanged=change.before===change.after&&JSON.stringify(change.old)===JSON.stringify(change.next);
+    mock.method(api,'previewDailyPlanOverride',async()=>({id:'quotas',date:plan.date,base:plan.rules,rules:next,changed:unchanged?[]:['dailyCount','difficulty'],issues:[],unresolved:[],counts:difficultyCounts(next),candidateCount:20,expiresAt:Date.now()+60000,revision:{catalog:1,practice:1,planning:1,timezone:plan.timezone},planVersion:1}));
+    const commit=mock.method(api,'commitDailyPlanOverride',async()=>({...plan,rules:next}));
+    await act(async()=>{render(<PromptOverrideModal isOpen currentPlan={plan} lang="en" onClose={()=>{}} onApplied={()=>{}}/>);});
+    if(change.manual){
+      fireEvent.change(screen.getByLabelText('Daily count'),{target:{value:String(change.after)}});
+      await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'Preview edited rules'}));});
+    }else{
+      fireEvent.change(screen.getByPlaceholderText(/dynamic programming questions today/i),{target:{value:'Use the requested synthetic rules'}});
+      await act(async()=>{fireEvent.click(screen.getByRole('button',{name:/Parse with AI/i}));});
+    }
+    const row=[...document.querySelectorAll('tr')].find(item=>item.querySelector('td')?.textContent==='Difficulty counts')!;
+    assert.ok(row,document.body.textContent!);
+    const cells=row.querySelectorAll('td');
+    const format=(rules:typeof next)=>{const counts=difficultyCounts(rules);return `Easy: ${counts.Easy}, Medium: ${counts.Medium}, Hard: ${counts.Hard}`;};
+    assert.equal(cells[1].textContent,format(plan.rules));assert.equal(cells[2].textContent,format(next));
+    assert.equal(commit.mock.callCount(),0);
+    const apply=screen.getByRole('button',{name:'Apply to Unfinished Slots'}) as HTMLButtonElement;
+    if(unchanged)assert.equal(apply.disabled,true);
+    await act(async()=>{fireEvent.click(apply);});
+    assert.equal(commit.mock.callCount(),unchanged?0:1);
+  });
+}
+
 it('renders setup view when timezone is not configured and triggers navigation callback', async () => {
   mock.method(api, 'ensureDailyPlan', async () => ({
     status: 'setup' as const,

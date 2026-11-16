@@ -6,7 +6,7 @@ import { z } from 'zod';
 import type { ApplicationContext } from '../context.ts';
 import { workspaceDraftSchema, type WorkspaceDraft, type WorkspaceDraftState } from '../../../contracts/src/agent-operations.ts';
 
-const identitySchema = workspaceDraftSchema.pick({ clientId: true, workspaceInstanceId: true, entityType: true, entityId: true });
+const identitySchema = z.object({clientId:workspaceDraftSchema.shape.clientId,workspaceInstanceId:workspaceDraftSchema.shape.workspaceInstanceId,entityType:workspaceDraftSchema.shape.entityType,entityId:workspaceDraftSchema.shape.entityId});
 const fileSchema = identitySchema.extend({
   formatVersion: z.literal(2), revision: z.number().int().nonnegative(), draft: workspaceDraftSchema.nullable(),
 }).strict();
@@ -76,12 +76,12 @@ export function createWorkspaceDraftOperations(context: ApplicationContext, draf
     if (!sameIdentity(record, identity) || (record.draft && (!sameIdentity(record.draft, identity) || record.draft.revision !== record.revision))) failure('DRAFT_IDENTITY_MISMATCH');
     return record;
   }
-  const identity = (clientId: string, workspaceInstanceId: string, entityType: 'note' | 'practice', entityId: string) => identitySchema.parse({ clientId, workspaceInstanceId, entityType, entityId });
+  const identity = (clientId: string, workspaceInstanceId: string, entityType: WorkspaceDraft['entityType'], entityId: string) => identitySchema.parse({ clientId, workspaceInstanceId, entityType, entityId });
   const checkRevision = (record: DraftFile, expected: number) => {
     if (!Number.isSafeInteger(expected) || expected < 0) failure('DRAFT_REVISION_REQUIRED');
     if (record.revision !== expected) failure('DRAFT_CONFLICT');
   };
-  function getDraft(clientId: string, instanceId: string, type: 'note' | 'practice', id: string, assertAuthorized = () => {}): Promise<WorkspaceDraftState> {
+  function getDraft(clientId: string, instanceId: string, type: WorkspaceDraft['entityType'], id: string, assertAuthorized = () => {}): Promise<WorkspaceDraftState> {
     const key = identity(clientId, instanceId, type, id);
     return serialized(key, () => { assertAuthorized(); const record = read(key, assertAuthorized); return { draft: record.draft, revision: record.revision }; });
   }
@@ -96,7 +96,7 @@ export function createWorkspaceDraftOperations(context: ApplicationContext, draf
       replace({ ...key, formatVersion: 2, revision: draft.revision, draft }, assertAuthorized); return draft;
     });
   }
-  function deleteDraft(clientId: string, instanceId: string, type: 'note' | 'practice', id: string, expectedDraftRevision: number, assertAuthorized = () => {}): Promise<{ deleted: boolean; revision: number }> {
+  function deleteDraft(clientId: string, instanceId: string, type: WorkspaceDraft['entityType'], id: string, expectedDraftRevision: number, assertAuthorized = () => {}): Promise<{ deleted: boolean; revision: number }> {
     const key = identity(clientId, instanceId, type, id);
     return serialized(key, () => {
       assertAuthorized(); const record = read(key, assertAuthorized); checkRevision(record, expectedDraftRevision);

@@ -18,6 +18,7 @@ Object.assign(globalThis, {
   location: dom.window.location,
   HTMLElement: dom.window.HTMLElement,
   localStorage: dom.window.localStorage,
+  FileReader: dom.window.FileReader,
   IS_REACT_ACT_ENVIRONMENT: true,
 });
 
@@ -44,13 +45,105 @@ Object.defineProperty(window, 'matchMedia', {
 });
 
 const React = await import('react');
-const { render, fireEvent, screen, act, cleanup } = await import('@testing-library/react');
+const { render: renderUi, fireEvent, screen, act, cleanup, waitFor } = await import('@testing-library/react');
 const { DesktopWorkspaceProvider } = await import('../apps/web/src/workspace-adapter.tsx');
 const { SettingsView } = await import('../apps/web/src/components/SettingsView.tsx');
 const { api, mcpApi } = await import('../apps/web/src/api.ts');
 import * as platform from '../apps/web/src/platform/index.ts';
+// These legacy management checks explicitly open the manual configuration section.
+const render = (...args: Parameters<typeof renderUi>) => {
+  const result = renderUi(...args);
+  document.querySelector<HTMLDetailsElement>('#plugin-manual-setup')?.setAttribute('open', '');
+  return result;
+};
 
 describe('SettingsView: Background Runtime & AI Connection (MCP)', () => {
+  it('refreshes successful-call metadata on focus without resetting unsaved port or connection name', async () => {
+    const initial = await mcpApi.getConfig();
+    const config = {...initial, clients: initial.clients.map(client => ({...client, credentialVersion:1}))};
+    let timestamp: number | null = null;
+    mock.method(api, 'getBusinessVersions', async () => ({approvals:0}) as any);
+    mock.method(mcpApi, 'getConfig', async () => ({...config, clients:config.clients.map(client => ({...client,lastSuccessfulCallAt:client.id==='claude-desktop'?timestamp:client.lastSuccessfulCallAt}))}));
+    await act(async () => {render(<DesktopWorkspaceProvider><SettingsView lang="en" currentTheme="light" onLanguageChange={()=>{}} onThemeChange={()=>{}}/></DesktopWorkspaceProvider>);});
+    const port = screen.getByRole('button',{name:'Save Port'}).closest('form')!.querySelector('input')!;
+    const name = screen.getByPlaceholderText('Connection Name (e.g. Work Laptop Cursor)');
+    fireEvent.change(port,{target:{value:'32001'}});
+    fireEvent.change(name,{target:{value:'Unsaved connection'}});
+    timestamp = 1791388800000;
+    await act(async () => {fireEvent.focus(window);});
+    await waitFor(() => assert.ok(screen.getByText(new Date(timestamp!).toLocaleString())));
+    timestamp += 1000;
+    await waitFor(() => assert.ok(screen.getByText(new Date(timestamp!).toLocaleString())),{timeout:3500});
+    assert.equal(port.value,'32001');
+    assert.equal((name as HTMLInputElement).value,'Unsaved connection');
+  });
+
+  it('refreshes external pause changes while retaining visible metadata on a failed config read', async () => {
+    const initial = await mcpApi.getConfig();
+    let config = {...initial,accessRevision:1,aiAccessPaused:false};
+    let failed = false;
+    mock.method(api, 'getBusinessVersions', async () => ({approvals:0}) as any);
+    mock.method(mcpApi, 'getConfig', async () => {if(failed)throw new Error('Synthetic read failure');return config;});
+    mock.method(mcpApi, 'getStatus', async () => ({state:'ready',listeningPort:30138,aiAccessPaused:config.aiAccessPaused}) as any);
+    await act(async () => {render(<DesktopWorkspaceProvider><SettingsView lang="en" currentTheme="light" onLanguageChange={()=>{}} onThemeChange={()=>{}}/></DesktopWorkspaceProvider>);});
+    config = {...config,accessRevision:2,aiAccessPaused:true};
+    await act(async () => {fireEvent.focus(window);});
+    await waitFor(() => assert.ok(screen.getByRole('button',{name:'Resume Access'})));
+    failed = true;
+    await act(async () => {fireEvent.focus(window);});
+    assert.ok(screen.getByRole('button',{name:'Resume Access'}));
+    assert.ok(screen.getByText('Claude Desktop'));
+  });
+
+  it('does not apply late call metadata from a credential that rotated during refresh', {timeout:10000}, async () => {
+    const initial = await mcpApi.getConfig();
+    let config = {...initial, clients:initial.clients.map(client=>({...client,credentialVersion:1}))};
+    let release!: (value:any)=>void;
+    let defer = false;
+    mock.method(api, 'getBusinessVersions', async () => ({approvals:0}) as any);
+    mock.method(mcpApi, 'getConfig', async () => defer ? new Promise(resolve=>{release=resolve;}) : config);
+    mock.method(mcpApi, 'rotateClient', async (id:string) => {
+      config = {...config,clients:config.clients.map(client=>client.id===id?{...client,credentialVersion:2,token:'rotated-token',lastSuccessfulCallAt:null}:client)};
+      defer = false;
+      return {client:config.clients.find(client=>client.id===id)!};
+    });
+    await act(async () => {render(<DesktopWorkspaceProvider><SettingsView lang="en" currentTheme="light" onLanguageChange={()=>{}} onThemeChange={()=>{}}/></DesktopWorkspaceProvider>);});
+    const stale = {...config,clients:config.clients.map(client=>client.id==='claude-desktop'?{...client,lastSuccessfulCallAt:1791388800000}:client)};
+    defer = true;
+    fireEvent.focus(window);
+    await waitFor(() => assert.equal(typeof release,'function'));
+    assert.equal(typeof release,'function');
+    // Rotation loads the replacement connection while the old background read remains outstanding.
+    await act(async () => {fireEvent.click(screen.getAllByRole('button',{name:'Rotate'})[0]);});
+    if (release) await act(async () => {release(stale);});
+    assert.equal(screen.queryByText(new Date(1791388800000).toLocaleString()),null);
+  });
+  it('previews v1 partial and v2/v3/v4 complete migrations without restoring on file selection', async () => {
+    const {DatabaseSync}=await import('node:sqlite');
+    const {CatalogStore}=await import('../packages/database/src/store.ts');
+    const {waitFor}=await import('@testing-library/react');
+    const store=new CatalogStore(new DatabaseSync(':memory:'),{skipBackup:true});
+    let restores=0;
+    mock.method(api,'importBundle',async()=>{restores++;return {} as any;});
+    try {
+      await act(async()=>{render(<DesktopWorkspaceProvider><SettingsView lang="en" currentTheme="light" onLanguageChange={()=>{}} onThemeChange={()=>{}}/></DesktopWorkspaceProvider>);});
+      const input=document.querySelector<HTMLInputElement>('input[type="file"][accept=".json"]') ?? [...document.querySelectorAll<HTMLInputElement>('input[type="file"]')].find(item=>item.accept.includes('json'))!;
+      assert.ok(input);
+      for(const version of [1,2,3,4] as const) {
+        const bundle=version===1?store.exportSnapshotBundle():store.exportMigrationBundle(version);
+        const file=new dom.window.File([JSON.stringify(bundle)],`bundle-v${version}.json`,{type:'application/json'});
+        fireEvent.change(input,{target:{files:[file]}});
+        await waitFor(()=>assert.ok(screen.getByRole('button',{name:'Confirm & Restore'})),{timeout:5000});
+        if(version===1)assert.ok(screen.getByText(/Legacy v1: partial restore/));
+        else {
+          assert.ok(screen.getByText(new RegExp(`Complete migration.*Bundle v${version}.*App v${'appVersion' in bundle ? bundle.appVersion : ''}`)));
+          assert.equal(screen.queryByText(/Legacy v1/),null);
+        }
+        assert.equal(restores,0);
+        fireEvent.click(screen.getByRole('button',{name:'Cancel'}));
+      }
+    } finally {store.db.close();}
+  });
   it('shows unknown access on load failure and a conflicting listener without readiness', async () => {
     mock.method(mcpApi, 'getConfig', async () => { throw new Error('synthetic read failure'); });
     await act(async () => { render(<DesktopWorkspaceProvider><SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} /></DesktopWorkspaceProvider>); });
@@ -131,7 +224,7 @@ describe('SettingsView: Background Runtime & AI Connection (MCP)', () => {
     assert.ok(screen.getByText('开机静默启动'));
 
     // Check AI Connection headers
-    assert.ok(screen.getByText('AI 连接'));
+    assert.ok(screen.getByText('Plugin / AI 连接'));
     assert.ok(screen.getByText('外部 AI 访问状态'));
     assert.ok(screen.getByText('MCP 服务端点'));
     assert.ok(screen.getByText('专用连接凭证 (Named Connections)'));
@@ -155,7 +248,7 @@ describe('SettingsView: Background Runtime & AI Connection (MCP)', () => {
     });
 
     assert.ok(screen.getByText('Background Runtime'));
-    assert.ok(screen.getByText('AI Connection'));
+    assert.ok(screen.getByText('Plugin / AI Connection'));
     assert.ok(screen.getByText('External AI Access State'));
     assert.ok(screen.getByText('MCP Server Endpoint'));
     assert.ok(screen.getByText('Named Connections & Credentials'));

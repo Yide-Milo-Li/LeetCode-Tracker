@@ -1,7 +1,18 @@
 import type { createHttpTrackerClient } from './client-http-adapter.ts';
+import type { WorkspaceDraftState } from '../../contracts/src/agent-operations.ts';
 /** Full desktop business surface; embeds advertise the supported subset through their host. */
 export type TrackerClient = ReturnType<typeof createHttpTrackerClient>['api'] & {
   recoverOperations?: () => Promise<void>;
+  initializeRecovery?: () => Promise<void>;
+  /** Immutable read stamp for a rendered object; later background reads cannot replace it. */
+  getReadGeneration?: (value: object) => number | undefined;
+  /** Exact local lookup keeps host positioning independent of fuzzy-search pagination. */
+  getWorkspaceProblem?: (frontendId:string) => Promise<import('../../contracts/src/sync.ts').CatalogProblem>;
+  drafts?: {
+    get(type:'note'|'practice'|'recovery', id:string):Promise<WorkspaceDraftState>;
+    set(type:'note'|'practice'|'recovery', id:string, content:string, revision:number, baseRevision:number, generation:number):Promise<WorkspaceDraftState>;
+    delete(type:'note'|'practice'|'recovery', id:string, revision:number):Promise<WorkspaceDraftState>;
+  };
 };
 
 export type WorkspaceOperationStatus = 'pending' | 'applied' | 'rejected' | 'cancelled' | 'expired' | 'failed' | 'unknown' | 'applied_refresh_required' | 'external_change';

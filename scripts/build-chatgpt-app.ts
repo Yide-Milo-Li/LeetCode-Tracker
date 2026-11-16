@@ -33,7 +33,7 @@ const html = `<!doctype html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LeetCode Tracker Workspace</title>
-  <style>${css}</style>
+  <style>html,body,#tracker-root{margin:0;min-height:100%;width:100%;} ${css}</style>
 </head>
 <body>
   <div id="tracker-root"></div>

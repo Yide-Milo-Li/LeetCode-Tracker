@@ -16,6 +16,56 @@ const rules: Rules = { dailyCount: 1, difficulty: { Easy: 100, Medium: 0, Hard: 
 
 afterEach(() => mock.restoreAll());
 
+it('DeepSeek bounds reviews and probes while leaving ordinary generation unchanged', async () => {
+  const bodies:any[]=[];
+  const provider=new DeepSeekProvider({apiKey:'synthetic',fetchFn:async(_url,init)=>{
+    bodies.push(JSON.parse(String(init?.body)));
+    return new Response(JSON.stringify({model:'resolved-flash',choices:[{message:{content:'{"decision":"allow","riskLevel":"low","reason":"Synthetic"}'}}]}));
+  }});
+  const request={model:'deepseek-flash',prompt:'Synthetic',systemInstruction:'Return JSON',abortSignal:new AbortController().signal};
+  await provider.generateContent(request);
+  assert.equal(bodies[0].thinking,undefined);assert.equal(bodies[0].max_tokens,undefined);
+  const reviewed=await provider.generateContent({...request,purpose:'operation-review'});
+  assert.equal(reviewed.model,'resolved-flash');
+  assert.deepEqual(bodies[1].thinking,{type:'disabled'});assert.equal(bodies[1].max_tokens,2048);
+  assert.deepEqual(bodies[1].response_format,{type:'json_object'});
+  assert.equal((await provider.testConnection()).ok,true);
+  assert.deepEqual(bodies[2].thinking,{type:'disabled'});assert.equal(bodies[2].max_tokens,64);
+  const openai=new OpenAIProvider({apiKey:'synthetic',fetchFn:async(_url,init)=>{
+    bodies.push(JSON.parse(String(init?.body)));return new Response(JSON.stringify({choices:[{message:{content:'{}'}}]}));
+  }});
+  await openai.generateContent({...request,purpose:'operation-review'});
+  assert.equal(bodies[3].thinking,undefined);assert.equal(bodies[3].max_tokens,undefined);
+});
+
+it('review metadata identifies the returned model and rejects provider failures without retries', async () => {
+  const {OperationReviewService}=await import('../apps/server/src/mcp/review.ts');
+  let calls=0;
+  const input={toolName:'tracker_create_practice',clientId:'synthetic',operationId:'review-regression',action:'create_practice',target:'1',diffSummary:'Authorized practice entry'};
+  const fetch=mock.method(globalThis,'fetch',async()=>{calls++;return new Response(JSON.stringify({model:'resolved-deepseek',choices:[{message:{content:'{"decision":"allow","riskLevel":"low","reason":"Authorized"}'}}]}));});
+  const assistant=new LLMAssistant({provider:'deepseek',apiKey:'synthetic',model:'deepseek-flash',fallbackModels:[]});
+  assert.equal((await assistant.reviewOperation({operation:input})).auditMetadata?.model,'resolved-deepseek');
+  assert.equal(calls,1);
+  const failures=[
+    {status:401,body:'{"error":{"message":"Synthetic authentication failure"}}'},
+    {status:402,body:'{"error":{"message":"Synthetic balance failure"}}'},
+    {status:429,body:'{"error":{"message":"Synthetic limit failure"}}'},
+    {status:503,body:'{}'},
+    {status:200,body:'{"choices":[{"message":{"content":""}}]}'},
+    {status:200,body:'{"choices":[{"message":{"content":"not JSON"}}]}'},
+    {status:200,body:'{"choices":[{"message":{"content":"{}"}}]}'},
+  ];
+  for(const failure of failures){
+    fetch.mock.mockImplementation(async()=>{calls++;return new Response(failure.body,{status:failure.status});});
+    const before:number=calls;
+    const review=await new OperationReviewService().review(input,assistant);
+    assert.equal(review.decision,'require_confirmation');assert.equal(calls,before+1);
+  }
+  const controller=new AbortController();controller.abort();
+  fetch.mock.mockImplementation(async(_url,init)=>{calls++;init?.signal?.throwIfAborted();throw new Error('Synthetic transport failure');});
+  await assert.rejects(assistant.reviewOperation({operation:input,abortSignal:controller.signal}));
+});
+
 it('application configuration pins the single OpenAI and DeepSeek models over legacy settings', async () => {
   for (const [provider, model] of [['openai', 'gpt-5.6-luna'], ['deepseek', 'deepseek-flash']] as const) {
   const store = new CatalogStore(new DatabaseSync(':memory:'), { skipBackup: true });

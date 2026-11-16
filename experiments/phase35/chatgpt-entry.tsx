@@ -4,8 +4,19 @@ import {createRoot} from 'react-dom/client';
 import {createChatGPTWorkspace} from '../../packages/workspace/src/hosts/chatgpt.ts';
 import {WorkspaceProvider} from '../../packages/workspace/src/context.tsx';
 import {EmbeddedWorkspace} from '../../packages/workspace/src/EmbeddedWorkspace.tsx';
-const workspace=createChatGPTWorkspace(undefined,'experimental');
-const root=createRoot(document.getElementById('tracker-root')!);
-workspace.app.onteardown=async()=>{root.unmount();await workspace.dispose();return {};};
-try {await workspace.connect();root.render(<WorkspaceProvider client={workspace.client} host={workspace.host}><EmbeddedWorkspace/></WorkspaceProvider>);}
-catch(error){document.getElementById('tracker-root')!.textContent=error instanceof Error?error.message:String(error);await workspace.dispose();}
+const rootElement=document.getElementById('tracker-root')!;
+const root=createRoot(rootElement);
+const workspace=createChatGPTWorkspace(undefined,'experimental',{onDispose:()=>root.unmount()});
+try {
+  await workspace.connect();
+  if(!workspace.isDisposed()) {
+    workspace.renderReady();
+    root.render(<WorkspaceProvider client={workspace.client} host={workspace.host}><EmbeddedWorkspace/></WorkspaceProvider>);
+  }
+} catch(error) {
+  // A host-triggered cancellation must leave the transport open for its teardown acknowledgement.
+  if(!workspace.isDisposed()) {
+    await workspace.dispose();
+    rootElement.textContent=error instanceof Error?error.message:String(error);
+  }
+}

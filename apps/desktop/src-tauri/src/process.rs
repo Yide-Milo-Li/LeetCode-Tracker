@@ -3,6 +3,10 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::time::{Duration, Instant};
 
 pub type ReadyReceiver = Receiver<Result<String, String>>;
@@ -52,9 +56,47 @@ impl Job {
     }
 }
 
+/// A newly created Windows process stays suspended until its Job owns all future descendants.
+#[cfg(windows)]
+fn resume_owned_process(child: &Child) -> Result<(), String> {
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+    use windows_sys::Win32::{
+        Foundation::INVALID_HANDLE_VALUE,
+        System::{Diagnostics::ToolHelp::*, Threading::*},
+    };
+    // SAFETY: each native handle is owned once; the snapshot entry is initialized to its documented size.
+    unsafe {
+        let raw = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        if raw == INVALID_HANDLE_VALUE {
+            return Err("Could not enumerate suspended process threads".into());
+        }
+        let snapshot = OwnedHandle::from_raw_handle(raw);
+        let mut entry: THREADENTRY32 = std::mem::zeroed();
+        entry.dwSize = std::mem::size_of_val(&entry) as u32;
+        let mut available = Thread32First(snapshot.as_raw_handle(), &mut entry) != 0;
+        while available {
+            if entry.th32OwnerProcessID == child.id() {
+                let raw = OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID);
+                if raw.is_null() {
+                    return Err("Could not open suspended process thread".into());
+                }
+                let thread = OwnedHandle::from_raw_handle(raw);
+                if ResumeThread(thread.as_raw_handle()) != 1 {
+                    return Err("Could not resume owned process".into());
+                }
+                return Ok(());
+            }
+            available = Thread32Next(snapshot.as_raw_handle(), &mut entry) != 0;
+        }
+        Err("Suspended process thread is unavailable".into())
+    }
+}
+
 /// Owns the child until it exits; dropping an unfinished startup also reaps its process.
 pub struct ManagedChild {
     child: Child,
+    auth_failed: Arc<AtomicBool>,
+    diagnostics: Option<std::thread::JoinHandle<()>>,
     #[cfg(windows)]
     _job: Job,
 }
@@ -69,7 +111,7 @@ impl ManagedChild {
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
-            command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+            command.creation_flags(0x08000000 | 0x00000004); // CREATE_NO_WINDOW | CREATE_SUSPENDED
         }
         let mut child = command.spawn().map_err(|e| e.to_string())?;
         #[cfg(windows)]
@@ -81,8 +123,16 @@ impl ManagedChild {
                 return Err(error);
             }
         };
+        #[cfg(windows)]
+        if let Err(error) = resume_owned_process(&child) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
         let stdout = child.stdout.take().ok_or("Missing sidecar stdout")?;
         let stderr = child.stderr.take().ok_or("Missing sidecar stderr")?;
+        let auth_failed = Arc::new(AtomicBool::new(false));
+        let diagnostic_flag = auth_failed.clone();
         let (sender, receiver) = mpsc::channel();
         std::thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
@@ -103,13 +153,45 @@ impl ManagedChild {
             let _ = sender.send(result);
             let _ = std::io::copy(&mut reader, &mut std::io::sink());
         });
-        std::thread::spawn(move || {
-            // Raw provider diagnostics can contain credentials; drain without recording payloads.
-            let _ = std::io::copy(&mut BufReader::new(stderr), &mut std::io::sink());
+        let diagnostics = std::thread::spawn(move || {
+            // Retain only a boolean classification; raw diagnostics and credentials are never recorded.
+            let mut reader = BufReader::new(stderr);
+            let mut buffer = [0u8; 4096];
+            let mut tail = String::new();
+            while let Ok(size) = reader.read(&mut buffer) {
+                if size == 0 {
+                    break;
+                }
+                let text = (tail + &String::from_utf8_lossy(&buffer[..size])).to_ascii_lowercase();
+                if [
+                    "unauthorized",
+                    "invalid_api_key",
+                    "permission_denied",
+                    "status=401",
+                    "status=403",
+                    "status_code=401",
+                    "status_code=403",
+                ]
+                .iter()
+                .any(|marker| text.contains(marker))
+                {
+                    diagnostic_flag.store(true, Ordering::SeqCst);
+                }
+                tail = text
+                    .chars()
+                    .rev()
+                    .take(64)
+                    .collect::<String>()
+                    .chars()
+                    .rev()
+                    .collect();
+            }
         });
         Ok((
             Self {
                 child,
+                auth_failed,
+                diagnostics: Some(diagnostics),
                 #[cfg(windows)]
                 _job: job,
             },
@@ -127,9 +209,40 @@ impl ManagedChild {
 
     /// Reap a terminated child while allowing callers to detect unexpected exits.
     pub fn exited(&mut self) -> bool {
+        let exited = self
+            .child
+            .try_wait()
+            .map_or(true, |status| status.is_some());
+        // A reaped child's stderr must be classified before deciding whether to retry it.
+        if exited {
+            let deadline = Instant::now() + Duration::from_millis(20);
+            while self
+                .diagnostics
+                .as_ref()
+                .is_some_and(|reader| !reader.is_finished())
+                && Instant::now() < deadline
+            {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            if self
+                .diagnostics
+                .as_ref()
+                .is_some_and(|reader| reader.is_finished())
+            {
+                let _ = self.diagnostics.take().unwrap().join();
+            }
+        }
+        exited
+    }
+    pub fn authentication_failed(&self) -> bool {
+        self.auth_failed.load(Ordering::SeqCst)
+    }
+    pub fn success(&mut self) -> bool {
         self.child
             .try_wait()
-            .map_or(true, |status| status.is_some())
+            .ok()
+            .flatten()
+            .is_some_and(|status| status.success())
     }
 
     /// Return true for a clean exit; allow outstanding writes to finish before a bounded forced kill.
@@ -188,6 +301,33 @@ pub fn wait_ready(receiver: ReadyReceiver, nonce: &str, timeout: Duration) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A fast child may spawn immediately; containment must precede its first instruction.
+    #[cfg(windows)]
+    #[test]
+    fn dropping_a_managed_process_terminates_its_immediate_descendant() {
+        use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+        use windows_sys::Win32::{Foundation::WAIT_OBJECT_0, System::Threading::*};
+        let (child, ready) = node("const c=require('node:child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'}); console.log(c.pid);setInterval(()=>{},1000);");
+        let pid = ready
+            .recv_timeout(Duration::from_secs(3))
+            .unwrap()
+            .unwrap()
+            .trim()
+            .parse::<u32>()
+            .unwrap();
+        // SAFETY: the descendant process handle is owned once and retained while the Job is dropped.
+        unsafe {
+            let raw = OpenProcess(0x00100000, 0, pid); // SYNCHRONIZE
+            assert!(!raw.is_null());
+            let descendant = OwnedHandle::from_raw_handle(raw);
+            drop(child);
+            assert_eq!(
+                WaitForSingleObject(descendant.as_raw_handle(), 3000),
+                WAIT_OBJECT_0
+            );
+        }
+    }
 
     /// Exercise the pinned private runtime under canonical Unicode paths on both supported hosts.
     #[cfg(any(windows, target_os = "macos"))]
@@ -292,6 +432,19 @@ mod tests {
         );
         wait_ready(ready, "test", Duration::from_secs(5)).unwrap();
         assert!(child.shutdown(Duration::from_secs(5)).unwrap());
+    }
+
+    #[test]
+    fn authentication_failure_is_classified_across_chunks_before_exit() {
+        let (mut child,ready)=node("console.log(JSON.stringify({type:'ready',nonce:'test',protocolVersion:1,port:1234}));process.stderr.write('x'.repeat(4094)+'unauth');setTimeout(()=>process.stderr.write('orized synthetic diagnostic'),10);setTimeout(()=>process.exit(1),30);");
+        wait_ready(ready, "test", Duration::from_secs(5)).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !child.exited() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(child.exited());
+        assert!(child.authentication_failed());
+        assert!(!child.success());
     }
 
     #[test]

@@ -1,5 +1,5 @@
 /** Shared practice creation intent storage; uncertain retries preserve both ID and actual event time. */
-import { ApiError, type TrackerClient } from './client.ts';
+import { ApiError, OperationStateError, type TrackerClient, type WorkspaceOperationState } from './client.ts';
 import type { CreatePracticeRecordInput, PracticeRecord } from '../../contracts/src/index.ts';
 import type { WorkspaceHost } from './host.ts';
 
@@ -41,7 +41,8 @@ export function fromZonedInput(value: string, zone: string): string {
 
 /** Each provider owns immutable retry intents and in-flight requests. */
 export function createPracticeService(api:TrackerClient, host:WorkspaceHost) {
-const pending = new Map<string, CreatePracticeRecordInput>();
+type PracticeIntent = CreatePracticeRecordInput & { expectedLibraryGeneration?: number };
+const pending = new Map<string, PracticeIntent>();
 const inFlight = new Map<string, Promise<PracticeRecord>>();
 const prefix = 'leetcode-practice-intent:';
 
@@ -58,12 +59,12 @@ function clearPracticeIntents(): void {
 }
 
 /** Recover an unresolved intent across page reload; storage denial still preserves in-memory safety. */
-function getPracticeIntent(key: string): CreatePracticeRecordInput | undefined {
+function getPracticeIntent(key: string): PracticeIntent | undefined {
   if (pending.has(key)) return pending.get(key);
   try {
     const raw = host.storage('session').getItem(prefix + key);
     if (raw) {
-      const value = JSON.parse(raw) as CreatePracticeRecordInput;
+      const value = JSON.parse(raw) as PracticeIntent;
       if (value.operationId && value.practicedAt && value.questionFrontendId) {
         pending.set(key, value);
         return value;
@@ -76,18 +77,19 @@ function getPracticeIntent(key: string): CreatePracticeRecordInput | undefined {
 }
 
 /** Submit exactly one immutable creation intent; preserve it until the server confirms the record. */
-function createPractice(key: string, payload: CreatePracticeRecordInput): Promise<PracticeRecord> {
+function createPractice(key: string, payload: CreatePracticeRecordInput, expectedLibraryGeneration?: number): Promise<PracticeRecord> {
   const running = inFlight.get(key);
   if (running) return running;
-  const input = getPracticeIntent(key) ?? { ...payload, operationId: crypto.randomUUID() };
+  const input = getPracticeIntent(key) ?? { ...payload, operationId: crypto.randomUUID(), ...(expectedLibraryGeneration === undefined ? {} : { expectedLibraryGeneration }) };
   pending.set(key, input);
   try {
     host.storage('session').setItem(prefix + key, JSON.stringify(input));
   } catch {
     /* In-memory fallback. */
   }
+  const preconditions: [] | [number] = input.expectedLibraryGeneration === undefined ? [] : [input.expectedLibraryGeneration];
   const request = api
-    .createPracticeRecord(input)
+    .createPracticeRecord(input, ...preconditions)
     .then((record) => {
       pending.delete(key);
       try {
@@ -99,7 +101,8 @@ function createPractice(key: string, payload: CreatePracticeRecordInput): Promis
     })
     .catch((error) => {
       // Explicit validation/not-found responses prove no row was written. Network/5xx failures do not.
-      if (error instanceof ApiError && [400, 404, 422].includes(error.status)) {
+      if ((error instanceof ApiError && ([400, 404, 422].includes(error.status) || error.code === 'LIBRARY_GENERATION_MISMATCH')) ||
+        (error instanceof OperationStateError && ['rejected', 'cancelled', 'expired', 'failed'].includes(error.operation.status))) {
         pending.delete(key);
         try {
           host.storage('session').removeItem(prefix + key);
@@ -115,5 +118,14 @@ function createPractice(key: string, payload: CreatePracticeRecordInput): Promis
 }
 
 
-return {clearPracticeIntents,getPracticeIntent,createPractice};
+/** Polling may settle an operation after its original promise rejected; release only its matching identity. */
+function settlePracticeOperation(operation: WorkspaceOperationState): void {
+  if (!['applied', 'rejected', 'cancelled', 'expired', 'failed'].includes(operation.status)) return;
+  for (const [key, input] of pending) {
+    if (input.operationId !== operation.operationId) continue;
+    pending.delete(key);
+    try { host.storage('session').removeItem(prefix + key); } catch { /* In-memory state is already settled. */ }
+  }
+}
+return {clearPracticeIntents,getPracticeIntent,createPractice,settlePracticeOperation};
 }

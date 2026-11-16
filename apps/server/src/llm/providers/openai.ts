@@ -90,6 +90,8 @@ export class OpenAIProvider extends BaseLLMProvider {
         { role: 'user', content: params.prompt },
       ],
       response_format: { type: 'json_object' },
+      ...(this.providerId === 'deepseek' && params.purpose === 'operation-review'
+        ? { thinking: { type: 'disabled' }, max_tokens: 2048 } : {}),
     };
 
     const response = await this.fetchFn(endpoint, {
@@ -167,6 +169,7 @@ export class OpenAIProvider extends BaseLLMProvider {
           model: testModel,
           messages: [{ role: 'user', content: 'ping' }],
           ...(this.providerId === 'openai' ? { max_completion_tokens: 64 } : { max_tokens: 64 }),
+          ...(this.providerId === 'deepseek' ? { thinking: { type: 'disabled' } } : {}),
         }),
         signal: abort.signal,
       });

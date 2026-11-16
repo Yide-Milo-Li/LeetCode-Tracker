@@ -21,6 +21,8 @@ async function bundleDesktopServer(): Promise<void> {
   }
 
   const startTime = Date.now();
+  const workspaceHtml=fs.readFileSync(path.join(repoRoot,'apps/chatgpt/dist/workspace.html'),'utf8');
+  if(!workspaceHtml.includes('tracker-root')||!workspaceHtml.includes('<script type="module">'))throw new Error('Build the formal ChatGPT workspace first.');
   await build({
     entryPoints: [entryPoint],
     bundle: true,
@@ -28,6 +30,7 @@ async function bundleDesktopServer(): Promise<void> {
     target: 'node24',
     format: 'esm',
     outfile,
+    define:{__TRACKER_WORKSPACE_HTML__:JSON.stringify(workspaceHtml)},
     sourcemap: false,
     external: [
       'node:*',

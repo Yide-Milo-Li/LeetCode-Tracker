@@ -13,6 +13,103 @@ function pair():[Transport,Transport] {
   return [a,b];
 }
 
+test('global deep-link context updates preserve local navigation and accept a changed route', async () => {
+  const app = new App({name:'global navigation regression',version:'1'}, {}, {autoResize:false});
+  const workspace = createChatGPTWorkspace(app, 'formal');
+  const bridge = new AppBridge(null, {name:'synthetic global host',version:'1'}, {serverTools:{}}, {
+    hostContext: {displayMode:'fullscreen','openai/deepLink':{url:'/home'}},
+  });
+  const [a,b] = pair();
+  const settle = () => new Promise<void>(resolve => setImmediate(resolve));
+  try {
+    await bridge.connect(b); await workspace.connect(a); workspace.renderReady();
+    assert.equal(workspace.host.currentView(), 'home');
+    // Hosts resend the current deep link with resize/theme updates; it is not a new navigation request.
+    for (const view of ['today','practice','notes']) {
+      workspace.host.navigate(view);
+      await bridge.sendHostContextChange({theme:'dark','openai/deepLink':{url:'/home'}});
+      await settle();
+      assert.equal(workspace.host.currentView(), view);
+    }
+    await bridge.sendHostContextChange({'openai/deepLink':{url:'/notes?questionFrontendId=1'}});
+    await settle();
+    assert.equal(workspace.host.currentView(), 'notes');
+    await bridge.sendToolResult({content:[],_meta:{workspace:{view:'today'}}});
+    await settle();
+    assert.equal(workspace.host.currentView(), 'today');
+    await bridge.sendHostContextChange({theme:'light'});
+    await settle();
+    assert.equal(workspace.host.currentView(), 'today');
+    await bridge.sendHostContextChange({'openai/deepLink':{url:'/home'}});
+    await settle();
+    assert.equal(workspace.host.currentView(), 'home');
+  } finally {await workspace.dispose(); await bridge.close();}
+});
+
+test('SDK teardown acknowledges before transport close and shares exactly-once cleanup', async () => {
+  const app = new App({name:'teardown regression',version:'1'},{},{autoResize:false});
+  let unmounts = 0, closes = 0;
+  let entered!:()=>void, release!:()=>void;
+  const cleaning = new Promise<void>(resolve=>{entered=resolve;});
+  const finishCleanup = new Promise<void>(resolve=>{release=resolve;});
+  const originalClose = app.close.bind(app);
+  app.close = async () => { closes++; await originalClose(); };
+  const workspace = createChatGPTWorkspace(app, 'formal', {onDispose:async()=>{unmounts++;entered();await finishCleanup;}});
+  const bridge = new AppBridge(null,{name:'synthetic host',version:'1'},{serverTools:{}},{hostContext:{displayMode:'fullscreen'}});
+  const [a,b] = pair();
+  try {
+    await bridge.connect(b); await workspace.connect(a);
+    const tearingDown = bridge.teardownResource({}, {timeout:1000});
+    await cleaning;
+    // Notifications arriving while asynchronous unmount finishes cannot change closed navigation.
+    await bridge.sendToolResult({content:[],_meta:{workspace:{view:'notes',questionFrontendId:'1'}}});
+    await new Promise<void>(resolve=>setImmediate(resolve));
+    assert.equal(workspace.host.currentView(),null);
+    release();
+    assert.deepEqual(await tearingDown, {});
+    assert.equal(unmounts,1); assert.equal(closes,0);
+    assert.equal(workspace.isDisposed(),true);
+    assert.throws(()=>workspace.host.subscribe(()=>{}),/disposed/);
+    await assert.rejects(workspace.client.getSettings(),/disposed/);
+    await Promise.all([workspace.dispose(),workspace.dispose()]);
+    assert.equal(unmounts,1); assert.equal(closes,1);
+  } finally { release(); await workspace.dispose(); await bridge.close(); }
+});
+
+test('SDK teardown aborts pending tools and ignores their late response', async () => {
+  let unmounts=0, calls=0, release!:(value:any)=>void, started!:()=>void;
+  const pending = new Promise<any>(resolve=>{release=resolve;});
+  const entered = new Promise<void>(resolve=>{started=resolve;});
+  const workspace=createChatGPTWorkspace(new App({name:'pending teardown',version:'1'},{},{autoResize:false}),'formal',{onDispose:()=>{unmounts++;}});
+  const bridge=new AppBridge(null,{name:'synthetic host',version:'1'},{serverTools:{}},{hostContext:{displayMode:'fullscreen'}});
+  bridge.oncalltool=async()=>{calls++;started();return pending;};
+  const [a,b]=pair();
+  try {
+    await bridge.connect(b);await workspace.connect(a);
+    const request=workspace.client.getSettings();
+    const rejected=assert.rejects(request);
+    await entered;
+    await bridge.teardownResource({}, {timeout:1000});
+    await rejected;
+    release({content:[],structuredContent:{data:{timezone:'UTC',language:'en'}}});
+    await new Promise<void>(resolve=>setImmediate(resolve));
+    await assert.rejects(workspace.client.getSettings(),/disposed/);
+    assert.equal(calls,1);assert.equal(unmounts,1);
+  } finally {await workspace.dispose();await bridge.close();}
+});
+
+test('disposing during SDK initialization prevents late recovery and render readiness', async () => {
+  const app=new App({name:'startup teardown',version:'1'},{});
+  let release!:()=>void, unmounts=0;
+  app.connect=async()=>new Promise<void>(resolve=>{release=resolve;});
+  const workspace=createChatGPTWorkspace(app,'formal',{onDispose:()=>{unmounts++;}});
+  const connecting=workspace.connect();
+  const rejected=assert.rejects(connecting,/disposed/);
+  await workspace.dispose();release();await rejected;
+  assert.throws(()=>workspace.renderReady(),/disposed/);
+  assert.equal(unmounts,1);
+});
+
 test('stateless HTTP rejects standalone SSE and completes real SDK discovery without a hanging GET',async()=>{
   const lab=await openExperimentLab('<html>HTTP synthetic resource</html>');
   const port=await lab.listen(0);
@@ -100,5 +197,83 @@ test('DSH client bundle registers via window.__ModuleLoader__.load and exports a
   }finally{
     (globalThis as unknown as {window?:unknown}).window=originalWindow;
   }
+});
+
+test('host context theme notifications and expand requests propagate to workspace host', async () => {
+  const app = new App({ name: 'theme-expand-test', version: '1' }, {}, { autoResize: false });
+  const workspace = createChatGPTWorkspace(app, 'formal');
+  let requestedMode: string | undefined;
+  const bridge = new AppBridge(null, { name: 'synthetic host', version: '1' }, { serverTools: {} }, {
+    hostContext: { displayMode: 'inline', availableDisplayModes: ['fullscreen', 'inline'], theme: 'light' },
+  });
+  bridge.onrequestdisplaymode = async ({ mode }) => {
+    requestedMode = mode;
+    return { mode };
+  };
+  const [a, b] = pair();
+  const themeEvents: string[] = [];
+  const off = workspace.host.subscribe((event) => {
+    if (event.type === 'theme') {
+      themeEvents.push(event.theme);
+    }
+  });
+  try {
+    await bridge.connect(b);
+    await workspace.connect(a);
+    workspace.renderReady();
+    assert.deepEqual(themeEvents, ['light']);
+
+    await bridge.sendHostContextChange({ theme: 'dark' });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepEqual(themeEvents, ['light', 'dark']);
+
+    await workspace.host.expand?.();
+    assert.equal(requestedMode, 'fullscreen');
+  } finally {
+    off();
+    await workspace.dispose();
+    await bridge.close();
+  }
+});
+
+test('expansion reports actual mode, unsupported capability, failures and dynamic availability', async () => {
+  for (const scenario of ['unsupported', 'rejected', 'failed', 'undeclared'] as const) {
+    const app = new App({name:'expansion-'+scenario,version:'1'}, {}, {autoResize:false});
+    const workspace = createChatGPTWorkspace(app, 'formal');
+    const bridge = new AppBridge(null, {name:'synthetic host',version:'1'}, {serverTools:{}}, {
+      hostContext:{displayMode:'inline', ...(scenario==='undeclared'?{}:{availableDisplayModes:scenario==='unsupported'?['inline']:['inline','fullscreen']})},
+    });
+    let requests=0;
+    bridge.onrequestdisplaymode=async()=>{requests++;if(scenario==='failed')throw new Error('Synthetic refusal');return {mode:scenario==='rejected'?'inline':'fullscreen'};};
+    const [a,b]=pair();
+    try {
+      await bridge.connect(b);await workspace.connect(a);
+      assert.equal(requests,scenario==='unsupported'?0:1);
+      assert.equal(workspace.host.displayState().result?.status,scenario==='undeclared'?'accepted':scenario);
+      if(scenario==='failed')assert.match(workspace.host.displayState().result?.reason??'',/Synthetic refusal/);
+      const displays:unknown[]=[];
+      const off=workspace.host.subscribe(e=>{if(e.type==='display')displays.push(e.state);});
+      await bridge.sendHostContextChange({availableDisplayModes:['inline','fullscreen'],displayMode:'inline'});
+      await new Promise<void>(resolve=>setImmediate(resolve));
+      assert.equal(workspace.host.displayState().availability,'available');assert.ok(displays.length);off();
+    } finally {await workspace.dispose();await bridge.close();}
+  }
+});
+
+test('concurrent expansion requests share one pending negotiation', async () => {
+  const app=new App({name:'pending-expand',version:'1'}, {}, {autoResize:false});
+  const workspace=createChatGPTWorkspace(app,'formal');
+  const bridge=new AppBridge(null,{name:'synthetic',version:'1'},{serverTools:{}},{hostContext:{displayMode:'fullscreen',availableDisplayModes:['inline','fullscreen']}});
+  let release:(value:{mode:'fullscreen'})=>void=()=>{};let requests=0;
+  bridge.onrequestdisplaymode=()=>{requests++;return new Promise(resolve=>{release=resolve;});};
+  const [a,b]=pair();
+  try {
+    await bridge.connect(b);await workspace.connect(a);
+    const first=workspace.host.expand!(),second=workspace.host.expand!();
+    await new Promise<void>(resolve=>setImmediate(resolve));
+    assert.equal(workspace.host.displayState().pending,true);assert.equal(requests,1);
+    release({mode:'fullscreen'});
+    assert.deepEqual(await first,await second);assert.equal(workspace.host.displayState().pending,false);
+  } finally {await workspace.dispose();await bridge.close();}
 });
 

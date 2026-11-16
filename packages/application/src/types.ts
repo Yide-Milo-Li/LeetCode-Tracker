@@ -77,6 +77,8 @@ export interface GenerateContentParams {
   responseSchema?: unknown;
   abortSignal: AbortSignal;
   timeoutMs?: number;
+  /** Short security reviews use provider-specific bounded output without changing other tasks. */
+  purpose?: 'operation-review';
 }
 
 /** Raw result from a provider content generation call. */
