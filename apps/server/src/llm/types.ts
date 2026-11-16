@@ -4,7 +4,7 @@
  */
 import type { ProgressCandidateInput } from '../../../../packages/contracts/src/practice.ts';
 import type { Bilingual, Rules, RulePatch } from '../../../../packages/contracts/src/recommendations.ts';
-import type { CatalogProblem } from '../../../../packages/contracts/src/sync.ts';
+import type { CatalogProblem, ReasoningEffort } from '../../../../packages/contracts/src/sync.ts';
 
 export type LLMProviderType = 'gemini' | 'openai' | 'deepseek';
 
@@ -60,6 +60,7 @@ export interface LLMAssistantStatus {
   model: string;
   fallbackModels?: string[];
   baseUrl?: string;
+  reasoningEffort?: ReasoningEffort;
 }
 
 /** Legacy alias for Gemini assistant status. */
@@ -67,6 +68,7 @@ export interface GeminiAssistantStatus {
   configured: boolean;
   model: string;
   fallbackModels?: string[];
+  reasoningEffort?: ReasoningEffort;
 }
 
 /** Parameters for raw content generation call. */
@@ -77,6 +79,7 @@ export interface GenerateContentParams {
   responseSchema?: unknown;
   abortSignal: AbortSignal;
   timeoutMs?: number;
+  reasoningEffort?: ReasoningEffort;
 }
 
 /** Raw result from a provider content generation call. */
@@ -92,6 +95,7 @@ export interface ConnectionTestParams {
   apiKey?: string;
   model?: string;
   baseUrl?: string;
+  reasoningEffort?: ReasoningEffort;
 }
 
 /** Result returned by connectivity test. */
@@ -121,6 +125,7 @@ export type CustomGenerateFn = (params: {
     responseMimeType: string;
     responseSchema: unknown;
     abortSignal: AbortSignal;
+    reasoningEffort?: ReasoningEffort;
   };
 }) => Promise<{ text?: string }>;
 
@@ -133,6 +138,7 @@ export type GeminiGenerateContentFn = (params: {
     responseMimeType: string;
     responseSchema: unknown;
     abortSignal: AbortSignal;
+    thinkingConfig?: { thinkingLevel?: string };
   };
 }) => Promise<{ text?: string }>;
 
@@ -142,6 +148,7 @@ export interface ProviderConfig {
   model?: string;
   baseUrl?: string;
   fallbackModels?: string[];
+  reasoningEffort?: ReasoningEffort;
 }
 
 /** Options for configuring the LLMAssistant. */
@@ -152,6 +159,7 @@ export interface LLMAssistantOptions {
   model?: string;
   baseUrl?: string;
   fallbackModels?: string[];
+  reasoningEffort?: ReasoningEffort;
   maxRetriesPerModel?: number;
   initialBackoffMs?: number;
   timeoutMs?: number;
@@ -192,6 +200,7 @@ export interface ILLMAssistant {
     model?: string | null;
     baseUrl?: string | null;
     fallbackModels?: string[] | null;
+    reasoningEffort?: ReasoningEffort | null;
     providers?: Partial<Record<LLMProviderType, ProviderConfig>> | null;
   }): void;
   testConnection?(params?: ConnectionTestParams): Promise<ConnectionTestResult>;

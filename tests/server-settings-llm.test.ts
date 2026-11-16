@@ -14,6 +14,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { CatalogStore } from '../packages/database/src/store.ts';
 import { buildApp } from '../apps/server/src/app.ts';
 import { LLMAssistant } from '../apps/server/src/llm/assistant.ts';
+import { GeminiProvider } from '../apps/server/src/llm/providers/gemini.ts';
 import { OpenAIProvider } from '../apps/server/src/llm/providers/openai.ts';
 import { DeepSeekProvider } from '../apps/server/src/llm/providers/deepseek.ts';
 import {
@@ -164,20 +165,20 @@ describe('Multi-Provider LLM Settings & Server Endpoints (/api/v1/settings)', ()
       getStatus: (): LLMAssistantStatus => ({
         configured: true,
         provider: 'openai',
-        model: 'gpt-5.6-luna',
+        model: 'gpt-6-luna',
       }),
       testConnection: async (params) => {
         testedParams = params;
         if (shouldSucceed) {
           return {
             ok: true,
-            model: params?.model || 'gpt-5.6-luna',
+            model: params?.model || 'gpt-6-luna',
             provider: params?.provider || 'openai',
           };
         }
         return {
           ok: false,
-          model: params?.model || 'gpt-5.6-luna',
+          model: params?.model || 'gpt-6-luna',
           provider: params?.provider || 'openai',
           message: 'Invalid authorization token',
         };
@@ -193,19 +194,19 @@ describe('Multi-Provider LLM Settings & Server Endpoints (/api/v1/settings)', ()
       payload: {
         provider: 'openai',
         apiKey: 'sk-test-valid',
-        model: 'gpt-5.6-luna',
+        model: 'gpt-6-luna',
         baseUrl: 'https://api.openai.com/v1',
       },
     });
     assert.equal(successRes.statusCode, 200);
     const successBody = JSON.parse(successRes.payload);
     assert.equal(successBody.ok, true);
-    assert.equal(successBody.model, 'gpt-5.6-luna');
+    assert.equal(successBody.model, 'gpt-6-luna');
     assert.equal(successBody.provider, 'openai');
     assert.deepEqual(testedParams, {
       provider: 'openai',
       apiKey: 'sk-test-valid',
-      model: 'gpt-5.6-luna',
+      model: 'gpt-6-luna',
       baseUrl: 'https://api.openai.com/v1',
     });
 
@@ -262,6 +263,36 @@ describe('Multi-Provider LLM Settings & Server Endpoints (/api/v1/settings)', ()
     assert.equal(received.apiKey, 'new-deepseek-key');
     assert.equal(received.model, 'deepseek-flash');
     assert.deepEqual((received.providers as any).deepseek.fallbackModels, []);
+  });
+
+  it('persists independent reasoning efforts across providers and rejects invalid values', async () => {
+    const db = new DatabaseSync(':memory:');
+    const store = new CatalogStore(db, { skipBackup: true });
+    const app = await buildApp({ store, disableStatic: true });
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/settings',
+      payload: {
+        geminiModel: 'models/gemini-4-hydrogen',
+        geminiReasoningEffort: 'xhigh',
+        openaiReasoningEffort: 'max',
+        deepseekReasoningEffort: 'none',
+      },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.geminiReasoningEffort, 'xhigh');
+    assert.equal(body.openaiReasoningEffort, 'max');
+    assert.equal(body.deepseekReasoningEffort, 'none');
+
+    const invalidDeepseek = await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/settings',
+      payload: { deepseekReasoningEffort: 'medium' },
+    });
+    assert.equal(invalidDeepseek.statusCode, 400);
+    assert.equal(invalidDeepseek.json().error, 'INVALID_SETTINGS');
   });
 });
 
@@ -527,5 +558,108 @@ describe('Native HTTP LLM Providers (OpenAI & DeepSeek)', () => {
     assert.ok(planRes.reasons['1']);
     assert.ok(planRes.reasons['2']);
     assert.equal(planRes.model, 'local');
+  });
+
+  it('sends vendor-specific reasoning parameters for OpenAI, DeepSeek, and Gemini with fallback clamping', async () => {
+    const capturedRequests: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const originalFetch = globalThis.fetch;
+    try {
+      globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        capturedRequests.push({
+          url: String(input),
+          body: JSON.parse(String(init?.body)),
+        });
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({ candidates: [], unparsedSnippets: [] }),
+                },
+              },
+            ],
+          }),
+        } as unknown as Response;
+      }) as typeof fetch;
+
+      const openai = new OpenAIProvider({
+        apiKey: 'sk-openai',
+        defaultModel: 'gpt-6-luna',
+        defaultReasoningEffort: 'max',
+      });
+      await openai.generateContent({
+        model: 'gpt-6-luna',
+        systemInstruction: 'sys',
+        prompt: 'prompt',
+        abortSignal: new AbortController().signal,
+      });
+
+      const deepseekNone = new DeepSeekProvider({
+        apiKey: 'sk-deepseek',
+        defaultModel: 'deepseek-flash',
+        defaultReasoningEffort: 'none',
+      });
+      await deepseekNone.generateContent({
+        model: 'deepseek-flash',
+        systemInstruction: 'sys',
+        prompt: 'prompt',
+        abortSignal: new AbortController().signal,
+      });
+
+      const deepseekMax = new DeepSeekProvider({
+        apiKey: 'sk-deepseek',
+        defaultModel: 'deepseek-flash',
+        defaultReasoningEffort: 'max',
+      });
+      await deepseekMax.generateContent({
+        model: 'deepseek-flash',
+        systemInstruction: 'sys',
+        prompt: 'prompt',
+        abortSignal: new AbortController().signal,
+      });
+
+      assert.equal(capturedRequests[0].body.reasoning_effort, 'max');
+      assert.equal(capturedRequests[0].body.thinking, undefined);
+
+      assert.equal(capturedRequests[1].body.reasoning_effort, 'none');
+      assert.deepEqual(capturedRequests[1].body.thinking, { type: 'disabled' });
+
+      assert.equal(capturedRequests[2].body.reasoning_effort, 'max');
+      assert.deepEqual(capturedRequests[2].body.thinking, { type: 'enabled' });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    const geminiCalls: Array<{ model: string; thinkingLevel?: string }> = [];
+    const geminiAssistant = new LLMAssistant({
+      provider: 'gemini',
+      apiKey: 'AIzaTest',
+      model: 'models/gemini-4-hydrogen',
+      fallbackModels: ['models/gemini-3.8-flash'],
+      reasoningEffort: 'xhigh',
+      maxRetriesPerModel: 0,
+      initialBackoffMs: 0,
+      generateContentFn: async ({ model, config }) => {
+        geminiCalls.push({ model, thinkingLevel: config.thinkingConfig?.thinkingLevel });
+        if (model === 'models/gemini-4-hydrogen') {
+          throw new Error('503 temporary overload');
+        }
+        return {
+          text: JSON.stringify({ candidates: [], unparsedSnippets: [] }),
+        };
+      },
+    });
+
+    const formatted = await geminiAssistant.formatProgressText('1. Two Sum | Accepted');
+    assert.equal(formatted.model, 'models/gemini-3.8-flash');
+    assert.deepEqual(geminiCalls, [
+      { model: 'models/gemini-4-hydrogen', thinkingLevel: 'XHIGH' },
+      { model: 'models/gemini-3.8-flash', thinkingLevel: 'HIGH' },
+    ]);
+
+    const directGemini = new GeminiProvider({ apiKey: 'AIzaTest', defaultModel: 'models/gemini-3.8-flash' });
+    assert.ok(directGemini);
   });
 });

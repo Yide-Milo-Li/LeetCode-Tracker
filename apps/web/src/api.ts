@@ -28,6 +28,7 @@ import type {
   ProgressImportSummary,
   ProgressSnapshot,
   ProgressSnapshotHistory,
+  ReasoningEffort,
   RulePatch,
   SnapshotBundle,
   Strategy,
@@ -184,6 +185,7 @@ const settingsApi = {
     apiKey?: string;
     model?: string;
     baseUrl?: string;
+    reasoningEffort?: ReasoningEffort;
   }): Promise<{ ok: boolean; model: string; message?: string; provider?: LLMProvider }> {
     return request<{ ok: boolean; model: string; message?: string; provider?: LLMProvider }>('/settings/test-llm', {
       method: 'POST',
@@ -191,7 +193,11 @@ const settingsApi = {
     });
   },
 
-  testGeminiConnection(params?: { apiKey?: string; model?: string }): Promise<{ ok: boolean; model: string; message?: string }> {
+  testGeminiConnection(params?: {
+    apiKey?: string;
+    model?: string;
+    reasoningEffort?: ReasoningEffort;
+  }): Promise<{ ok: boolean; model: string; message?: string }> {
     return request<{ ok: boolean; model: string; message?: string }>('/settings/test-gemini', {
       method: 'POST',
       body: JSON.stringify(params ?? {}),

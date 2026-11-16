@@ -1,8 +1,13 @@
 /**
  * Google Gemini provider adapter using official @google/genai SDK.
  */
-import { GoogleGenAI } from '@google/genai';
-import { defaultGeminiModel, normalizeGeminiModel } from '../../../../../packages/contracts/src/sync.ts';
+import { GoogleGenAI, type ThinkingLevel } from '@google/genai';
+import {
+  defaultGeminiModel,
+  normalizeGeminiModel,
+  resolveModelReasoningEffort,
+  type ReasoningEffort,
+} from '../../../../../packages/contracts/src/sync.ts';
 import { BaseLLMProvider } from './base.ts';
 import type {
   GenerateContentParams,
@@ -15,6 +20,7 @@ import type {
 export interface GeminiProviderOptions {
   apiKey?: string;
   defaultModel?: string;
+  defaultReasoningEffort?: ReasoningEffort;
   generateContentFn?: GeminiGenerateContentFn;
 }
 
@@ -23,6 +29,7 @@ export class GeminiProvider extends BaseLLMProvider {
   public readonly providerId = 'gemini' as const;
   private apiKey?: string;
   private defaultModel: string;
+  private defaultReasoningEffort: ReasoningEffort;
   private readonly generateContentFn?: GeminiGenerateContentFn;
 
   /** Configure this adapter without making an external request. */
@@ -30,21 +37,40 @@ export class GeminiProvider extends BaseLLMProvider {
     super();
     this.apiKey = options.apiKey ?? process.env.GEMINI_API_KEY;
     this.defaultModel = options.defaultModel || normalizeGeminiModel(process.env.GEMINI_MODEL) || defaultGeminiModel;
+    this.defaultReasoningEffort = resolveModelReasoningEffort(
+      'gemini',
+      this.defaultModel,
+      options.defaultReasoningEffort ?? process.env.GEMINI_REASONING_EFFORT
+    );
     this.generateContentFn = options.generateContentFn;
   }
 
   /** Apply explicit credential changes; omitted fields preserve current values. */
-  public updateCredentials(config: { apiKey?: string | null; defaultModel?: string | null }): void {
+  public updateCredentials(config: {
+    apiKey?: string | null;
+    defaultModel?: string | null;
+    defaultReasoningEffort?: ReasoningEffort | null;
+  }): void {
     if (config.apiKey !== undefined) {
       this.apiKey = config.apiKey ? config.apiKey.trim() : undefined;
     }
     if (config.defaultModel !== undefined) {
       this.defaultModel = config.defaultModel ? config.defaultModel.trim() : defaultGeminiModel;
     }
+    if (config.defaultReasoningEffort !== undefined || config.defaultModel !== undefined) {
+      this.defaultReasoningEffort = resolveModelReasoningEffort(
+        'gemini',
+        this.defaultModel,
+        config.defaultReasoningEffort === undefined ? this.defaultReasoningEffort : config.defaultReasoningEffort
+      );
+    }
   }
 
   /** Send one structured request; reject transport or missing-content failures. */
   public async generateContent(params: GenerateContentParams): Promise<GenerateContentOutput> {
+    const effort = resolveModelReasoningEffort('gemini', params.model, params.reasoningEffort ?? this.defaultReasoningEffort);
+    const thinkingConfig = { thinkingLevel: effort.toUpperCase() as unknown as ThinkingLevel };
+
     if (this.generateContentFn) {
       const response = await this.generateContentFn({
         model: params.model,
@@ -54,6 +80,7 @@ export class GeminiProvider extends BaseLLMProvider {
           responseMimeType: 'application/json',
           responseSchema: params.responseSchema,
           abortSignal: params.abortSignal,
+          thinkingConfig,
         },
       });
       return { text: response.text, model: params.model };
@@ -72,6 +99,7 @@ export class GeminiProvider extends BaseLLMProvider {
         responseMimeType: 'application/json',
         responseSchema: params.responseSchema,
         abortSignal: params.abortSignal,
+        thinkingConfig,
       },
     });
 
@@ -82,6 +110,8 @@ export class GeminiProvider extends BaseLLMProvider {
   public async testConnection(params?: ConnectionTestParams): Promise<ConnectionTestResult> {
     const testKey = params?.apiKey !== undefined ? params.apiKey.trim() : this.apiKey;
     const testModel = params?.model?.trim() || this.defaultModel;
+    const effort = resolveModelReasoningEffort('gemini', testModel, params?.reasoningEffort ?? this.defaultReasoningEffort);
+    const thinkingConfig = { thinkingLevel: effort.toUpperCase() as unknown as ThinkingLevel };
 
     if (!testKey) {
       return { ok: false, model: testModel, message: 'Gemini API key is not configured', provider: 'gemini' };
@@ -99,6 +129,7 @@ export class GeminiProvider extends BaseLLMProvider {
             responseMimeType: 'text/plain',
             responseSchema: undefined,
             abortSignal: abort.signal,
+            thinkingConfig,
           },
         });
       } else {
@@ -108,6 +139,7 @@ export class GeminiProvider extends BaseLLMProvider {
           contents: 'ping',
           config: {
             abortSignal: abort.signal,
+            thinkingConfig,
           },
         });
       }

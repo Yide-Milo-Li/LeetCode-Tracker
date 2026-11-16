@@ -11,7 +11,9 @@ import {
   defaultGeminiFallbackModels,
   defaultGeminiModel,
   normalizeGeminiModel,
+  resolveModelReasoningEffort,
   type CatalogProblem,
+  type ReasoningEffort,
 } from '../../../../packages/contracts/src/sync.ts';
 import {
   progressFormatResponseSchema,
@@ -67,6 +69,7 @@ export class LLMAssistant implements ILLMAssistant {
     model: string;
     baseUrl?: string;
     fallbackModels: string[];
+    reasoningEffort: ReasoningEffort;
   }>;
 
   private readonly maxRetriesPerModel: number;
@@ -87,26 +90,45 @@ export class LLMAssistant implements ILLMAssistant {
     const openaiOpts = options.providers?.openai;
     const deepseekOpts = options.providers?.deepseek;
 
+    const geminiModel = geminiOpts?.model || (this.activeProviderType === 'gemini' ? options.model : undefined) || normalizeGeminiModel(process.env.GEMINI_MODEL) || defaultGeminiModel;
+    const openaiModel = openaiOpts?.model || (this.activeProviderType === 'openai' ? options.model : undefined) || process.env.OPENAI_MODEL || 'gpt-6-luna';
+    const deepseekModel = deepseekOpts?.model || (this.activeProviderType === 'deepseek' ? options.model : undefined) || process.env.DEEPSEEK_MODEL || 'deepseek-flash';
+
     this.providerConfigs = {
       gemini: {
         apiKey: geminiOpts?.apiKey ?? (this.activeProviderType === 'gemini' ? options.apiKey : undefined) ?? process.env.GEMINI_API_KEY,
-        model: geminiOpts?.model || (this.activeProviderType === 'gemini' ? options.model : undefined) || normalizeGeminiModel(process.env.GEMINI_MODEL) || defaultGeminiModel,
+        model: geminiModel,
         baseUrl: undefined,
         fallbackModels: geminiOpts?.fallbackModels || (this.activeProviderType === 'gemini' ? options.fallbackModels : undefined) || [
           ...defaultGeminiFallbackModels,
         ],
+        reasoningEffort: resolveModelReasoningEffort(
+          'gemini',
+          geminiModel,
+          geminiOpts?.reasoningEffort ?? (this.activeProviderType === 'gemini' ? options.reasoningEffort : undefined) ?? process.env.GEMINI_REASONING_EFFORT
+        ),
       },
       openai: {
         apiKey: openaiOpts?.apiKey ?? (this.activeProviderType === 'openai' ? options.apiKey : undefined) ?? process.env.OPENAI_API_KEY,
-        model: openaiOpts?.model || (this.activeProviderType === 'openai' ? options.model : undefined) || process.env.OPENAI_MODEL || 'gpt-5.6-luna',
+        model: openaiModel,
         baseUrl: openaiOpts?.baseUrl || (this.activeProviderType === 'openai' ? options.baseUrl : undefined) || process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
         fallbackModels: openaiOpts?.fallbackModels || (this.activeProviderType === 'openai' ? options.fallbackModels : undefined) || [],
+        reasoningEffort: resolveModelReasoningEffort(
+          'openai',
+          openaiModel,
+          openaiOpts?.reasoningEffort ?? (this.activeProviderType === 'openai' ? options.reasoningEffort : undefined) ?? process.env.OPENAI_REASONING_EFFORT
+        ),
       },
       deepseek: {
         apiKey: deepseekOpts?.apiKey ?? (this.activeProviderType === 'deepseek' ? options.apiKey : undefined) ?? process.env.DEEPSEEK_API_KEY,
-        model: deepseekOpts?.model || (this.activeProviderType === 'deepseek' ? options.model : undefined) || process.env.DEEPSEEK_MODEL || 'deepseek-flash',
+        model: deepseekModel,
         baseUrl: deepseekOpts?.baseUrl || (this.activeProviderType === 'deepseek' ? options.baseUrl : undefined) || process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
         fallbackModels: deepseekOpts?.fallbackModels || (this.activeProviderType === 'deepseek' ? options.fallbackModels : undefined) || [],
+        reasoningEffort: resolveModelReasoningEffort(
+          'deepseek',
+          deepseekModel,
+          deepseekOpts?.reasoningEffort ?? (this.activeProviderType === 'deepseek' ? options.reasoningEffort : undefined) ?? process.env.DEEPSEEK_REASONING_EFFORT
+        ),
       },
     };
 
@@ -121,18 +143,21 @@ export class LLMAssistant implements ILLMAssistant {
       gemini: new GeminiProvider({
         apiKey: this.providerConfigs.gemini.apiKey ?? '',
         defaultModel: this.providerConfigs.gemini.model,
+        defaultReasoningEffort: this.providerConfigs.gemini.reasoningEffort,
         generateContentFn: options.generateContentFn,
       }),
       openai: new OpenAIProvider({
         apiKey: this.providerConfigs.openai.apiKey ?? '',
         defaultModel: this.providerConfigs.openai.model,
         baseUrl: this.providerConfigs.openai.baseUrl,
+        defaultReasoningEffort: this.providerConfigs.openai.reasoningEffort,
         customGenerateFn: options.customGenerateFn,
       }),
       deepseek: new DeepSeekProvider({
         apiKey: this.providerConfigs.deepseek.apiKey ?? '',
         defaultModel: this.providerConfigs.deepseek.model,
         baseUrl: this.providerConfigs.deepseek.baseUrl,
+        defaultReasoningEffort: this.providerConfigs.deepseek.reasoningEffort,
         customGenerateFn: options.customGenerateFn,
       }),
     };
@@ -157,6 +182,7 @@ export class LLMAssistant implements ILLMAssistant {
       model: activeCfg.model,
       fallbackModels: [...activeCfg.fallbackModels],
       baseUrl: activeCfg.baseUrl,
+      reasoningEffort: activeCfg.reasoningEffort,
     };
   }
 
@@ -169,6 +195,7 @@ export class LLMAssistant implements ILLMAssistant {
     model?: string | null;
     baseUrl?: string | null;
     fallbackModels?: string[] | null;
+    reasoningEffort?: ReasoningEffort | null;
     providers?: Partial<Record<LLMProviderType, ProviderConfig>> | null;
   }): void {
     if (config.provider) {
@@ -194,6 +221,19 @@ export class LLMAssistant implements ILLMAssistant {
         : [];
     }
     target.fallbackModels = target.fallbackModels.filter(m => m !== target.model);
+    if (config.reasoningEffort !== undefined) {
+      target.reasoningEffort = resolveModelReasoningEffort(
+        this.activeProviderType,
+        target.model,
+        config.reasoningEffort ?? undefined
+      );
+    } else if (config.model !== undefined) {
+      target.reasoningEffort = resolveModelReasoningEffort(
+        this.activeProviderType,
+        target.model,
+        target.reasoningEffort
+      );
+    }
 
     // Update specific providers if provided
     if (config.providers) {
@@ -208,13 +248,18 @@ export class LLMAssistant implements ILLMAssistant {
             ? [...new Set(pVal.fallbackModels.map(s => s.trim()).filter(Boolean))].filter(m => m !== cfg.model)
             : [];
         }
+        if (pVal.reasoningEffort !== undefined) {
+          cfg.reasoningEffort = resolveModelReasoningEffort(pKey, cfg.model, pVal.reasoningEffort);
+        } else if (pVal.model !== undefined) {
+          cfg.reasoningEffort = resolveModelReasoningEffort(pKey, cfg.model, cfg.reasoningEffort);
+        }
       }
     }
 
     // Replace adapters instead of mutating them: requests already running retain their credentials.
-    this.providers.gemini = new GeminiProvider({ apiKey: this.providerConfigs.gemini.apiKey ?? '', defaultModel: this.providerConfigs.gemini.model, generateContentFn: this.hooks.generateContentFn });
-    this.providers.openai = new OpenAIProvider({ apiKey: this.providerConfigs.openai.apiKey ?? '', defaultModel: this.providerConfigs.openai.model, baseUrl: this.providerConfigs.openai.baseUrl, customGenerateFn: this.hooks.customGenerateFn });
-    this.providers.deepseek = new DeepSeekProvider({ apiKey: this.providerConfigs.deepseek.apiKey ?? '', defaultModel: this.providerConfigs.deepseek.model, baseUrl: this.providerConfigs.deepseek.baseUrl, customGenerateFn: this.hooks.customGenerateFn });
+    this.providers.gemini = new GeminiProvider({ apiKey: this.providerConfigs.gemini.apiKey ?? '', defaultModel: this.providerConfigs.gemini.model, defaultReasoningEffort: this.providerConfigs.gemini.reasoningEffort, generateContentFn: this.hooks.generateContentFn });
+    this.providers.openai = new OpenAIProvider({ apiKey: this.providerConfigs.openai.apiKey ?? '', defaultModel: this.providerConfigs.openai.model, baseUrl: this.providerConfigs.openai.baseUrl, defaultReasoningEffort: this.providerConfigs.openai.reasoningEffort, customGenerateFn: this.hooks.customGenerateFn });
+    this.providers.deepseek = new DeepSeekProvider({ apiKey: this.providerConfigs.deepseek.apiKey ?? '', defaultModel: this.providerConfigs.deepseek.model, baseUrl: this.providerConfigs.deepseek.baseUrl, defaultReasoningEffort: this.providerConfigs.deepseek.reasoningEffort, customGenerateFn: this.hooks.customGenerateFn });
   }
 
   /**
@@ -228,10 +273,17 @@ export class LLMAssistant implements ILLMAssistant {
     }
 
     const cfg = this.providerConfigs[targetProviderType];
+    const targetModel = params?.model ?? cfg.model;
+    const targetEffort = resolveModelReasoningEffort(
+      targetProviderType,
+      targetModel,
+      params?.reasoningEffort ?? cfg.reasoningEffort
+    );
     return provider.testConnection({
       apiKey: params?.apiKey ?? cfg.apiKey,
-      model: params?.model ?? cfg.model,
+      model: targetModel,
       baseUrl: params?.baseUrl ?? cfg.baseUrl,
+      reasoningEffort: targetEffort,
     });
   }
 
@@ -323,6 +375,7 @@ Do not invent or hallucinate problems not in the input. If lines cannot be parse
             responseSchema: progressFormatResponseSchema,
             abortSignal: abortController.signal,
             timeoutMs: attemptTimeout,
+            reasoningEffort: resolveModelReasoningEffort(providerType, currentModel, activeCfg.reasoningEffort),
           });
 
           clearTimeout(timeoutHandle);
@@ -475,6 +528,7 @@ Do not invent or hallucinate problems not in the input. If lines cannot be parse
           responseSchema: planContentResponseSchema,
           abortSignal: abortController.signal,
           timeoutMs: attemptTimeout,
+          reasoningEffort: resolveModelReasoningEffort(providerType, currentModel, activeCfg.reasoningEffort),
         });
 
         clearTimeout(timeoutHandle);
@@ -571,6 +625,7 @@ Return ONLY valid JSON conforming to the schema.`;
           responseSchema: overrideResponseSchema,
           abortSignal: abortController.signal,
           timeoutMs: attemptTimeout,
+          reasoningEffort: resolveModelReasoningEffort(providerType, currentModel, activeCfg.reasoningEffort),
         });
 
         clearTimeout(timeoutHandle);
@@ -742,6 +797,7 @@ Return JSON with an array of selectedQuestionIds (strings). Order them in priori
           responseSchema: problemSelectionResponseSchema,
           abortSignal: abortController.signal,
           timeoutMs: attemptTimeout,
+          reasoningEffort: resolveModelReasoningEffort(providerType, currentModel, activeCfg.reasoningEffort),
         });
 
         clearTimeout(timeoutHandle);

@@ -205,7 +205,7 @@ try {
           ['models/gemini-3.8-flash', 'models/gemini-4-hydrogen'],
         );
       } else {
-        const expected = provider === 'openai' ? 'gpt-5.6-luna' : 'deepseek-flash';
+        const expected = provider === 'openai' ? 'gpt-6-luna' : 'deepseek-flash';
         assert.equal(assistant.getStatus().model, expected);
         assert.deepEqual(await evaluate("[...document.querySelector('.ai-settings-form select').options].map(o=>o.value)"), [expected]);
         assert.equal(await evaluate("Boolean(document.querySelector('.candidate-chips'))"), false);

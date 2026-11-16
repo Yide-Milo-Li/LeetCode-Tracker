@@ -2,7 +2,7 @@
 
 In the installed Windows app, configure providers in Settings. The host supplies startup paths/session state through a private stream and removes inherited provider API keys; it does not load a checkout `.env`. Environment defaults below describe source mode. AI requests send task-relevant metadata and user instructions or progress text to the configured endpoint.
 
-Settings supports Gemini, OpenAI and DeepSeek. Gemini offers only `models/gemini-3.8-flash` and `models/gemini-4-hydrogen` (with fallback chain selection between those two and no custom-model input). OpenAI offers only GPT-5.6 Luna (`gpt-5.6-luna`); DeepSeek offers only DeepSeek V4.1 Flash (`deepseek-flash`), with no custom-model or fallback-model controls. Each provider keeps its own settings in SQLite; fallback-model configuration is exposed only for Gemini. OpenAI and DeepSeek also support an optional HTTP(S) API base URL; requests append `/chat/completions`. No OpenAI SDK or schema migration was added.
+Settings supports Gemini, OpenAI and DeepSeek. Gemini offers only `models/gemini-3.8-flash` and `models/gemini-4-hydrogen` (with fallback chain selection between those two and no custom-model input). OpenAI offers only GPT-6 Luna (`gpt-6-luna`); DeepSeek offers only DeepSeek V4.1 Flash (`deepseek-flash`), with no custom-model or fallback-model controls. Each provider keeps its own settings in SQLite; fallback-model configuration is exposed only for Gemini. OpenAI and DeepSeek also support an optional HTTP(S) API base URL; requests append `/chat/completions`. No OpenAI SDK or schema migration was added.
 
 Choose a provider, edit its configuration and save to activate it. Switching the displayed provider preserves other drafts and remasks keys. Configuration changes apply immediately; in-flight requests retain their original adapter. Save and probe controls remain unavailable until settings load successfully and while a form action is pending.
 
@@ -10,9 +10,20 @@ Keys are stored locally in plaintext, like the existing Gemini configuration. Pr
 
 ## Defaults and reset behavior
 
-Missing settings may use `GEMINI_API_KEY`, `OPENAI_API_KEY` or `DEEPSEEK_API_KEY`, along with the corresponding `*_MODEL` variables. OpenAI and DeepSeek also recognize `OPENAI_BASE_URL` and `DEEPSEEK_BASE_URL`. A saved, explicitly cleared API key disables that provider, including after restart. Clearing a saved Gemini model or a provider URL returns to its environment or built-in default. Unsupported `GEMINI_MODEL` values or legacy stored Gemini models fall back to `models/gemini-3.8-flash`, and unsupported stored Gemini fallback models are ignored; OpenAI and DeepSeek application requests always use the fixed model above, including after loading old settings or testing a connection. Legacy stored model fields remain readable for compatibility but cannot override the application choice. An explicitly empty fallback list stays empty after restart.
+Missing settings may use `GEMINI_API_KEY`, `OPENAI_API_KEY` or `DEEPSEEK_API_KEY`, along with the corresponding `*_MODEL` and `*_REASONING_EFFORT` variables. OpenAI and DeepSeek also recognize `OPENAI_BASE_URL` and `DEEPSEEK_BASE_URL`. A saved, explicitly cleared API key disables that provider, including after restart. Clearing a saved Gemini model or a provider URL returns to its environment or built-in default. Unsupported `GEMINI_MODEL` values or legacy stored Gemini models fall back to `models/gemini-3.8-flash`, and unsupported stored Gemini fallback models are ignored; OpenAI and DeepSeek application requests always use the fixed model above, including after loading old settings or testing a connection. Legacy stored model fields remain readable for compatibility but cannot override the application choice. An explicitly empty fallback list stays empty after restart.
 
-Preset identifiers are conveniences, not proof that an account has access to every listed model. Use the connection test to check your account or gateway; custom model identifiers are not exposed for any provider, and settings/test endpoints reject unsupported Gemini model identifiers. Official model identifiers were checked against the [OpenAI model page](https://developers.openai.com/api/docs/models/gpt-5.6-luna) and [DeepSeek model table](https://api-docs.deepseek.com/quick_start/pricing/). No live account availability was tested.
+## Reasoning effort controls
+
+Each provider exposes its vendor-accurate reasoning effort options in Settings and sends the corresponding upstream parameter:
+
+- **Google Gemini** (`thinkingConfig.thinkingLevel`):
+  - `models/gemini-3.8-flash`: `LOW`, `MEDIUM` (default), `HIGH`
+  - `models/gemini-4-hydrogen`: `LOW`, `MEDIUM`, `HIGH` (default), `XHIGH`
+  - If `gemini-4-hydrogen` is configured with `XHIGH` and falls back at runtime to `gemini-3.8-flash`, the runtime clamps the level to `HIGH`.
+- **OpenAI** (`gpt-6-luna`, `reasoning_effort` on `/chat/completions`): `none`, `low`, `medium` (default), `high`, `xhigh`, `max`.
+- **DeepSeek** (`deepseek-flash`, `reasoning_effort` + `thinking` on `/chat/completions`): `none` (`thinking: { type: "disabled" }`), `low`, `high` (default), `max` (`thinking: { type: "enabled" }` when not `none`).
+
+Preset identifiers are conveniences, not proof that an account has access to every listed model. Use the connection test to check your account or gateway; custom model identifiers are not exposed for any provider, and settings/test endpoints reject unsupported Gemini model identifiers or unsupported reasoning effort values. Official model identifiers were checked against the [OpenAI model page](https://developers.openai.com/api/docs/models/gpt-6-luna) and [DeepSeek model table](https://api-docs.deepseek.com/quick_start/pricing/). No live account availability was tested.
 
 ## Provider boundary and failure behavior
 

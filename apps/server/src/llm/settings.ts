@@ -3,6 +3,7 @@ import {
   defaultGeminiModel,
   fixedProviderModels,
   normalizeGeminiModel,
+  resolveModelReasoningEffort,
 } from '../../../../packages/contracts/src/sync.ts';
 import type { CatalogStore } from '../../../../packages/database/src/store.ts';
 import type { LLMAssistantOptions, LLMProviderType, ProviderConfig } from './types.ts';
@@ -26,6 +27,9 @@ export function resolveAssistantSettings(store: CatalogStore): LLMAssistantOptio
                 .filter((m): m is NonNullable<typeof m> => m !== null && m !== model)
             )]
           : undefined,
+        reasoningEffort: hasRow('reasoning_effort') && settings.geminiReasoningEffort
+          ? resolveModelReasoningEffort('gemini', model, settings.geminiReasoningEffort)
+          : undefined,
         baseUrl: undefined,
       };
     } else {
@@ -33,6 +37,9 @@ export function resolveAssistantSettings(store: CatalogStore): LLMAssistantOptio
         apiKey: hasRow('api_key') ? settings[`${provider}ApiKey`] ?? '' : undefined,
         model: fixedProviderModels[provider],
         fallbackModels: [],
+        reasoningEffort: hasRow('reasoning_effort') && settings[`${provider}ReasoningEffort`]
+          ? resolveModelReasoningEffort(provider, fixedProviderModels[provider], settings[`${provider}ReasoningEffort`])
+          : undefined,
         baseUrl: settings[`${provider}BaseUrl`] ?? undefined,
       };
     }

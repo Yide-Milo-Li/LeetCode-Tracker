@@ -2,6 +2,7 @@
  * DeepSeek provider adapter using OpenAI-compatible Chat Completions API.
  * Defaults to https://api.deepseek.com with DeepSeek V4.1 Flash (deepseek-flash).
  */
+import type { ReasoningEffort } from '../../../../../packages/contracts/src/sync.ts';
 import { OpenAIProvider, type FetchFn } from './openai.ts';
 import type {
   CustomGenerateFn,
@@ -11,6 +12,7 @@ export interface DeepSeekProviderOptions {
   apiKey?: string;
   defaultModel?: string;
   baseUrl?: string;
+  defaultReasoningEffort?: ReasoningEffort;
   fetchFn?: FetchFn;
   customGenerateFn?: CustomGenerateFn;
 }
@@ -24,6 +26,7 @@ export class DeepSeekProvider extends OpenAIProvider {
       apiKey: options.apiKey ?? process.env.DEEPSEEK_API_KEY,
       defaultModel: options.defaultModel || process.env.DEEPSEEK_MODEL || 'deepseek-flash',
       baseUrl: options.baseUrl || process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
+      defaultReasoningEffort: options.defaultReasoningEffort,
       fetchFn: options.fetchFn,
       customGenerateFn: options.customGenerateFn,
     });

@@ -18,7 +18,7 @@ afterEach(() => mock.restoreAll());
 it('application configuration pins supported Gemini, OpenAI and DeepSeek models over legacy settings', async () => {
   for (const [provider, model, storedFallback, expectedFallback] of [
     ['gemini', 'models/gemini-3.8-flash', ['models/gemini-3.7-flash', 'models/gemini-4-hydrogen'], ['models/gemini-4-hydrogen']],
-    ['openai', 'gpt-5.6-luna', ['old-backup'], []],
+    ['openai', 'gpt-6-luna', ['old-backup'], []],
     ['deepseek', 'deepseek-flash', ['old-backup'], []],
   ] as const) {
   const store = new CatalogStore(new DatabaseSync(':memory:'), { skipBackup: true });

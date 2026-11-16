@@ -102,7 +102,7 @@ async function main() {
     deepseekApiKey: '',
     geminiModel: 'models/gemini-3.5-flash',
     geminiFallbackModels: ['models/gemini-2.5-pro', 'models/gemini-2.5-flash'],
-    openaiModel: 'gpt-5.6-luna',
+    openaiModel: 'gpt-6-luna',
     deepseekModel: 'deepseek-flash',
   });
 

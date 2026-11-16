@@ -207,5 +207,53 @@ describe('Server Settings & Gemini AI Configuration (/api/v1/settings)', () => {
     assert.equal(invalidTestLlm.statusCode, 400);
     assert.equal(invalidTestLlm.json().error, 'INVALID_SETTINGS');
   });
+
+  it('persists model-specific Gemini thinkingLevel and rejects xhigh on gemini-3.8-flash', async () => {
+    const db = new DatabaseSync(':memory:');
+    const store = new CatalogStore(db, { skipBackup: true });
+    const app = await buildApp({ store, disableStatic: true });
+
+    const validFlash = await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/settings',
+      payload: { geminiModel: 'models/gemini-3.8-flash', geminiReasoningEffort: 'low' },
+    });
+    assert.equal(validFlash.statusCode, 200);
+    assert.equal(validFlash.json().geminiReasoningEffort, 'low');
+
+    const invalidFlashXhigh = await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/settings',
+      payload: { geminiModel: 'models/gemini-3.8-flash', geminiReasoningEffort: 'xhigh' },
+    });
+    assert.equal(invalidFlashXhigh.statusCode, 400);
+    assert.equal(invalidFlashXhigh.json().error, 'INVALID_SETTINGS');
+
+    const validHydrogen = await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/settings',
+      payload: { geminiModel: 'models/gemini-4-hydrogen', geminiReasoningEffort: 'xhigh' },
+    });
+    assert.equal(validHydrogen.statusCode, 200);
+    assert.equal(validHydrogen.json().geminiReasoningEffort, 'xhigh');
+
+    // Switching back to gemini-3.8-flash without specifying effort clamps xhigh to high
+    const switchedToFlash = await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/settings',
+      payload: { geminiModel: 'models/gemini-3.8-flash' },
+    });
+    assert.equal(switchedToFlash.statusCode, 200);
+    assert.equal(switchedToFlash.json().geminiReasoningEffort, 'high');
+
+    // Sending xhigh alone while gemini-3.8-flash is stored is rejected
+    const staleXhigh = await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/settings',
+      payload: { geminiReasoningEffort: 'xhigh' },
+    });
+    assert.equal(staleXhigh.statusCode, 400);
+    assert.equal(staleXhigh.json().error, 'INVALID_SETTINGS');
+  });
 });
 

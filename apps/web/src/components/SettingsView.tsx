@@ -6,8 +6,12 @@ import {
   defaultGeminiFallbackModels,
   defaultGeminiModel,
   fixedProviderModels,
+  getDefaultReasoningEffort,
+  getSupportedReasoningEfforts,
   normalizeGeminiModel,
+  resolveModelReasoningEffort,
   supportedGeminiModels,
+  type ReasoningEffort,
   type ThemePalette,
 } from '../../../../packages/contracts/src/sync.ts';
 import { api } from '../api.ts';
@@ -15,6 +19,7 @@ import { snapshotBundleSchema, type SnapshotBundle } from '../../../../packages/
 import { MAX_BUNDLE_BYTES } from '../../../../packages/contracts/src/migration.ts';
 import { clearPracticeIntents } from '../practice-service.ts';
 import { translations, type Language } from '../i18n.ts';
+import { brandIconUrl } from '../brand-icons.ts';
 import { useWorkspace } from '../workspace.tsx';
 import { PageHeader, Feedback, Field, InfoPopover } from './ui.tsx';
 
@@ -23,6 +28,7 @@ interface SettingsViewProps {
   onLanguageChange: (lang: Language) => void;
   onThemeChange: (theme: 'light' | 'dark' | 'system') => void;
   currentTheme: 'light' | 'dark' | 'system';
+  resolvedDark?: boolean;
   onPaletteChange?: (palette: ThemePalette) => void;
   currentPalette?: ThemePalette;
   onTimezoneSaved?: (zone: string | null) => void;
@@ -145,6 +151,7 @@ export function SettingsView({
   onLanguageChange,
   onThemeChange,
   currentTheme,
+  resolvedDark = currentTheme === 'dark',
   onPaletteChange = () => {},
   currentPalette = 'default',
   onTimezoneSaved,
@@ -171,6 +178,9 @@ export function SettingsView({
   const [geminiFallbackModels, setGeminiFallbackModels] = useState<string[]>([
     ...defaultGeminiFallbackModels,
   ]);
+  const [geminiReasoningEffort, setGeminiReasoningEffort] = useState<ReasoningEffort>(
+    () => getDefaultReasoningEffort('gemini', defaultGeminiModel)
+  );
 
   // OpenAI state
   const [openaiApiKey, setOpenaiApiKey] = useState('');
@@ -178,6 +188,9 @@ export function SettingsView({
   const [openaiIsCustomPrimary, setOpenaiIsCustomPrimary] = useState(false);
   const [openaiBaseUrl, setOpenaiBaseUrl] = useState('');
   const [openaiFallbackModels, setOpenaiFallbackModels] = useState<string[]>([]);
+  const [openaiReasoningEffort, setOpenaiReasoningEffort] = useState<ReasoningEffort>(
+    () => getDefaultReasoningEffort('openai', fixedProviderModels.openai)
+  );
 
   // DeepSeek state
   const [deepseekApiKey, setDeepseekApiKey] = useState('');
@@ -185,6 +198,9 @@ export function SettingsView({
   const [deepseekIsCustomPrimary, setDeepseekIsCustomPrimary] = useState(false);
   const [deepseekBaseUrl, setDeepseekBaseUrl] = useState('');
   const [deepseekFallbackModels, setDeepseekFallbackModels] = useState<string[]>([]);
+  const [deepseekReasoningEffort, setDeepseekReasoningEffort] = useState<ReasoningEffort>(
+    () => getDefaultReasoningEffort('deepseek', fixedProviderModels.deepseek)
+  );
 
   // Shared AI form & action state
   const [showApiKey, setShowApiKey] = useState(false);
@@ -238,6 +254,20 @@ export function SettingsView({
 
   const currentPresetModels = PROVIDER_PRESET_MODELS[provider];
 
+  const currentReasoningEffort =
+    provider === 'gemini'
+      ? geminiReasoningEffort
+      : provider === 'openai'
+      ? openaiReasoningEffort
+      : deepseekReasoningEffort;
+  const setCurrentReasoningEffort = (val: ReasoningEffort) => {
+    if (provider === 'gemini') setGeminiReasoningEffort(val);
+    else if (provider === 'openai') setOpenaiReasoningEffort(val);
+    else setDeepseekReasoningEffort(val);
+  };
+  const currentSupportedEfforts = getSupportedReasoningEfforts(provider, currentPrimaryModel);
+  const currentDefaultEffort = getDefaultReasoningEffort(provider, currentPrimaryModel);
+
   // Bundle export / import state
   const [importingBundle, setImportingBundle] = useState(false);
   const [bundleSuccess, setBundleSuccess] = useState('');
@@ -263,6 +293,9 @@ export function SettingsView({
             const effGemini = normalizeGeminiModel(settings.geminiModel) ?? defaultGeminiModel;
             setGeminiPrimaryModel(effGemini);
             setGeminiIsCustomPrimary(false);
+            setGeminiReasoningEffort(
+              resolveModelReasoningEffort('gemini', effGemini, settings.geminiReasoningEffort)
+            );
             if (settings.geminiFallbackModels) {
               setGeminiFallbackModels(
                 [...new Set(
@@ -283,6 +316,9 @@ export function SettingsView({
             setOpenaiPrimaryModel(fixedProviderModels.openai);
             setOpenaiIsCustomPrimary(false);
             setOpenaiFallbackModels([]);
+            setOpenaiReasoningEffort(
+              resolveModelReasoningEffort('openai', fixedProviderModels.openai, settings.openaiReasoningEffort)
+            );
             if (settings.openaiBaseUrl !== undefined) setOpenaiBaseUrl(settings.openaiBaseUrl ?? '');
 
             // DeepSeek
@@ -291,6 +327,9 @@ export function SettingsView({
             setDeepseekPrimaryModel(fixedProviderModels.deepseek);
             setDeepseekIsCustomPrimary(false);
             setDeepseekFallbackModels([]);
+            setDeepseekReasoningEffort(
+              resolveModelReasoningEffort('deepseek', fixedProviderModels.deepseek, settings.deepseekReasoningEffort)
+            );
             if (settings.deepseekBaseUrl !== undefined) setDeepseekBaseUrl(settings.deepseekBaseUrl ?? '');
 
           }
@@ -376,14 +415,17 @@ export function SettingsView({
         geminiApiKey: geminiApiKey.trim() || null,
         geminiModel: geminiPrimaryModel.trim() || null,
         geminiFallbackModels: cleanGeminiFb,
+        geminiReasoningEffort,
         openaiApiKey: openaiApiKey.trim() || null,
         openaiModel: openaiPrimaryModel.trim() || null,
         openaiBaseUrl: openaiBaseUrl.trim() || null,
         openaiFallbackModels: cleanOpenaiFb,
+        openaiReasoningEffort,
         deepseekApiKey: deepseekApiKey.trim() || null,
         deepseekModel: deepseekPrimaryModel.trim() || null,
         deepseekBaseUrl: deepseekBaseUrl.trim() || null,
         deepseekFallbackModels: cleanDeepseekFb,
+        deepseekReasoningEffort,
       });
       setGeminiFallbackModels(cleanGeminiFb);
       setOpenaiFallbackModels(cleanOpenaiFb);
@@ -409,12 +451,14 @@ export function SettingsView({
         ? await api.testGeminiConnection({
             apiKey: currentApiKey.trim(),
             model: currentPrimaryModel.trim() || undefined,
+            reasoningEffort: currentReasoningEffort,
           })
         : await api.testLlmConnection({
             provider,
             apiKey: currentApiKey.trim(),
             model: currentPrimaryModel.trim() || undefined,
             baseUrl: currentBaseUrl.trim() || undefined,
+            reasoningEffort: currentReasoningEffort,
           });
       setTestResult({ ok: true, model: res.model });
     } catch (err) {
@@ -559,11 +603,14 @@ export function SettingsView({
                   }
                 }}
               >
-                <div className="palette-swatches">
-                  <span style={{ backgroundColor: pal.canvas }} title="Canvas" />
-                  <span style={{ backgroundColor: pal.surface }} title="Surface" />
-                  <span style={{ backgroundColor: pal.primary }} title="Primary" />
-                  <span style={{ backgroundColor: pal.accent }} title="Accent" />
+                <div className="palette-preview">
+                  <div className="palette-swatches">
+                    <span style={{ backgroundColor: pal.canvas }} title="Canvas" />
+                    <span style={{ backgroundColor: pal.surface }} title="Surface" />
+                    <span style={{ backgroundColor: pal.primary }} title="Primary" />
+                    <span style={{ backgroundColor: pal.accent }} title="Accent" />
+                  </div>
+                  <img src={brandIconUrl(pal.id, resolvedDark)} alt="" width="40" height="40" />
                 </div>
                 <div className="palette-meta">
                   <span className="palette-name">{t[pal.nameKey] as string}</span>
@@ -825,14 +872,68 @@ export function SettingsView({
                   setCurrentIsCustomPrimary(false);
                   setCurrentPrimaryModel(selectedModel);
                   setCurrentFallbackModels((prev) => prev.filter((item) => item !== selectedModel));
+                  if (provider === 'gemini') {
+                    const nextSupported = getSupportedReasoningEfforts('gemini', selectedModel);
+                    if (!nextSupported.includes(geminiReasoningEffort)) {
+                      setGeminiReasoningEffort(getDefaultReasoningEffort('gemini', selectedModel));
+                    }
+                  }
                 }
               }}
             >
               {currentPresetModels.map((m, idx) => (
                 <option key={m} value={m}>
-                  {provider === 'openai' ? 'GPT-5.6 Luna' : provider === 'deepseek' ? 'DeepSeek V4.1 Flash' : m.replace('models/', '')}{idx === 0 ? (zh ? '（推荐）' : ' (Recommended)') : ''}
+                  {provider === 'openai' ? 'GPT-6 Luna' : provider === 'deepseek' ? 'DeepSeek V4.1 Flash' : m.replace('models/', '')}{idx === 0 ? (zh ? '（推荐）' : ' (Recommended)') : ''}
                 </option>
               ))}
+            </select>
+          </Field>
+
+          {/* Reasoning Effort selection (tailored per provider & model) */}
+          <Field
+            label={t.reasoningEffortLabel}
+            hint={
+              provider === 'gemini'
+                ? (zh
+                    ? '通过 thinkingConfig.thinkingLevel 控制 Gemini 思考深度。'
+                    : 'Controls Gemini reasoning depth via thinkingConfig.thinkingLevel.')
+                : provider === 'openai'
+                ? (zh
+                    ? '通过 reasoning_effort 控制 GPT-6 Luna 推理强度。'
+                    : 'Controls GPT-6 Luna reasoning depth via reasoning_effort.')
+                : (zh
+                    ? '通过 reasoning_effort 与 thinking 开关控制 DeepSeek V4.1 Flash 思考模式。'
+                    : 'Controls DeepSeek V4.1 Flash thinking mode via reasoning_effort and thinking.')
+            }
+          >
+            <select
+              aria-label={t.reasoningEffortLabel}
+              value={currentReasoningEffort}
+              onChange={(e) => {
+                dirtyAi.current = true;
+                setAiSaved(false);
+                setTestResult(null);
+                setCurrentReasoningEffort(e.target.value as ReasoningEffort);
+              }}
+            >
+              {currentSupportedEfforts.map((effort) => {
+                const labelText =
+                  provider === 'gemini'
+                    ? effort.toUpperCase()
+                    : provider === 'deepseek'
+                    ? effort === 'none'
+                      ? 'none (thinking: disabled)'
+                      : `${effort} (thinking: enabled)`
+                    : effort === 'none'
+                    ? (zh ? 'none（关闭推理）' : 'none (no reasoning)')
+                    : effort;
+                const defaultBadge = effort === currentDefaultEffort ? (zh ? '（默认）' : ' (Default)') : '';
+                return (
+                  <option key={effort} value={effort}>
+                    {labelText}{defaultBadge}
+                  </option>
+                );
+              })}
             </select>
           </Field>
 

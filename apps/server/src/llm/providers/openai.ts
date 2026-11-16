@@ -3,6 +3,7 @@
  * Implements standard OpenAI Chat Completions API with structured JSON mode.
  * Zero external npm dependencies.
  */
+import { resolveModelReasoningEffort, type ReasoningEffort } from '../../../../../packages/contracts/src/sync.ts';
 import { BaseLLMProvider } from './base.ts';
 import type {
   LLMProviderType,
@@ -20,6 +21,7 @@ export interface OpenAIProviderOptions {
   apiKey?: string;
   defaultModel?: string;
   baseUrl?: string;
+  defaultReasoningEffort?: ReasoningEffort;
   fetchFn?: FetchFn;
   customGenerateFn?: CustomGenerateFn;
 }
@@ -30,6 +32,7 @@ export class OpenAIProvider extends BaseLLMProvider {
   protected apiKey?: string;
   protected defaultModel: string;
   protected baseUrl: string;
+  protected defaultReasoningEffort: ReasoningEffort;
   protected readonly fetchFn: FetchFn;
   protected readonly customGenerateFn?: CustomGenerateFn;
 
@@ -38,8 +41,16 @@ export class OpenAIProvider extends BaseLLMProvider {
     super();
     this.providerId = options.providerId || 'openai';
     this.apiKey = options.apiKey ?? (this.providerId === 'openai' ? process.env.OPENAI_API_KEY : undefined);
-    this.defaultModel = options.defaultModel || process.env.OPENAI_MODEL || 'gpt-5.6-luna';
+    this.defaultModel = options.defaultModel || process.env.OPENAI_MODEL || 'gpt-6-luna';
     this.baseUrl = (options.baseUrl || process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, '');
+    const envEffort = this.providerId === 'deepseek'
+      ? process.env.DEEPSEEK_REASONING_EFFORT
+      : process.env.OPENAI_REASONING_EFFORT;
+    this.defaultReasoningEffort = resolveModelReasoningEffort(
+      this.providerId,
+      this.defaultModel,
+      options.defaultReasoningEffort ?? envEffort
+    );
     this.fetchFn = options.fetchFn || globalThis.fetch;
     this.customGenerateFn = options.customGenerateFn;
   }
@@ -49,20 +60,34 @@ export class OpenAIProvider extends BaseLLMProvider {
     apiKey?: string | null;
     defaultModel?: string | null;
     baseUrl?: string | null;
+    defaultReasoningEffort?: ReasoningEffort | null;
   }): void {
     if (config.apiKey !== undefined) {
       this.apiKey = config.apiKey ? config.apiKey.trim() : undefined;
     }
     if (config.defaultModel !== undefined) {
-      this.defaultModel = config.defaultModel ? config.defaultModel.trim() : (this.providerId === 'deepseek' ? 'deepseek-flash' : 'gpt-5.6-luna');
+      this.defaultModel = config.defaultModel ? config.defaultModel.trim() : (this.providerId === 'deepseek' ? 'deepseek-flash' : 'gpt-6-luna');
     }
     if (config.baseUrl !== undefined) {
       this.baseUrl = (config.baseUrl ? config.baseUrl.trim() : (this.providerId === 'deepseek' ? 'https://api.deepseek.com' : 'https://api.openai.com/v1')).replace(/\/+$/, '');
+    }
+    if (config.defaultReasoningEffort !== undefined || config.defaultModel !== undefined) {
+      this.defaultReasoningEffort = resolveModelReasoningEffort(
+        this.providerId,
+        this.defaultModel,
+        config.defaultReasoningEffort === undefined ? this.defaultReasoningEffort : config.defaultReasoningEffort
+      );
     }
   }
 
   /** Send one structured request; reject transport or missing-content failures. */
   public async generateContent(params: GenerateContentParams): Promise<GenerateContentOutput> {
+    const effort = resolveModelReasoningEffort(
+      this.providerId,
+      params.model,
+      params.reasoningEffort ?? this.defaultReasoningEffort
+    );
+
     if (this.customGenerateFn) {
       const response = await this.customGenerateFn({
         provider: this.providerId,
@@ -73,6 +98,7 @@ export class OpenAIProvider extends BaseLLMProvider {
           responseMimeType: 'application/json',
           responseSchema: params.responseSchema,
           abortSignal: params.abortSignal,
+          reasoningEffort: effort,
         },
       });
       return { text: response.text, model: params.model };
@@ -90,6 +116,10 @@ export class OpenAIProvider extends BaseLLMProvider {
         { role: 'user', content: params.prompt },
       ],
       response_format: { type: 'json_object' },
+      reasoning_effort: effort,
+      ...(this.providerId === 'deepseek'
+        ? { thinking: { type: effort === 'none' ? 'disabled' : 'enabled' } }
+        : {}),
     };
 
     const response = await this.fetchFn(endpoint, {
@@ -132,6 +162,11 @@ export class OpenAIProvider extends BaseLLMProvider {
     const testKey = params?.apiKey !== undefined ? params.apiKey.trim() : this.apiKey;
     const testModel = params?.model?.trim() || this.defaultModel;
     const targetBaseUrl = (params?.baseUrl?.trim() || this.baseUrl).replace(/\/+$/, '');
+    const effort = resolveModelReasoningEffort(
+      this.providerId,
+      testModel,
+      params?.reasoningEffort ?? this.defaultReasoningEffort
+    );
 
     if (!testKey) {
       return { ok: false, model: testModel, message: `${this.providerId.toUpperCase()} API key is not configured`, provider: this.providerId };
@@ -151,6 +186,7 @@ export class OpenAIProvider extends BaseLLMProvider {
             responseMimeType: 'text/plain',
             responseSchema: undefined,
             abortSignal: abort.signal,
+            reasoningEffort: effort,
           },
         });
         return { ok: true, model: testModel, provider: this.providerId };
@@ -166,6 +202,10 @@ export class OpenAIProvider extends BaseLLMProvider {
         body: JSON.stringify({
           model: testModel,
           messages: [{ role: 'user', content: 'ping' }],
+          reasoning_effort: effort,
+          ...(this.providerId === 'deepseek'
+            ? { thinking: { type: effort === 'none' ? 'disabled' : 'enabled' } }
+            : {}),
           ...(this.providerId === 'openai' ? { max_completion_tokens: 64 } : { max_tokens: 64 }),
         }),
         signal: abort.signal,

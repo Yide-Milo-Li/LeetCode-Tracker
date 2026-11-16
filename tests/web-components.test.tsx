@@ -23,7 +23,7 @@ const { WorkspaceContext } = await import('../apps/web/src/workspace.tsx');
 afterEach(() => { cleanup(); mock.restoreAll(); });
 
 it('offers only Luna, V4.1 Flash, and supported Gemini models even when legacy models were saved', async () => {
-  for (const [provider, model] of [['openai', 'gpt-5.6-luna'], ['deepseek', 'deepseek-flash']] as const) {
+  for (const [provider, model] of [['openai', 'gpt-6-luna'], ['deepseek', 'deepseek-flash']] as const) {
   mock.method(api, 'getSettings', async () => ({ language: 'en', theme: 'light', timezone: 'UTC', updatedAt: 1,
     llmProvider: provider, [`${provider}Model`]: 'old-model', [`${provider}FallbackModels`]: ['old-backup'] }));
   await act(async () => { render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} />); });
@@ -577,10 +577,32 @@ it('configures Gemini API key with default dots masking, eye icon toggle, and mo
   // 5. Test Preferred Model dropdown
   const modelSelect = screen.getByLabelText('Preferred Model') as HTMLSelectElement;
   assert.ok(modelSelect);
+  const effortSelect = screen.getByLabelText('Reasoning Effort') as HTMLSelectElement;
+  assert.deepEqual([...effortSelect.options].map(o => o.value), ['low', 'medium', 'high']);
+  assert.equal(effortSelect.value, 'medium');
+
   await act(async () => {
     fireEvent.change(modelSelect, { target: { value: 'models/gemini-4-hydrogen' } });
   });
   assert.equal(modelSelect.value, 'models/gemini-4-hydrogen');
+  assert.deepEqual([...effortSelect.options].map(o => o.value), ['low', 'medium', 'high', 'xhigh']);
+
+  await act(async () => {
+    fireEvent.change(effortSelect, { target: { value: 'xhigh' } });
+  });
+  assert.equal(effortSelect.value, 'xhigh');
+
+  // Verify that switching back to gemini-3.8-flash clamps unsupported xhigh and preserves supported levels
+  await act(async () => {
+    fireEvent.change(modelSelect, { target: { value: 'models/gemini-3.8-flash' } });
+  });
+  assert.equal(effortSelect.value, 'medium');
+  await act(async () => {
+    fireEvent.change(modelSelect, { target: { value: 'models/gemini-4-hydrogen' } });
+  });
+  await act(async () => {
+    fireEvent.change(effortSelect, { target: { value: 'xhigh' } });
+  });
 
   // Verify that the newly selected primary model is disabled in candidate chips and pruned from fallbacks
   const chipHydrogen = screen.getByRole('button', { name: 'gemini-4-hydrogen' });
@@ -605,6 +627,7 @@ it('configures Gemini API key with default dots masking, eye icon toggle, and mo
   const sentPayload = updateCalls.mock.calls[0].arguments[0];
   assert.equal(sentPayload.geminiApiKey, 'AIzaSyPastedKey456');
   assert.equal(sentPayload.geminiModel, 'models/gemini-4-hydrogen');
+  assert.equal(sentPayload.geminiReasoningEffort, 'xhigh');
   assert.deepEqual(sentPayload.geminiFallbackModels, ['models/gemini-3.8-flash']);
   assert.ok(screen.getByText('AI settings saved'));
 
@@ -614,4 +637,49 @@ it('configures Gemini API key with default dots masking, eye icon toggle, and mo
     fireEvent.click(testBtn);
   });
   assert.ok(screen.getByText('Connection successful (models/gemini-3.8-flash)'));
+});
+
+it('renders vendor-specific reasoning effort choices for OpenAI and DeepSeek', async () => {
+  mock.method(api, 'getSettings', async () => ({
+    language: 'en',
+    theme: 'light',
+    timezone: 'UTC',
+    updatedAt: 1,
+    llmProvider: 'openai',
+    openaiApiKey: 'sk-o',
+    deepseekApiKey: 'sk-d',
+  }));
+  const writes = mock.method(api, 'updateSettings', async (payload: any) => ({
+    language: 'en' as const,
+    theme: 'light' as const,
+    timezone: 'UTC',
+    updatedAt: 2,
+    ...payload,
+  }));
+
+  await act(async () => {
+    render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} />);
+  });
+
+  const effortSelect = screen.getByLabelText('Reasoning Effort') as HTMLSelectElement;
+  assert.deepEqual([...effortSelect.options].map(o => o.value), ['none', 'low', 'medium', 'high', 'xhigh', 'max']);
+  assert.equal(effortSelect.value, 'medium');
+  await act(async () => {
+    fireEvent.change(effortSelect, { target: { value: 'max' } });
+  });
+
+  fireEvent.click(screen.getByRole('button', { name: 'DeepSeek' }));
+  const deepseekEffortSelect = screen.getByLabelText('Reasoning Effort') as HTMLSelectElement;
+  assert.deepEqual([...deepseekEffortSelect.options].map(o => o.value), ['none', 'low', 'high', 'max']);
+  assert.equal(deepseekEffortSelect.value, 'high');
+  await act(async () => {
+    fireEvent.change(deepseekEffortSelect, { target: { value: 'none' } });
+  });
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Save AI settings' }));
+  });
+  const payload = writes.mock.calls[0].arguments[0];
+  assert.equal(payload.openaiReasoningEffort, 'max');
+  assert.equal(payload.deepseekReasoningEffort, 'none');
 });

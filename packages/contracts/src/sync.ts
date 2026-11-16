@@ -284,7 +284,7 @@ export const catalogStatsSchema = z.object({
 export type CatalogStats = z.infer<typeof catalogStatsSchema>;
 
 /** Application model choices for providers with a single supported selection. */
-export const fixedProviderModels = { openai: 'gpt-5.6-luna', deepseek: 'deepseek-flash' } as const;
+export const fixedProviderModels = { openai: 'gpt-6-luna', deepseek: 'deepseek-flash' } as const;
 
 /** Supported Gemini model identifiers. */
 export const supportedGeminiModels = [
@@ -309,6 +309,87 @@ export function normalizeGeminiModel(model?: string | null): SupportedGeminiMode
 /** Check whether a model string is one of the supported Gemini models. */
 export function isSupportedGeminiModel(model?: string | null): boolean {
   return normalizeGeminiModel(model) !== null;
+}
+
+/** All canonical reasoning effort identifiers across providers. */
+export const reasoningEffortLevels = ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+export type ReasoningEffort = (typeof reasoningEffortLevels)[number];
+
+export const geminiFlashReasoningEfforts = ['low', 'medium', 'high'] as const;
+export const geminiHydrogenReasoningEfforts = ['low', 'medium', 'high', 'xhigh'] as const;
+export const openaiLunaReasoningEfforts = ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+export const deepseekFlashReasoningEfforts = ['none', 'low', 'high', 'max'] as const;
+
+/** Return the supported reasoning effort options for a provider and model. */
+export function getSupportedReasoningEfforts(
+  provider: LLMProvider,
+  model?: string | null
+): readonly ReasoningEffort[] {
+  if (provider === 'gemini') {
+    const normalized = normalizeGeminiModel(model) ?? defaultGeminiModel;
+    return normalized === 'models/gemini-4-hydrogen'
+      ? geminiHydrogenReasoningEfforts
+      : geminiFlashReasoningEfforts;
+  }
+  if (provider === 'openai') {
+    return openaiLunaReasoningEfforts;
+  }
+  return deepseekFlashReasoningEfforts;
+}
+
+/** Return the vendor default reasoning effort for a provider and model. */
+export function getDefaultReasoningEffort(
+  provider: LLMProvider,
+  model?: string | null
+): ReasoningEffort {
+  if (provider === 'gemini') {
+    const normalized = normalizeGeminiModel(model) ?? defaultGeminiModel;
+    return normalized === 'models/gemini-4-hydrogen' ? 'high' : 'medium';
+  }
+  if (provider === 'openai') {
+    return 'medium';
+  }
+  return 'high';
+}
+
+/**
+ * Normalize a reasoning effort string for a provider (and optional model), or null if unsupported.
+ * When provider is 'gemini' and model is omitted/null, accepts any effort valid for a supported Gemini model.
+ */
+export function normalizeReasoningEffort(
+  provider: LLMProvider,
+  effort?: string | null,
+  model?: string | null
+): ReasoningEffort | null {
+  if (!effort) return null;
+  const trimmed = effort.trim().toLowerCase();
+  if (!trimmed) return null;
+  const allowed: readonly string[] =
+    provider === 'gemini' && (!model || !model.trim())
+      ? geminiHydrogenReasoningEfforts
+      : getSupportedReasoningEfforts(provider, model);
+  return allowed.includes(trimmed) ? (trimmed as ReasoningEffort) : null;
+}
+
+/**
+ * Resolve the effective reasoning effort for a concrete provider and model at runtime.
+ * Clamps Gemini 'xhigh' to 'high' when executing on models/gemini-3.8-flash (e.g. during fallback).
+ */
+export function resolveModelReasoningEffort(
+  provider: LLMProvider,
+  model?: string | null,
+  effort?: string | null
+): ReasoningEffort {
+  const direct = normalizeReasoningEffort(provider, effort, model);
+  if (direct) return direct;
+  if (
+    provider === 'gemini' &&
+    effort?.trim().toLowerCase() === 'xhigh' &&
+    (normalizeGeminiModel(model) ?? defaultGeminiModel) === 'models/gemini-3.8-flash'
+  ) {
+    return 'high';
+  }
+  return getDefaultReasoningEffort(provider, model);
 }
 
 /** Supported custom theme palettes for desktop UI. */
@@ -340,14 +421,17 @@ export const userSettingsSchema = z.object({
   geminiApiKey: z.string().max(256).nullable().optional(),
   geminiModel: z.string().max(100).nullable().optional(),
   geminiFallbackModels: z.array(z.string().max(100)).nullable().optional(),
+  geminiReasoningEffort: z.string().max(32).nullable().optional(),
   openaiApiKey: z.string().max(256).nullable().optional(),
   openaiModel: z.string().max(100).nullable().optional(),
   openaiBaseUrl: z.string().max(256).nullable().optional(),
   openaiFallbackModels: z.array(z.string().max(100)).nullable().optional(),
+  openaiReasoningEffort: z.string().max(32).nullable().optional(),
   deepseekApiKey: z.string().max(256).nullable().optional(),
   deepseekModel: z.string().max(100).nullable().optional(),
   deepseekBaseUrl: z.string().max(256).nullable().optional(),
   deepseekFallbackModels: z.array(z.string().max(100)).nullable().optional(),
+  deepseekReasoningEffort: z.string().max(32).nullable().optional(),
   updatedAt: z.number().int().nonnegative(),
 });
 
@@ -388,14 +472,17 @@ export const updateSettingsInputSchema = z.object({
   geminiApiKey: z.string().max(256).nullable().optional(),
   geminiModel: z.string().max(100).nullable().optional(),
   geminiFallbackModels: z.array(z.string().max(100)).nullable().optional(),
+  geminiReasoningEffort: z.string().max(32).nullable().optional(),
   openaiApiKey: z.string().max(256).nullable().optional(),
   openaiModel: z.string().max(100).nullable().optional(),
   openaiBaseUrl: z.string().max(256).nullable().optional(),
   openaiFallbackModels: z.array(z.string().max(100)).nullable().optional(),
+  openaiReasoningEffort: z.string().max(32).nullable().optional(),
   deepseekApiKey: z.string().max(256).nullable().optional(),
   deepseekModel: z.string().max(100).nullable().optional(),
   deepseekBaseUrl: z.string().max(256).nullable().optional(),
   deepseekFallbackModels: z.array(z.string().max(100)).nullable().optional(),
+  deepseekReasoningEffort: z.string().max(32).nullable().optional(),
 }).refine(data =>
   data.language !== undefined ||
   data.theme !== undefined ||
@@ -405,19 +492,28 @@ export const updateSettingsInputSchema = z.object({
   data.geminiApiKey !== undefined ||
   data.geminiModel !== undefined ||
   data.geminiFallbackModels !== undefined ||
+  data.geminiReasoningEffort !== undefined ||
   data.openaiApiKey !== undefined ||
   data.openaiModel !== undefined ||
   data.openaiBaseUrl !== undefined ||
   data.openaiFallbackModels !== undefined ||
+  data.openaiReasoningEffort !== undefined ||
   data.deepseekApiKey !== undefined ||
   data.deepseekModel !== undefined ||
   data.deepseekBaseUrl !== undefined ||
-  data.deepseekFallbackModels !== undefined, {
+  data.deepseekFallbackModels !== undefined ||
+  data.deepseekReasoningEffort !== undefined, {
   message: 'At least one setting must be provided',
 }).refine(data => !data.geminiModel || !data.geminiModel.trim() || isSupportedGeminiModel(data.geminiModel), {
   message: 'Unsupported Gemini model. Allowed models: models/gemini-3.8-flash, models/gemini-4-hydrogen',
 }).refine(data => !data.geminiFallbackModels || data.geminiFallbackModels.every(m => isSupportedGeminiModel(m)), {
   message: 'Unsupported Gemini fallback model. Allowed models: models/gemini-3.8-flash, models/gemini-4-hydrogen',
+}).refine(data => !data.geminiReasoningEffort || !data.geminiReasoningEffort.trim() || normalizeReasoningEffort('gemini', data.geminiReasoningEffort, data.geminiModel) !== null, {
+  message: 'Unsupported Gemini thinkingLevel for the selected model',
+}).refine(data => !data.openaiReasoningEffort || !data.openaiReasoningEffort.trim() || normalizeReasoningEffort('openai', data.openaiReasoningEffort) !== null, {
+  message: 'Unsupported OpenAI reasoning_effort. Allowed values: none, low, medium, high, xhigh, max',
+}).refine(data => !data.deepseekReasoningEffort || !data.deepseekReasoningEffort.trim() || normalizeReasoningEffort('deepseek', data.deepseekReasoningEffort) !== null, {
+  message: 'Unsupported DeepSeek reasoning_effort. Allowed values: none, low, high, max',
 }).refine(data => !hasDuplicateWithPrimary(data.geminiModel, data.geminiFallbackModels, m => normalizeGeminiModel(m) ?? m.trim()), {
   message: 'Primary model and fallback models cannot contain duplicate entries (Gemini)',
 }).refine(data => hasUniqueFallbacks(data.geminiFallbackModels, m => normalizeGeminiModel(m) ?? m.trim()), {

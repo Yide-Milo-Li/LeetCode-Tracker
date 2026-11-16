@@ -8,6 +8,8 @@ import {
   catalogQuerySchema,
   importSummarySchema,
   normalizeGeminiModel,
+  normalizeReasoningEffort,
+  resolveModelReasoningEffort,
   themePaletteSchema,
   type CatalogProblem,
   type CatalogQueryInput,
@@ -311,16 +313,19 @@ export function getUserSettings(db: DatabaseSync): UserSettings {
   let geminiApiKey: string | null = null;
   let geminiModel: string | null = null;
   let geminiFallbackModels: string[] | null = null;
+  let rawGeminiEffort: string | null = null;
 
   let openaiApiKey: string | null = null;
   let openaiModel: string | null = null;
   let openaiBaseUrl: string | null = null;
   let openaiFallbackModels: string[] | null = null;
+  let rawOpenaiEffort: string | null = null;
 
   let deepseekApiKey: string | null = null;
   let deepseekModel: string | null = null;
   let deepseekBaseUrl: string | null = null;
   let deepseekFallbackModels: string[] | null = null;
+  let rawDeepseekEffort: string | null = null;
 
   let maxUpdatedAt = 0;
 
@@ -361,6 +366,9 @@ export function getUserSettings(db: DatabaseSync): UserSettings {
         geminiFallbackModels = null;
       }
     }
+    if (r.key === 'gemini_reasoning_effort') {
+      rawGeminiEffort = r.value && r.value.trim().length > 0 ? r.value.trim() : null;
+    }
 
     // OpenAI
     if (r.key === 'openai_api_key') {
@@ -381,6 +389,9 @@ export function getUserSettings(db: DatabaseSync): UserSettings {
       } catch {
         openaiFallbackModels = null;
       }
+    }
+    if (r.key === 'openai_reasoning_effort') {
+      rawOpenaiEffort = r.value && r.value.trim().length > 0 ? r.value.trim() : null;
     }
 
     // DeepSeek
@@ -403,6 +414,9 @@ export function getUserSettings(db: DatabaseSync): UserSettings {
         deepseekFallbackModels = null;
       }
     }
+    if (r.key === 'deepseek_reasoning_effort') {
+      rawDeepseekEffort = r.value && r.value.trim().length > 0 ? r.value.trim() : null;
+    }
 
     if (r.updated_at > maxUpdatedAt) {
       maxUpdatedAt = r.updated_at;
@@ -420,6 +434,10 @@ export function getUserSettings(db: DatabaseSync): UserSettings {
   openaiFallbackModels = sanitizeFb(openaiFallbackModels, openaiModel);
   deepseekFallbackModels = sanitizeFb(deepseekFallbackModels, deepseekModel);
 
+  const geminiReasoningEffort = normalizeReasoningEffort('gemini', rawGeminiEffort, geminiModel);
+  const openaiReasoningEffort = normalizeReasoningEffort('openai', rawOpenaiEffort);
+  const deepseekReasoningEffort = normalizeReasoningEffort('deepseek', rawDeepseekEffort);
+
   return {
     language,
     theme,
@@ -429,14 +447,17 @@ export function getUserSettings(db: DatabaseSync): UserSettings {
     geminiApiKey,
     geminiModel,
     geminiFallbackModels,
+    geminiReasoningEffort,
     openaiApiKey,
     openaiModel,
     openaiBaseUrl,
     openaiFallbackModels,
+    openaiReasoningEffort,
     deepseekApiKey,
     deepseekModel,
     deepseekBaseUrl,
     deepseekFallbackModels,
+    deepseekReasoningEffort,
     updatedAt: maxUpdatedAt,
   };
 }
@@ -481,7 +502,8 @@ export function updateUserSettingsTransaction(
       keyInput?: string | null,
       modelInput?: string | null,
       baseUrlInput?: string | null,
-      fallbacksInput?: string[] | null
+      fallbacksInput?: string[] | null,
+      effortInput?: string | null
     ) => {
       const normalizeModelValue = (value: string) =>
         prefix === 'gemini' ? (normalizeGeminiModel(value) ?? value.trim()) : value.trim();
@@ -502,6 +524,19 @@ export function updateUserSettingsTransaction(
 
       if (modelInput !== undefined) {
         updateStmt.run(`${prefix}_model`, effectiveModel ?? '', now);
+      }
+
+      if (effortInput !== undefined) {
+        const normEffort = effortInput && effortInput.trim()
+          ? (normalizeReasoningEffort(prefix, effortInput, effectiveModel) ?? resolveModelReasoningEffort(prefix, effectiveModel, effortInput))
+          : null;
+        updateStmt.run(`${prefix}_reasoning_effort`, normEffort ?? '', now);
+      } else if (prefix === 'gemini' && modelInput !== undefined && effectiveModel) {
+        const existingEffortRow = db.prepare(`SELECT value FROM settings WHERE key = 'gemini_reasoning_effort'`).get() as { value: string } | undefined;
+        const existingEffort = existingEffortRow?.value?.trim();
+        if (existingEffort && existingEffort.toLowerCase() === 'xhigh' && effectiveModel === 'models/gemini-3.8-flash') {
+          updateStmt.run('gemini_reasoning_effort', resolveModelReasoningEffort('gemini', effectiveModel, existingEffort), now);
+        }
       }
 
       if (fallbacksInput !== undefined) {
@@ -530,9 +565,9 @@ export function updateUserSettingsTransaction(
       }
     };
 
-    persistProviderConfig('gemini', input.geminiApiKey, input.geminiModel, undefined, input.geminiFallbackModels);
-    persistProviderConfig('openai', input.openaiApiKey, input.openaiModel, input.openaiBaseUrl, input.openaiFallbackModels);
-    persistProviderConfig('deepseek', input.deepseekApiKey, input.deepseekModel, input.deepseekBaseUrl, input.deepseekFallbackModels);
+    persistProviderConfig('gemini', input.geminiApiKey, input.geminiModel, undefined, input.geminiFallbackModels, input.geminiReasoningEffort);
+    persistProviderConfig('openai', input.openaiApiKey, input.openaiModel, input.openaiBaseUrl, input.openaiFallbackModels, input.openaiReasoningEffort);
+    persistProviderConfig('deepseek', input.deepseekApiKey, input.deepseekModel, input.deepseekBaseUrl, input.deepseekFallbackModels, input.deepseekReasoningEffort);
 
     db.exec('COMMIT;');
   } catch (err) {
