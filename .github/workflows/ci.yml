@@ -92,7 +92,7 @@ jobs:
 
   desktop-macos:
     name: macOS Apple Silicon desktop package and migration checks
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -155,7 +155,7 @@ jobs:
 
   desktop-macos-native:
     name: macOS embedded WebView native migration test
-    runs-on: macos-14
+    runs-on: macos-latest
     needs: desktop-macos
     steps:
       - uses: actions/checkout@v4
