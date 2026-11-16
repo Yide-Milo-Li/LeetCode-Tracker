@@ -4,7 +4,7 @@ The local workbench accepts user-supplied JSONL through its web UI. It creates i
 
 ## Run and check
 
-Run `npm run build` then `npm start` from the repository root with Node.js 24.15 or later in the 24.x series. The service listens on `127.0.0.1:3000`; `PORT` and `DB_PATH` override the port and database path. Backups remain under `.local/backups` relative to the working directory. Run `npm run dev` alongside the local API for frontend development.
+Run `npm run build` then `npm start` from the repository root with Node.js 26.13.0 or later in the 26.x series (pinned in `.node-version`). The service listens on `127.0.0.1:3000`; `PORT` and `DB_PATH` override the port and database path. Backups remain under `.local/backups` relative to the working directory. Run `npm run dev` alongside the local API for frontend development.
 
 For one-click Windows source-mode startup, run `start.bat` from the repository root, or execute `scripts/start-desktop.ps1` (or `npm run desktop`). The launcher probes port 3000 to avoid lease collisions, ensures built assets exist, starts Fastify, and opens the default browser. The native Windows 1.1.0 installer is separate: `npm run desktop:build` packages the Tauri app, while `npm run desktop:dev` starts the native development host. See the [desktop guide](../docs/desktop.md).
 

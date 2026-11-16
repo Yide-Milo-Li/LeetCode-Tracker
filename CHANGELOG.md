@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+- Standardize source development, CI and pinned desktop sidecars on Node.js 26.13.0, with verified official Windows and Apple Silicon runtime hashes and Node 26 build/type targets.
+- Verify the actual sidecar runtime version during isolated bundled-server and MCP-proxy tests.
+
 ## [1.2.0] - 2026-09-22
 
 - Add a built-in single-problem practice timer: start/stop from Today rows or Problems, one active timer persisted across reloads, stop keeps whole minutes (rounded up, minimum 1) pending for the next record. Clicking the completion circle stops the same-problem timer and pre-fills the enrich dialog; manual editors pre-fill pending minutes and offer stop-and-fill while running.

@@ -4,7 +4,7 @@ Release 1.1.0 updates the Windows desktop package, planning controls, knowledge 
 
 ## Desktop distribution: implemented and remaining
 
-- Implemented: Tauri host, private Node 24.15.0, authenticated IPC bridge, native export authorization, sidecar lifecycle/retry, and unsigned Windows x64 installer.
+- Implemented: Tauri host, private Node 26.13.0, authenticated IPC bridge, native export authorization, sidecar lifecycle/retry, and unsigned Windows x64 installer.
 - Remaining: complete SQLite migration and custom paths, clean-machine installation/upgrade/downgrade, real WebView2/native-dialog acceptance, performance measurements, signing and automatic updates.
 - macOS/Linux/ARM64 native packages and mobile UI are not part of Release 1.0.
 

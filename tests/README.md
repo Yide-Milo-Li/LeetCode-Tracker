@@ -50,7 +50,7 @@ npm run verify:desktop
 Build first with `npm run build`. The current command runs `scripts/verify-refactor-browser.ts`:
 
 - Starts real Fastify/React against an in-memory synthetic SQLite store on a random loopback port, with an injected Gemini stub.
-- Launches an isolated Chrome profile and connects using native Node 24 CDP/WebSocket. It does not attach to a personal browsing profile or load environment files.
+- Launches an isolated Chrome profile and connects using native Node 26 CDP/WebSocket. It does not attach to a personal browsing profile or load environment files.
 - Checks eight destinations at 1024x768, 1440x900 and 1920x1080, in English/Chinese and light/dark themes: 96 layout combinations. Theme and language are asserted after full document reloads.
 - Exercises create-first completion, an actual response-stage disconnect after the database INSERT, same-record edits, closed-save draft recovery, four dismissals, historical entry/correction, both imports, file-upload errors, snapshot pagination/audit, weekday conflicts and plan versions/replacements.
 - Checks nine overlay families in all 12 size/language/theme combinations (108 cases), including keyboard-created completion details, long-title manual forms, history and snapshot drawers. The manifest records exact screenshot and workflow counts for each run.

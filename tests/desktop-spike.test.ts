@@ -1,7 +1,7 @@
 /**
  * Synthetic technical spike test for the bundled desktop server.
  * Verifies that the bundled ESM server (desktop-server.mjs):
- * 1. Initializes with Node 24 without node_modules dependency
+ * 1. Initializes with the pinned private Node 26 without node_modules dependency
  * 2. Implements stdin configuration protocol with nonce verification
  * 3. Enforces cryptographic session token authentication
  * 4. Executes SQLite migrations, catalog import, practice creation, and notes
@@ -12,8 +12,9 @@ import assert from 'node:assert/strict';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import * as readline from 'node:readline';
+import { NODE_VERSION } from '../scripts/prepare-desktop-runtime.ts';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
 const bundledServerPath = path.join(repoRoot, 'apps/server/dist/desktop-server.mjs');
@@ -34,6 +35,8 @@ async function launchTestServer(options: {
   nonce: string;
 }): Promise<ServerHandle> {
   const executable = process.env.DESKTOP_TEST_NODE || process.execPath;
+  // A healthy sidecar on a different Node version cannot validate the shipped runtime.
+  assert.equal(execFileSync(executable, ['--version'], { encoding: 'utf8', windowsHide: true }).trim(), `v${NODE_VERSION}`);
   const child = spawn(executable, [path.join(path.dirname(options.dbPath), 'desktop-server.mjs')], {
     stdio: ['pipe', 'pipe', 'pipe'],
     cwd: path.dirname(options.dbPath),

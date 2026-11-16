@@ -37,7 +37,7 @@ function findChromeExecutable(): string {
   throw new Error('Google Chrome executable was not found. Please install Chrome or set CHROME_BIN.');
 }
 
-/** Lightweight CDP client using Node 24 native WebSocket. */
+/** Lightweight CDP client using Node 26 native WebSocket. */
 class CdpSession {
   private ws: WebSocket;
   private messageId = 0;

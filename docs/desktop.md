@@ -8,13 +8,13 @@ The published 1.0.0 host can fail before readiness because Tauri returns a canon
 
 Release 1.2.0 is an unsigned Windows x64 distribution; download it from [Release 1.2.0](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.2.0). Automated boundary tests and local packaging do not establish clean-machine installation, upgrade compatibility, Windows 10 compatibility, or the full WebView2 acceptance matrix; those checks remain pending. See the [release notes](releases/1.2.0.md).
 
-The desktop shell packages the shared React user interface, the Fastify `/api/v1` service, and the native SQLite storage engine alongside a private, bundled Node.js 24 runtime. Users can run the application with **zero requirement** to install Node.js, npm, Git, or Rust on their machine.
+The desktop shell packages the shared React user interface, the Fastify `/api/v1` service, and the native SQLite storage engine alongside a private, bundled Node.js 26 runtime. Users can run the application with **zero requirement** to install Node.js, npm, Git, or Rust on their machine.
 
 ### 1.3 Apple Silicon macOS internal build
 
 - **Target**: Apple Silicon (`aarch64-apple-darwin`), macOS 14 or newer. Intel Macs, Universal binaries, Linux, mobile layouts, notarization, and App Store distribution are outside this phase.
 - **Package**: The internal artifact contains an ad-hoc signed `.app` and `.dmg`. It is not notarized or published as a public Release. macOS may require the user to approve the first launch in Privacy & Security because the package is not notarized.
-- **Build**: On an Apple Silicon runner or Mac with the Rust toolchain, run `npm run desktop:build:mac`. The command downloads and SHA-256 verifies the pinned private Node 24.15.0 Darwin ARM64 runtime before bundling it.
+- **Build**: On an Apple Silicon runner or Mac with the Rust toolchain, run `npm run desktop:build:mac`. The command downloads and SHA-256 verifies the pinned private Node 26.13.0 Darwin ARM64 runtime before bundling it.
 - **Data path**: SQLite and safety backups live in the Tauri application data directory, outside the read-only `.app` or mounted DMG. The macOS data directory is normally `~/Library/Application Support/com.leetcodetracker.desktop/`.
 - **Lifecycle**: Closing the red window button hides the app; selecting it again from the Dock restores the window. `Cmd+Q` exits the host and sidecar. These behaviors are covered by the native test build; real Mac installation and Gatekeeper behavior still require manual acceptance.
 
@@ -54,7 +54,7 @@ The desktop shell packages the shared React user interface, the Fastify `/api/v1
 │         x-desktop-session-token   127.0.0.1 (kernel port)   │
 │                   │                     │                   │
 │   ┌───────────────▼─────────────────────┴───────────────┐   │
-│   │ Node.js 24 Private Sidecar (node.exe)               │   │
+│   │ Node.js 26 Private Sidecar (node.exe)               │   │
 │   │ • Fastify API server (desktop-server.mjs)           │   │
 │   │ • node:sqlite engine & transactional store          │   │
 │   │ • Bound via Windows Job Object (Auto-Kill)          │   │
@@ -107,10 +107,12 @@ To eliminate orphan background processes if the desktop window crashes or is clo
 To build the standalone Windows installer from source on a Windows development machine:
 
 ### Prerequisites
-- Node.js `>=24.15.0 <25` and npm `>=12`
+- Node.js `>=26.13.0 <27` and npm `>=12`
 - Visual Studio 2022/2026 with C++ Build Tools (`VC.Tools.x86.x64`)
 - Rust `stable-x86_64-pc-windows-msvc` (via rustup)
 - NSIS 3.x (`winget install NSIS.NSIS -e`)
+
+Use MSVC for the `x86_64-pc-windows-msvc` target. If the shell inherits generic `CC`/`CXX` overrides for MinGW, remove those overrides in the build shell before the Cargo checks and installer build (`Remove-Item Env:CC, Env:CXX -ErrorAction SilentlyContinue`). Cargo then discovers MSVC; no global environment change is needed.
 
 ### Build Commands
 ```powershell
@@ -123,7 +125,7 @@ npm run build
 # 3. Bundle standalone backend server
 npm run desktop:bundle-server
 
-# 4. Verify and prepare private Node 24 runtime binary
+# 4. Verify and prepare private Node 26 runtime binary
 npm run desktop:prepare-runtime
 
 # 5. Build native release executable and NSIS installer

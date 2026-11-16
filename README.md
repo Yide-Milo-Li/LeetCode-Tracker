@@ -95,7 +95,7 @@ Read [AI provider behavior](docs/llm-providers.md) and the [security policy](SEC
 
 ## Run from source
 
-Source mode requires **Node.js >=24.15.0 <25** and npm. It uses a desktop browser and is separate from the packaged Windows app:
+Source mode requires **Node.js >=26.13.0 <27** (pinned in `.node-version`) and npm. It uses a desktop browser and is separate from the packaged Windows app:
 
 ```sh
 git clone https://github.com/Yide-Milo-Li/LeetCode-Tracker.git
@@ -114,15 +114,15 @@ For a native Windows build, install the Rust/MSVC toolchain and run `npm run des
 ```mermaid
 flowchart LR
     UI[React desktop UI] -->|Tauri IPC| Host[Tauri Rust host]
-    Host -->|Authenticated loopback HTTP| API[Fastify and private Node 24]
-    API --> DB[(Local SQLite v10)]
+    Host -->|Authenticated loopback HTTP| API[Fastify and private Node 26]
+    API --> DB[(Local SQLite v11)]
     API -. Optional requests .-> AI[Selected AI provider]
     Host --> OS[Native save dialog and browser URL handler]
 ```
 
 The host validates the startup handshake, owns the sidecar process through a Windows Job Object, and waits for graceful shutdown before enforcing its deadline. Browser source mode uses HTTP directly. See [architecture](docs/architecture.md).
 
-The current local verification passed **418 JavaScript/Web/sidecar tests and 7 Rust tests**, TypeScript checking, documentation links, Rust formatting/clippy, and Windows installer packaging. These are automated/local results. They do not establish clean-VM installation, complete native UI/upgrade acceptance, live-provider availability, or performance guarantees. [Status](docs/status.md) separates current evidence from historical phase results; [CI](https://github.com/Yide-Milo-Li/LeetCode-Tracker/actions) reports remote runs independently.
+The unreleased source candidate uses Node 26.13.0; the published 1.2.0 installer retains its original private Node 24 runtime. [Status](docs/status.md) records current automated checks, candidate packaging and remaining installed/host acceptance separately from historical phase results. [CI](https://github.com/Yide-Milo-Li/LeetCode-Tracker/actions) reports remote runs independently.
 
 ## Documentation
 

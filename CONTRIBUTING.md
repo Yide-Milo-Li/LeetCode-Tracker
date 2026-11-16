@@ -12,7 +12,7 @@ Read the [documentation index](docs/README.md), [requirements](docs/requirements
 4. Record checks actually run, their outcomes, and checks that were not run.
 5. Inspect the staged diff for unrelated work, generated artifacts, credentials, and personal data before committing.
 
-Use `npm ci`, `npm run check`, `npm test` and `npm run docs:check` with Node.js 24. Tests use synthetic data. Users supply JSONL metadata with appropriate usage rights; the application creates its database; no dataset is included.
+Use `npm ci`, `npm run check`, `npm test` and `npm run docs:check` with Node.js 26. Tests use synthetic data. Users supply JSONL metadata with appropriate usage rights; the application creates its database; no dataset is included.
 
 ## Code and documentation
 
