@@ -2,6 +2,14 @@
 
 The rebased Phase 38 / Phase 39 development source merges the independently developed schema v11 and v12 layouts as schema v13 and uses Bundle v6 to retain both note revisions and recommendation data. Rebase verification and a new candidate build are pending; historical results below apply only to their recorded candidates.
 
+## Host shell candidate requalification — November 15, 2026
+
+The new **phase38-node26-20261115-r2** candidate includes **681bc12**: the embedded desktop sidebar, negotiated ChatGPT/DSH conversation entry points and host safe-area handling. Verification and source commits use an isolated LC-2.0 worktree; the shared main checkout is preserved. A deferred-acknowledgement regression reproduced loss of newer composer text. The repair only clears/acknowledges the submitted text and subject snapshot, preserving newer drafts and their unsent state. A clean full-suite attempt also exposed a cross-worker formal-HTML build/read race; `npm pretest` now builds the real resource before backend workers import its hashed URI. Focused resource suites document their `build:chatgpt` prerequisite. No synthetic HTML, weakened assertion, timeout relaxation or skipped case substitutes for these repairs.
+
+After removing the worktree's generated ChatGPT dist, the complete JavaScript suite passes **645 tests (443 backend + 200 Web + 2 private sidecar/proxy)** with zero failures, cancellations or skips on Node **26.13.0** / npm **12.0.2**. TypeScript, production frontend/formal HTML, documentation links, Git whitespace, Rust fmt and **24 Rust library tests** pass. Locked all-target Clippy with warnings denied also passes on Rust/Cargo **1.98.1**. Engineering requalification is complete; clean-source installer freezing is in progress. No actual-host acceptance is inferred. The R1 installer and its source/evidence remain unchanged. Its bfed1f9 build does not contain 681bc12 and remains historical for that scope.
+
+The no-separate-Windows-account/VM constraint remains. Current-account production-profile isolation and dedicated Tunnel/key/workspace/host resources are unverified. The new shell/conversation behavior needs candidate-specific installed and actual-host proof; historical accepted scopes keep their original provenance. Basic Skill, automatic Codex/DSH setup and aggregate Gate 0 dispositions remain as recorded below.
+
 ## Historical Node 26 candidate qualification — November 15, 2026
 
 The user selected Node **26.13.0** as the project baseline. Source engines require `>=26.13.0 <27`; `.node-version`, CI, Node type definitions, backend build targets and hash-verified Windows/Apple Silicon private runtimes use Node 26. Prior release installers and acceptance reports retain their original runtime identity. This checkpoint predated Release 1.3.0.
