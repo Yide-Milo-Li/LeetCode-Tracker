@@ -8,7 +8,7 @@ Settings → AI assistant supports Gemini, OpenAI and DeepSeek; model, fallback,
 - **OpenAI**: `gpt-6-luna` (GPT-6 Luna, default) and `gpt-6.1-terra` (GPT-6.1 Terra), with no custom-model or fallback-model controls.
 - **DeepSeek**: `deepseek-flash` (DeepSeek V4.1 Flash), with no custom-model or fallback-model controls.
 
-Each provider keeps its own settings in SQLite; fallback-model configuration is exposed only for Gemini. OpenAI and DeepSeek also support an optional HTTP(S) API base URL; requests append `/chat/completions`. The provider adapters use no OpenAI SDK; Phase 39 recommendation semantics use a separate schema-12 / Bundle-v5 compatibility fence.
+Each provider keeps its own settings in SQLite; fallback-model configuration is exposed only for Gemini. OpenAI and DeepSeek also support an optional HTTP(S) API base URL; requests append `/chat/completions`. The provider adapters use no OpenAI SDK; The merged candidate preserves Phase 39 recommendation semantics and note revisions in schema 13 / Bundle v6; earlier v4 and v5 formats remain importable.
 
 Choose a provider, edit its configuration and save to activate it. Switching the displayed provider preserves other drafts and remasks keys. Configuration changes apply immediately; in-flight requests retain their original adapter. Save and probe controls remain unavailable until settings load successfully and while a form action is pending.
 

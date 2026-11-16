@@ -49,7 +49,7 @@ Generated items save `adaptive-v1` explanations with the target, role, local pri
 
 ## Planning, history and model boundaries
 
-Generation, replacement and temporary overrides share a request-local candidate context. Adaptive projections never overwrite the fixed `problem_review_state` cache. Allocation metadata remains in plan JSON. Phase 39 adds schema 12 / Bundle v5 to fence newer policy, provenance and optional feedback semantics; schema 11 / Bundle v4 are reserved for the separate LC-2.0 lineage.
+Generation, replacement and temporary overrides share a request-local candidate context. Adaptive projections never overwrite the fixed `problem_review_state` cache. Allocation metadata remains in plan JSON. The merged candidate stores the Phase 39 policy, provenance and optional feedback alongside note revisions in schema 13 / Bundle v6; the earlier schema 11 / Bundle v4 and schema 12 / Bundle v5 remain supported for migration.
 
 New plan items save optional `explanation` facts: analysis version/date, focus tag slugs and actual duration/threshold/base/adjusted interval when applicable. Saved versions and operation replays retain those facts. Old items without metadata show their saved reasons and hide new badges. Record/settings changes affect future generation or explicit replacement, not saved historical JSON.
 

@@ -75,7 +75,7 @@ The workbench invalidates pending file reads and preview responses on input chan
 
 ## Topic analysis and adaptive projections
 
-The planning store builds a request-local indexed evidence context. Insights use fixed review states; adaptive states remain separate and never overwrite the fixed cache. Generation, replacement and overrides share the candidate builder, constrain model reordering locally and persist minimal explanation facts. Read-only insights do not write revisions or call providers. Phase 39 uses one fixed-slot allocator, optional outcome-v2 replay, bounded per-profile caches and local bilingual content; semantic selection remains advisory. See [local recommendation contracts](local-recommendations.md) for policy, usage/privacy and Bundle v5 boundaries. See [topic practice insights](topic-practice-insights.md) for thresholds and compatibility.
+The planning store builds a request-local indexed evidence context. Insights use fixed review states; adaptive states remain separate and never overwrite the fixed cache. Generation, replacement and overrides share the candidate builder, constrain model reordering locally and persist minimal explanation facts. Read-only insights do not write revisions or call providers. Phase 39 uses one fixed-slot allocator, optional outcome-v2 replay, bounded per-profile caches and local bilingual content; semantic selection remains advisory. See [local recommendation contracts](local-recommendations.md) for policy, usage/privacy and Bundle v6 boundaries. See [topic practice insights](topic-practice-insights.md) for thresholds and compatibility.
 
 ## Multi-provider AI boundary
 

@@ -28,7 +28,7 @@ test('audit: malformed review response must require manual confirmation', async 
   assert.equal(result.decision,'require_confirmation');
 });
 
-test('audit: standard client snapshot export must preserve note revisions in v4', async () => {
+test('audit: standard client snapshot export preserves note revisions', async () => {
   const e=await writeFixture();
   const app=await buildApp({application:e.application,disableStatic:true});
   try {
@@ -38,7 +38,9 @@ test('audit: standard client snapshot export must preserve note revisions in v4'
     const {bundleApi}=createHttpTrackerClient({baseUrl:'/api/v1',exportDataFile:async()=>{},request:async(path)=>{requested=path;return (await app.inject({url:'/api/v1'+path})).json();}});
     const bundle=await bundleApi.exportBundle();
     info('normal export',{requested,version:bundle.version,note:(bundle as any).tables?.problem_notes?.[0]});
-    assert.equal(bundle.version,4);
+    assert.equal(requested, '/bundle/export?version=6');
+    assert.equal(bundle.version, 6);
+    assert.equal(bundle.tables.problem_notes[0].revision, 2);
   } finally {await app.close();await e.close();}
 });
 

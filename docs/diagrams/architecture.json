@@ -210,7 +210,7 @@
       "title": "BYOD & ACID Storage",
       "items": [
         "100% user-supplied JSONL without crawlers or account scrapers",
-        "Native Node 26 SQLite DatabaseSync with WAL and schema v11",
+        "Native Node 26 SQLite DatabaseSync with WAL and schema v13",
         "Pre-import safety snapshots and automated 14-day retention"
       ]
     }

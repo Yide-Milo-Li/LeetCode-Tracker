@@ -342,11 +342,11 @@ test('Desktop bundled server lifecycle, session auth, and data persistence', asy
       const plansResponse = await fetch(`http://127.0.0.1:${server2.port}/api/v1/daily-plans`, { headers: restoredHeaders });
       assert.equal(plansResponse.status, 200);
       assert.deepEqual((await plansResponse.json()).items.find((item: DailyPlan) => item.id === savedPlan.id), savedPlan);
-      const exportResponse = await fetch(`http://127.0.0.1:${server2.port}/api/v1/bundle/export?version=5`, { headers: restoredHeaders });
+      const exportResponse = await fetch(`http://127.0.0.1:${server2.port}/api/v1/bundle/export?version=6`, { headers: restoredHeaders });
       assert.equal(exportResponse.status, 200);
       const exported = await exportResponse.json();
-      assert.equal(exported.version, 5);
-      assert.equal(exported.schemaVersion, 12);
+      assert.equal(exported.version, 6);
+      assert.equal(exported.schemaVersion, 13);
     } finally {
       const exit2 = await stopTestServer(server2);
       assert.equal(exit2, 0);
