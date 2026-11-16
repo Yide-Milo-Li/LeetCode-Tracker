@@ -1255,3 +1255,88 @@ describe('Phase 26: Today remove plan item UI', () => {
     assert.equal(addBtn.disabled, false);
   });
 });
+
+
+it('saves opt-in review policy, shadow trial and time budget only after explicit strategy submission', async () => {
+  const existing: Strategy = { id: 'phase39-strategy', version: 1, name: 'Synthetic', deleted: false, weekdays: [1], rules: createMockPlan().rules };
+  const { update } = await openCountEditor(existing);
+  const advanced = screen.queryByText('Advanced Settings');
+  if (advanced) fireEvent.click(advanced);
+  fireEvent.change(screen.getByLabelText('Review policy'), { target: { value: 'outcome-v2' } });
+  fireEvent.click(screen.getByLabelText('Personal duration experiment (shadow)'));
+  fireEvent.change(screen.getByLabelText('Daily time budget (minutes, optional)'), { target: { value: '25' } });
+  assert.equal(update.mock.callCount(), 0);
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save Strategy' })); });
+  assert.equal(update.mock.callCount(), 1);
+  const saved = update.mock.calls[0].arguments[1].rules;
+  assert.equal(saved.reviewPolicy, 'outcome-v2'); assert.equal(saved.adaptiveReviewEnabled, false);
+  assert.equal(saved.personalDurationCalibration, true); assert.equal(saved.timeBudgetMinutes, 25);
+});
+
+it('keeps bilingual optional controls labeled and independent without automatic submission', async () => {
+  const { RecommendationOptions } = await import('../apps/web/src/components/RecommendationOptions.tsx');
+  for (const lang of ['en', 'zh'] as const) {
+    let submitted = 0;
+    function Draft() {
+      const [value, setValue] = React.useState<any>({});
+      return <form onSubmit={event => { event.preventDefault(); submitted++; }}>
+        <RecommendationOptions lang={lang} reviewEnabled value={value} onChange={patch => setValue({ ...value, ...patch })} />
+        <button type="submit">Submit draft</button>
+      </form>;
+    }
+    render(<Draft />);
+    const policy = screen.getByLabelText(lang === 'zh' ? '复习策略' : 'Review policy');
+    const calibration = screen.getByLabelText(lang === 'zh' ? '个人用时实验（影子对照）' : 'Personal duration experiment (shadow)');
+    const budget = screen.getByLabelText(lang === 'zh' ? '每日时间预算（分钟，可选）' : 'Daily time budget (minutes, optional)');
+    assert.ok(policy.id && calibration.id && budget.id);
+    fireEvent.change(policy, { target: { value: 'outcome-v2' } });
+    fireEvent.click(calibration); fireEvent.change(budget, { target: { value: '15' } });
+    assert.equal(submitted, 0); assert.equal((policy as HTMLSelectElement).value, 'outcome-v2');
+    assert.equal((calibration as HTMLInputElement).checked, true);
+    fireEvent.click(screen.getByRole('button', { name: 'Submit draft' })); assert.equal(submitted, 1);
+    cleanup();
+  }
+});
+
+it('keeps override policy changes local to the draft until explicit preview', async () => {
+  const plan = createMockPlan();
+  const preview = mock.method(api, 'previewDailyPlanOverride', async (input: any) => ({ id: 'p39-preview', date: plan.date, expiresAt: Date.now() + 60000,
+    base: plan.rules, rules: input.rules, changed: ['reviewPolicy', 'timeBudgetMinutes'], issues: [], unresolved: [], counts: { Easy: 1, Medium: 1, Hard: 0 },
+    candidateCount: 10, planVersion: 1, revision: { catalog: 1, planning: 1, practice: 1, timezone: plan.timezone } }));
+  render(<PromptOverrideModal isOpen lang="en" currentPlan={plan} onClose={() => {}} onApplied={() => {}} />);
+  fireEvent.change(screen.getByLabelText('Review policy'), { target: { value: 'outcome-v2' } });
+  fireEvent.change(screen.getByLabelText('Daily time budget (minutes, optional)'), { target: { value: '10' } });
+  assert.equal(preview.mock.callCount(), 0);
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Preview/i })); });
+  assert.equal(preview.mock.callCount(), 1);
+  assert.equal(preview.mock.calls[0].arguments[0].rules.reviewPolicy, 'outcome-v2');
+  assert.equal(preview.mock.calls[0].arguments[0].rules.timeBudgetMinutes, 10);
+});
+
+it('saves optional feedback only with the explicit item action and uses distinct item labels', async () => {
+  const { TodayProblemRow } = await import('../apps/web/src/components/TodayProblemRow.tsx');
+  const item = createMockPlan().items[0]; let replaced: unknown[] = [], removed: unknown[] = [];
+  render(<TodayProblemRow item={item} lang="en" isSaving={false} replacingBatch={false} replacingItemId={null}
+    onComplete={() => {}} onReplaceOne={(...args) => { replaced = args; }} onRemove={(...args) => { removed = args; }} />);
+  fireEvent.click(screen.getByText('Optional swap/removal feedback'));
+  const reason = screen.getByLabelText('Reason for next action: ' + item.problem.title);
+  fireEvent.change(reason, { target: { value: 'time_unavailable' } });
+  assert.equal(replaced.length, 0); assert.equal(removed.length, 0);
+  fireEvent.click(screen.getByRole('button', { name: translations.en.replaceOne }));
+  assert.equal(replaced[1], 'time_unavailable');
+  fireEvent.click(screen.getByRole('button', { name: translations.en.removeProblem })); assert.equal(removed[1], 'time_unavailable');
+});
+
+it('shows budget infeasibility without changing quotas and opens explicit adjustment', async () => {
+  const plan = createMockPlan({ timeEstimate: { newMinutes: 30, reviewMinutes: 22.5, totalMinutes: 52.5, budgetMinutes: 10, feasible: false } });
+  const controller: import('../apps/web/src/hooks/useDailyPlan.ts').UseDailyPlanReturn = {
+    loading: false, ensureResult: { status: 'ready', plan }, plan, error: null, clearError: () => {}, replacingBatch: false, replacingItemId: null,
+    appending: false, removingItemId: null, isPlanMutationPending: () => false, refresh: async () => {}, replaceOne: async () => {},
+    replaceAllUnfinished: async () => {}, appendOne: async () => {}, removeOne: async () => {}, onOverrideCommitted: () => {}, onPracticeLogged: async () => {},
+  };
+  await act(async () => { render(<TodayPlanView lang="en" onNavigateToSettings={() => {}} planController={controller} />); });
+  assert.ok(screen.getByText(/The estimate exceeds your budget. Counts and difficulty remain unchanged./i));
+  assert.equal(plan.items.length, 2);
+  fireEvent.click(screen.getByRole('button', { name: 'Adjust count or budget' }));
+  assert.ok(screen.getByLabelText('Daily time budget (minutes, optional)'));
+});

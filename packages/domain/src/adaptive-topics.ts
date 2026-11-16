@@ -1,4 +1,5 @@
 /** Local topic/difficulty priorities and durable 1-in-5 new-slot exploration policy. */
+import { selectCandidateSlots } from './selection.ts';
 import type { Candidate, Difficulty, Rules } from '../../contracts/src/recommendations.ts';
 import type { KnowledgeProfileReport, TopicDifficultyEvidence } from '../../contracts/src/knowledge-profile.ts';
 
@@ -63,7 +64,7 @@ export function rankAdaptiveTopics(
     return { ...candidate, isFocusTopic: weak, matchedWeakTags: weak ? [topic.tagSlug] : [],
       explanation: { ...candidate.explanation, analysisVersion: 'adaptive-v1' as const,
         asOfDate: profile.asOfDate, targetTopic: { slug: topic.tagSlug, name: topic.tagName }, role,
-        focusTagSlugs: weak ? [topic.tagSlug] : [], priorityGroup: JSON.stringify(rank),
+        focusTagSlugs: weak ? [topic.tagSlug] : [], priorityGroup: JSON.stringify(rank.slice(0, 2)), historicalExposure: rank[2],
         evidenceSummary: { distinctProblems: evidence.distinctProblemCount, difficulty: candidate.difficulty,
           assistedUnsolvedCount: assisted, totalFeedbackCount: feedback, reasonText } } } satisfies Candidate;
   });
@@ -90,26 +91,6 @@ function compareRank(a: number[], b: number[]): number {
 }
 
 /** Fill fixed slots using cumulative exploration; shortages never cross difficulty or kind. */
-export function selectAdaptiveSlots(pool: Candidate[], slots: AdaptiveSlot[], nextOrdinal: number): Candidate[] {
-  const used = new Set<string>();
-  const selected: Candidate[] = [];
-  for (const slot of slots) {
-    const eligible = pool.filter(p => p.difficulty === slot.difficulty && p.kind === slot.kind && !used.has(p.questionId));
-    if (!eligible.length) continue;
-    let ordinal = slot.ordinal;
-    let candidate = eligible[0];
-    if (slot.kind === 'new') {
-      if (ordinal === undefined) ordinal = nextOrdinal++;
-      const explore = ordinal !== null && ordinal % 5 === 0;
-      const exploration = eligible.filter(p => p.explanation?.role === 'exploration');
-      const consolidation = eligible.filter(p => p.explanation?.role !== 'exploration');
-      // Cold start explores for coverage; absent exploration candidates return the
-      // slot to consolidation. Neither fallback loosens the hard constraints.
-      candidate = (explore ? exploration[0] ?? consolidation[0] : consolidation[0] ?? exploration[0])!;
-    }
-    used.add(candidate.questionId);
-    selected.push({ ...candidate, explanation: candidate.explanation ? { ...candidate.explanation,
-      ...(slot.kind === 'new' && ordinal != null ? { explorationOrdinal: ordinal } : {}) } : undefined });
-  }
-  return selected;
+export function selectAdaptiveSlots(pool: Candidate[], slots: AdaptiveSlot[], nextOrdinal: number, retained: import('../../contracts/src/recommendations.ts').PlanItem[] = []): Candidate[] {
+  return selectCandidateSlots(pool, slots, nextOrdinal, retained, true).selected;
 }

@@ -5,6 +5,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import * as path from 'node:path';
 import { snapshotBundleSchema, type SnapshotBundleV1 as SnapshotBundle } from '../../contracts/src/notes.ts';
+import { assertLegacyRecommendationExport } from './recommendation-format.ts';
 import { importMigrationBundle } from './migration-bundle.ts';
 import { isSecretSetting } from './secrets.ts';
 export { isSecretSetting } from './secrets.ts';
@@ -17,6 +18,7 @@ import type { BackupManager } from './backup.ts';
  * Excludes sensitive credentials (API keys/secrets) by default.
  */
 export function exportSnapshotBundle(db: DatabaseSync): SnapshotBundle {
+  assertLegacyRecommendationExport(db);
   // 1. Settings (exclude provider API keys and confidential tokens)
   const settingsRows = db.prepare('SELECT key, value FROM settings').all() as Array<{ key: string; value: string }>;
   const settings: Record<string, string> = {};
@@ -105,7 +107,7 @@ export interface BundleRestoreResult {
   restoredNotes: number;
   restoredStrategies: number;
   restoredProblems?: number;
-  formatVersion?: 1 | 2 | 3;
+  formatVersion?: 1 | 2 | 3 | 5;
 }
 
 /**
@@ -120,7 +122,7 @@ export async function importSnapshotBundle(
 ): Promise<BundleRestoreResult> {
   // Validate schema
   const bundle = snapshotBundleSchema.parse(rawBundle);
-  if (bundle.version === 2 || bundle.version === 3) return importMigrationBundle(db, backupManager, bundle, backupDir);
+  if (bundle.version === 2 || bundle.version === 3 || bundle.version === 5) return importMigrationBundle(db, backupManager, bundle, backupDir);
 
   // 1. Create safety snapshot before any write
   const timestamp = Date.now();

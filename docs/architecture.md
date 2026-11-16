@@ -1,6 +1,6 @@
 # Architecture
 
-The repository baseline implements an offline-first, Bring-Your-Own-Data (BYOD) practice workbench. It provides shared TypeScript contracts, transactional SQLite storage (schema v10), a local Fastify loopback API, a multi-provider LLM assistant tier (Gemini, OpenAI, DeepSeek), a bilingual React web client, and Windows x64 / Apple Silicon macOS Tauri hosts with a private Node 24.15.0 runtime.
+The repository baseline implements an offline-first, Bring-Your-Own-Data (BYOD) practice workbench. It provides shared TypeScript contracts, transactional SQLite storage (schema v12), a local Fastify loopback API, a multi-provider LLM assistant tier (Gemini, OpenAI, DeepSeek), a bilingual React web client, and Windows x64 / Apple Silicon macOS Tauri hosts with a private Node 26.13.0 runtime.
 
 The interactive diagram predates the native shell and shows the shared application core; the current native boundary is described below. For an interactive SVG diagram with dark/light themes, search, pan/zoom, and guided views, see the [Interactive Architecture Diagram](diagrams/architecture.html).
 
@@ -17,7 +17,7 @@ flowchart TD
         Server["Fastify API Loopback (apps/server)"]
         AsyncLock["AsyncLock Mutex Serializer"]
         Domain["Pure Domain Algorithms (packages/domain)"]
-        DB[("SQLite Storage Engine v9 (packages/database)")]
+        DB[("SQLite Storage Engine v12 (packages/database)")]
         Backups[("Rolling Snapshots (profile backups directory)")]
         LLMAssistant["LLM Assistant Tier (apps/server/src/llm)"]
     end
@@ -46,7 +46,7 @@ flowchart TD
 ## Component structure
 
 - **`packages/contracts`**: Validated Zod schemas and normalization pipelines for JSON Lines parsing, preflight preview, import summaries, catalog filtering, manual practice records, progress snapshots, conflict evaluation, planning lifecycle, and dashboard analytics.
-- **`packages/database`**: High-performance SQLite engine (`DatabaseSync`) managing schema migrations (supported v3–v9 to v10), preflight validation, atomic multi-table writes, point-in-time backups via native Node SQLite backup, daily backup pruning, problem notes store, planning store, dashboard query layer, and offline restore.
+- **`packages/database`**: High-performance SQLite engine (`DatabaseSync`) managing schema migrations (supported v3–v10 to v12; v11 is a separate incompatible lineage), preflight validation, atomic multi-table writes, point-in-time backups via native Node SQLite backup, daily backup pruning, problem notes store, planning store, dashboard query layer, and offline restore.
 - **`packages/domain`**: Pure algorithmic domain logic for deterministic quota calculation (largest remainder), review candidate selection, streak calculation, yearly heatmap matrix generation, and activity pagination.
 - **`apps/server`**: Local Fastify API bound to `127.0.0.1`. Exposes `/api/v1` endpoints for catalog, imports, practice records, progress snapshots, recommendation planning, problem notes, read-only dashboard overview and activity stream, and multi-provider LLM assistant with write serialization mutex and static SPA hosting.
 - **`apps/desktop`**: Rust host with Windows NSIS and Apple Silicon macOS `.app`/`.dmg` packaging. Owns native file destinations, parsed external URL launching (`ShellExecuteW` on Windows, `/usr/bin/open` on macOS), session secrets, bounded startup/health checks, and sidecar lifecycle ownership (Windows Job Object / macOS `ManagedChild` cleanup, Dock reopen, and `Cmd+Q` shutdown). See [desktop lifecycle and storage](desktop.md).
@@ -71,7 +71,7 @@ The workbench invalidates pending file reads and preview responses on input chan
 
 ## Topic analysis and adaptive projections
 
-The planning store builds a request-local indexed evidence context. Insights use fixed review states; adaptive states remain separate and never overwrite the fixed cache. Generation, replacement and overrides share the candidate builder, constrain model reordering locally and persist minimal explanation facts. Read-only insights do not write revisions or call Gemini. See [topic practice insights](topic-practice-insights.md) for thresholds and compatibility.
+The planning store builds a request-local indexed evidence context. Insights use fixed review states; adaptive states remain separate and never overwrite the fixed cache. Generation, replacement and overrides share the candidate builder, constrain model reordering locally and persist minimal explanation facts. Read-only insights do not write revisions or call providers. Phase 39 uses one fixed-slot allocator, optional outcome-v2 replay, bounded per-profile caches and local bilingual content; semantic selection remains advisory. See [local recommendation contracts](local-recommendations.md) for policy, usage/privacy and Bundle v5 boundaries. See [topic practice insights](topic-practice-insights.md) for thresholds and compatibility.
 
 ## Multi-provider AI boundary
 

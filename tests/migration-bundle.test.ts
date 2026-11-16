@@ -79,13 +79,16 @@ test('a target write failure rolls back even after a valid safety backup', async
   } finally {p.close();}
 });
 
-test('API keeps v1 default and rejects overlapping restore/write requests', async () => {
+test('API keeps the empty legacy default, rejects lossy old exports and overlapping restore/write requests', async () => {
   const p=profile(); const app=await buildApp({store:p.store,disableStatic:true});
   try {
-    await seed(p.store);
     assert.equal((await app.inject('/api/v1/bundle/export')).json().version,1);
-    const exported=await app.inject('/api/v1/bundle/export?version=2');
-    assert.equal(exported.json().version,2);
+    await seed(p.store);
+    const legacy = await app.inject('/api/v1/bundle/export?version=2');
+    assert.equal(legacy.statusCode,409);
+    assert.equal(legacy.json().error,'BUNDLE_VERSION_REQUIRED');
+    const exported=await app.inject('/api/v1/bundle/export?version=5');
+    assert.equal(exported.json().version,5);
     let release!:()=>void; let started!:()=>void;
     const signal=new Promise<void>(resolve=>{started=resolve;});
     const wait=new Promise<void>(resolve=>{release=resolve;});

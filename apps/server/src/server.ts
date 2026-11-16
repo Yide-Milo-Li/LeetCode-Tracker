@@ -40,7 +40,7 @@ async function startServer() {
     opened = db;
     const store = await CatalogStore.open(db, { backupDir });
 
-    const app = await buildApp({ store });
+    const app = await buildApp({ store, profileDirectory: localDir });
 
     const address = await app.listen({ host, port });
     console.log(`✓ LeetCode Tracker local workbench listening at: ${address}`);

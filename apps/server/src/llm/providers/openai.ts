@@ -1,5 +1,5 @@
 /**
- * OpenAI provider adapter using Node 24 native global fetch.
+ * OpenAI provider adapter using Node native global fetch.
  * Implements standard OpenAI Chat Completions API with structured JSON mode.
  * Zero external npm dependencies.
  */
@@ -10,6 +10,7 @@ import {
   type ReasoningEffort,
 } from '../../../../../packages/contracts/src/sync.ts';
 import { BaseLLMProvider } from './base.ts';
+import { normalizeUsage } from '../usage.ts';
 import type {
   LLMProviderType,
   GenerateContentParams,
@@ -104,9 +105,10 @@ export class OpenAIProvider extends BaseLLMProvider {
           responseSchema: params.responseSchema,
           abortSignal: params.abortSignal,
           reasoningEffort: effort,
+          maxOutputTokens: params.maxOutputTokens,
         },
       });
-      return { text: response.text, model: params.model };
+      return { text: response.text, model: params.model, provider: this.providerId, usage: normalizeUsage(this.providerId, response.usage) };
     }
 
     if (!this.apiKey) {
@@ -125,6 +127,9 @@ export class OpenAIProvider extends BaseLLMProvider {
       ...(this.providerId === 'deepseek'
         ? { thinking: { type: effort === 'none' ? 'disabled' : 'enabled' } }
         : {}),
+      // Unknown gateways keep their existing protocol; never retry an incompatible budget field.
+      ...(params.maxOutputTokens && this.baseUrl === 'https://api.openai.com/v1' ? { max_completion_tokens: params.maxOutputTokens } : {}),
+      ...(params.maxOutputTokens && this.providerId === 'deepseek' ? { max_tokens: params.maxOutputTokens } : {}),
     };
 
     const response = await this.fetchFn(endpoint, {
@@ -154,12 +159,13 @@ export class OpenAIProvider extends BaseLLMProvider {
     const data = await response.json() as {
       choices?: Array<{ message?: { content?: string } }>;
       model?: string;
+      usage?: unknown;
     };
 
     const text = data.choices?.[0]?.message?.content;
     if (typeof text !== 'string' || !text.trim()) throw new Error('Missing assistant JSON content');
     JSON.parse(text);
-    return { text, model: data.model || params.model };
+    return { text, model: data.model || params.model, provider: this.providerId, usage: normalizeUsage(this.providerId, data.usage) };
   }
 
   /** Probe the selected credentials with a bounded request; never persist draft values. */
@@ -182,7 +188,7 @@ export class OpenAIProvider extends BaseLLMProvider {
 
     try {
       if (this.customGenerateFn) {
-        await this.customGenerateFn({
+        const result = await this.customGenerateFn({
           provider: this.providerId,
           model: testModel,
           contents: 'ping',
@@ -192,9 +198,10 @@ export class OpenAIProvider extends BaseLLMProvider {
             responseSchema: undefined,
             abortSignal: abort.signal,
             reasoningEffort: effort,
+            maxOutputTokens: 64,
           },
         });
-        return { ok: true, model: testModel, provider: this.providerId };
+        return { ok: true, model: testModel, provider: this.providerId, usage: normalizeUsage(this.providerId, result.usage) };
       }
 
       const endpoint = `${targetBaseUrl}/chat/completions`;
@@ -211,7 +218,8 @@ export class OpenAIProvider extends BaseLLMProvider {
           ...(this.providerId === 'deepseek'
             ? { thinking: { type: effort === 'none' ? 'disabled' : 'enabled' } }
             : {}),
-          ...(this.providerId === 'openai' ? { max_completion_tokens: 64 } : { max_tokens: 64 }),
+          ...(this.providerId === 'openai' && targetBaseUrl === 'https://api.openai.com/v1' ? { max_completion_tokens: 64 } : {}),
+          ...(this.providerId === 'deepseek' ? { max_tokens: 64 } : {}),
         }),
         signal: abort.signal,
       });
@@ -228,7 +236,8 @@ export class OpenAIProvider extends BaseLLMProvider {
         return { ok: false, model: testModel, message, provider: this.providerId };
       }
 
-      return { ok: true, model: testModel, provider: this.providerId };
+      const data = await response.json().catch(() => ({})) as { usage?: unknown };
+      return { ok: true, model: testModel, provider: this.providerId, usage: normalizeUsage(this.providerId, data.usage) };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return { ok: false, model: testModel, message, provider: this.providerId };

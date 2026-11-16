@@ -3,6 +3,7 @@
  * when AI is unavailable, unconfigured, or times out.
  * Maintains 100% offline, zero-network fallback guarantees.
  */
+import { compilePreference } from '../../../../packages/domain/src/preference.ts';
 import type { Bilingual, RulePatch, Rules, Candidate } from '../../../../packages/contracts/src/recommendations.ts';
 import type { CatalogProblem } from '../../../../packages/contracts/src/sync.ts';
 import type { OverridePromptResult, PlanContentResult } from './types.ts';
@@ -23,7 +24,15 @@ export function fallbackPlanContent(problems: CatalogProblem[] = [], _rules: Rul
     const tagNames = p.topicTags.slice(0, 2).map((t: { name: string }) => t.name).join(' / ');
     const tagStr = focusTags ? ` (${focusTags})` : (tagNames ? ` (${tagNames})` : '');
 
-    if (candidate.explanation?.evidenceSummary?.reasonText) {
+    if (candidate.explanation?.reviewDecision) {
+      const d = candidate.explanation.reviewDecision;
+      reasons[p.questionId] = { en: 'Review (' + d.policyVersion + ', ' + d.reason + '): stage ' + d.stage + ', interval ' + d.intervalDays + ' day(s), due ' + (d.dueDate ?? 'unknown') + '.',
+        zh: '复习（' + d.policyVersion + '，' + ({ independent: '独立完成', assisted: '辅助完成', unsolved: '未解决', duration_threshold: '达到用时阈值', legacy_unknown: '未记录解题方式', baseline: '历史基线' }[d.reason]) + '）：阶段 ' + d.stage + '，间隔 ' + d.intervalDays + ' 天，到期 ' + (d.dueDate ?? '日期未知') + '。' };
+    } else if (candidate.explanation?.recoveryPriority) {
+      reasons[p.questionId] = { en: 'A recorded attempt remained unsolved. This recovery practice uses a new-problem slot.', zh: '已有一次未解决的记录；本次补练使用新题名额。' };
+    } else if (candidate.kind === 'review') {
+      reasons[p.questionId] = { en: 'Review due ' + (candidate.dueDate ?? 'on an unknown date') + ' under the saved review schedule.', zh: '依据当前复习安排，到期日期：' + (candidate.dueDate ?? '未知') + '。' };
+    } else if (candidate.explanation?.evidenceSummary?.reasonText) {
       reasons[p.questionId] = candidate.explanation.evidenceSummary.reasonText;
     } else if (candidate.isFocusTopic) {
       reasons[p.questionId] = {
@@ -45,8 +54,8 @@ export function fallbackPlanContent(problems: CatalogProblem[] = [], _rules: Rul
           zh: '按自己的节奏巩固今日专题，记录收获与疑问。',
         }
       : {
-          en: 'Consistent daily practice turns small efforts into mastery. Let’s tackle today’s challenge!',
-          zh: '坚持每日训练，积硅步以至千里。开启今日刷题挑战吧！',
+          en: 'Work through the selected plan at your own pace and record the outcome of each attempt.',
+          zh: '按自己的节奏完成今日计划，并记录每次尝试的结果。',
         },
     model: 'local',
   };
@@ -66,92 +75,5 @@ export function fallbackOverridePrompt(
   _baseRules: Rules | null = null,
   knownTags: string[] = [],
 ): OverridePromptResult {
-  const patch: RulePatch = {};
-  const unresolved: string[] = [];
-  const lower = prompt.toLowerCase();
-
-  const countMatch =
-    lower.match(/(\d+)\s*(?:题|道|problems?|questions?|count)/i) ??
-    lower.match(/(?:做|加|选|刷)\s*(\d+)/i);
-  if (countMatch) {
-    const num = parseInt(countMatch[1], 10);
-    if (num > 0) patch.dailyCount = num;
-  }
-
-  if (lower.includes('全easy') || lower.includes('全部简单') || lower.includes('all easy')) {
-    patch.difficulty = { Easy: 100, Medium: 0, Hard: 0 };
-  } else if (lower.includes('全medium') || lower.includes('全部中等') || lower.includes('all medium')) {
-    patch.difficulty = { Easy: 0, Medium: 100, Hard: 0 };
-  } else if (lower.includes('全hard') || lower.includes('全部困难') || lower.includes('all hard')) {
-    patch.difficulty = { Easy: 0, Medium: 0, Hard: 100 };
-  } else if (lower.includes('不要hard') || lower.includes('不要困难') || lower.includes('no hard')) {
-    patch.difficulty = { Easy: 50, Medium: 50, Hard: 0 };
-  }
-
-  if (
-    lower.includes('不要复习') ||
-    lower.includes('关复习') ||
-    lower.includes('不复习') ||
-    lower.includes('仅新题') ||
-    lower.includes('全新题') ||
-    lower.includes('no review') ||
-    lower.includes('without review') ||
-    lower.includes('new only')
-  ) {
-    patch.reviewEnabled = false;
-    patch.reviewPercent = null;
-    patch.reviewMode = 'none';
-    patch.reviewCount = 0;
-  } else if (lower.includes('全部复习') || lower.includes('全复习') || lower.includes('all review')) {
-    patch.reviewEnabled = true;
-    patch.reviewPercent = 100;
-    patch.reviewMode = 'all';
-    patch.reviewCount = null;
-  } else if (lower.includes('复习') || lower.includes('review')) {
-    const countReviewMatch = lower.match(/(?:其中)?复习\s*(\d+)\s*(?:题)?/i)
-      ?? lower.match(/(\d+)\s*(?:题)?复习/i)
-      ?? lower.match(/review\s*(\d+)/i)
-      ?? lower.match(/(\d+)\s*review/i);
-    const reviewPctMatch = lower.match(/(\d+)\s*%/);
-
-    if (countReviewMatch && (!reviewPctMatch || !lower.includes(reviewPctMatch[0]))) {
-      const rCount = parseInt(countReviewMatch[1], 10);
-      if (rCount > 0) {
-        patch.reviewMode = 'partial';
-        patch.reviewCount = rCount;
-        patch.reviewEnabled = true;
-        const total = patch.dailyCount ?? _baseRules?.dailyCount;
-        if (total) patch.reviewPercent = (rCount / total) * 100;
-      }
-    } else if (reviewPctMatch) {
-      const pct = Math.min(100, Math.max(1, parseInt(reviewPctMatch[1], 10)));
-      patch.reviewEnabled = true;
-      patch.reviewPercent = pct;
-      if (pct === 100) {
-        patch.reviewMode = 'all';
-        patch.reviewCount = null;
-      } else {
-        patch.reviewMode = 'partial';
-        const total = patch.dailyCount ?? _baseRules?.dailyCount;
-        if (total) patch.reviewCount = Math.round((total * pct) / 100);
-      }
-    }
-  }
-
-  const matchedTags: string[] = [];
-  for (const slug of knownTags) {
-    const cleanSlug = slug.toLowerCase().replace(/-/g, ' ');
-    if (lower.includes(slug) || lower.includes(cleanSlug)) {
-      matchedTags.push(slug);
-    }
-  }
-  if (matchedTags.length > 0) {
-    patch.tags = matchedTags;
-  }
-
-  if (lower.includes('高频') || lower.includes('top') || lower.includes('google') || lower.includes('amazon') || lower.includes('面试')) {
-    unresolved.push('Company and frequency tags cannot be verified against local metadata; treated as soft qualitative preferences.');
-  }
-
-  return { patch, unresolved, model: 'local' };
+  return compilePreference(prompt, _baseRules, knownTags);
 }

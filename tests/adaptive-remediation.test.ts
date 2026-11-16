@@ -8,6 +8,7 @@ import { PlanningService } from '../apps/server/src/planning-service.ts';
 import { LLMAssistant } from '../apps/server/src/llm/assistant.ts';
 import { fallbackPlanContent, type IGeminiAssistant } from '../apps/server/src/gemini.ts';
 import { select } from '../packages/domain/src/recommendations.ts';
+import { selectCandidateSlots, buildSelectionSlate } from '../packages/domain/src/selection.ts';
 import { rankAdaptiveTopics, selectAdaptiveSlots } from '../packages/domain/src/adaptive-topics.ts';
 import { candidates, reorderCandidates } from '../packages/domain/src/recommendations.ts';
 import type { Candidate, PlanItem, Rules } from '../packages/contracts/src/recommendations.ts';
@@ -144,16 +145,17 @@ it('subtracts retained reviews globally before distributing remaining review slo
 });
 
 it('serializes competing strategy budgets through the planning revision', async () => {
-  const clock = mock.method(Date, 'now', () => now), f = await fixture({ ...rules, dailyCount: 1 });
+  const clock = mock.method(Date, 'now', () => now), f = await fixture({ ...rules, dailyCount: 1, preference: 'Iterative solutions' });
   let release!: () => void;
   let entered!: () => void;
   const waiting = new Promise<void>(resolve => { release = resolve; });
   const started = new Promise<void>(resolve => { entered = resolve; });
   try {
     await seedFeedback(f.store);
-    f.assistant.generatePlanContent = async p => {
-      if (p.date === '2026-09-18') { entered(); await waiting; }
-      return fallbackPlanContent(p.problems, p.rules);
+    f.assistant.getStatus = () => ({ configured: true, model: 'mock' });
+    f.assistant.selectPlanProblems = async params => {
+      if (params.date === '2026-09-18') { entered(); await waiting; }
+      return { selectedQuestionIds: [], model: 'mock' };
     };
     const pending = f.service.ensureDailyPlan({ date: '2026-09-18' });
     const rejected = assert.rejects(pending, { code: 'STALE_DATA' });
@@ -212,7 +214,10 @@ it('keeps exploration candidates inside the bounded model input', async () => {
       captured = p.contents;
       return { text: JSON.stringify({ selectedQuestionIds: [] }) };
     } });
-    await assistant.selectPlanProblems({ candidates: pool, rules: { ...rules, preference: 'Practice carefully' }, date: '2026-09-18' });
+    const allocation = selectCandidateSlots(pool, Array.from({ length: 5 }, () => ({ difficulty: 'Easy' as const, kind: 'new' as const })), 1);
+    const slate = buildSelectionSlate(allocation);
+    assert.ok(slate.candidates.length <= 30);
+    await assistant.selectPlanProblems({ candidates: slate.candidates, rules: { ...rules, preference: 'Practice carefully' }, date: '2026-09-18' });
     assert.ok(captured.includes('explore-candidate'), 'The exploration pool must survive the 30-candidate bound');
   } finally { f.db.close(); clock.mock.restore(); }
 });

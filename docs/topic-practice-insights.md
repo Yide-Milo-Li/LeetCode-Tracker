@@ -39,7 +39,7 @@ The fixed ladder remains 1, 3, 7, 14 and 30 days. A stage-two review with a seve
   - `developing`: Samples are accumulating but have not satisfied stability or reinforcement criteria.
   - `insufficient_evidence`: Fewer than 3 problems or 2 practice days.
 
-When `focusWeakTags` is enabled, eligible topic/difficulty pairs are ordered by sufficient assisted/unsolved feedback, due/overdue work, sufficient duration anomalies, and other sufficient evidence. Insufficiently evidenced pairs enter exploration without being described as weak. Each candidate has one target from the strategy's allowed tags. Recent recommendation exposure breaks equal signal priorities before the seeded candidate order.
+When `focusWeakTags` is enabled, eligible topic/difficulty pairs are ordered by sufficient assisted/unsolved feedback, due/overdue work, sufficient duration anomalies, and other sufficient evidence. Insufficiently evidenced pairs enter exploration without being described as weak. Each candidate has one target from the strategy's allowed tags. Request-local target exposure, initialized with retained items and updated after each selection, then recent committed recommendation exposure break equal signal priorities before semantic preference and the seeded order.
 
 Each committed new adaptive slot carries an `explorationOrdinal`: every fifth slot of the same strategy prefers exploration, while the others prefer consolidation. One-question days therefore accumulate toward exploration. Cold starts use exploration for coverage; unavailable exploration candidates fall back to consolidation within the same difficulty and kind. Consequently 20% is an allocation target, not a guaranteed observed ratio when evidence or eligible candidates are missing.
 
@@ -49,18 +49,23 @@ Generated items save `adaptive-v1` explanations with the target, role, local pri
 
 ## Planning, history and model boundaries
 
-Generation, replacement and temporary overrides share a request-local candidate context. Adaptive projections never overwrite the fixed `problem_review_state` cache. Allocation metadata is stored in existing plan JSON; this remediation requires no additional database migration beyond schema v10.
+Generation, replacement and temporary overrides share a request-local candidate context. Adaptive projections never overwrite the fixed `problem_review_state` cache. Allocation metadata remains in plan JSON. Phase 39 adds schema 12 / Bundle v5 to fence newer policy, provenance and optional feedback semantics; schema 11 / Bundle v4 are reserved for the separate LC-2.0 lineage.
 
 New plan items save optional `explanation` facts: analysis version/date, focus tag slugs and actual duration/threshold/base/adjusted interval when applicable. Saved versions and operation replays retain those facts. Old items without metadata show their saved reasons and hide new badges. Record/settings changes affect future generation or explicit replacement, not saved historical JSON.
 
-Temporary overrides expose structured inherit/on/off controls. Natural-language requests for these controls are not guessed. Commit checks revisions and rejects a preview from a different local calendar day. Add one captures revisions before selecting candidates or awaiting provider content, and validates data, profile lifetime and calendar date inside the final write transaction after the backup queue has settled.
+Temporary overrides expose structured inherit/on/off controls. Natural-language requests for these controls are not guessed. Commit checks revisions and rejects a preview from a different local calendar day. Add one stays local and captures revisions before selecting candidates, and validates data, profile lifetime and calendar date inside the final write transaction after the backup queue has settled.
 
-Gemini receives bounded metadata and focus tags, not notes, durations or complete history. It may reorder only within equal difficulty, kind, due-date and topic-priority groups. Membership, duplicates and selection limits remain locally validated. The original 30-candidate bound and shared deadline remain; no separate model analysis call is added. Local fallback uses identical constraints.
+Optional semantic ranking receives bounded candidate metadata and relevant aggregate topic facts, not notes, raw durations or complete history. It may reorder only within equal difficulty, kind, due-date and topic-priority groups. Membership, duplicates and selection limits remain locally validated. The original 30-candidate bound and shared deadline remain; no separate model analysis call is added. Local fallback uses identical constraints.
 
 ## Desktop workflow and verification
 
 Statistics loads insights independently with retry, initially showing ten tags with explicit expansion. Creating a topic strategy opens an unsaved draft with focus enabled; required counts, review mode and weekdays still require user choices. Both controls remain independent. Saved explanations use keyboard-accessible popovers.
 
-Offline checks use synthetic fixtures. Run `npm test`, `npm run check`, `npm run build`, `npm run docs:check` and `git diff --check`. After building, `npm run verify:phase16` runs isolated desktop Chrome with mocked Gemini. `npm run benchmark:phase16` measures synthetic 4,046-problem catalogs with 10,000/50,000 records. Run timing measurements without concurrent tests/browser checks. Evidence goes under ignored `.local/evidence/phase16/`.
+Offline checks use synthetic fixtures. Run `npm run check`, `npm test`, `npm run build`, `npm run docs:check` and `git diff --check` in that order. After building, `npm run verify:phase16` runs isolated desktop Chrome with mocked Gemini. `npm run benchmark:phase16` measures synthetic 4,046-problem catalogs with 10,000/50,000 records. Run timing measurements without concurrent tests/browser checks. Evidence goes under ignored `.local/evidence/phase16/`.
 
 Private data, live Gemini, other browsers, mobile UI, publication and long-term learning effects are outside this verification claim.
+
+
+## Outcome review and optional trials
+
+The [Phase 39 recommendation contract](local-recommendations.md) documents opt-in outcome-v2 (separate from success/completion), conservative same-day/pre-baseline replay, 90-day freshness, independent-sample duration shadow thresholds, optional effort budgets and explicit optional swap/removal reasons. These are versioned heuristics. Stale evidence cannot establish recent stability; time infeasibility does not change hard quotas; bare removal never becomes a failed attempt. Historical reasons and operation replays stay immutable.

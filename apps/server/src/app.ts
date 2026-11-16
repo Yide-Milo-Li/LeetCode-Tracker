@@ -11,6 +11,7 @@ import * as path from 'node:path';
 import type { CatalogStore } from '../../../packages/database/src/store.ts';
 import { resolveAssistantSettings } from './llm/settings.ts';
 import { GeminiAssistant, type IGeminiAssistant } from './gemini.ts';
+import { createDiagnosticSink } from './llm/diagnostics.ts';
 import { PlanningService } from './planning-service.ts';
 import { AsyncLock } from './async-lock.ts';
 import { registerMigrationGate } from './migration-gate.ts';
@@ -27,6 +28,7 @@ export interface AppOptions {
   staticRoot?: string;
   disableStatic?: boolean;
   sessionSecret?: string;
+  profileDirectory?: string;
 }
 
 /**
@@ -37,9 +39,10 @@ export interface AppOptions {
  */
 export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const { store } = options;
-  const gemini = options.geminiAssistant ?? new GeminiAssistant(resolveAssistantSettings(store));
+  const diagnosticSink = options.profileDirectory ? createDiagnosticSink(options.profileDirectory) : undefined;
+  const gemini = options.geminiAssistant ?? new GeminiAssistant({ ...resolveAssistantSettings(store), diagnosticSink });
   const writeLock = new AsyncLock();
-  const planningService = new PlanningService(store, gemini);
+  const planningService = new PlanningService(store, gemini, 60000, diagnosticSink);
 
   // Only uncommitted previews live in memory; committed results survive restarts.
   const activePreviews = new Map<string, ActivePreview>();

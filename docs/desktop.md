@@ -8,7 +8,7 @@ The published 1.0.0 host can fail before readiness because Tauri returns a canon
 
 Release 1.2.0 is an unsigned Windows x64 distribution; download it from [Release 1.2.0](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.2.0). Automated boundary tests and local packaging do not establish clean-VM Windows installation, populated-profile upgrade/downgrade compatibility, Windows 10 compatibility, or the full WebView2 acceptance matrix; those checks remain pending. See the [release notes](releases/1.2.0.md).
 
-The desktop shell packages the shared React user interface, the Fastify `/api/v1` service, and the native SQLite storage engine alongside a private, bundled Node.js 24 runtime. Users can run the application with **zero requirement** to install Node.js, npm, Git, or Rust on their machine.
+The desktop shell packages the shared React user interface, the Fastify `/api/v1` service, and the native SQLite storage engine alongside a private, bundled Node.js 26 runtime. Users can run the application with **zero requirement** to install Node.js, npm, Git, or Rust on their machine.
 
 ---
 
@@ -75,7 +75,7 @@ The desktop shell packages the shared React user interface, the Fastify `/api/v1
 │         x-desktop-session-token   127.0.0.1 (kernel port)   │
 │                   │                     │                   │
 │   ┌───────────────▼─────────────────────┴───────────────┐   │
-│   │ Node.js 24 Private Sidecar (node[.exe])             │   │
+│   │ Node.js 26 Private Sidecar (node[.exe])             │   │
 │   │ • Fastify API server (desktop-server.mjs)           │   │
 │   │ • node:sqlite engine & transactional store          │   │
 │   │ • Windows Job Object / macOS ManagedChild Drop      │   │
@@ -112,14 +112,14 @@ To prevent orphan background processes:
 ### 3.2 Backup, Restore, and Credential Protection
 - **Full Database Backups**: Automatic transactional SQLite snapshots are saved to the `backups/` directory before schema migrations and bulk data imports.
 - **Portable Snapshot Bundles**: The application supports exporting and importing portable JSON Snapshot Bundles (`.json`). Settings provides one **Export Complete Migration** / **Import Migration** entry for moving a profile between Windows and macOS.
-  - **Complete v3 migration**: Bundle v3 includes the local problem catalog, tags, practice records and operation history, imported progress history, notes, strategies and versions, weekly assignments, daily plans and versions, review state, statistics inputs, and non-sensitive settings. It replaces the target business profile after a preview and confirmation; it does not merge two profiles.
-  - **Cross-platform workflow**: Export v3 on the old device, copy the JSON file to the new device, choose Import Migration, review the source/count summary, and confirm replacement. The same file format works Windows → macOS and macOS → Windows.
+  - **Complete v5 migration**: Bundle v5 includes the local problem catalog, tags, practice records and operation history, imported progress history, notes, strategies and versions, weekly assignments, daily plans and versions, review state, statistics inputs, and non-sensitive settings. It replaces the target business profile after a preview and confirmation; it does not merge two profiles.
+  - **Cross-platform workflow**: Export v5 on the source candidate, copy the JSON file to the new device, choose Import Migration, review the source/count summary, and confirm replacement. The same file format works Windows → macOS and macOS → Windows.
   - **Secret Exclusion**: Provider API keys (Gemini, OpenAI, DeepSeek) are **automatically omitted** from exported bundles to avoid accidental credential leakage.
   - **Local Secret Preservation**: Importing a snapshot bundle updates settings and records without overwriting or clearing existing local API keys.
   - **Untrusted Imports**: Incoming key fields are ignored even when nonempty; an unset local key stays unset.
 - **Safety and limits**: The target database is backed up before replacement; malformed, unknown-version, broken-reference, oversized (>64 MiB), backup, or write failures leave the original profile in place. Restore blocks concurrent profile writes and clears stale planning/preview state after success.
 - API keys remain in the local SQLite settings store without operating-system credential encryption. Raw SQLite backups can contain them. Portable bundles exclude keys by design.
-- v1 snapshot imports remain available for backward compatibility but are labelled partial restore. v2 remains readable, while v3 is the current complete migration format and preserves schema-v10 outcome feedback. API keys must be configured again on the target device when they were not already present.
+- v1 snapshot imports remain available for backward compatibility but are labelled partial restore. v2/v3 remain readable; v5 is the current development migration format and preserves schema-12 recommendation policy, explanation and feedback semantics. Published 1.2.0 used v3/schema10. Legacy export that loses newer semantics fails explicitly. API keys must be configured again on the target device when they were not already present.
 
 ---
 
@@ -130,7 +130,7 @@ To prevent orphan background processes:
 To build the standalone Windows installer from source on a Windows development machine:
 
 #### Prerequisites
-- Node.js `>=24.15.0 <25` and npm `>=12`
+- Node.js `>=26.13.0 <27` and npm `>=12`
 - Visual Studio 2022/2026 with C++ Build Tools (`VC.Tools.x86.x64`)
 - Rust `stable-x86_64-pc-windows-msvc` (via rustup)
 - NSIS 3.x (`winget install NSIS.NSIS -e`)
@@ -146,7 +146,7 @@ npm run build
 # 3. Bundle standalone backend server
 npm run desktop:bundle-server
 
-# 4. Verify and prepare private Node 24 runtime binary
+# 4. Verify and prepare private Node 26 runtime binary
 npm run desktop:prepare-runtime
 
 # 5. Build native release executable and NSIS installer
@@ -160,7 +160,7 @@ To build and verify the internal Apple Silicon macOS bundle (covering `v1.2.0` +
 #### Prerequisites
 - macOS 14+ on Apple Silicon (`arm64` / `aarch64-apple-darwin`) with Xcode Command Line Tools
 - Rust `1.100.0+` (`aarch64-apple-darwin`) with `rustfmt` and `clippy`
-- Node.js `>=24.15.0 <25` (system Node `v26.x` emits an `EBADENGINE` advisory warning on `npm ci`, while `desktop:prepare-runtime` downloads the pinned private Node `24.15.0` Darwin ARM64 binary)
+- Node.js `>=26.13.0 <27` (`desktop:prepare-runtime` downloads the pinned private Node `26.13.0` Darwin ARM64 binary)
 
 #### Build & Verification Commands
 ```sh
@@ -169,10 +169,10 @@ npm ci
 npm run check
 npm test
 
-# 2. Build web client, bundle desktop server, fetch pinned Node 24.15.0, and package .app/.dmg
+# 2. Build web client, bundle desktop server, fetch pinned Node 26.13.0, and package .app/.dmg
 npm run desktop:build:mac
 
-# 3. Verify the isolated sidecar explicitly against the pinned private Node 24.15.0 runtime
+# 3. Verify the isolated sidecar explicitly against the pinned private Node 26.13.0 runtime
 DESKTOP_TEST_NODE="$(pwd)/apps/desktop/src-tauri/binaries/node-aarch64-apple-darwin" npm run test:desktop
 ```
 
@@ -184,7 +184,7 @@ cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
 cargo clippy --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets -- -D warnings
 ```
 
-`npm test` includes a freshly bundled sidecar test (`tests/desktop-spike.test.ts`) copied to a temporary directory without repository dependencies. Set `DESKTOP_TEST_NODE` to the prepared private Node `24.15.0` binary to test that runtime explicitly.
+`npm test` includes a freshly bundled sidecar test (`tests/desktop-spike.test.ts`) copied to a temporary directory without repository dependencies. Set `DESKTOP_TEST_NODE` to the prepared private Node `26.13.0` binary to test that runtime explicitly.
 
 The completed Windows installer is generated at:
 `apps/desktop/src-tauri/target/release/bundle/nsis/LeetCode Tracker_1.2.0_x64-setup.exe`
@@ -194,3 +194,8 @@ The Apple Silicon internal artifacts are generated at:
 - `.app`: `apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/LeetCode Tracker.app`
 
 The native WebdriverIO runner is deliberately isolated under `tests/desktop/` and is used only with the test-only Tauri configuration (`tauri.e2e.conf.json` + `--features desktop-e2e`); it is not included in the distributable `.dmg`. Running the E2E build overwrites `bundle/macos/LeetCode Tracker.app` with the `--features desktop-e2e` test bundle while the `.dmg` retains the production `desktop:build:mac` bundle; restore the production web build afterward with `npm run build` (and re-run `npm run desktop:build:mac` if you need a fresh production `.app` outside the `.dmg`).
+
+
+## Phase 39 candidate qualification
+
+The source candidate adds schema 12 / Bundle v5 and the [local recommendation policy](local-recommendations.md). Runtime preparation, bundled-sidecar lifecycle tests and Rust checks qualify only their observed local scope. They do not install or migrate a personal profile, approve an installer, close macOS/native restart acceptance, or replace Phase 35–38 external evidence. Diagnostics live under the host-supplied profile directory, retain 30 days / 5 MiB, and exclude request content and keys.

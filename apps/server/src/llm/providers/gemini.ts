@@ -9,6 +9,7 @@ import {
   type ReasoningEffort,
 } from '../../../../../packages/contracts/src/sync.ts';
 import { BaseLLMProvider } from './base.ts';
+import { normalizeUsage } from '../usage.ts';
 import type {
   GenerateContentParams,
   GenerateContentOutput,
@@ -81,9 +82,10 @@ export class GeminiProvider extends BaseLLMProvider {
           responseSchema: params.responseSchema,
           abortSignal: params.abortSignal,
           thinkingConfig,
+          maxOutputTokens: params.maxOutputTokens,
         },
       });
-      return { text: response.text, model: params.model };
+      return { text: response.text, model: params.model, provider: 'gemini', usage: normalizeUsage('gemini', response.usageMetadata) };
     }
 
     if (!this.apiKey) {
@@ -100,10 +102,11 @@ export class GeminiProvider extends BaseLLMProvider {
         responseSchema: params.responseSchema,
         abortSignal: params.abortSignal,
         thinkingConfig,
+        maxOutputTokens: params.maxOutputTokens,
       },
     });
 
-    return { text: response.text, model: params.model };
+    return { text: response.text, model: params.model, provider: 'gemini', usage: normalizeUsage('gemini', response.usageMetadata) };
   }
 
   /** Probe the selected credentials with a bounded request; never persist draft values. */
@@ -120,8 +123,9 @@ export class GeminiProvider extends BaseLLMProvider {
     const abort = new AbortController();
     const timeoutId = setTimeout(() => abort.abort(), 10000);
     try {
+      let usage = normalizeUsage('gemini');
       if (this.generateContentFn) {
-        await this.generateContentFn({
+        const result = await this.generateContentFn({
           model: testModel,
           contents: 'ping',
           config: {
@@ -130,20 +134,24 @@ export class GeminiProvider extends BaseLLMProvider {
             responseSchema: undefined,
             abortSignal: abort.signal,
             thinkingConfig,
+            maxOutputTokens: 64,
           },
         });
+        usage = normalizeUsage('gemini', result.usageMetadata);
       } else {
         const ai = new GoogleGenAI({ apiKey: testKey });
-        await ai.models.generateContent({
+        const result = await ai.models.generateContent({
           model: testModel,
           contents: 'ping',
           config: {
             abortSignal: abort.signal,
             thinkingConfig,
+            maxOutputTokens: 64,
           },
         });
+        usage = normalizeUsage('gemini', result.usageMetadata);
       }
-      return { ok: true, model: testModel, provider: 'gemini' };
+      return { ok: true, model: testModel, provider: 'gemini', usage };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return { ok: false, model: testModel, message, provider: 'gemini' };

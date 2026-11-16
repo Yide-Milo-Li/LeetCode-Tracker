@@ -22,7 +22,7 @@ Coverage includes:
 
 ## Complete cross-device migration coverage
 
-The migration suites include Snapshot Bundle v2 and v3 tests for all 22 business tables, including schema-v10 nullable outcomes in v3. They verify Windows/macOS-shaped export and restore into an empty profile, API-key exclusion and target-key preservation, invalid version/missing-table/reference rejection, size and schema boundaries, backup failure isolation, transactional write rollback, API v1/v2/v3 compatibility, and concurrent restore/write rejection. The isolated `tests/desktop/` WebdriverIO package and Tauri permissions are installed only by the macOS native CI job; they are not part of the ordinary application dependency set.
+The migration suites retain Snapshot Bundle v2/v3 compatibility tests for all 22 business tables and add Phase 39 Bundle v5/schema12 policy, feedback and replay round-trips. Schema11/Bundle4 are a separate incompatible lineage, not intermediate imports. They verify Windows/macOS-shaped export and restore into an empty profile, API-key exclusion and target-key preservation, invalid version/missing-table/reference rejection, size and schema boundaries, backup failure isolation, transactional write rollback, API v1/v2/v3 compatibility, and concurrent restore/write rejection. The isolated `tests/desktop/` WebdriverIO package and Tauri permissions are installed only by the macOS native CI job; they are not part of the ordinary application dependency set.
 
 ## Live Gemini API validation
 
@@ -50,7 +50,7 @@ npm run verify:desktop
 Build first with `npm run build`. The current command runs `scripts/verify-refactor-browser.ts`:
 
 - Starts real Fastify/React against an in-memory synthetic SQLite store on a random loopback port, with an injected Gemini stub.
-- Launches an isolated Chrome profile and connects using native Node 24 CDP/WebSocket. It does not attach to a personal browsing profile or load environment files.
+- Launches an isolated Chrome profile and connects using native Node 26 CDP/WebSocket. It does not attach to a personal browsing profile or load environment files.
 - Checks eight destinations at 1024x768, 1440x900 and 1920x1080, in English/Chinese and light/dark themes: 96 layout combinations. Theme and language are asserted after full document reloads.
 - Exercises create-first completion, an actual response-stage disconnect after the database INSERT, same-record edits, closed-save draft recovery, four dismissals, historical entry/correction, both imports, file-upload errors, snapshot pagination/audit, weekday conflicts and plan versions/replacements.
 - Checks nine overlay families in all 12 size/language/theme combinations (108 cases), including keyboard-created completion details, long-title manual forms, history and snapshot drawers. The manifest records exact screenshot and workflow counts for each run.
@@ -97,3 +97,10 @@ These checks are synthetic automation, not native save-dialog interaction, clean
 
 
 The static-serving security suite reproduces the encoded-separator guard bypass against the old plugin, verifies the upgraded dependency rejects it, and checks SPA fallback, unknown API routes, conditional/HEAD requests, root containment, and static-disabled native mode.
+
+
+## Phase 39 local recommendation candidate
+
+The five `phase39-*.test.ts` suites are registered in `npm test`. They cover outcome transitions/deduplication/date precision, separate completion, fixed-slot diversity/exploration, conservative parsing, cache/revision/restore/provider/day races, nullable mocked usage/output/deadline bounds, failing/bounded diagnostics, schemas 3–10 safety upgrades to12, incompatible versions and Bundle v5 round-trips with target-key preservation. `web-planning-components.test.tsx` covers explicit paired EN/ZH strategy/override options, optional item feedback and time-budget infeasibility without automatic quota changes.
+
+Use the ordered sequence `npm run check` → `npm test` → `npm run build` → `npm run docs:check` → `git diff --check`. Timing is separate: `npm run benchmark:phase39` uses only synthetic memory databases and transport stubs. Private-runtime preparation and Rust checks are local engineering evidence, not installed-host or live-provider acceptance. See [recommendation contracts](../docs/local-recommendations.md).

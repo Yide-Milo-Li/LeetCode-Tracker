@@ -12,6 +12,7 @@ import { Dialog, Feedback, PageHeader, InfoPopover } from './ui.tsx';
 import { TodayRecentOverview } from './TodayRecentOverview.tsx';
 import { TodayProblemRow } from './TodayProblemRow.tsx';
 import { QuickNoteDrawer } from './QuickNoteDrawer.tsx';
+import type { RecommendationFeedbackReason } from '../../../../packages/contracts/src/recommendations.ts';
 
 /** Above this many planned problems, segments get too thin to read and the meter becomes one bar. */
 const MAX_METER_SEGMENTS = 12;
@@ -81,6 +82,7 @@ function TodayPlanViewInner({
   const [recentCompletions, setRecentCompletions] = useState<Set<string>>(new Set());
   const [quickNoteProblem, setQuickNoteProblem] = useState<PlanItem | null>(null);
   const [problemToRemove, setProblemToRemove] = useState<PlanItem | null>(null);
+  const [removalReason, setRemovalReason] = useState<RecommendationFeedbackReason | undefined>();
   const completionTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
   useEffect(() => {
     const clearFeedback = () => {
@@ -189,7 +191,7 @@ function TodayPlanViewInner({
    * Uncompleted problems are removed immediately with single click (no dialog).
    * Completed problems prompt a confirmation dialog since removal cascades to revoking practice records.
    */
-  async function handleRemoveItem(target: PlanItem) {
+  async function handleRemoveItem(target: PlanItem, reason?: RecommendationFeedbackReason) {
     if (
       !plan ||
       controller.appending ||
@@ -199,12 +201,13 @@ function TodayPlanViewInner({
     ) return;
 
     if (target.completed) {
+      setRemovalReason(reason);
       setProblemToRemove(target);
       return;
     }
 
     try {
-      await controller.removeOne(target);
+      await controller.removeOne(target, reason);
       workspace.notifyMutation();
     } catch (err) {
       setRowErrors((old) => ({
@@ -218,9 +221,10 @@ function TodayPlanViewInner({
     if (!problemToRemove) return;
     const target = problemToRemove;
     try {
-      await controller.removeOne(target);
+      await controller.removeOne(target, removalReason);
       workspace.notifyMutation();
       setProblemToRemove(null);
+      setRemovalReason(undefined);
     } catch (err) {
       setRowErrors((old) => ({
         ...old,
@@ -555,6 +559,13 @@ function TodayPlanViewInner({
 
             <TodayRecentOverview lang={lang} embedded={true} />
           </section>
+          {plan.timeEstimate && <section className="form-group" aria-label={zh ? '计划用时估计' : 'Plan effort estimate'}>
+            <p>{zh ? '预计用时 ' : 'Estimated effort '}{plan.timeEstimate.totalMinutes}{zh ? ' 分钟：新题 ' : ' min: new '}{plan.timeEstimate.newMinutes}{zh ? '，复习 ' : ', review '}{plan.timeEstimate.reviewMinutes}{zh ? '。仅为估计。' : '. Estimates only.'}</p>
+            {!plan.timeEstimate.feasible && <Feedback tone="warning">
+              <p>{zh ? '预计用时超出预算，题数与难度保持不变。' : 'The estimate exceeds your budget. Counts and difficulty remain unchanged.'}</p>
+              <button type="button" className="btn btn-secondary" disabled={controller.isPlanMutationPending()} onClick={() => setOverride(true)}>{zh ? '明确调整题数或预算' : 'Adjust count or budget'}</button>
+            </Feedback>}
+          </section>}
           {plan.items.length < plan.rules.dailyCount && (
             <Feedback tone="warning">
               {zh ? '候选题目不足，缺口 ' : 'Not enough eligible candidates. Short by '}
@@ -590,15 +601,15 @@ function TodayPlanViewInner({
                 canRemove={true}
                 isRemoving={controller.removingItemId === item.id}
                 onComplete={(target) => void complete(target)}
-                onReplaceOne={(target) => {
+                onReplaceOne={(target, reason) => {
                   if (
                     controller.appending ||
                     controller.isPlanMutationPending() ||
                     saving.size > 0
                   ) return;
-                  void controller.replaceOne(target);
+                  void controller.replaceOne(target, reason);
                 }}
-                onRemove={(target) => void handleRemoveItem(target)}
+                onRemove={(target, reason) => void handleRemoveItem(target, reason)}
                 onOpenQuickNote={(target) => setQuickNoteProblem(target)}
               />
             ))}

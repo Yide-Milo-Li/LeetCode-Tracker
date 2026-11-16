@@ -1,7 +1,7 @@
 /**
  * Synthetic technical spike test for the bundled desktop server.
  * Verifies that the bundled ESM server (desktop-server.mjs):
- * 1. Initializes with Node 24 without node_modules dependency
+ * 1. Initializes with the pinned private Node runtime without node_modules dependency
  * 2. Implements stdin configuration protocol with nonce verification
  * 3. Enforces cryptographic session token authentication
  * 4. Executes SQLite migrations, catalog import, practice creation, and notes
@@ -14,6 +14,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import { spawn, type ChildProcess } from 'node:child_process';
 import * as readline from 'node:readline';
+import type { DailyPlan } from '../packages/contracts/src/recommendations.ts';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
 const bundledServerPath = path.join(repoRoot, 'apps/server/dist/desktop-server.mjs');
@@ -267,11 +268,34 @@ test('Desktop bundled server lifecycle, session auth, and data persistence', asy
       body: JSON.stringify({
         llmProvider: 'openai',
         openaiModel: 'gpt-6.1-terra',
+        timezone: 'UTC',
       }),
     });
     assert.equal(patchRes.status, 200);
     const patchedSettings = await patchRes.json();
     assert.equal(patchedSettings.llmProvider, 'openai');
+
+    const requestHeaders = { 'Content-Type': 'application/json', 'x-desktop-session-token': sessionSecret };
+    const strategyResponse = await fetch(`http://127.0.0.1:${server.port}/api/v1/strategies`, {
+      method: 'POST', headers: requestHeaders, body: JSON.stringify({ name: 'Synthetic Phase39', weekdays: [0, 1, 2, 3, 4, 5, 6],
+        rules: { dailyCount: 2, difficulty: { Easy: 50, Medium: 50, Hard: 0 }, tags: [], premium: false,
+          reviewEnabled: true, reviewPercent: 50, preference: '', reviewPolicy: 'outcome-v2',
+          personalDurationCalibration: true, timeBudgetMinutes: 1 } }),
+    });
+    assert.equal(strategyResponse.status, 201, strategyResponse.status === 201 ? 'strategy created' : await strategyResponse.text());
+    const strategy = await strategyResponse.json();
+    const ensureResponse = await fetch(`http://127.0.0.1:${server.port}/api/v1/daily-plans/ensure`, { method: 'POST', headers: requestHeaders, body: '{}' });
+    assert.equal(ensureResponse.status, 200);
+    const generated = (await ensureResponse.json()).plan as DailyPlan;
+    assert.equal(generated.provenance?.content, 'local');
+    assert.equal(generated.timeEstimate?.feasible, false);
+    const removalResponse = await fetch(`http://127.0.0.1:${server.port}/api/v1/daily-plans/${generated.id}/remove-item`, {
+      method: 'POST', headers: requestHeaders, body: JSON.stringify({ itemId: generated.items[0].id,
+        expectedVersion: generated.version, operationId: '00000000-0000-4000-8000-000000000039', feedbackReason: 'time_unavailable' }),
+    });
+    assert.equal(removalResponse.status, 200);
+    const savedPlan = await removalResponse.json();
+    assert.equal(savedPlan.feedback[0].reason, 'time_unavailable');
 
     // 6. Clean shutdown
     const exitCode = await stopTestServer(server);
@@ -304,6 +328,21 @@ test('Desktop bundled server lifecycle, session auth, and data persistence', asy
       assert.equal(getNote2Res.status, 200);
       const note2Data = (await getNote2Res.json()) as { note: { content: string } };
       assert.equal(note2Data.note.content, '## Two Sum Solution\nHash map pattern.');
+      const restoredHeaders = { 'x-desktop-session-token': 'another-synthetic-session-secret-999-123456789' };
+      const strategiesResponse = await fetch(`http://127.0.0.1:${server2.port}/api/v1/strategies`, { headers: restoredHeaders });
+      assert.equal(strategiesResponse.status, 200);
+      const restoredStrategy = (await strategiesResponse.json()).items.find((item: { id: string }) => item.id === strategy.id);
+      assert.equal(restoredStrategy.rules.reviewPolicy, 'outcome-v2');
+      assert.equal(restoredStrategy.rules.personalDurationCalibration, true);
+      assert.equal(restoredStrategy.rules.timeBudgetMinutes, 1);
+      const plansResponse = await fetch(`http://127.0.0.1:${server2.port}/api/v1/daily-plans`, { headers: restoredHeaders });
+      assert.equal(plansResponse.status, 200);
+      assert.deepEqual((await plansResponse.json()).items.find((item: DailyPlan) => item.id === savedPlan.id), savedPlan);
+      const exportResponse = await fetch(`http://127.0.0.1:${server2.port}/api/v1/bundle/export?version=5`, { headers: restoredHeaders });
+      assert.equal(exportResponse.status, 200);
+      const exported = await exportResponse.json();
+      assert.equal(exported.version, 5);
+      assert.equal(exported.schemaVersion, 12);
     } finally {
       const exit2 = await stopTestServer(server2);
       assert.equal(exit2, 0);

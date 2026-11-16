@@ -240,4 +240,7 @@ export const snapshotBundleV3Schema = z.object({
 }).strict();
 
 export type SnapshotBundleV3 = z.infer<typeof snapshotBundleV3Schema>;
-export type AnyMigrationBundle = SnapshotBundleV2 | SnapshotBundleV3;
+/** v4 is reserved by LC-2.0; v5 adds Phase 39 strategy and plan JSON semantics. */
+export const snapshotBundleV5Schema = snapshotBundleV3Schema.extend({ version: z.literal(5), schemaVersion: z.literal(12) }).strict();
+export type SnapshotBundleV5 = z.infer<typeof snapshotBundleV5Schema>;
+export type AnyMigrationBundle = SnapshotBundleV2 | SnapshotBundleV3 | SnapshotBundleV5;

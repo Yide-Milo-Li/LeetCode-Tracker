@@ -20,7 +20,7 @@ import type { CatalogProblem } from '../../contracts/src/sync.ts';
 import { ANALYSIS_VERSION, DURATION_THRESHOLDS, REVIEW_VERSION, validDuration } from './review-policy.ts';
 
 /** Versioned opt-in topic priorities and duration-based review explanations. */
-export const ALGORITHM_VERSION = 'phase16-v2';
+export const ALGORITHM_VERSION = 'phase39-v1';
 export const intervals = [1, 3, 7, 14, 30] as const;
 
 /**
@@ -107,18 +107,40 @@ export function evidenceDate(evidence: Evidence, zone: string, now: number): str
   return evidence.at <= localDate(now, evidence.zone!) ? evidence.at : null;
 }
 
+const QUARTER_HOUR_MS=15*60*1000;
+
 /** Resolve dates with request-local formatters without inventing a source zone. */
 export function createEvidenceDateResolver(zone:string,now:number):(e:Evidence)=>string|null {
-  const formatter=new Intl.DateTimeFormat('en-CA',{timeZone:zone,year:'numeric',month:'2-digit',day:'2-digit'});
+  const formatter=new Intl.DateTimeFormat('en-CA',{timeZone:zone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
   const sourceToday=new Map<string,string|null>(),cache=new Map<string,string|null>();
+  /** Local date plus minute-of-day for one instant in the user zone. */
+  const local=(epoch:number)=>{
+    const parts=formatter.formatToParts(epoch),value=(type:string)=>parts.find(p=>p.type===type)!.value;
+    return {date:[value('year'),value('month'),value('day')].join('-'),minute:Number(value('hour'))*60+Number(value('minute'))};
+  };
+  // Distinct instants usually share a few quarter-hour buckets. A bucket is reused only when both ends
+  // fall on the same local date and exactly 14 local minutes apart, which rules out an offset change
+  // inside it; otherwise (`null`) every instant in that bucket is formatted exactly.
+  const bucketDates=new Map<number,string|null>();
+  const instantDate=(epoch:number)=>{
+    const bucket=Math.floor(epoch/QUARTER_HOUR_MS);
+    let date=bucketDates.get(bucket);
+    if(date===undefined){
+      const start=local(bucket*QUARTER_HOUR_MS),end=local((bucket+1)*QUARTER_HOUR_MS-1);
+      date=start.date===end.date && end.minute-start.minute===14?start.date:null;
+      bucketDates.set(bucket,date);
+    }
+    return date??local(epoch).date;
+  };
   return (e:Evidence)=>{
-    const key=JSON.stringify([e.at,e.precision,e.zone]);
+    // Plain concatenation is unambiguous here: precision has no separator and zone names contain no '|'.
+    const key=e.precision+'|'+(e.zone??'')+'|'+e.at;
     if(cache.has(key))return cache.get(key)!;
     let date:string|null=null;
     if(isEventTime(e.at,e.precision)){
       if(e.precision==='datetime'){
         const epoch=Date.parse(e.at);
-        if(epoch<=now){const parts=formatter.formatToParts(epoch);date=['year','month','day'].map(type=>parts.find(p=>p.type===type)!.value).join('-');}
+        if(epoch<=now)date=instantDate(epoch);
       }else if(e.zone){
         if(!sourceToday.has(e.zone))sourceToday.set(e.zone,isTimeZone(e.zone)?localDate(now,e.zone):null);
         const today=sourceToday.get(e.zone);if(today && e.at<=today)date=e.at;
@@ -223,12 +245,15 @@ export function candidates(
     const matched=p.topicTags.filter(t=>weak.has(t.slug)).map(t=>t.slug);
     const review=rules.adaptiveReviewEnabled?state?.adjustment??null:null;
     return [{...p,kind:state?.solved?'review':'new',dueDate:state?.solved?state.dueDate:null,
-      isFocusTopic:matched.length>0,matchedWeakTags:matched,isAdaptiveReview:review!==null,
-      adaptiveReason:review?'duration_threshold':null,
-      explanation:{analysisVersion:ANALYSIS_VERSION,asOfDate:date,focusTagSlugs:matched,review}}];
+      isFocusTopic:matched.length>0,matchedWeakTags:matched,isAdaptiveReview:review!==null || !!state?.isAdaptive,
+      adaptiveReason:state?.decision?.reason ?? (review?'duration_threshold':null),
+      explanation:{analysisVersion:ANALYSIS_VERSION,asOfDate:date,focusTagSlugs:matched,review,
+        ...(state?.decision ? {reviewDecision:state.decision} : {}),
+        ...(state?.recoveryPriority ? {recoveryPriority:true} : {})}}];
   }).sort((a,b)=>{
     if(a.kind!==b.kind)return a.kind==='review'?-1:1;
     if(a.kind==='review'){const diff=compareDueDates(a.dueDate,b.dueDate);if(diff)return diff;}
+    if (!!a.explanation?.recoveryPriority !== !!b.explanation?.recoveryPriority) return a.explanation?.recoveryPriority ? -1 : 1;
     if(rules.focusWeakTags && a.isFocusTopic!==b.isFocusTopic)return a.isFocusTopic?-1:1;
     return rank(seed+':'+a.questionId)-rank(seed+':'+b.questionId)||a.questionId.localeCompare(b.questionId);
   });

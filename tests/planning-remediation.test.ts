@@ -19,7 +19,7 @@ function gate() {
 }
 
 /** Synthetic catalog and memory-only database; no environment or private fixtures required. */
-async function fixture(overrides: Partial<IGeminiAssistant> = {}, timeout = 60000) {
+async function fixture(overrides: Partial<IGeminiAssistant> = {}, timeout = 60000, initialRules: Rules = rules) {
   const db = new DatabaseSync(':memory:');
   const store = new CatalogStore(db, { skipBackup: true });
   await store.updateSettings({ timezone: 'UTC' });
@@ -31,13 +31,15 @@ async function fixture(overrides: Partial<IGeminiAssistant> = {}, timeout = 6000
     ...overrides,
   };
   const service = new PlanningService(store, assistant, timeout);
-  const strategy = await service.createStrategy({ name: 'Daily', rules, weekdays: [0, 1, 2, 3, 4, 5, 6] });
+  const strategy = await service.createStrategy({ name: 'Daily', rules: initialRules, weekdays: [0, 1, 2, 3, 4, 5, 6] });
   return { db, store, service, strategy };
 }
 
 test('ensure rejects rules changed during generation and releases its pending slot', async () => {
   const barrier = gate();
-  const f = await fixture({ generatePlanContent: async p => { barrier.enter(); await barrier.wait; return fallbackPlanContent(p.problems, p.rules); } });
+  const f = await fixture({ getStatus: () => ({ configured: true, model: 'mock' }),
+    selectPlanProblems: async () => { barrier.enter(); await barrier.wait; return { selectedQuestionIds: [], model: 'mock' }; } },
+    60000, { ...rules, preference: 'Iterative solutions' });
   try {
     const result = f.service.ensureDailyPlan();
     await barrier.started;
@@ -51,7 +53,9 @@ test('ensure rejects rules changed during generation and releases its pending sl
 
 test('concurrent ensure callers share one provider call and one saved plan', async () => {
   const barrier = gate(); let calls = 0;
-  const f = await fixture({ generatePlanContent: async p => { calls++; barrier.enter(); await barrier.wait; return fallbackPlanContent(p.problems, p.rules); } });
+  const f = await fixture({ getStatus: () => ({ configured: true, model: 'mock' }),
+    selectPlanProblems: async () => { calls++; barrier.enter(); await barrier.wait; return { selectedQuestionIds: [], model: 'mock' }; } },
+    60000, { ...rules, preference: 'Iterative solutions' });
   try {
     const first = f.service.ensureDailyPlan(); await barrier.started;
     const second = f.service.ensureDailyPlan(); barrier.release();
@@ -62,7 +66,8 @@ test('concurrent ensure callers share one provider call and one saved plan', asy
 
 test('preview rejects inherited rules changed while prompt parsing is pending', async () => {
   const barrier = gate();
-  const f = await fixture({ parseOverridePrompt: async () => { barrier.enter(); await barrier.wait; return { patch: {}, unresolved: [], model: 'mock' }; } });
+  const f = await fixture({ getStatus: () => ({ configured: true, model: 'mock' }),
+    parseOverridePrompt: async () => { barrier.enter(); await barrier.wait; return { patch: {}, unresolved: [], model: 'mock' }; } });
   try {
     const result = f.service.previewDailyPlanOverride({ prompt: 'Keep current rules' });
     await barrier.started;
@@ -73,7 +78,7 @@ test('preview rejects inherited rules changed while prompt parsing is pending', 
 
 test('actual adapter unknown tags block commit until manually corrected', async () => {
   const adapter = new GeminiAssistant({ apiKey: 'synthetic', fallbackModels: [], generateContentFn: async () => ({ text: '{"tags":["graph-magic"]}' }) });
-  const f = await fixture({ parseOverridePrompt: p => adapter.parseOverridePrompt(p) });
+  const f = await fixture({ getStatus: () => adapter.getStatus(), parseOverridePrompt: p => adapter.parseOverridePrompt(p) });
   try {
     const preview = await f.service.previewDailyPlanOverride({ prompt: 'Only graph-magic' });
     assert.ok(preview.issues.length);
@@ -99,7 +104,7 @@ test('selection exhausting the shared budget prevents a second provider request'
     calls++;
     return new Promise((_, reject) => config.abortSignal.addEventListener('abort', () => reject(new Error('timed out')), { once: true }));
   } });
-  const f = await fixture({ selectPlanProblems: p => adapter.selectPlanProblems(p), generatePlanContent: p => adapter.generatePlanContent(p) }, 300);
+  const f = await fixture({ getStatus: () => adapter.getStatus(), selectPlanProblems: p => adapter.selectPlanProblems(p), generatePlanContent: p => adapter.generatePlanContent(p) }, 300);
   try {
     await f.service.updateStrategy(f.strategy.id, { expectedVersion: 1, rules: { preference: 'Iterative solutions' } });
     assert.equal((await f.service.ensureDailyPlan()).plan?.source, 'local');
@@ -112,22 +117,23 @@ test('bounded ranking input retains the scarce required difficulty', async () =>
   const adapter = new GeminiAssistant({ apiKey: 'synthetic', fallbackModels: [], generateContentFn: async p => { sent = p.contents; return { text: '{"selectedQuestionIds":["hard"]}' }; } });
   const f = await fixture();
   try {
-    const easy = f.store.planning.problems()[0];
-    const candidates = [...Array.from({ length: 30 }, (_, i) => ({ ...easy, questionId: `easy-${i}` })), { ...easy, questionId: 'hard', difficulty: 'Hard' as const }];
-    const result = await adapter.selectPlanProblems({ candidates, rules: { ...rules, difficulty: { Easy: 0, Medium: 0, Hard: 100 }, preference: 'Iterative' }, date: '2026-09-08' });
-    assert.ok(sent.includes('hard')); assert.deepEqual(result.selectedQuestionIds, ['hard']);
+    await f.store.importJsonl([...Array.from({ length: 40 }, (_, index) => JSON.stringify({ id: `easy-${index}`, title: `Synthetic ${index}`, difficulty: 'Easy', tags: ['Array'] })), JSON.stringify({ id: 'hard', title: 'Synthetic hard', difficulty: 'Hard', tags: ['Array'] })].join('\n'));
+    await f.service.updateStrategy(f.strategy.id, { expectedVersion: 1, rules: { difficulty: { Easy: 50, Medium: 0, Hard: 50 }, preference: 'Iterative' } });
+    const service = new PlanningService(f.store, { getStatus: () => adapter.getStatus(), formatProgressText: params => adapter.formatProgressText(params), generatePlanContent: params => adapter.generatePlanContent(params), selectPlanProblems: params => adapter.selectPlanProblems(params) });
+    const result = await service.ensureDailyPlan();
+    assert.ok(sent.includes('hard')); assert.ok(result.plan?.items.some(item => item.problem.questionFrontendId === 'hard'));
   } finally { f.db.close(); }
 });
 
-test('override updates provenance and supports replay after preview deletion', async () => {
-  let model = 'local';
-  const f = await fixture({ generatePlanContent: async p => ({ ...fallbackPlanContent(p.problems, p.rules), model }) });
+test('override retains truthful local provenance and supports replay after preview deletion', async () => {
+  let contentCalls = 0;
+  const f = await fixture({ generatePlanContent: async p => { contentCalls++; return { ...fallbackPlanContent(p.problems, p.rules), model: 'unused-model' }; } });
   try {
-    await f.service.ensureDailyPlan(); model = 'mock-gemini';
+    await f.service.ensureDailyPlan();
     const preview = await f.service.previewDailyPlanOverride({ rules: { dailyCount: 1 } });
     const options = { expectedVersion: 1, operationId: randomUUID() };
     const saved = await f.service.commitDailyPlanOverride(preview.id, options);
-    assert.equal(saved.model, model); assert.equal(saved.source, 'gemini');
+    assert.equal(saved.model, null); assert.equal(saved.source, 'local'); assert.equal(contentCalls, 0);
     assert.deepEqual(await f.service.commitDailyPlanOverride(preview.id, options), JSON.parse(JSON.stringify(saved)));
   } finally { f.db.close(); }
 });

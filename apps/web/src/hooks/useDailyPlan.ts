@@ -5,6 +5,7 @@
  */
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { api, type DailyPlan, type EnsureResult, type PlanItem, type PracticeRecord } from '../api.ts';
+import type { RecommendationFeedbackReason } from '../../../../packages/contracts/src/recommendations.ts';
 import { evidenceAfter } from '../../../../packages/domain/src/index.ts';
 
 export interface UseDailyPlanReturn {
@@ -33,9 +34,9 @@ export interface UseDailyPlanReturn {
   /** Append one question to today's plan. */
   appendOne: () => Promise<void>;
   /** Remove a single question from today's plan. */
-  removeOne: (item: PlanItem) => Promise<void>;
+  removeOne: (item: PlanItem, feedbackReason?: RecommendationFeedbackReason) => Promise<void>;
   /** Replace a single problem in today's plan while preserving slot properties. */
-  replaceOne: (item: PlanItem) => Promise<void>;
+  replaceOne: (item: PlanItem, feedbackReason?: RecommendationFeedbackReason) => Promise<void>;
   /** Replace all unfinished problems in today's plan. */
   replaceAllUnfinished: () => Promise<void>;
   /** Synchronize newly committed plan after a prompt rule override. */
@@ -122,7 +123,7 @@ export function useDailyPlan(): UseDailyPlanReturn {
   }, [refresh]);
 
   const replaceOne = useCallback(
-    async (item: PlanItem) => {
+    async (item: PlanItem, feedbackReason?: RecommendationFeedbackReason) => {
       if (!ensureResult?.plan || planMutationPending.current) return;
       planMutationPending.current = true;
       setReplacingItemId(item.id);
@@ -132,6 +133,7 @@ export function useDailyPlan(): UseDailyPlanReturn {
         const updated = await api.replacePlanItems(ensureResult.plan.id, {
           mode: 'one',
           itemId: item.id,
+          ...(feedbackReason ? { feedbackReason } : {}),
           expectedVersion: ensureResult.plan.version,
         });
         if (currentRevision === changeRevision.current) {
@@ -218,7 +220,7 @@ export function useDailyPlan(): UseDailyPlanReturn {
   }, [ensureResult, refresh]);
 
   const removeOne = useCallback(
-    async (item: PlanItem) => {
+    async (item: PlanItem, feedbackReason?: RecommendationFeedbackReason) => {
       if (!ensureResult?.plan || planMutationPending.current) return;
       planMutationPending.current = true;
       setRemovingItemId(item.id);
@@ -227,6 +229,7 @@ export function useDailyPlan(): UseDailyPlanReturn {
       try {
         const updated = await api.removePlanItem(ensureResult.plan.id, {
           itemId: item.id,
+          ...(feedbackReason ? { feedbackReason } : {}),
           expectedVersion: ensureResult.plan.version,
         });
         if (currentRevision === changeRevision.current) {

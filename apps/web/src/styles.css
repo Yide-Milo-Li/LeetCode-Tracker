@@ -2801,17 +2801,20 @@ progress::-moz-progress-bar {
   font-size: 14px;
   margin-bottom: 20px;
 }
-.override-modal details fieldset {
+.override-modal details > fieldset {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
   padding: 16px 0;
 }
-.override-modal details label {
+.override-modal details > fieldset > label {
   display: flex;
   flex-direction: column;
   gap: 7px;
   font-size: 14px;
+}
+.override-modal details > fieldset > .recommendation-options {
+  grid-column: 1 / -1;
 }
 .override-modal table {
   width: 100%;

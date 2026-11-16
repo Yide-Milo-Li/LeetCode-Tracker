@@ -5,16 +5,16 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-export const NODE_VERSION = '24.15.0';
+export const NODE_VERSION = '26.13.0';
 export const RUNTIMES = {
   'x86_64-pc-windows-msvc': {
     file: 'win-x64/node.exe',
-    sha256: '3331e1ffe19874215472217c5e94f5a0c6d8e18c4ac7111d3937aa0ad5e9b4a5',
+    sha256: '14319838b3f355e0398c13569a90270bce4fc68f25189f58c59b03dadae0e6d5',
     output: 'node-x86_64-pc-windows-msvc.exe',
   },
   'aarch64-apple-darwin': {
     file: `node-v${NODE_VERSION}-darwin-arm64.tar.gz`,
-    sha256: '372331b969779ab5d15b949884fc6eaf88d5afe87bde8ba881d6400b9100ffc4',
+    sha256: 'd38bd5e5a2ddce6bbb5ce45e46e208337da4d51fffe611e567fd32073d6439f6',
     output: 'node-aarch64-apple-darwin',
   },
 } as const;

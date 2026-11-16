@@ -1,7 +1,7 @@
 /** Read-only compatibility checks shared by storage initialization and recovery. */
 import type { DatabaseSync } from 'node:sqlite';
 
-export const CURRENT_SCHEMA_VERSION = 10;
+export const CURRENT_SCHEMA_VERSION = 12;
 
 /** Unsupported historical or future catalog layout. */
 export class UnsupportedSchemaVersionError extends Error {
@@ -56,7 +56,7 @@ export function inspectCatalogSchema(db: DatabaseSync, allowEmpty = false): numb
   }
   if (versions.length !== 1 || !Number.isInteger(versions[0].version)) throw new DatabaseCorruptionError('Exactly one integer schema version is required');
   const version = versions[0].version;
-  if (![3, 4, 5, 6, 7, 8, 9, CURRENT_SCHEMA_VERSION].includes(version)) throw new UnsupportedSchemaVersionError(`Unsupported catalog schema version ${version}; supported versions are 3 through ${CURRENT_SCHEMA_VERSION}`);
+  if (![3, 4, 5, 6, 7, 8, 9, 10, CURRENT_SCHEMA_VERSION].includes(version)) throw new UnsupportedSchemaVersionError(`Unsupported catalog schema version ${version}; supported versions are 3 through 10 and ${CURRENT_SCHEMA_VERSION} (11 belongs to a different development format)`);
   const required = { ...columns };
   if (version >= 4) {
     required.import_history = [...columns.import_history, 'unchanged_count', 'duplicate_count'];

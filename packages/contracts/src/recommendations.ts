@@ -21,8 +21,13 @@ export const ruleFieldsSchema = z.object({
   preference: z.string().max(2000).default(''),
   focusWeakTags: z.boolean().optional(),
   adaptiveReviewEnabled: z.boolean().optional(),
+  reviewPolicy: z.enum(['fixed', 'duration-v1', 'outcome-v2']).optional(),
+  personalDurationCalibration: z.boolean().optional(),
+  timeBudgetMinutes: z.number().int().min(1).max(1440).nullable().optional(),
 }).strict();
 export const rulesSchema = ruleFieldsSchema.superRefine((value, ctx) => {
+  if (value.reviewPolicy && value.reviewPolicy !== 'fixed' && !value.reviewEnabled) ctx.addIssue({ code: 'custom', path: ['reviewPolicy'], message: 'Review policy requires review to be enabled' });
+  if (value.reviewPolicy && value.adaptiveReviewEnabled !== undefined && value.adaptiveReviewEnabled !== (value.reviewPolicy === 'duration-v1')) ctx.addIssue({ code: 'custom', path: ['reviewPolicy'], message: 'Review policy contradicts the legacy duration switch' });
   if(value.adaptiveReviewEnabled && !value.reviewEnabled) ctx.addIssue({code:'custom',path:['adaptiveReviewEnabled'],message:'Adaptive review requires review to be enabled'});
   if (Math.abs(difficulties.reduce((sum, d) => sum + value.difficulty[d], 0) - 100) > 1e-8) ctx.addIssue({ code: 'custom', path: ['difficulty'], message: 'Difficulty percentages must total 100' });
   if (value.reviewEnabled && (value.reviewPercent === null || value.reviewPercent <= 0)) ctx.addIssue({ code: 'custom', path: ['reviewPercent'], message: 'An explicit positive review share is required' });
@@ -76,6 +81,7 @@ export function normalizeRules(rules: Rules): Rules {
   const isAll = resolved.reviewMode === 'all';
   return {
     ...rules,
+    ...(rules.reviewPolicy ? { adaptiveReviewEnabled: rules.reviewPolicy === 'duration-v1' } : {}),
     reviewMode: resolved.reviewMode,
     reviewCount: resolved.reviewCount,
     reviewEnabled: !isNone,
@@ -99,6 +105,21 @@ export interface Evidence {
   zone: string | null;
   recordedAt: number;
   durationMinutes?: number | null;
+}
+/** Active attempts used for scheduling; completion still consumes success Evidence only. */
+export interface ReviewEvent extends Evidence {
+  completed: boolean;
+  outcome: 'independent' | 'assisted' | 'unsolved' | null;
+}
+export interface ReviewDecision {
+  policyVersion: 'outcome-v2';
+  reason: 'independent' | 'assisted' | 'unsolved' | 'duration_threshold' | 'legacy_unknown' | 'baseline';
+  eventIds: string[];
+  stage: number;
+  intervalDays: number;
+  dueDate: string | null;
+  thresholdMinutes: number | null;
+  baselineVersion: 'static-v1' | 'personal-duration-v1';
 }
 /** Minimal immutable facts used for local bilingual explanations. */
 export interface ReviewAdjustment {
@@ -125,6 +146,12 @@ export interface SelectionExplanation {
   priorityGroup?: string;
   /** One-based new-slot budget identity; swaps reuse it and never charge another slot. */
   explorationOrdinal?: number;
+  reviewDecision?: ReviewDecision;
+  recoveryPriority?: boolean;
+  historicalExposure?: number;
+  freshness?: { windowDays: 90; distinctProblems: number; practiceDays: number; lastPracticedDate: string | null; status: 'recent' | 'stale' | 'unseen' };
+  durationEstimate?: { minutes: number; source: 'heuristic' | 'personal'; kind: 'new' | 'review' };
+  durationShadow?: { version: 'personal-duration-v1'; eligible: boolean; sampleCount: number; thresholdMinutes: number; staticThresholdMinutes: number };
 }
 export interface ReviewState {
   questionId: string;
@@ -136,6 +163,8 @@ export interface ReviewState {
   intervalDays?: number;
   isAdaptive?: boolean;
   adaptiveReason?: string | null;
+  decision?: ReviewDecision;
+  recoveryPriority?: boolean;
 }
 export interface Candidate extends CatalogProblem {
   kind: 'new' | 'review';
@@ -165,6 +194,9 @@ export interface DailyPlan {
   rules: Rules; items: PlanItem[]; source: 'gemini' | 'openai' | 'deepseek' | 'local'; model: string | null; encouragement: Bilingual;
   notices: Bilingual[]; catalogRevision: number; practiceRevision: number; planningRevision: number;
   algorithmVersion: string; createdAt: number; updatedAt: number; action: string;
+  provenance?: { version: 'recommendation-v1'; selection: 'local' | 'model'; selectionModel: string | null; content: 'local'; callReason: string; membershipChanged: boolean; orderChanged: boolean };
+  timeEstimate?: { newMinutes: number; reviewMinutes: number; totalMinutes: number; budgetMinutes: number | null; feasible: boolean };
+  feedback?: { questionId: string; action: 'replace' | 'remove'; reason: RecommendationFeedbackReason; recordedAt: number }[];
 }
 export interface RevisionStamp { catalog: number; practice: number; planning: number; timezone: string | null }
 export interface OverridePreview {
@@ -195,7 +227,11 @@ export const overrideCommitSchema = operationSchema.extend({
 }).strict();
 export type OverrideCommitInput = z.infer<typeof overrideCommitSchema>;
 
-export const replaceSchema = operationSchema.extend({ expectedVersion: z.number().int().positive(), mode: z.enum(['one', 'all_unfinished']), itemId: z.string().uuid().optional() }).strict()
+export const recommendationFeedbackReasonSchema = z.enum(['time_unavailable', 'already_familiar', 'topic_mismatch', 'too_difficult', 'other']);
+export type RecommendationFeedbackReason = z.infer<typeof recommendationFeedbackReasonSchema>;
+export const recommendationFeedbackSchema = z.object({ questionId: z.string().min(1), action: z.enum(['replace', 'remove']),
+  reason: recommendationFeedbackReasonSchema, recordedAt: z.number().int().nonnegative() }).strict();
+export const replaceSchema = operationSchema.extend({ expectedVersion: z.number().int().positive(), mode: z.enum(['one', 'all_unfinished']), itemId: z.string().uuid().optional(), feedbackReason: recommendationFeedbackReasonSchema.optional() }).strict()
   .refine(v => v.mode !== 'one' || !!v.itemId, 'Select an item to replace');
 export const appendPlanItemSchema = operationSchema.extend({
   expectedVersion: z.number().int().positive(),
@@ -205,6 +241,7 @@ export type AppendPlanItemInput = z.infer<typeof appendPlanItemSchema>;
 export const removePlanItemSchema = operationSchema.extend({
   expectedVersion: z.number().int().positive(),
   itemId: z.string().uuid(),
+  feedbackReason: recommendationFeedbackReasonSchema.optional(),
 }).strict();
 export type RemovePlanItemInput = z.infer<typeof removePlanItemSchema>;
 

@@ -80,6 +80,8 @@ export interface GenerateContentParams {
   abortSignal: AbortSignal;
   timeoutMs?: number;
   reasoningEffort?: ReasoningEffort;
+  maxOutputTokens?: number;
+  purpose?: 'progress_import' | 'override_parse' | 'semantic_rank' | 'coaching';
 }
 
 /** Raw result from a provider content generation call. */
@@ -87,6 +89,7 @@ export interface GenerateContentOutput {
   text?: string;
   model: string;
   provider?: LLMProviderType;
+  usage?: import('./usage.ts').LLMUsage;
 }
 
 /** Parameters for testing provider connectivity. */
@@ -102,6 +105,7 @@ export interface ConnectionTestParams {
 export interface ConnectionTestResult {
   ok: boolean;
   model: string;
+  usage?: import('./usage.ts').LLMUsage;
   message?: string;
   provider?: LLMProviderType;
 }
@@ -126,8 +130,9 @@ export type CustomGenerateFn = (params: {
     responseSchema: unknown;
     abortSignal: AbortSignal;
     reasoningEffort?: ReasoningEffort;
+    maxOutputTokens?: number;
   };
-}) => Promise<{ text?: string }>;
+}) => Promise<{ text?: string; usage?: unknown; usageMetadata?: unknown }>;
 
 /** Legacy alias for Gemini generate content function. */
 export type GeminiGenerateContentFn = (params: {
@@ -139,8 +144,9 @@ export type GeminiGenerateContentFn = (params: {
     responseSchema: unknown;
     abortSignal: AbortSignal;
     thinkingConfig?: { thinkingLevel?: string };
+    maxOutputTokens?: number;
   };
-}) => Promise<{ text?: string }>;
+}) => Promise<{ text?: string; usage?: unknown; usageMetadata?: unknown }>;
 
 /** Configuration for a single LLM provider. */
 export interface ProviderConfig {
@@ -165,6 +171,7 @@ export interface LLMAssistantOptions {
   timeoutMs?: number;
   customGenerateFn?: CustomGenerateFn;
   generateContentFn?: GeminiGenerateContentFn;
+  diagnosticSink?: import('./diagnostics.ts').DiagnosticSink;
 }
 
 /** Legacy alias for Gemini assistant options. */
@@ -175,6 +182,7 @@ export type GeminiAssistantOptions = LLMAssistantOptions;
  * Implemented by LLMAssistant and fully backwards-compatible with IGeminiAssistant.
  */
 export interface ILLMAssistant {
+  getConfigurationGeneration?(): number;
   formatProgressText(rawText: string, batchYear?: number): Promise<LLMFormatResult>;
   generatePlanContent?(params: {
     problems: CatalogProblem[];

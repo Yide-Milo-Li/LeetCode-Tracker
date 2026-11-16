@@ -143,4 +143,4 @@ Today's immediate completion saves the actual timestamp first; the optional meta
 
 ## Device migration export
 
-The Settings export action and frontend bundle API request Snapshot Bundle v3 (schema v10), preserving nullable practice `outcome` feedback together with plan explanations and exploration allocation metadata. Imports continue to accept v1/v2/v3. Explicit legacy v2 exports omit outcomes and should only be used for legacy compatibility; ordinary device migration uses v3.
+The development Settings export action and frontend/native bundle API request Snapshot Bundle v5 (schema v12), preserving nullable practice outcomes, outcome-review policy, explanation/provenance versions, optional time/calibration rules and explicit swap/removal feedback. Imports accept v1/v2/v3/v5; v4 belongs to a different lineage and is rejected. Published 1.2.0 used v3/schema10. Legacy export returns HTTP 409 when it cannot preserve Phase 39 semantics. Ordinary migration uses v5; target keys remain private and unchanged. See [local recommendation portability](local-recommendations.md#portability-and-rollback).

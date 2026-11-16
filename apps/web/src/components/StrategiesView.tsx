@@ -17,6 +17,8 @@ import {
 } from '../strategy-counts.ts';
 import { WeeklyScheduleGrid } from './WeeklyScheduleGrid.tsx';
 import { StrategyCard } from './StrategyCard.tsx';
+import { RecommendationOptions, readRecommendationOptions } from './RecommendationOptions.tsx';
+import type { RulePatch } from '../../../../packages/contracts/src/recommendations.ts';
 
 interface StrategiesViewProps {
   lang: Language;
@@ -44,6 +46,7 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [focusWeakTags, setFocusWeakTags] = useState(false);
   const [adaptiveReviewEnabled,setAdaptiveReviewEnabled]=useState(false);
+  const [recommendationOptions, setRecommendationOptions] = useState<RulePatch>({});
   const [masteryLoading,setMasteryLoading]=useState(true);
   const [masteryError,setMasteryError]=useState(false);
   const [masteryRetry,setMasteryRetry]=useState(0);
@@ -116,6 +119,7 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
     setSelectedTags([]);
     setFocusWeakTags(false);
     setAdaptiveReviewEnabled(false);
+    setRecommendationOptions({});
     setPremium(false);
     setReviewMode(null);
     setReviewCount('');
@@ -135,12 +139,13 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
     setSelectedTags(s.rules.tags);
     setFocusWeakTags(!!s.rules.focusWeakTags);
     setAdaptiveReviewEnabled(!!s.rules.adaptiveReviewEnabled);
+    setRecommendationOptions(readRecommendationOptions(s.rules));
     setPremium(s.rules.premium);
     setReviewMode(reviewModeForRules(s.rules));
     setReviewCount(reviewCountForRules(s.rules));
     setWeekdays(s.weekdays);
     setPreference(s.rules.preference);
-    setAdvancedOpen(Boolean(s.rules.focusWeakTags || s.rules.tags?.length > 0 || (s.rules.preference && s.rules.preference.trim().length > 0)));
+    setAdvancedOpen(Boolean(s.rules.reviewPolicy || s.rules.personalDurationCalibration || s.rules.timeBudgetMinutes || s.rules.focusWeakTags || s.rules.tags?.length > 0 || (s.rules.preference && s.rules.preference.trim().length > 0)));
     setError(null);
     setModalOpen(true);
   }
@@ -198,7 +203,10 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
             ? {}
             : { reviewMode: reviewMode!, reviewCount: reviewMode === 'partial' ? Number(reviewCount) : null }),
           preference: preference.trim(),
-          ...(adaptiveReviewEnabled ? {adaptiveReviewEnabled:true} : editingStrategy?.rules.adaptiveReviewEnabled!==undefined ? {adaptiveReviewEnabled:false}:{}),
+          ...recommendationOptions,
+          ...(recommendationOptions.reviewPolicy
+            ? { reviewPolicy: reviewMode === 'none' ? 'fixed' : recommendationOptions.reviewPolicy, adaptiveReviewEnabled: reviewMode !== 'none' && recommendationOptions.reviewPolicy === 'duration-v1' }
+            : adaptiveReviewEnabled && reviewMode !== 'none' ? { adaptiveReviewEnabled: true } : editingStrategy?.rules.adaptiveReviewEnabled !== undefined ? { adaptiveReviewEnabled: false } : {}),
           ...(focusWeakTags
             ? { focusWeakTags: true }
             : editingStrategy?.rules.focusWeakTags !== undefined
@@ -477,14 +485,14 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
                       required
                     />
                   </div>
-                  <div className="form-group u-margin-top-0-5rem">
+                  {!recommendationOptions.reviewPolicy && <div className="form-group u-margin-top-0-5rem">
                     <label className="form-checkbox-label">
                       <input type="checkbox" checked={adaptiveReviewEnabled}
                         onChange={e=>setAdaptiveReviewEnabled(e.target.checked)} />
                       <span>{t.adaptiveReviewEnabled}</span>
                     </label>
                     <p className="text-muted u-margin-top-0-25rem">{t.adaptiveReviewDescription}</p>
-                  </div>
+                  </div>}
                 </div>
               )}
             </div>
@@ -507,6 +515,8 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
                 )}
               </summary>
               <div className="strategy-advanced-content">
+                <RecommendationOptions lang={lang} reviewEnabled={reviewMode !== null && reviewMode !== 'none'} value={recommendationOptions}
+                  onChange={patch => { setRecommendationOptions(previous => ({ ...previous, ...patch })); if (patch.adaptiveReviewEnabled !== undefined) setAdaptiveReviewEnabled(patch.adaptiveReviewEnabled); }} />
                 {/* Focus weak tags */}
                 <div className="form-group focus-session-box">
                   <label className="form-checkbox-label">

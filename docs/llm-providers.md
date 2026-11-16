@@ -8,7 +8,7 @@ Settings → AI assistant supports Gemini, OpenAI and DeepSeek; model, fallback,
 - **OpenAI**: `gpt-6-luna` (GPT-6 Luna, default) and `gpt-6.1-terra` (GPT-6.1 Terra), with no custom-model or fallback-model controls.
 - **DeepSeek**: `deepseek-flash` (DeepSeek V4.1 Flash), with no custom-model or fallback-model controls.
 
-Each provider keeps its own settings in SQLite; fallback-model configuration is exposed only for Gemini. OpenAI and DeepSeek also support an optional HTTP(S) API base URL; requests append `/chat/completions`. No OpenAI SDK or schema migration was added.
+Each provider keeps its own settings in SQLite; fallback-model configuration is exposed only for Gemini. OpenAI and DeepSeek also support an optional HTTP(S) API base URL; requests append `/chat/completions`. The provider adapters use no OpenAI SDK; Phase 39 recommendation semantics use a separate schema-12 / Bundle-v5 compatibility fence.
 
 Choose a provider, edit its configuration and save to activate it. Switching the displayed provider preserves other drafts and remasks keys. Configuration changes apply immediately; in-flight requests retain their original adapter. Save and probe controls remain unavailable until settings load successfully and while a form action is pending.
 
@@ -35,10 +35,10 @@ Preset identifiers are conveniences, not proof that an account has access to eve
 
 - Gemini uses `@google/genai`. OpenAI and DeepSeek use native `fetch`, bearer authentication, JSON mode and a task schema in the prompt. JSON mode alone does not ensure field-level schema compliance; malformed or missing content is rejected or handled by the domain fallback. See the [OpenAI Chat Completions reference](https://developers.openai.com/api/reference/resources/chat).
 - Progress formatting serializes requests, retries within a bounded deadline and tries configured fallback models. Authentication failures stop retries. DeepSeek insufficient balance is reported as a quota error. Import failures remain explicit: the service never fabricates successful progress records when a provider is unavailable.
-- Plan explanations, prompt overrides and candidate selection can degrade to deterministic local behavior. Candidate selection and explanations share the planning service's deadline. Local fallback has no fixed latency guarantee.
+- Routine plan explanations and encouragement are deterministic local content, not an AI request followed by discarded reasons. High-confidence override syntax compiles locally. Unresolved semantic selection requires an effective fixed-slot choice and uses at most 30 candidates under the shared deadline. Local fallback has no promised latency bound.
 - Appending a single problem to today's plan (`POST /api/v1/daily-plans/:id/append` - Add one) executes 100% locally with zero external model provider requests and zero token consumption. Explanations use local deterministic bilingual templates or personal practice evidence. Existing plan-level provider provenance is preserved without retroactively altering historical plan origins.
 - Request aborts bound application waiting even if an injected generation transport ignores cancellation. The underlying third-party operation may continue if that transport disregards the signal.
-- Generated results carry provider provenance. Plans persist the provider that supplied the used result, and Today displays that provider. Local plans remain labelled local.
+- Generated results carry provider provenance. New plans persist separate selection/content provenance; only an effective validated ranking is model-selected, while routine content is local. Today displays the persisted origin. Local plans remain labelled local.
 - Legacy Gemini module imports and `/api/v1/settings/test-gemini` remain available; the legacy probe always targets Gemini. `/api/v1/settings/test-llm` accepts `provider`, `apiKey`, `model` and `baseUrl` and does not save draft values.
 
 Errors use the shared `LLMError` with code, HTTP status and provider fields; separate subclasses for every error category were unnecessary. `GeminiFormatError` aliases the shared constructor so existing `instanceof` checks keep working. This is a deliberate simplification of the original plan.
@@ -47,6 +47,11 @@ Errors use the shared `LLMError` with code, HTTP status and provider fields; sep
 
 The audit reproduced ten missing regression boundaries before repair: configuration clearing/isolation, legacy error identity, legacy probe targeting, missing JSON content/schema guidance, cross-provider environment credentials, restart persistence of empty fallbacks, non-cooperative transport timeout, plan provenance, DeepSeek quota classification and desktop key remasking/draft preservation.
 
-Run `npm test`, `npm run check`, `npm run build` and `npm run docs:check`. Provider tests use synthetic credentials, mocked transports and isolated SQLite. After building, run `node --import tsx scripts/verify-phase17-browser.ts` for isolated desktop Chrome verification; local screenshots and its report go to ignored `.local/evidence/phase17/browser/`.
+Run `npm run check`, `npm test`, `npm run build`, `npm run docs:check` and `git diff --check` in that order. Provider tests use synthetic credentials, mocked transports and isolated SQLite. After building, run `node --import tsx scripts/verify-phase17-browser.ts` for isolated desktop Chrome verification; local screenshots and its report go to ignored `.local/evidence/phase17/browser/`.
 
 The audit does not establish live-provider availability, a universal JSON guarantee, fixed 0.2 ms fallback latency, a release, or production deployment. Vite currently emits plugin-related `esbuild` option deprecation warnings; a successful build must not be described as warning-free.
+
+
+## Phase 39 usage and privacy
+
+[Local recommendation contracts](local-recommendations.md) define useful-call gates, task output limits, nullable provider-reported usage, per-attempt/cumulative totals, and the profile-local 30-day / 5-MiB diagnostic log. Cache/reasoning counts are subsets, not extra billed tokens. Missing usage stays unknown, including failures and timeouts. Synthetic/mock checks do not establish actual billed savings, pricing or live account/model availability. Raw prompts, notes, candidate titles, credentials and full responses are not written to diagnostics.

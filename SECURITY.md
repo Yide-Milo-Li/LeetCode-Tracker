@@ -15,3 +15,8 @@ Release 1.0.0 pins `@fastify/static` to 10.1.3 in both root and server manifests
 Release 1.1.0 provides an unsigned Windows x64 installer. The Apple Silicon port remains internal and is not notarized. Do not publish credentials, personal records or database contents in issues. Use GitHub private vulnerability reporting if available; otherwise request a private channel without disclosing sensitive details.
 
 Users must have rights to use supplied data. Keep databases, exports, backups, logs and keys out of Git. Use synthetic public examples. Validate imported records and preserve prior data on failure. The MIT license covers code and does not grant rights to third-party content.
+
+
+## Recommendation diagnostics
+
+The Phase 39 candidate stores an allowlisted usage/decision log under the resolved profile directory, capped at 5 MiB and 30 days. It excludes keys, auth headers, raw prompts/notes, candidate titles and full responses; diagnostic failures cannot fail a plan. Caches are bounded per-profile memory and never contain authorization/confirmation results. Portable Bundle v5 includes intentional recommendation feedback but omits provider keys and diagnostic logs. Raw SQLite backups can still contain keys. See [local recommendation privacy and rollback](docs/local-recommendations.md).

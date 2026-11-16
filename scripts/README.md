@@ -4,7 +4,7 @@ The local workbench accepts user-supplied JSONL through its web UI. It creates i
 
 ## Run and check
 
-Run `npm run build` then `npm start` from the repository root with Node.js 24.15 or later in the 24.x series. The service listens on `127.0.0.1:3000`; `PORT` and `DB_PATH` override the port and database path. Backups remain under `.local/backups` relative to the working directory. Run `npm run dev` alongside the local API for frontend development.
+Run `npm run build` then `npm start` from the repository root with Node.js 26.13.0 or later in the 26.x series. The service listens on `127.0.0.1:3000`; `PORT` and `DB_PATH` override the port and database path. Backups remain under `.local/backups` relative to the working directory. Run `npm run dev` alongside the local API for frontend development.
 
 For source-mode startup with browser launch, run `npm run desktop` (`scripts/start-desktop.ts`). On Windows, `npm run desktop` delegates to `scripts/start-desktop.ps1` (also invoked by one-click `start.bat`). On macOS, run `npm run desktop`, `npm run desktop:mac`, or `./scripts/start-desktop.sh` directly. The macOS/POSIX launcher probes `http://127.0.0.1:${PORT:-3000}/api/v1/catalog/stats` (opening the existing URL via `/usr/bin/open` if already running), aborts if another process holds the port, runs `npm run build` when `apps/web/dist/index.html` is missing, spawns `node apps/server/src/server.ts`, polls `/api/v1/catalog/stats` for up to 15 seconds, opens the default browser via `/usr/bin/open`, and forwards `SIGINT`/`SIGTERM` for clean database shutdown. Native Tauri builds are separate: `npm run desktop:build` packages the Windows installer, `npm run desktop:build:mac` builds the Apple Silicon macOS bundle, and `npm run desktop:dev` starts the native development host. See the [desktop guide](../docs/desktop.md).
 
@@ -51,3 +51,8 @@ The matrix verifies persisted language/theme after a full document reload, check
 ## README showcase
 
 `npm run assets:screenshots` uses the same fictional 4,046-problem catalog as the social capture script, isolated SQLite and Chrome profiles, and empty provider keys. Run `npm run build` first. It refreshes all eight images under `docs/assets/screenshots/`; it does not read private backups or call providers. Temporary synthetic profiles stay under ignored `.local/` for inspection. These screenshots demonstrate browser UI, not native acceptance.
+
+
+## Phase 39 offline comparison
+
+`npm run benchmark:phase39` extracts immutable `HEAD` sources under ignored `.local/evidence/phase39/` without switching branches or opening a user database. Use `-- --output-dir <ignored-path> --baseline <commit>` to bind output and baseline. It compares fixed-date/seed cold, sparse, assisted-heavy, recovery, mature 10,000/50,000-record and narrow synthetic fixtures with sequential workers and mocked providers. Run it without concurrent test/browser load. The report distinguishes measured local p50/p95, mock call/slate counts, discarded reasons, diversity and shortages from unknown billed tokens and untested live/native/learning acceptance. See [policy and portability](../docs/local-recommendations.md).

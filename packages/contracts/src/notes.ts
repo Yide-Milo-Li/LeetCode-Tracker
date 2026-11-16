@@ -2,7 +2,7 @@
  * Contracts and schemas for problem notes, knowledge base exports, and snapshot bundles.
  */
 import { z } from 'zod';
-import { snapshotBundleV2Schema, snapshotBundleV3Schema } from './migration.ts';
+import { snapshotBundleV2Schema, snapshotBundleV3Schema, snapshotBundleV5Schema } from './migration.ts';
 
 /** Canonical problem note stored in SQLite. */
 export const problemNoteSchema = z.object({
@@ -147,7 +147,7 @@ export const snapshotBundleV1Schema = z.object({
 }).strict();
 
 export type SnapshotBundleV1 = z.infer<typeof snapshotBundleV1Schema>;
-export const snapshotBundleSchema = z.discriminatedUnion('version', [snapshotBundleV1Schema, snapshotBundleV2Schema, snapshotBundleV3Schema]);
+export const snapshotBundleSchema = z.discriminatedUnion('version', [snapshotBundleV1Schema, snapshotBundleV2Schema, snapshotBundleV3Schema, snapshotBundleV5Schema]);
 export type SnapshotBundle = z.infer<typeof snapshotBundleSchema>;
 
 

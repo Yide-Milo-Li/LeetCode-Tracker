@@ -7,11 +7,15 @@ import {
   migrationRows,
   snapshotBundleV2Schema,
   snapshotBundleV3Schema,
+  snapshotBundleV5Schema,
   MAX_BUNDLE_BYTES,
   type SnapshotBundleV2,
   type SnapshotBundleV3,
+  type SnapshotBundleV5,
   type AnyMigrationBundle,
 } from '../../contracts/src/migration.ts';
+import { assertLegacyRecommendationExport, hasRecommendationFields } from './recommendation-format.ts';
+import { rulesSchema, recommendationFeedbackSchema } from '../../contracts/src/recommendations.ts';
 import { initOrMigrateSchema } from './migrations.ts';
 import { inspectCatalogSchema } from './schema.ts';
 import { isSecretSetting } from './secrets.ts';
@@ -40,9 +44,19 @@ function replaceRows(db: DatabaseSync, bundle: AnyMigrationBundle): void {
 export function validateMigrationBundle(raw: unknown): AnyMigrationBundle {
   if (Buffer.byteLength(JSON.stringify(raw) ?? '') > MAX_BUNDLE_BYTES) throw new Error('Migration exceeds 64 MiB');
   const rawVersion = (raw as { version?: number })?.version;
-  const bundle = rawVersion === 3
+  const bundle = rawVersion === 5 ? snapshotBundleV5Schema.parse(raw) : rawVersion === 3
     ? snapshotBundleV3Schema.parse(raw)
     : snapshotBundleV2Schema.parse(raw);
+  for (const table of ['strategies', 'strategy_versions', 'daily_plans', 'daily_plan_versions'] as const) {
+    for (const row of bundle.tables[table]) {
+      const value = JSON.parse('rules_json' in row ? row.rules_json : row.payload_json);
+      if (bundle.version !== 5 && hasRecommendationFields(value)) throw new Error('Phase 39 data requires Bundle v5');
+      const rules = 'rules_json' in row ? value : value.rules;
+      if (rules && bundle.version === 5) rulesSchema.parse(rules);
+      if (bundle.version === 5 && Array.isArray(value.feedback)) recommendationFeedbackSchema.array().parse(value.feedback);
+      else if (bundle.version === 5 && value.feedback !== undefined) throw new Error('Invalid recommendation feedback');
+    }
+  }
   const scratch = new DatabaseSync(':memory:');
   try {
     initOrMigrateSchema(scratch);
@@ -57,12 +71,13 @@ export function validateMigrationBundle(raw: unknown): AnyMigrationBundle {
 export function exportMigrationBundle(
   db: DatabaseSync,
   appVersion: string,
-  versionOrOptions: 2 | 3 | { formatVersion?: 2 | 3 } = 3
-): SnapshotBundleV2 | SnapshotBundleV3 {
-  const version: 2 | 3 =
+  versionOrOptions: 2 | 3 | 5 | { formatVersion?: 2 | 3 | 5 } = 5
+): SnapshotBundleV2 | SnapshotBundleV3 | SnapshotBundleV5 {
+  const version: 2 | 3 | 5 =
     typeof versionOrOptions === 'object' && versionOrOptions !== null
-      ? (versionOrOptions.formatVersion ?? 3)
-      : (versionOrOptions ?? 3);
+      ? (versionOrOptions.formatVersion ?? 5)
+      : (versionOrOptions ?? 5);
+  if (version !== 5) assertLegacyRecommendationExport(db);
   db.exec('BEGIN');
   try {
     const tables: Record<string, unknown[]> = {};
@@ -88,11 +103,11 @@ export function exportMigrationBundle(
           exportedAt: Date.now(),
           tables: tables as unknown as SnapshotBundleV2['tables'],
         })
-      : snapshotBundleV3Schema.parse({
+      : (version === 5 ? snapshotBundleV5Schema : snapshotBundleV3Schema).parse({
           format: 'leetcode-tracker-snapshot',
-          version: 3,
+          version,
           appVersion,
-          schemaVersion: 10,
+          schemaVersion: version === 5 ? 12 : 10,
           exportedAt: Date.now(),
           tables: tables as unknown as SnapshotBundleV3['tables'],
         });

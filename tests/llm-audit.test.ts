@@ -140,7 +140,7 @@ it('planning honors timeout even when a custom transport ignores abort', async (
   assert.equal(result.model, 'local');
 });
 
-it('saved plan provenance follows the generating response when provider changes during generation', async () => {
+it('routine plans do not claim content-provider provenance from an unused adapter', async () => {
   const store = new CatalogStore(new DatabaseSync(':memory:'), { skipBackup: true });
   await store.updateSettings({ timezone: 'UTC' });
   await store.importJsonl(JSON.stringify({ id: '1', title: 'Synthetic problem', difficulty: 'Easy', tags: ['Array'] }));
@@ -153,7 +153,9 @@ it('saved plan provenance follows the generating response when provider changes 
   try {
     const response = await app.inject({ method: 'POST', url: '/api/v1/daily-plans/ensure', payload: {} });
     assert.equal(response.statusCode, 200, response.payload);
-    assert.equal(response.json().plan.source, 'openai');
+    assert.equal(response.json().plan.source, 'local');
+    assert.equal(response.json().plan.provenance.content, 'local');
+    assert.equal(response.json().plan.model, null);
   } finally { await app.close(); store.db.close(); }
 });
 

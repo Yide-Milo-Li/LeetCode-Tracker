@@ -3,6 +3,7 @@
  * Provides typed methods for catalog browsing, JSONL problem import, manual practice records,
  * progress snapshot management, Gemini-assisted text formatting, and user preferences.
  */
+import type { RecommendationFeedbackReason } from '../../../packages/contracts/src/recommendations.ts';
 import type {
   CatalogProblem,
   CatalogQueryInput,
@@ -375,7 +376,7 @@ const planningApi = {
     });
   },
 
-  replacePlanItems(planId: string, options: { mode: 'one' | 'all_unfinished'; itemId?: string; expectedVersion: number }): Promise<DailyPlan> {
+  replacePlanItems(planId: string, options: { mode: 'one' | 'all_unfinished'; itemId?: string; expectedVersion: number; feedbackReason?: RecommendationFeedbackReason }): Promise<DailyPlan> {
     return planningMutation(`/daily-plans/${planId}/replace`, options);
   },
 
@@ -383,7 +384,7 @@ const planningApi = {
     return planningMutation(`/daily-plans/${planId}/append`, options);
   },
 
-  removePlanItem(planId: string, options: { itemId: string; expectedVersion: number }): Promise<DailyPlan> {
+  removePlanItem(planId: string, options: { itemId: string; expectedVersion: number; feedbackReason?: RecommendationFeedbackReason }): Promise<DailyPlan> {
     return planningMutation(`/daily-plans/${planId}/remove-item`, options);
   },
 
@@ -496,16 +497,16 @@ export const exportApi = {
 
 export const bundleApi = {
   getBundleExportUrl(): string {
-    return `${API_BASE}/bundle/export?version=3`;
+    return `${API_BASE}/bundle/export?version=5`;
   },
 
   exportBundle(): Promise<SnapshotBundle> {
-    return request<SnapshotBundle>('/bundle/export?version=3');
+    return request<SnapshotBundle>('/bundle/export?version=5');
   },
 
   async exportBundleFile(): Promise<void> {
     const filename = `leetcode-tracker-snapshot-${new Date().toISOString().slice(0, 10)}.json`;
-    await exportDataFile('/bundle/export?version=3', filename);
+    await exportDataFile('/bundle/export?version=5', filename);
   },
 
   importBundle(

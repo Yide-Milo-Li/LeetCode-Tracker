@@ -44,9 +44,9 @@ describe('Migration Bundle v3 & Schema v10', () => {
     try {
       await source.store.importJsonl(JSON.stringify({ id: '1', title: 'Synthetic', difficulty: 'Easy' }));
       await source.store.createPracticeRecord({ questionFrontendId: '1', practicedAt: '2026-09-17', completed: true, outcome: 'assisted' });
-      assert.ok(api.getBundleExportUrl().endsWith('version=3'));
+      assert.ok(api.getBundleExportUrl().endsWith('version=5'));
       const bundle = await api.exportBundle();
-      assert.equal(bundle.version, 3);
+      assert.equal(bundle.version, 5);
       await target.store.importSnapshotBundle(bundle);
       assert.equal(target.store.queryPracticeRecords().items[0].outcome, 'assisted');
     } finally { transport.mock.restore(); await app.close(); source.close(); target.close(); }

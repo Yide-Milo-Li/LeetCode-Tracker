@@ -37,7 +37,7 @@ import {
 } from '../../contracts/src/practice.ts';
 import { BackupManager } from './backup.ts';
 import { exportMigrationBundle } from './migration-bundle.ts';
-import type { SnapshotBundleV2, SnapshotBundleV3 } from '../../contracts/src/migration.ts';
+import type { SnapshotBundleV2, SnapshotBundleV3, SnapshotBundleV5 } from '../../contracts/src/migration.ts';
 import { PlanningStore } from './planning-store.ts';
 import type {
   ProblemNote,
@@ -695,7 +695,7 @@ export class CatalogStore {
   }
 
   /** Export catalog and all saved business history for another device. */
-  public exportMigrationBundle(versionOrOptions: 2 | 3 | { formatVersion?: 2 | 3 } = 3): SnapshotBundleV2 | SnapshotBundleV3 {
+  public exportMigrationBundle(versionOrOptions: 2 | 3 | 5 | { formatVersion?: 2 | 3 | 5 } = 5): SnapshotBundleV2 | SnapshotBundleV3 | SnapshotBundleV5 {
     return exportMigrationBundle(this.db, '1.2.0', versionOrOptions);
   }
 

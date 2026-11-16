@@ -329,6 +329,8 @@ export function initOrMigrateSchema(db: DatabaseSync): void {
     createPracticeMetadataSchema(db);
     createNotesSchema(db);
     createOutcomeSchema(db);
+    // v12 fences strategy/provenance JSON semantics; v11 is reserved by LC-2.0.
+    db.prepare('UPDATE schema_version SET version = ?').run(CURRENT_SCHEMA_VERSION);
     inspectCatalogSchema(db);
     db.exec('COMMIT');
   } catch (error) {

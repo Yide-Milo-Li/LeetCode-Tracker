@@ -140,7 +140,15 @@ export class PlanningStore {
     for(const s of raw.snapshots)if(s.status==='active'&&s.hasAccepted)solved.add(s.questionId);
     const baseline=Number((this.db.prepare("SELECT value FROM catalog_meta WHERE key='review_baseline'").get() as {value:string}).value);
     const fixed=projectReviewStates(raw.problems,events,solved,zone,baseline,now);
-    return {raw,events,solved,baseline,fixed};
+    const reviewEvents: import('../../contracts/src/recommendations.ts').ReviewEvent[] = [
+      ...raw.manualRecords.filter(r => r.status === 'active').map(r => ({
+        id: 'manual:' + r.id, questionId: r.questionId, at: r.practicedAt, precision: r.timePrecision,
+        zone: r.sourceTimezone, recordedAt: r.createdAt, durationMinutes: r.durationMinutes,
+        completed: r.completed, outcome: r.outcome ?? null,
+      })),
+      ...events.filter(e => e.id.startsWith('snapshot:')).map(e => ({ ...e, completed: true, outcome: null })),
+    ];
+    return {raw,events,reviewEvents,solved,baseline,fixed};
   }
 
   /** Expose only aggregate insight facts; GET never updates review caches or revisions. */

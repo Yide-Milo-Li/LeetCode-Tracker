@@ -7,14 +7,14 @@
 <p align="center">
   <a href="https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.2.0"><img src="https://img.shields.io/badge/release-1.2.0-blue?style=flat-square" alt="Release 1.2.0"></a>
   <a href="docs/desktop.md"><img src="https://img.shields.io/badge/desktop-Windows%20x64%20%2B%20macOS%20ARM64-455a64?style=flat-square" alt="Windows x64 and macOS ARM64"></a>
-  <a href="tests/README.md"><img src="https://img.shields.io/badge/tests-430%20JS%20%2B%207%20Rust-brightgreen?style=flat-square" alt="430 JavaScript and 7 Rust tests"></a>
-  <a href="docs/architecture.md"><img src="https://img.shields.io/badge/sqlite-schema%20v10-003b57?style=flat-square" alt="SQLite schema v10"></a>
+  <a href="tests/README.md"><img src="https://img.shields.io/badge/tests-476%20JS%20%2B%207%20Rust-brightgreen?style=flat-square" alt="476 JavaScript and 7 Rust tests"></a>
+  <a href="docs/architecture.md"><img src="https://img.shields.io/badge/sqlite-schema%20v12-003b57?style=flat-square" alt="SQLite schema v12"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT License"></a>
 </p>
 
 A local-first desktop workbench for algorithm practice: bring your own JSONL catalog, plan a weekly routine, record practice, review progress, and keep problem notes together. The interface supports English and Simplified Chinese, desktop windows at 1024px and above, ten theme palettes, and keyboard navigation.
 
-Release 1.2.0 (plus `994f516` UI refinements on `main`) packages the React interface, Fastify API, SQLite engine, and a private Node.js 24 runtime into native Tauri desktop apps for **Windows x64** and **Apple Silicon macOS 14+** (`aarch64-apple-darwin` internal `.app`/`.dmg` build) with the same local-first data model. **End users do not need to install Node.js, npm, Git, or Rust.**
+Release 1.2.0 (plus `994f516` UI refinements on `main`) packages the React interface, Fastify API, SQLite engine, and a private Node.js 26 runtime into native Tauri desktop apps for **Windows x64** and **Apple Silicon macOS 14+** (`aarch64-apple-darwin` internal `.app`/`.dmg` build) with the same local-first data model. **End users do not need to install Node.js, npm, Git, or Rust.**
 
 ## Download and start
 
@@ -55,7 +55,7 @@ These are format examples, not a bundled curriculum. An AI-generated catalog can
 
 ![Today's practice](docs/assets/screenshots/01-today-overview.png)
 
-The unified Today panel combines plan completion, Add one / Adjust today actions, a built-in practice timer linked to practice records, clickable problem titles, dual-path Note navigation (go to workspace or quick-view slide drawer), and seven-day activity. Define reusable weekly strategies with exact difficulty quotas, fixed new/review counts, and topic preferences. Add one runs locally without model calls; remove completed items with explicit confirmation and inspect plan versions. Recommendations explain their source. Local code owns candidate membership, uniqueness, quotas, and persistence; optional Gemini, OpenAI, or DeepSeek assistance remains advisory. Failed planning requests can use a labelled deterministic fallback.
+The unified Today panel combines plan completion, Add one / Adjust today actions, a built-in practice timer linked to practice records, clickable problem titles, dual-path Note navigation (go to workspace or quick-view slide drawer), and seven-day activity. Define reusable weekly strategies with exact difficulty quotas, fixed new/review counts, and topic preferences. Add one runs locally without model calls; remove completed items with explicit confirmation and inspect plan versions. Recommendations explain their source. Local code owns candidate membership, uniqueness, quotas, and persistence; optional Gemini, OpenAI, or DeepSeek assistance remains advisory. Routine explanations and encouragement are local; optional semantic selection is bounded and used only for an effective choice. Opt-in outcome review, duration-shadow calibration, time budgets and explicit optional feedback preserve hard quotas. See [local recommendations](docs/local-recommendations.md) for development-candidate policies and validation limits.
 
 ### Progress and topic insights
 
@@ -104,13 +104,13 @@ See the [workflow guide](docs/desktop-workflow.md) for input guards and context-
 - API keys are stored in local SQLite settings without operating-system credential encryption. Raw database backups can contain keys; keep them private.
 - AI features send task-relevant inputs to the selected provider or configured gateway. These can include candidate problem metadata, strategy/override text, or pasted progress text. AI-assisted progress import requires a working provider and has no deterministic formatting fallback.
 - Supported models and per-model reasoning effort controls in Settings: **Google Gemini** (`models/gemini-3.8-flash`, `models/gemini-4-hydrogen` via `thinkingConfig.thinkingLevel`), **OpenAI** (`gpt-6-luna`, `gpt-6.1-terra` via `reasoning_effort`), and **DeepSeek** (`deepseek-flash` via `reasoning_effort` and `thinking`).
-- Portable Snapshot Bundle v3 (schema v10) is the complete one-time Windows ↔ macOS migration path for the catalog, saved practice progress, history, notes, plans, review state, and non-sensitive settings. It excludes provider keys, preserves keys already configured on the target, validates references before writing, and replaces the target business profile only after confirmation. Legacy v1 bundles remain partial restore files; v2 imports remain supported and map missing outcome feedback to unknown.
+- Portable Snapshot Bundle v5 (schema v12, Phase 39 development candidate) is the complete one-time Windows ↔ macOS migration path for the catalog, saved practice progress, history, notes, plans, review state, and non-sensitive settings. It excludes provider keys, preserves keys already configured on the target, validates references before writing, and replaces the target business profile only after confirmation. Legacy v1 bundles remain partial restore files; v2/v3 imports remain supported. v2 maps missing outcomes to unknown. Incompatible legacy exports fail explicitly rather than dropping new policy/feedback. Published 1.2.0 used schema v10 / Bundle v3.
 
 Read [AI provider behavior](docs/llm-providers.md) and the [security policy](SECURITY.md) before configuring a provider or sharing exports.
 
 ## Run from source
 
-Source mode targets **Node.js >=24.15.0 <25** and npm (newer Node versions such as Homebrew `v26.x` on macOS emit an `EBADENGINE` warning during `npm ci`, while native macOS packaging downloads and bundles the pinned Node `24.15.0` runtime). It uses a desktop browser and is separate from the packaged desktop apps:
+Source mode requires **Node.js >=26.13.0 <27** and npm. It uses a desktop browser and is separate from the packaged desktop apps:
 
 ```sh
 git clone https://github.com/Yide-Milo-Li/LeetCode-Tracker.git
@@ -129,7 +129,7 @@ For a native Windows build, install the Rust/MSVC toolchain and run `npm run des
 ```mermaid
 flowchart LR
     UI[React desktop UI] -->|Tauri IPC| Host[Tauri Rust host]
-    Host -->|Authenticated loopback HTTP| API[Fastify and private Node 24]
+    Host -->|Authenticated loopback HTTP| API[Fastify and private Node 26]
     API --> DB[(Local SQLite v10)]
     API -. Optional requests .-> AI[Selected AI provider]
     Host --> OS[Native save dialog and browser URL handler]
