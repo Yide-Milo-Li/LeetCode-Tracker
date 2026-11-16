@@ -221,8 +221,8 @@ test('a retained note survives navigation and UI recreation without writing busi
     await waitFor(()=>assert.equal(view.container.querySelector('textarea')?.disabled,false));assert.equal(within(view.container).queryByRole('link',{name:/Export Obsidian/}),null);fireEvent.change(view.container.querySelector('textarea')!,{target:{value:'Unsaved Runtime-only draft'}});
     await waitFor(()=>assert.match(view.container.textContent!,/Draft retained/));
     assert.equal((await api.drafts!.get('note','1')).draft?.content,'Unsaved Runtime-only draft');
-    fireEvent.click(within(view.container).getByRole('button',{name:'Home'}));await waitFor(()=>assert.ok(within(view.container).getByRole('button',{name:'Keep draft and switch'})));
-    fireEvent.click(within(view.container).getByRole('button',{name:'Keep draft and switch'}));assert.equal(state.view,'home');assert.equal(f.store.getProblemNote('1'),null);assert.doesNotMatch(JSON.stringify(state),/Runtime-only draft/);
+    fireEvent.click(within(view.container).getByRole('button',{name:'Today'}));await waitFor(()=>assert.ok(within(view.container).getByRole('button',{name:'Keep draft and switch'})));
+    fireEvent.click(within(view.container).getByRole('button',{name:'Keep draft and switch'}));assert.equal(state.view,'today');assert.equal(f.store.getProblemNote('1'),null);assert.doesNotMatch(JSON.stringify(state),/Runtime-only draft/);
     view.unmount();state={...state,view:'notes',targetId:'1'};
     view=render(<WorkspaceProvider client={api} host={host}><EmbeddedWorkspace lang="en"/></WorkspaceProvider>);
     await waitFor(()=>assert.equal(view.container.querySelector('textarea')?.value,'Unsaved Runtime-only draft',view.container.textContent??''),{timeout:3000});assert.equal(f.store.getProblemNote('1'),null);
@@ -400,4 +400,49 @@ test('operation recovery skips hidden workspaces and stops focus or reconnect ch
   await act(async()=>{window.dispatchEvent(new window.Event('focus'));});assert.equal(checks,1);
   view.unmount();
   await act(async()=>{window.dispatchEvent(new window.Event('focus'));host.emit({type:'connection',connected:true});});assert.equal(checks,1);host.dispose();
+});
+
+test('embedded shell mirrors the desktop sidebar and renders no chat entries without a conversation host',async()=>{
+  const {writeFixture}=await import('./fixtures/agent-write.ts'),{createToolTrackerClient}=await import('../packages/workspace/src/hosts/tool-client.ts'),{EmbeddedWorkspace}=await import('../packages/workspace/src/EmbeddedWorkspace.tsx'),{waitFor}=await import('@testing-library/react');
+  const f=await writeFixture('full_access');await f.call('tracker_create_today',{operationId:'shell-today'});
+  let state:Record<string,unknown>={view:'home'};
+  const host=createWorkspaceHost({id:'embedded-shell',capabilities:{practice:true,durableDrafts:true},recoveryState:()=>state,saveRecoveryState:value=>{state=value;}}),api=createToolTrackerClient(f.call,host);
+  const view=render(<WorkspaceProvider client={api} host={host}><EmbeddedWorkspace lang="en"/></WorkspaceProvider>);
+  try{
+    const nav=within(view.container).getByRole('navigation',{name:'Main navigation'});
+    assert.deepEqual(within(nav).getAllByRole('button').map(b=>b.getAttribute('aria-label')),['Today','Progress','Notes']);
+    assert.equal(within(nav).getByRole('button',{name:'Today'}).getAttribute('aria-current'),'page');
+    await waitFor(()=>assert.equal(view.container.querySelectorAll('.today-problem').length,3));
+    assert.equal(view.container.querySelector('.assistant-dock'),null);assert.equal(view.container.querySelector('.assistant-ask'),null);
+    fireEvent.click(within(nav).getByRole('button',{name:'Progress'}));
+    await waitFor(()=>assert.ok(within(view.container).getByRole('heading',{name:'Progress'})));assert.equal(state.view,'practice');
+  }finally{view.unmount();host.dispose();await f.close();}
+});
+
+test('conversation host sends contextual prompts, attaches a Today problem and keeps text on failure',async()=>{
+  const {writeFixture}=await import('./fixtures/agent-write.ts'),{createToolTrackerClient}=await import('../packages/workspace/src/hosts/tool-client.ts'),{EmbeddedWorkspace}=await import('../packages/workspace/src/EmbeddedWorkspace.tsx'),{waitFor}=await import('@testing-library/react');
+  const f=await writeFixture('full_access');await f.call('tracker_create_today',{operationId:'assistant-today'});
+  const sent:string[]=[];let fail=false;
+  const host=createWorkspaceHost({id:'embedded-assistant',capabilities:{durableDrafts:true},conversation:{label:'ChatGPT',available:()=>true,send:async text=>{if(fail)throw new Error('Synthetic host refusal');sent.push(text);}}});
+  const api=createToolTrackerClient(f.call,host);
+  const view=render(<WorkspaceProvider client={api} host={host}><EmbeddedWorkspace lang="en"/></WorkspaceProvider>);
+  try{
+    const dock=within(view.container).getByRole('region',{name:'Ask ChatGPT'});
+    fireEvent.click(within(dock).getByRole('button',{name:/What first\?/}));
+    await waitFor(()=>assert.equal(sent.length,1));assert.match(sent[0],/plan for today/);
+    await waitFor(()=>assert.match(dock.textContent!,/Sent to ChatGPT/));
+    await waitFor(()=>assert.equal(view.container.querySelectorAll('.today-problem').length,3));
+    const ask=within(view.container).getAllByRole('button',{name:/^Ask ChatGPT: #\d+ Problem \d+$/})[0];
+    const subject=ask.getAttribute('aria-label')!.replace('Ask ChatGPT: ','');
+    fireEvent.click(ask);
+    await waitFor(()=>assert.ok(within(dock).getByRole('button',{name:'Give me a hint'})));
+    const field=within(dock).getByRole('textbox') as HTMLTextAreaElement;
+    fireEvent.change(field,{target:{value:'Is a hash map enough?'}});
+    fail=true;fireEvent.keyDown(field,{key:'Enter'});
+    await waitFor(()=>assert.match(dock.textContent!,/Could not send: Synthetic host refusal/));assert.equal(field.value,'Is a hash map enough?');assert.equal(sent.length,1);
+    fail=false;fireEvent.click(within(dock).getByRole('button',{name:'Send to ChatGPT'}));
+    await waitFor(()=>assert.equal(sent.length,2));assert.equal(sent[1],`About ${subject}: Is a hash map enough?`);
+    assert.equal(field.value,'');assert.equal(within(dock).queryByRole('button',{name:'Remove problem context'}),null);
+    assert.equal(f.store.planning.plans()[0].items.length,3);
+  }finally{view.unmount();host.dispose();await f.close();}
 });

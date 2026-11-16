@@ -1,5 +1,6 @@
 import React, {useEffect,useRef,useState} from 'react';
 import type {WorkspaceHost} from '../../../packages/workspace/src/host.ts';
+import {BookOpen} from 'lucide-react';
 import {Feedback} from '../../../packages/workspace/src/components/ui.tsx';
 
 /** Keep the editor mounted across host context changes; only measured width reveals it. */
@@ -29,8 +30,8 @@ export function HostViewport({host,language,children}:{host:WorkspaceHost;langua
   const failed=display.result?.status==='failed'||display.result?.status==='rejected';
   return <>
     {!host.capabilities.durableDrafts&&<Feedback>{language==='zh'?'当前宿主无法保留恢复句柄。请在 Tracker 桌面端写入数据。':'This host cannot retain recovery handles. Use Tracker desktop for writes.'}</Feedback>}
-    {narrow&&<section className="embedded-page">
-      <h1>LeetCode Tracker</h1>
+    {narrow&&<section className="embedded-inline-card">
+      <header><span className="brand-mark" aria-hidden="true"><BookOpen size={19}/></span><h1>LeetCode Tracker</h1></header>
       <p>{language==='zh'?'展开工作区，查看今日计划、练习和笔记。':'Expand the workspace for Today, practice, and notes.'}</p>
       {unsupported?<Feedback>{language==='zh'?'宿主不支持展开。请增大宿主窗口或在 Tracker 桌面端查看。':'This host cannot expand. Increase the host window or view Tracker desktop.'}</Feedback>:<>
         {failed&&<Feedback>{language==='zh'?(display.result?.status==='rejected'?'宿主拒绝展开。请重试或增大宿主窗口。':'展开失败。请重试或在 Tracker 桌面端查看。'):(display.result?.status==='rejected'?'The host declined expansion. Retry or increase the host window.':'Expansion failed. Retry or view Tracker desktop.')}</Feedback>}

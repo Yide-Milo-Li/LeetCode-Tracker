@@ -79,6 +79,19 @@ export function createChatGPTWorkspace(
       const result = await app.openLink({ url }, { signal: lifetime.signal });
       if (result.isError) throw new Error('Host rejected the link');
     },
+    conversation: {
+      label: 'ChatGPT',
+      // Negotiated during connect; a host without `message` support hides every chat entry.
+      available: () => !disposed && Boolean(app.getHostCapabilities()?.message),
+      send: async (text) => {
+        assertActive();
+        const result = await app.sendMessage(
+          { role: 'user', content: [{ type: 'text', text }] },
+          { signal: lifetime.signal },
+        );
+        if (result.isError) throw new Error('Host declined the message');
+      },
+    },
   });
   const navigate = (value: unknown) => {
     if (disposed || !value || typeof value !== 'object') return;
@@ -121,8 +134,11 @@ export function createChatGPTWorkspace(
       | undefined;
     const theme = ctx?.theme;
     const modes=ctx?.availableDisplayModes;
+    const insets=ctx?.safeAreaInsets;
     host.emit({type:'display',state:{...host.displayState(),mode:ctx?.displayMode,
-      availability:modes?(modes.includes('fullscreen')?'available':'unsupported'):'unknown'}});
+      availability:modes?(modes.includes('fullscreen')?'available':'unsupported'):'unknown',
+      // Host chrome such as the fullscreen composer overlaps the frame; the shell pads around it.
+      ...(insets?{safeArea:{top:insets.top,right:insets.right,bottom:insets.bottom,left:insets.left}}:{})}});
     if ((theme === 'light' || theme === 'dark') && theme !== lastTheme) {
       lastTheme = theme;
       host.emit({ type: 'theme', theme });
