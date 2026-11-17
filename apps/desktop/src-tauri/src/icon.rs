@@ -1,12 +1,13 @@
 //! Native application icon decoding, DPI target selection, and Win32 HICON lifecycle management.
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 /// Largest icon payload accepted from the webview (any target-size PNG is far smaller).
 pub const MAX_APP_ICON_BYTES: usize = 1024 * 1024;
 /// Maximum number of rasterized variants accepted in a single update.
 pub const MAX_ICON_VARIANTS: usize = 16;
 /// Maximum pixel edge length accepted for a decoded icon variant.
+#[cfg(any(not(target_os = "macos"), test))]
 pub const MAX_ICON_DIMENSION: u32 = 1024;
 
 /// A single rasterized PNG variant at a specific target edge length.
@@ -26,6 +27,7 @@ pub struct IconTargetSizes {
 }
 
 /// Decoded RGBA icon variant retained for DPI-change refreshes on Windows.
+#[cfg(any(not(target_os = "macos"), test))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DecodedIconVariant {
     pub size: u32,
@@ -35,6 +37,7 @@ pub struct DecodedIconVariant {
 }
 
 /// Decode and validate incoming PNG icon payloads from the webview.
+#[cfg(any(not(target_os = "macos"), test))]
 pub fn decode_variants(
     png: Option<Vec<u8>>,
     variants: Option<Vec<IconVariantInput>>,
@@ -64,6 +67,7 @@ pub fn decode_variants(
     Ok(decoded)
 }
 
+#[cfg(any(not(target_os = "macos"), test))]
 fn decode_png(bytes: &[u8]) -> Result<DecodedIconVariant, String> {
     if bytes.is_empty() || bytes.len() > MAX_APP_ICON_BYTES {
         return Err("Invalid icon".into());
@@ -97,6 +101,7 @@ fn decode_png(bytes: &[u8]) -> Result<DecodedIconVariant, String> {
 
 /// Select the best variant for a requested pixel dimension:
 /// 1) exact match, 2) smallest variant larger than target (no upscaling blur), 3) largest available.
+#[cfg(any(not(target_os = "macos"), test))]
 pub fn select_variant_for_size(
     variants: &[DecodedIconVariant],
     target: u32,
@@ -195,7 +200,7 @@ pub fn build_win32_icon_buffers(
         return Err("Invalid icon buffer".into());
     }
 
-    let stride = ((width as usize + 15) / 16) * 2;
+    let stride = (width as usize).div_ceil(16) * 2;
     let mut and_mask = vec![0u8; stride * height as usize];
     let mut bgra = Vec::with_capacity(expected_len);
 
@@ -222,6 +227,7 @@ pub fn build_win32_icon_buffers(
 mod win32 {
     use super::*;
     use crate::DesktopState;
+    use tauri::Manager;
     use windows_sys::Win32::Foundation::{HWND, LPARAM, WPARAM};
     use windows_sys::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -338,7 +344,12 @@ mod win32 {
                 ICON_SMALL as WPARAM,
                 new_small.raw() as LPARAM,
             );
-            SendMessageW(hwnd, WM_SETICON, ICON_BIG as WPARAM, new_big.raw() as LPARAM);
+            SendMessageW(
+                hwnd,
+                WM_SETICON,
+                ICON_BIG as WPARAM,
+                new_big.raw() as LPARAM,
+            );
         }
 
         let state = app.state::<DesktopState>();
@@ -503,7 +514,10 @@ mod tests {
             ]),
         )
         .unwrap();
-        assert_eq!(decoded.iter().map(|v| v.size).collect::<Vec<_>>(), vec![16, 32]);
+        assert_eq!(
+            decoded.iter().map(|v| v.size).collect::<Vec<_>>(),
+            vec![16, 32]
+        );
 
         // Mismatched declared size must be rejected.
         let mismatch = decode_variants(
