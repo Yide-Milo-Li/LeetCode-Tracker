@@ -10,7 +10,7 @@ import { api, type DailyPlan, type OverridePreview, type RulePatch } from '../ap
 import { localizeApiError, localizePlanningIssue } from '../error-i18n.ts';
 import { formatDifficulty, translations, type Language } from '../i18n.ts';
 import { Dialog } from './ui.tsx';
-import { RecommendationOptions, readRecommendationOptions } from './RecommendationOptions.tsx';
+import { RecommendationOptions, readRecommendationOptions, reviewPolicyLabel } from './RecommendationOptions.tsx';
 import {
   difficulties,
   type Difficulty,
@@ -441,7 +441,7 @@ export const PromptOverrideModal: React.FC<PromptOverrideModalProps> = ({
           preference: '软偏好',
           focusWeakTags: '自适应专题推荐',
           adaptiveReviewEnabled: '自适应复习',
-          reviewPolicy: '复习策略', personalDurationCalibration: '个人用时影子实验', timeBudgetMinutes: '时间预算（分钟）',
+          reviewPolicy: '复习间隔', personalDurationCalibration: '个人用时影子实验', timeBudgetMinutes: '时间预算（分钟）',
         }
       : {
           dailyCount: 'Daily count',
@@ -453,7 +453,7 @@ export const PromptOverrideModal: React.FC<PromptOverrideModalProps> = ({
           preference: 'Soft preference',
           focusWeakTags: 'Adaptive topic recommendations',
           adaptiveReviewEnabled: 'Adaptive review',
-          reviewPolicy: 'Review policy', personalDurationCalibration: 'Personal duration shadow experiment', timeBudgetMinutes: 'Time budget (minutes)',
+          reviewPolicy: 'Review spacing', personalDurationCalibration: 'Personal duration shadow experiment', timeBudgetMinutes: 'Time budget (minutes)',
         };
 
   function formatRuleValue(key: string, value: any, baseRules?: Rules | null): React.ReactNode {
@@ -490,7 +490,7 @@ export const PromptOverrideModal: React.FC<PromptOverrideModalProps> = ({
     if (key === 'tags') {
       return Array.isArray(value) && value.length > 0 ? value.join(', ') : lang === 'zh' ? '不限' : 'Any';
     }
-    if (key === 'reviewPolicy') return ({ fixed: lang === 'zh' ? '固定间隔' : 'Fixed intervals', 'duration-v1': lang === 'zh' ? '用时调整 v1' : 'Duration v1', 'outcome-v2': lang === 'zh' ? '结果反馈 v2' : 'Outcome v2' } as Record<string, string>)[value] ?? value;
+    if (key === 'reviewPolicy') return reviewPolicyLabel(String(value), lang);
     if (key === 'premium' || key === 'focusWeakTags' || key === 'adaptiveReviewEnabled' || key === 'personalDurationCalibration') {
       return value ? (lang === 'zh' ? '是' : 'Yes') : lang === 'zh' ? '否' : 'No';
     }

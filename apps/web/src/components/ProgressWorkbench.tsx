@@ -1,4 +1,4 @@
-/** Progress import workspace: Gemini proposes candidates; the local server matches, validates and commits. */
+/** Progress import workspace: the optional AI provider proposes candidates; the local server matches, validates and commits. */
 import React, { useEffect, useRef, useState } from 'react';
 import {
   api,
@@ -8,7 +8,7 @@ import {
   type ProgressImportPreview,
   type ProgressImportSummary,
 } from '../api.ts';
-import type { Language } from '../i18n.ts';
+import { formatPlanSource, type Language } from '../i18n.ts';
 import { localizeApiError } from '../error-i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
 import { Feedback, Field, PageHeader } from './ui.tsx';
@@ -178,15 +178,20 @@ export function ProgressWorkbench({ lang }: { lang: Language }) {
         <section className="import-stage">
           <h2>{zh ? '粘贴已有进度' : 'Paste your existing progress'}</h2>
           <p className="muted">
-            {zh
-              ? 'Gemini 仅整理候选数据，匹配和校验由本地服务完成。'
-              : 'Gemini only organizes candidate data. Your local service handles matching and validation.'}
+            {/* Name the provider chosen in Settings; stay generic while loading or when none is configured. */}
+            {status?.configured && status.provider
+              ? zh
+                ? `${formatPlanSource(status.provider, lang)} 仅整理候选数据，匹配和校验由本地服务完成。`
+                : `${formatPlanSource(status.provider, lang)} only organizes candidate data. Your local service handles matching and validation.`
+              : zh
+                ? '可选的 AI 助手仅整理候选数据，匹配和校验由本地服务完成。'
+                : 'The optional AI assistant only organizes candidate data. Your local service handles matching and validation.'}
           </p>
           {status && !status.configured && (
             <Feedback tone="warning">
               {zh
-                ? 'Gemini 未配置。你仍可以手动填写候选数据。'
-                : 'Gemini is not configured. You can still enter candidates manually.'}
+                ? '未配置 AI 服务商。你仍可以手动填写候选数据。'
+                : 'No AI provider is configured. You can still enter candidates manually.'}
             </Feedback>
           )}
           <Field label={zh ? '进度内容' : 'Progress content'}>

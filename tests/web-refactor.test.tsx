@@ -838,3 +838,69 @@ for (const mode of ['pending', 'rejected'] as const) {
     }
   });
 }
+
+it('names the selected AI provider in the progress import hint instead of assuming Gemini', async () => {
+  mock.method(api, 'getProgressImportStatus', async () => ({ configured: true, provider: 'openai' as const, model: 'synthetic-mock' }));
+  const view = await act(async () => render(<ProgressWorkbench lang="zh" />));
+  assert.ok(screen.getByText('OpenAI 仅整理候选数据，匹配和校验由本地服务完成。'));
+  assert.equal(screen.queryByText(/Gemini/), null);
+  view.unmount();
+
+  mock.method(api, 'getProgressImportStatus', async () => ({ configured: false, provider: 'deepseek' as const, model: '' }));
+  await act(async () => {
+    render(<ProgressWorkbench lang="en" />);
+  });
+  assert.ok(screen.getByText(/^The optional AI assistant only organizes candidate data/));
+  assert.ok(screen.getByText('No AI provider is configured. You can still enter candidates manually.'));
+  assert.equal(screen.queryByText(/Gemini|DeepSeek/), null);
+});
+
+it('formats dates exactly like the native toLocale* calls it replaced', async () => {
+  const { formatInstant, formatCalendarDate } = await import('../apps/web/src/date-format.ts');
+  const instants = [Date.UTC(2026, 10, 16, 6, 5, 9), '2026-03-08T10:30:00.000Z'];
+  for (const lang of ['en', 'zh'] as const) {
+    const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
+    for (const at of instants) {
+      for (const timeZone of ['UTC', 'America/Los_Angeles', 'Asia/Shanghai']) {
+        assert.equal(formatInstant(at, lang, { timeZone }), new Date(at).toLocaleString(locale, { timeZone }));
+      }
+      assert.equal(formatInstant(at, lang), new Date(at).toLocaleString(locale));
+      assert.equal(formatInstant(at, lang, { preset: 'time' }), new Date(at).toLocaleTimeString(locale));
+    }
+    assert.equal(formatCalendarDate('2026-11-16', lang, { month: 'short', day: 'numeric' }),
+      new Date('2026-11-16T00:00:00Z').toLocaleDateString(locale, { month: 'short', day: 'numeric', timeZone: 'UTC' }));
+    assert.equal(formatCalendarDate('2026-11-16', lang, { weekday: 'short' }),
+      new Date('2026-11-16T00:00:00Z').toLocaleDateString(locale, { weekday: 'short', timeZone: 'UTC' }));
+  }
+});
+
+it('useAsyncResource aborts superseded loads, ignores their results and keeps data across a failed reload', async () => {
+  const { useAsyncResource } = await import('../apps/web/src/hooks/useAsyncResource.ts');
+  const calls: { key: number; signal: AbortSignal; settle: ReturnType<typeof deferred<string>> }[] = [];
+  let latest: any;
+  function Probe({ k }: { k: number }) {
+    latest = useAsyncResource((signal) => {
+      const settle = deferred<string>();
+      calls.push({ key: k, signal, settle });
+      return settle.promise;
+    }, [k]);
+    return null;
+  }
+  const view = await act(async () => render(<Probe k={1} />));
+  assert.equal(latest.loading, true);
+  await act(async () => { view.rerender(<Probe k={2} />); });
+  assert.equal(calls[0].signal.aborted, true);
+  await act(async () => { calls[0].settle.resolve('stale'); });
+  assert.equal(latest.data, undefined);
+  await act(async () => { calls[1].settle.resolve('fresh'); });
+  assert.deepEqual([latest.data, latest.loading, latest.error], ['fresh', false, null]);
+
+  await act(async () => { view.rerender(<Probe k={3} />); });
+  assert.equal(latest.loading, true);
+  assert.equal(latest.data, 'fresh');
+  const failure = new Error('offline');
+  await act(async () => { calls[2].settle.reject(failure); });
+  assert.deepEqual([latest.data, latest.loading, latest.error], ['fresh', false, failure]);
+  view.unmount();
+  assert.equal(calls[2].signal.aborted, true);
+});

@@ -1267,7 +1267,7 @@ it('saves opt-in review policy, shadow trial and time budget only after explicit
   const { update } = await openCountEditor(existing);
   const advanced = screen.queryByText('Advanced Settings');
   if (advanced) fireEvent.click(advanced);
-  fireEvent.change(screen.getByLabelText('Review policy'), { target: { value: 'outcome-v2' } });
+  fireEvent.change(screen.getByLabelText('Review spacing'), { target: { value: 'outcome-v2' } });
   fireEvent.click(screen.getByLabelText('Personal duration experiment (shadow)'));
   fireEvent.change(screen.getByLabelText('Daily time budget (minutes, optional)'), { target: { value: '25' } });
   assert.equal(update.mock.callCount(), 0);
@@ -1290,7 +1290,7 @@ it('keeps bilingual optional controls labeled and independent without automatic 
       </form>;
     }
     render(<Draft />);
-    const policy = screen.getByLabelText(lang === 'zh' ? '复习策略' : 'Review policy');
+    const policy = screen.getByLabelText(lang === 'zh' ? '复习间隔' : 'Review spacing');
     const calibration = screen.getByLabelText(lang === 'zh' ? '个人用时实验（影子对照）' : 'Personal duration experiment (shadow)');
     const budget = screen.getByLabelText(lang === 'zh' ? '每日时间预算（分钟，可选）' : 'Daily time budget (minutes, optional)');
     assert.ok(policy.id && calibration.id && budget.id);
@@ -1309,7 +1309,7 @@ it('keeps override policy changes local to the draft until explicit preview', as
     base: plan.rules, rules: input.rules, changed: ['reviewPolicy', 'timeBudgetMinutes'], issues: [], unresolved: [], counts: { Easy: 1, Medium: 1, Hard: 0 },
     candidateCount: 10, planVersion: 1, revision: { catalog: 1, planning: 1, practice: 1, timezone: plan.timezone } }));
   render(<PromptOverrideModal isOpen lang="en" currentPlan={plan} onClose={() => {}} onApplied={() => {}} />);
-  fireEvent.change(screen.getByLabelText('Review policy'), { target: { value: 'outcome-v2' } });
+  fireEvent.change(screen.getByLabelText('Review spacing'), { target: { value: 'outcome-v2' } });
   fireEvent.change(screen.getByLabelText('Daily time budget (minutes, optional)'), { target: { value: '10' } });
   assert.equal(preview.mock.callCount(), 0);
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Preview/i })); });
@@ -1566,4 +1566,23 @@ it('shows budget infeasibility without changing quotas and opens explicit adjust
   assert.equal(plan.items.length, 2);
   fireEvent.click(screen.getByRole('button', { name: 'Adjust count or budget' }));
   assert.ok(screen.getByLabelText('Daily time budget (minutes, optional)'));
+});
+
+it('names review spacing options without version ids and describes only the selected one', async () => {
+  const { RecommendationOptions } = await import('../apps/web/src/components/RecommendationOptions.tsx');
+  function Host() {
+    const [value, setValue] = React.useState<any>({});
+    return <RecommendationOptions lang="en" reviewEnabled value={value} onChange={patch => setValue({ ...value, ...patch })} />;
+  }
+  render(<Host />);
+  const select = screen.getByLabelText('Review spacing') as HTMLSelectElement;
+  const labels = [...select.options].map(option => option.textContent ?? '');
+  assert.ok(labels.every(label => !/\bv\d\b|legacy|opt-in/i.test(label)), labels.join(' | '));
+  assert.match(select.getAttribute('aria-describedby') ? document.getElementById(select.getAttribute('aria-describedby')!)!.textContent! : '', /Pick one/);
+
+  fireEvent.change(select, { target: { value: 'fixed' } });
+  assert.match(screen.getByText(/1, 3, 7, 14, then 30 days/).textContent!, /Each review/);
+  fireEvent.change(select, { target: { value: 'outcome-v2' } });
+  assert.ok(screen.getByText(/unsolved ones return the next day/));
+  assert.equal(screen.queryByText(/1, 3, 7, 14, then 30 days/), null);
 });
