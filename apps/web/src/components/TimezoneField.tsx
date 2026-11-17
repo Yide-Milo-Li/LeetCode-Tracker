@@ -2,6 +2,7 @@
 import React, { useMemo, useState } from 'react';
 import { api } from '../api.ts';
 import type { Language } from '../i18n.ts';
+import { localizeApiError } from '../error-i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
 import { Feedback } from './ui.tsx';
 
@@ -75,7 +76,7 @@ export function TimezoneField({ lang, value, onSaved, id = 'timezone-select', hi
       workspace.notifyMutation();
       setSaved(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(localizeApiError(err, lang));
     } finally {
       setPending(null);
     }

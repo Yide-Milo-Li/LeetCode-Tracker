@@ -1,7 +1,7 @@
 import React, { useId, useState } from 'react';
 import { ChevronRight } from 'lucide-react';
 import type { TagMastery, TagMasteryReport, KnowledgeProfileReport } from '../api.ts';
-import { translations, type Language } from '../i18n.ts';
+import { formatDifficulty, translations, type Language } from '../i18n.ts';
 
 type TopicFilter = 'practiced' | 'needs_practice' | 'developing' | 'recently_stable' | 'all';
 type SortKey = 'attention' | 'solved' | 'recent' | 'due';
@@ -98,7 +98,8 @@ function OutcomeSegment({ kind, count, total, difficulty, zh }: {
 }
 
 /** Thirty-day evidence for one topic, split by difficulty, shown when its table row expands. */
-function DifficultyEvidenceGrid({ topic, zh }: { topic: KnowledgeProfileReport['topics'][number]; zh: boolean }) {
+function DifficultyEvidenceGrid({ topic, lang }: { topic: KnowledgeProfileReport['topics'][number]; lang: Language }) {
+    const zh = lang === 'zh';
     return (
         <>
             <div className="topic-diff-shared-header">
@@ -116,10 +117,11 @@ function DifficultyEvidenceGrid({ topic, zh }: { topic: KnowledgeProfileReport['
                     const { independent, assisted, unsolved, unrecorded } = diff.outcomeCounts;
                     const total = independent + assisted + unsolved + unrecorded;
                     const status = difficultyStatus(diff.evaluation, zh);
+                    const diffLabel = formatDifficulty(d, lang);
                     return (
                         <div key={d} className="diff-card">
                             <div className="diff-card-header">
-                                <strong className={`difficulty ${d.toLowerCase()}`}>{d}</strong>
+                                <strong className={`difficulty ${d.toLowerCase()}`}>{diffLabel}</strong>
                                 <span className={`badge ${status.badge} u-font-size-10px`}>{status.text}</span>
                             </div>
                             <div className="diff-card-body">
@@ -128,7 +130,7 @@ function DifficultyEvidenceGrid({ topic, zh }: { topic: KnowledgeProfileReport['
                                         <div
                                             className="diff-feedback-bar"
                                             role="img"
-                                            aria-label={`${d}: ${zh ? `独立 ${independent}, 需提示 ${assisted}, 未解 ${unsolved}, 未记 ${unrecorded}` : `Independent ${independent}, Assisted ${assisted}, Unsolved ${unsolved}, Unrecorded ${unrecorded}`}`}
+                                            aria-label={`${diffLabel}: ${zh ? `独立 ${independent}, 需提示 ${assisted}, 未解 ${unsolved}, 未记 ${unrecorded}` : `Independent ${independent}, Assisted ${assisted}, Unsolved ${unsolved}, Unrecorded ${unrecorded}`}`}
                                         >
                                             <OutcomeSegment kind="independent" count={independent} total={total} difficulty={d} zh={zh} />
                                             <OutcomeSegment kind="assisted" count={assisted} total={total} difficulty={d} zh={zh} />
@@ -309,7 +311,7 @@ export function TopicInsights({ report, profileReport, lang }: {
                                                     {(['Easy', 'Medium', 'Hard'] as const).map(d => {
                                                         const status = difficultyStatus(topic.difficulties[d].evaluation, zh);
                                                         return (
-                                                            <span key={d} className={`topic-micro-pill ${status.pill}`} title={`${d}: ${status.text}`}>
+                                                            <span key={d} className={`topic-micro-pill ${status.pill}`} title={`${formatDifficulty(d, lang)}: ${status.text}`}>
                                                                 <span className="topic-pill-letter">{d[0]}</span>
                                                                 <StatusGlyph evaluation={topic.difficulties[d].evaluation} />
                                                                 <span className="topic-pill-label">{status.text}</span>
@@ -333,7 +335,7 @@ export function TopicInsights({ report, profileReport, lang }: {
                                                         </dl>
                                                         {tag.level === 'insufficient_data' && <p className="text-muted topic-detail-note">{t.insightInsufficient}</p>}
                                                         {topic ? (
-                                                            <DifficultyEvidenceGrid topic={topic} zh={zh} />
+                                                            <DifficultyEvidenceGrid topic={topic} lang={lang} />
                                                         ) : (
                                                             <p className="text-muted topic-detail-note">
                                                                 {zh ? '暂时没有按难度拆分的证据。' : 'No per-difficulty evidence is available yet.'}

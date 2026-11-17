@@ -21,6 +21,7 @@ import { snapshotBundleSchema, type SnapshotBundle } from '../../../../packages/
 import { MAX_BUNDLE_BYTES } from '../../../../packages/contracts/src/migration.ts';
 import { clearPracticeIntents } from '../practice-service.ts';
 import { translations, type Language } from '../i18n.ts';
+import { localizeApiError } from '../error-i18n.ts';
 import { brandIconUrl } from '../brand-icons.ts';
 import { PALETTE_OPTIONS } from '../palettes.ts';
 import { useWorkspace } from '../workspace.tsx';
@@ -40,6 +41,10 @@ interface SettingsViewProps {
   resolvedDark?: boolean;
   onPaletteChange?: (palette: ThemePalette) => void;
   currentPalette?: ThemePalette;
+  promptSwapFeedback?: boolean;
+  onPromptSwapFeedbackChange?: (enabled: boolean) => void;
+  notesFormatOnSave?: boolean | null;
+  onNotesFormatOnSaveChange?: (enabled: boolean) => void;
   onTimezoneSaved?: (zone: string | null) => void;
   /** Controlled tab; omit to let the view manage its own. */
   section?: SettingsSection;
@@ -83,6 +88,10 @@ export function SettingsView({
   resolvedDark = currentTheme === 'dark',
   onPaletteChange = () => {},
   currentPalette = 'default',
+  promptSwapFeedback: controlledPromptSwapFeedback,
+  onPromptSwapFeedbackChange,
+  notesFormatOnSave: controlledNotesFormatOnSave,
+  onNotesFormatOnSaveChange,
   onTimezoneSaved,
   section: controlledSection,
   onSectionChange,
@@ -97,6 +106,35 @@ export function SettingsView({
     setOwnSection(next);
     onSectionChange?.(next);
   };
+
+  const [ownPromptSwapFeedback, setOwnPromptSwapFeedback] = useState(true);
+  const promptSwapFeedback = controlledPromptSwapFeedback ?? ownPromptSwapFeedback;
+  const [ownNotesFormatOnSave, setOwnNotesFormatOnSave] = useState(true);
+  const notesFormatOnSave = controlledNotesFormatOnSave ?? ownNotesFormatOnSave;
+
+  /** Update the optional swap/removal feedback prompt preference via parent callback or API. */
+  function updatePromptSwapFeedback(enabled: boolean) {
+    setOwnPromptSwapFeedback(enabled);
+    if (onPromptSwapFeedbackChange) {
+      onPromptSwapFeedbackChange(enabled);
+    } else {
+      void api.updateSettings({ promptSwapFeedback: enabled }).catch((err) => {
+        setLoadError(localizeApiError(err, lang));
+      });
+    }
+  }
+
+  /** Update the notes format-on-save preference via parent callback or API. */
+  function updateNotesFormatOnSave(enabled: boolean) {
+    setOwnNotesFormatOnSave(enabled);
+    if (onNotesFormatOnSaveChange) {
+      onNotesFormatOnSaveChange(enabled);
+    } else {
+      void api.updateSettings({ notesFormatOnSave: enabled }).catch((err) => {
+        setLoadError(localizeApiError(err, lang));
+      });
+    }
+  }
 
   const [loadError, setLoadError] = useState('');
 
@@ -224,6 +262,8 @@ export function SettingsView({
       .getSettings()
       .then((settings) => {
         if (!active) return;
+        setOwnPromptSwapFeedback(settings.promptSwapFeedback ?? true);
+        setOwnNotesFormatOnSave(settings.notesFormatOnSave ?? true);
         setAiLoaded(true);
         const savedProvider = settings.llmProvider ?? 'gemini';
         const savedKey =
@@ -274,7 +314,7 @@ export function SettingsView({
         if (settings.deepseekBaseUrl !== undefined) setDeepseekBaseUrl(settings.deepseekBaseUrl ?? '');
       })
       .catch((err) => {
-        if (active) setLoadError(String(err.message));
+        if (active) setLoadError(localizeApiError(err, lang));
       });
     return () => {
       active = false;
@@ -327,7 +367,7 @@ export function SettingsView({
       setAiSaved(true);
       dirtyAi.current = false;
     } catch (err) {
-      setAiError(err instanceof Error ? err.message : String(err));
+      setAiError(localizeApiError(err, lang));
     } finally {
       setSavingAi(false);
     }
@@ -357,7 +397,7 @@ export function SettingsView({
     } catch (err) {
       setTestResult({
         ok: false,
-        message: err instanceof Error ? err.message : String(err),
+        message: localizeApiError(err, lang, t.testAiFailed),
       });
     } finally {
       setTestingAi(false);
@@ -417,7 +457,7 @@ export function SettingsView({
         setBundleError(zh ? '还原失败。' : 'Restore failed.');
       }
     } catch (err) {
-      setBundleError(err instanceof Error ? err.message : String(err));
+      setBundleError(localizeApiError(err, lang, zh ? '还原失败。' : 'Restore failed.'));
     } finally {
       setImportingBundle(false);
       setPendingBundle(null);
@@ -486,6 +526,63 @@ export function SettingsView({
               </p>
             </div>
             <TimezoneField lang={lang} value={workspace.timezone} onSaved={(zone) => onTimezoneSaved?.(zone)} hideLabel />
+          </section>
+
+          <section className="preference-row">
+            <div className="preference-label">
+              <h2>{zh ? '换题或移除时询问原因' : 'Ask for reason when swapping or removing'}</h2>
+              <p>
+                {zh
+                  ? '开启后，在今日计划中换题或移除题目时会弹出可选反馈窗口；关闭后直接执行操作。'
+                  : 'When enabled, swapping or removing a Today problem opens an optional feedback prompt; when off, the action runs directly.'}
+              </p>
+            </div>
+            <div
+              className="segmented-control"
+              aria-label={zh ? '换题或移除时询问原因' : 'Ask for reason when swapping or removing'}
+            >
+              <button
+                type="button"
+                aria-pressed={promptSwapFeedback}
+                onClick={() => updatePromptSwapFeedback(true)}
+              >
+                {zh ? '弹出反馈窗口' : 'Show prompt'}
+              </button>
+              <button
+                type="button"
+                aria-pressed={!promptSwapFeedback}
+                onClick={() => updatePromptSwapFeedback(false)}
+              >
+                {zh ? '不弹出' : "Don't show"}
+              </button>
+            </div>
+          </section>
+
+          <section className="preference-row">
+            <div className="preference-label">
+              <h2>{t.notesFormatOnSave}</h2>
+              <p>
+                {zh
+                  ? '开启后，保存笔记时会自动整理 Markdown 排版（可在保存后随时撤销）。'
+                  : 'Automatically clean up Markdown formatting when saving a note (can be undone immediately after saving).'}
+              </p>
+            </div>
+            <div className="segmented-control" role="group" aria-label={t.notesFormatOnSave}>
+              <button
+                type="button"
+                aria-pressed={notesFormatOnSave}
+                onClick={() => updateNotesFormatOnSave(true)}
+              >
+                {zh ? '开启' : 'On'}
+              </button>
+              <button
+                type="button"
+                aria-pressed={!notesFormatOnSave}
+                onClick={() => updateNotesFormatOnSave(false)}
+              >
+                {zh ? '关闭' : 'Off'}
+              </button>
+            </div>
           </section>
         </div>
       )}
@@ -742,8 +839,8 @@ export function SettingsView({
                               ? effort.toUpperCase()
                               : provider === 'deepseek'
                               ? effort === 'none'
-                                ? 'none (thinking: disabled)'
-                                : `${effort} (thinking: enabled)`
+                                ? (zh ? 'none（关闭思考模式）' : 'none (thinking: disabled)')
+                                : (zh ? `${effort}（开启思考模式）` : `${effort} (thinking: enabled)`)
                               : effort === 'none'
                               ? (zh ? 'none（关闭推理）' : 'none (no reasoning)')
                               : effort;
@@ -790,7 +887,7 @@ export function SettingsView({
                         <div className="fallback-chain-preview">
                           <span className="chain-label">{t.fallbackChainLabel}:</span>
                           <span className="chain-path">
-                            <strong>{currentPrimaryModel.replace('models/', '') || '(none)'}</strong>
+                            <strong>{currentPrimaryModel.replace('models/', '') || (zh ? '（未选择）' : '(none)')}</strong>
                             {currentFallbackModels.map((m) => (
                               <span key={m} className="chain-step">
                                 {' → '}{m.replace('models/', '')}
@@ -823,7 +920,9 @@ export function SettingsView({
                   <Feedback tone={testResult.ok ? 'success' : 'error'}>
                     {testResult.ok
                       ? t.testAiSuccess.replace('{model}', testResult.model || currentPrimaryModel)
-                      : `${t.testAiFailed}: ${testResult.message}`}
+                      : testResult.message && testResult.message !== t.testAiFailed
+                      ? `${t.testAiFailed}${zh ? '：' : ': '}${testResult.message}`
+                      : t.testAiFailed}
                   </Feedback>
                 )}
               </fieldset>

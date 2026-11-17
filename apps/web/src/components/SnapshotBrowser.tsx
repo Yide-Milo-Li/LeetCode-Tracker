@@ -1,7 +1,8 @@
 /** Current imported observations and their audit versions, kept separate from manual practices. */
 import React, { useEffect, useState } from 'react';
 import { api, type ProgressSnapshot, type ProgressSnapshotHistory, type RecentActivityItem } from '../api.ts';
-import type { Language } from '../i18n.ts';
+import { formatActivityAction, formatSnapshotStatus, type Language } from '../i18n.ts';
+import { localizeApiError } from '../error-i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
 import { Dialog, Feedback, Field, Pagination } from './ui.tsx';
 
@@ -41,7 +42,7 @@ export function SnapshotDetails({
         }
       })
       .catch((err) => {
-        if (active) setError(String(err.message));
+        if (active) setError(localizeApiError(err, lang));
       });
     return () => {
       active = false;
@@ -77,7 +78,7 @@ export function SnapshotDetails({
       workspace.notifyMutation();
       setRetry((n) => n + 1);
     } catch (err) {
-      setError(String((err as Error).message));
+      setError(localizeApiError(err, lang));
     } finally {
       setSaving(false);
     }
@@ -92,7 +93,7 @@ export function SnapshotDetails({
       {event && (
         <Feedback tone="info">
           {zh ? '所选观察日期：' : 'Selected observation: '}
-          {event.timestamp} · {event.status === 'accepted' ? 'Accepted' : event.action}
+          {event.timestamp} · {event.status === 'accepted' ? formatActivityAction('Accepted', lang) : formatActivityAction(event.action, lang)}
         </Feedback>
       )}
       {!snapshot ? (
@@ -116,7 +117,7 @@ export function SnapshotDetails({
             <dd>{snapshot.totalSubmissions}</dd>
             <dt>{zh ? '状态' : 'Status'}</dt>
             <dd>
-              {snapshot.status} · v{snapshot.version}
+              {formatSnapshotStatus(snapshot.status, lang)} · v{snapshot.version}
             </dd>
           </dl>
           {snapshot.status === 'active' && !editing && (
@@ -207,7 +208,7 @@ export function SnapshotDetails({
               </strong>
               <p>
                 {item.lastSubmittedAt} · {item.totalSubmissions}{' '}
-                {zh ? '次累计提交' : 'cumulative submissions'} · {item.status}
+                {zh ? '次累计提交' : 'cumulative submissions'} · {formatSnapshotStatus(item.status, lang)}
               </p>
               <small>
                 {item.reason} ·{' '}
@@ -248,7 +249,7 @@ export function SnapshotBrowser({ lang }: { lang: Language }) {
         }
       })
       .catch((err) => {
-        if (active) setError(String(err.message));
+        if (active) setError(localizeApiError(err, lang));
       })
       .finally(() => {
         if (active) setLoading(false);

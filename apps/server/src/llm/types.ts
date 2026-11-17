@@ -5,6 +5,7 @@
 import type { ProgressCandidateInput } from '../../../../packages/contracts/src/practice.ts';
 import type { Bilingual, Rules, RulePatch } from '../../../../packages/contracts/src/recommendations.ts';
 import type { CatalogProblem, ReasoningEffort } from '../../../../packages/contracts/src/sync.ts';
+import type { AiFragment, LayoutGroup } from '../../../../packages/markdown/src/index.ts';
 
 export type LLMProviderType = 'gemini' | 'openai' | 'deepseek';
 
@@ -81,7 +82,7 @@ export interface GenerateContentParams {
   timeoutMs?: number;
   reasoningEffort?: ReasoningEffort;
   maxOutputTokens?: number;
-  purpose?: 'progress_import' | 'override_parse' | 'semantic_rank' | 'coaching';
+  purpose?: 'progress_import' | 'override_parse' | 'semantic_rank' | 'coaching' | 'note_format';
 }
 
 /** Raw result from a provider content generation call. */
@@ -184,6 +185,7 @@ export type GeminiAssistantOptions = LLMAssistantOptions;
 export interface ILLMAssistant {
   getConfigurationGeneration?(): number;
   formatProgressText(rawText: string, batchYear?: number): Promise<LLMFormatResult>;
+  formatNoteMarkdown?(fragments: AiFragment[]): Promise<{ groups: LayoutGroup[]; model: string; provider?: LLMProviderType }>;
   generatePlanContent?(params: {
     problems: CatalogProblem[];
     rules: Rules;

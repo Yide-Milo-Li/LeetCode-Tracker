@@ -4,6 +4,26 @@
  */
 import { Type } from '@google/genai';
 
+/** Layout-only instructions: provider output has no fields for replacing source text. */
+export const noteLayoutResponseSchema = {
+  type: Type.OBJECT,
+  properties: {
+    groups: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          style: { type: Type.STRING, enum: ['keep', 'paragraph', 'heading', 'bullet_list', 'ordered_list', 'quote', 'code'] },
+          ids: { type: Type.ARRAY, items: { type: Type.STRING } },
+          level: { type: Type.INTEGER },
+        },
+        required: ['style', 'ids'],
+      },
+    },
+  },
+  required: ['groups'],
+};
+
 /** Schema for parsing unstructured progress table text into candidates. */
 export const progressFormatResponseSchema = {
   type: Type.OBJECT,

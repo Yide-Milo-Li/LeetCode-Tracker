@@ -30,6 +30,7 @@ describe('CatalogStore & JSONL Ingestion', async () => {
     const settings = store.getSettings();
     assert.equal(settings.language, 'en');
     assert.equal(settings.theme, 'system');
+    assert.equal(settings.promptSwapFeedback, true);
   });
 
   it('imports valid JSONL lines with auto-derived metadata', async () => {
@@ -413,14 +414,19 @@ describe('CatalogStore & JSONL Ingestion', async () => {
     const db = new DatabaseSync(':memory:');
     const store = new CatalogStore(db, { skipBackup: true });
 
-    const updated = await store.updateSettings({ language: 'zh', theme: 'dark' });
+    const updated = await store.updateSettings({ language: 'zh', theme: 'dark', promptSwapFeedback: false });
     assert.equal(updated.language, 'zh');
     assert.equal(updated.theme, 'dark');
+    assert.equal(updated.promptSwapFeedback, false);
     assert.ok(updated.updatedAt > 0);
 
     const fetched = store.getSettings();
     assert.equal(fetched.language, 'zh');
     assert.equal(fetched.theme, 'dark');
+    assert.equal(fetched.promptSwapFeedback, false);
+
+    const reenabled = await store.updateSettings({ promptSwapFeedback: true });
+    assert.equal(reenabled.promptSwapFeedback, true);
   });
 
   it('manages consistent backups, retention pruning, and offline restore drill', async () => {

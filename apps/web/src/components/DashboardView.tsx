@@ -26,6 +26,7 @@ import {
 } from '../api.ts';
 import type { UseDailyPlanReturn } from '../hooks/useDailyPlan.ts';
 import { translations, type Language } from '../i18n.ts';
+import { localizeApiError } from '../error-i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
 import { Feedback } from './ui.tsx';
 import { DashboardKpiGrid, shortDate } from './DashboardKpiGrid.tsx';
@@ -66,12 +67,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ lang, active = tru
 
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<DashboardResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [sourceStats, setSourceStats] = useState<Awaited<ReturnType<typeof api.getPracticeStats>> | null>(
     null,
   );
-  const [sourceError, setSourceError] = useState('');
+  const [sourceError, setSourceError] = useState<unknown>(null);
   const [sourceRetry, setSourceRetry] = useState(0);
   const [masteryError, setMasteryError] = useState(false);
   const [masteryLoading, setMasteryLoading] = useState(true);
@@ -85,11 +86,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ lang, active = tru
       .then((value) => {
         if (active) {
           setSourceStats(value);
-          setSourceError('');
+          setSourceError(null);
         }
       })
       .catch((err) => {
-        if (active) setSourceError(String(err.message));
+        if (active) setSourceError(err);
       });
 
     setMasteryReport(null);
@@ -146,7 +147,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ lang, active = tru
       }
     } catch (err: unknown) {
       if (seq !== dashboardSeqRef.current) return;
-      setError(err instanceof Error ? err.message : 'Failed to load dashboard data.');
+      setError(err);
     } finally {
       if (seq === dashboardSeqRef.current) {
         setLoading(false);
@@ -280,8 +281,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ lang, active = tru
 
   return (
     <div className="dashboard-view-container progress-stats">
-      {error && (
-        <Feedback retry={{ label: t.retry, run: () => void fetchDashboard(selectedYear) }}>{error}</Feedback>
+      {Boolean(error) && (
+        <Feedback retry={{ label: t.retry, run: () => void fetchDashboard(selectedYear) }}>
+          {localizeApiError(error, lang, lang === 'zh' ? '加载学习总览失败，请重试。' : 'Failed to load dashboard data.')}
+        </Feedback>
       )}
 
       {pendingDateCount > 0 && (
@@ -415,13 +418,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ lang, active = tru
             {Boolean(hoveredDay.day.easyCount || hoveredDay.day.mediumCount || hoveredDay.day.hardCount) && (
               <div className="tooltip-diff-breakdown">
                 {Boolean(hoveredDay.day.easyCount) && (
-                  <span className="difficulty easy">E: {hoveredDay.day.easyCount}</span>
+                  <span className="difficulty easy">{lang === 'zh' ? t.statEasy : 'E'}: {hoveredDay.day.easyCount}</span>
                 )}
                 {Boolean(hoveredDay.day.mediumCount) && (
-                  <span className="difficulty medium">M: {hoveredDay.day.mediumCount}</span>
+                  <span className="difficulty medium">{lang === 'zh' ? t.statMedium : 'M'}: {hoveredDay.day.mediumCount}</span>
                 )}
                 {Boolean(hoveredDay.day.hardCount) && (
-                  <span className="difficulty hard">H: {hoveredDay.day.hardCount}</span>
+                  <span className="difficulty hard">{lang === 'zh' ? t.statHard : 'H'}: {hoveredDay.day.hardCount}</span>
                 )}
               </div>
             )}
@@ -584,11 +587,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ lang, active = tru
             ? '没有记录不代表没有练习。手动记录和有效导入依据按题目与日期去重；这不是历史任务完成率。标签可重叠，分布之和可能超过已完成题数。'
             : 'No record does not prove inactivity. Manual records and valid imported evidence are deduplicated by problem and date; this is not a historical task completion rate. Tags overlap, so their totals may exceed solved problems.'}
         </p>
-        {sourceError && (
+        {Boolean(sourceError) && (
           <Feedback
             retry={{ label: zh ? '重试来源统计' : 'Retry source totals', run: () => setSourceRetry((value) => value + 1) }}
           >
-            {sourceError}
+            {localizeApiError(sourceError, lang)}
           </Feedback>
         )}
         <dl className="detail-grid">
@@ -609,11 +612,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ lang, active = tru
             <>
               <dt>{t.catalogLastUpdated}</dt>
               <dd>
-                {data.dataStatus.catalogUpdatedAt ? new Date(data.dataStatus.catalogUpdatedAt).toLocaleString() : t.never}
+                {data.dataStatus.catalogUpdatedAt
+                  ? new Date(data.dataStatus.catalogUpdatedAt).toLocaleString(zh ? 'zh-CN' : 'en-US', {
+                      ...(data.dataStatus.userTimezone ? { timeZone: data.dataStatus.userTimezone } : {}),
+                    })
+                  : t.never}
               </dd>
               <dt>{t.practiceLastUpdated}</dt>
               <dd>
-                {data.dataStatus.practiceUpdatedAt ? new Date(data.dataStatus.practiceUpdatedAt).toLocaleString() : t.never}
+                {data.dataStatus.practiceUpdatedAt
+                  ? new Date(data.dataStatus.practiceUpdatedAt).toLocaleString(zh ? 'zh-CN' : 'en-US', {
+                      ...(data.dataStatus.userTimezone ? { timeZone: data.dataStatus.userTimezone } : {}),
+                    })
+                  : t.never}
               </dd>
               <dt>{t.userTimezoneLabel}</dt>
               <dd>{data.dataStatus.userTimezone || t.setupTimezoneTitle}</dd>

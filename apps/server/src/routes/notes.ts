@@ -5,11 +5,43 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
   problemNoteListQuerySchema,
   upsertProblemNoteSchema,
+  noteFormatRequestSchema,
+  noteLayoutSchema,
 } from '../../../../packages/contracts/src/notes.ts';
+import { applyAiLayout, MarkdownFormatError, prepareAiFormat } from '../../../../packages/markdown/src/index.ts';
+import { LLMError } from '../llm/types.ts';
 import type { RouteContext } from './types.ts';
 
 export function registerNotesRoutes(app: FastifyInstance, context: RouteContext): void {
-  const { store, writeLock } = context;
+  const { store, writeLock, gemini } = context;
+
+  /** Report only public provider metadata, including environment-supplied configuration. */
+  app.get('/api/v1/notes/format/status', async (_request, reply) => {
+    const { configured, provider, model } = gemini.getStatus();
+    return reply.status(200).send({ configured, provider, model });
+  });
+
+  /** Construct a proposed layout in memory; persistence remains the note PUT operation. */
+  app.post('/api/v1/notes/format', async (request, reply) => {
+    const input = noteFormatRequestSchema.safeParse(request.body);
+    if (!input.success) return reply.status(400).send({ error: 'INVALID_NOTE_FORMAT_REQUEST', message: 'Invalid note or selection' });
+    try {
+      const prepared = prepareAiFormat(input.data.content, input.data.selection);
+      if (!gemini.formatNoteMarkdown) return reply.status(503).send({ error: 'NOTE_FORMAT_UNAVAILABLE', message: 'AI note formatting is unavailable' });
+      const result = await gemini.formatNoteMarkdown(prepared.fragments);
+      const layout = noteLayoutSchema.safeParse({ groups: result.groups });
+      if (!layout.success) return reply.status(422).send({ error: 'NOTE_FORMAT_INVALID_LAYOUT', message: 'The suggested layout could not be applied safely' });
+      const content = applyAiLayout(prepared, layout.data.groups);
+      return reply.status(200).send({ content, range: prepared.range, provider: result.provider, model: result.model });
+    } catch (err) {
+      if (err instanceof MarkdownFormatError) {
+        const status = err.code === 'FORMAT_TOO_LARGE' ? 413 : err.code.startsWith('INVALID_') && err.code !== 'INVALID_LAYOUT' ? 400 : 422;
+        return reply.status(status).send({ error: `NOTE_FORMAT_${err.code}`, message: err.message });
+      }
+      if (err instanceof LLMError) return reply.status(err.status).send({ error: err.code, message: err.message });
+      return reply.status(500).send({ error: 'NOTE_FORMAT_ERROR', message: 'Could not format the note' });
+    }
+  });
 
   /** GET /api/v1/notes: List problem note summaries with search and filters */
   app.get('/api/v1/notes', async (request: FastifyRequest, reply: FastifyReply) => {

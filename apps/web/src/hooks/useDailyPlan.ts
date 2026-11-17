@@ -5,6 +5,8 @@
  */
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { api, type DailyPlan, type EnsureResult, type PlanItem, type PracticeRecord } from '../api.ts';
+import type { Language } from '../i18n.ts';
+import { localizeApiError } from '../error-i18n.ts';
 import type { RecommendationFeedbackReason } from '../../../../packages/contracts/src/recommendations.ts';
 import { evidenceAfter } from '../../../../packages/domain/src/index.ts';
 
@@ -45,16 +47,21 @@ export interface UseDailyPlanReturn {
   onPracticeLogged: (record?: PracticeRecord) => Promise<void>;
 }
 
+interface PlanErrorEntry {
+  err: unknown;
+  fallback: { en: string; zh: string };
+}
+
 /**
  * Shared hook to manage daily plan lifecycle at application scope.
  * Prevents redundant generation calls on tab switches and synchronizes state between
  * retained workspaces and the Today execution view.
  */
-export function useDailyPlan(): UseDailyPlanReturn {
+export function useDailyPlan(lang: Language = 'en'): UseDailyPlanReturn {
   const [loading, setLoading] = useState(true);
   const [ensureResult, setEnsureResult] = useState<EnsureResult | null>(null);
-  const [refreshError, setRefreshError] = useState<string | null>(null);
-  const [mutationError, setMutationError] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<PlanErrorEntry | null>(null);
+  const [mutationError, setMutationError] = useState<PlanErrorEntry | null>(null);
   const [replacingItemId, setReplacingItemId] = useState<string | null>(null);
   const [replacingBatch, setReplacingBatch] = useState(false);
   const [appending, setAppending] = useState(false);
@@ -87,7 +94,10 @@ export function useDailyPlan(): UseDailyPlanReturn {
       }
     } catch (err: unknown) {
       if (revision === changeRevision.current)
-        setRefreshError(err instanceof Error ? err.message : 'Failed to load daily plan.');
+        setRefreshError({
+          err,
+          fallback: { en: 'Failed to load daily plan.', zh: '加载今日计划失败。' },
+        });
     } finally {
       refreshInFlight.current = false;
       setLoading(false);
@@ -143,7 +153,10 @@ export function useDailyPlan(): UseDailyPlanReturn {
         }
       } catch (err: unknown) {
         if (currentRevision === changeRevision.current) {
-          setMutationError(err instanceof Error ? err.message : 'Failed to replace problem.');
+          setMutationError({
+            err,
+            fallback: { en: 'Failed to replace problem.', zh: '更换题目失败。' },
+          });
         }
       } finally {
         changeRevision.current++;
@@ -176,7 +189,10 @@ export function useDailyPlan(): UseDailyPlanReturn {
       }
     } catch (err: unknown) {
       if (currentRevision === changeRevision.current) {
-        setMutationError(err instanceof Error ? err.message : 'Failed to replace unfinished problems.');
+        setMutationError({
+          err,
+          fallback: { en: 'Failed to replace unfinished problems.', zh: '更换未完成题目失败。' },
+        });
       }
     } finally {
       changeRevision.current++;
@@ -206,7 +222,10 @@ export function useDailyPlan(): UseDailyPlanReturn {
       }
     } catch (err: unknown) {
       if (currentRevision === changeRevision.current) {
-        setMutationError(err instanceof Error ? err.message : 'Failed to append problem.');
+        setMutationError({
+          err,
+          fallback: { en: 'Failed to append problem.', zh: '加题失败。' },
+        });
       }
     } finally {
       changeRevision.current++;
@@ -239,7 +258,10 @@ export function useDailyPlan(): UseDailyPlanReturn {
         }
       } catch (err: unknown) {
         if (currentRevision === changeRevision.current) {
-          setMutationError(err instanceof Error ? err.message : 'Failed to remove problem.');
+          setMutationError({
+            err,
+            fallback: { en: 'Failed to remove problem.', zh: '移除题目失败。' },
+          });
         }
       } finally {
         changeRevision.current++;
@@ -299,11 +321,13 @@ export function useDailyPlan(): UseDailyPlanReturn {
     [refresh],
   );
 
+  const activeError = mutationError ?? refreshError;
+
   return {
     loading,
     ensureResult,
     plan: ensureResult?.plan ?? null,
-    error: mutationError || refreshError,
+    error: activeError ? localizeApiError(activeError.err, lang, activeError.fallback[lang]) : null,
     replacingItemId,
     replacingBatch,
     appending,

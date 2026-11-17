@@ -3,6 +3,8 @@ import { selectCandidateSlots } from './selection.ts';
 import type { Candidate, Difficulty, Rules } from '../../contracts/src/recommendations.ts';
 import type { KnowledgeProfileReport, TopicDifficultyEvidence } from '../../contracts/src/knowledge-profile.ts';
 
+const ZH_DIFFICULTY: Record<Difficulty, string> = { Easy: '简单', Medium: '中等', Hard: '困难' };
+
 /** Selection capacity already validated against difficulty and review constraints. */
 export interface AdaptiveSlot {
   difficulty: Difficulty;
@@ -46,20 +48,21 @@ export function rankAdaptiveTopics(
     const role = rank[0] === 4 ? 'exploration' : rank[0] <= 2 ? 'reinforcement' : 'routine';
     const assisted = evidence.outcomeCounts.assisted + evidence.outcomeCounts.unsolved;
     const feedback = assisted + evidence.outcomeCounts.independent;
+    const zhDifficulty = ZH_DIFFICULTY[candidate.difficulty];
     const reasonText = role === 'exploration'
       ? { en: `Explore ${topic.tagName} (${candidate.difficulty}) to gather evidence; ${evidence.distinctProblemCount} distinct problems recorded in 30 days.`,
-          zh: `探索 ${topic.tagName}（${candidate.difficulty}）以补充证据；最近 30 天记录了 ${evidence.distinctProblemCount} 道不同题目。` }
+          zh: `探索 ${topic.tagName}（${zhDifficulty}）以补充证据；最近 30 天记录了 ${evidence.distinctProblemCount} 道不同题目。` }
       : evidence.reasons.includes('feedback_assistance')
         ? { en: `${topic.tagName} (${candidate.difficulty}): ${assisted} of ${feedback} recorded question/day feedback samples needed assistance or remained unsolved in 30 days.`,
-            zh: `${topic.tagName}（${candidate.difficulty}）：最近 30 天的 ${feedback} 个题目/日期反馈样本中，${assisted} 个需要辅助或未解决。` }
+            zh: `${topic.tagName}（${zhDifficulty}）：最近 30 天的 ${feedback} 个题目/日期反馈样本中，${assisted} 个需要辅助或未解决。` }
         : rank[0] === 1
           ? { en: `${topic.tagName} (${candidate.difficulty}): ${evidence.overdueCount} overdue and ${evidence.dueTodayCount} due today; review need is not a weakness assessment.`,
-              zh: `${topic.tagName}（${candidate.difficulty}）：${evidence.overdueCount} 道逾期、${evidence.dueTodayCount} 道今日到期；复习需求不代表薄弱。` }
+              zh: `${topic.tagName}（${zhDifficulty}）：${evidence.overdueCount} 道逾期、${evidence.dueTodayCount} 道今日到期；复习需求不代表薄弱。` }
           : evidence.reasons.includes('duration_threshold')
             ? { en: `${topic.tagName} (${candidate.difficulty}): ${evidence.longDurationCount} of ${evidence.durationSampleCount} timed samples reached the duration threshold.`,
-                zh: `${topic.tagName}（${candidate.difficulty}）：${evidence.durationSampleCount} 个用时样本中，${evidence.longDurationCount} 个达到用时阈值。` }
+                zh: `${topic.tagName}（${zhDifficulty}）：${evidence.durationSampleCount} 个用时样本中，${evidence.longDurationCount} 个达到用时阈值。` }
             : { en: `Continue ${topic.tagName} (${candidate.difficulty}) using existing practice evidence.`,
-                zh: `依据已有练习证据继续练习 ${topic.tagName}（${candidate.difficulty}）。` };
+                zh: `依据已有练习证据继续练习 ${topic.tagName}（${zhDifficulty}）。` };
     rankings.set(candidate.questionId, rank);
     return { ...candidate, isFocusTopic: weak, matchedWeakTags: weak ? [topic.tagSlug] : [],
       explanation: { ...candidate.explanation, analysisVersion: 'adaptive-v1' as const,

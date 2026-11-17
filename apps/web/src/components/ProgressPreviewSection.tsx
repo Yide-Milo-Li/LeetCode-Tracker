@@ -3,7 +3,7 @@
  */
 import React from 'react';
 import type { ProgressImportPreview } from '../api.ts';
-import type { Language } from '../i18n.ts';
+import { translations, type Language } from '../i18n.ts';
 
 interface ProgressPreviewSectionProps {
   step: number;
@@ -36,6 +36,14 @@ export const ProgressPreviewSection: React.FC<ProgressPreviewSectionProps> = ({
   onContinueOrCommit,
 }) => {
   const zh = lang === 'zh';
+  const t = translations[lang];
+  const conflictMessages: Record<string, string> = {
+    older_date: t.conflictOlderDate,
+    decreased_submissions: t.conflictDecreasedSubmissions,
+    conflicting_result_same_date_count: t.conflictSameDateDiffResult,
+    intra_batch_contradiction: t.conflictIntraBatch,
+    unmatched_problem: t.conflictUnmatched,
+  };
 
   const eligible =
     preview.items.filter(
@@ -97,8 +105,10 @@ export const ProgressPreviewSection: React.FC<ProgressPreviewSectionProps> = ({
                 </p>
               </div>
             </div>
-            {(item.error || item.conflictReason) && (
-              <p className="warning-text">{item.error || item.conflictReason}</p>
+            {(item.error || item.conflictReason || (item.conflictType && conflictMessages[item.conflictType])) && (
+              <p className="warning-text">
+                {(item.conflictType && conflictMessages[item.conflictType]) || item.error || item.conflictReason}
+              </p>
             )}
             {item.action === 'conflict' && !item.error && (
               <label className="checkbox-label">

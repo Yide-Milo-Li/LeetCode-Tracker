@@ -21,6 +21,29 @@ export const upsertProblemNoteSchema = z.object({
 
 export type UpsertProblemNoteInput = z.infer<typeof upsertProblemNoteSchema>;
 
+/** An AI request processes the provided draft only; selection uses UTF-16 offsets. */
+export const noteFormatRequestSchema = z.object({
+  content: z.string().min(1).max(100000),
+  selection: z.object({ start: z.number().int().nonnegative(), end: z.number().int().positive() }).strict().optional(),
+}).strict();
+export type NoteFormatRequest = z.infer<typeof noteFormatRequestSchema>;
+
+/** Provider output may refer to original fragments but cannot supply replacement prose. */
+export const noteLayoutSchema = z.object({
+  groups: z.array(z.object({
+    style: z.enum(['keep', 'paragraph', 'heading', 'bullet_list', 'ordered_list', 'quote', 'code']),
+    ids: z.array(z.string().regex(/^f[1-9][0-9]*$/)).min(1).max(200),
+    level: z.number().int().min(1).max(6).optional(),
+  }).strict().refine(group => group.style === 'heading' ? group.level !== undefined : group.level === undefined)).min(1).max(200),
+}).strict();
+
+export interface NoteFormatResponse {
+  content: string;
+  range: { start: number; end: number };
+  provider?: 'gemini' | 'openai' | 'deepseek';
+  model: string;
+}
+
 /** Summary of a problem with its practice activity and note existence. */
 export const problemNoteSummarySchema = z.object({
   questionId: z.string(),

@@ -282,12 +282,17 @@ it('renders active daily plan and triggers single problem item replacement', asy
   assert.equal(progress.getAttribute('aria-valuenow'), '1');
   assert.equal(progress.getAttribute('aria-valuemax'), '2');
 
-  // Trigger replace on the first (uncompleted) item
+  // Trigger replace on the first (uncompleted) item (default promptSwapFeedback=true opens modal)
   const replaceBtn = screen
     .getAllByRole('button', { name: /^Replace$/ })
     .find((button) => !button.hasAttribute('disabled'))!;
   await act(async () => {
     fireEvent.click(replaceBtn);
+  });
+
+  assert.equal(replaceMock.mock.callCount(), 0);
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm swap' }));
   });
 
   assert.equal(replaceMock.mock.callCount(), 1);
@@ -1077,7 +1082,7 @@ describe('Phase 26: Today remove plan item UI', () => {
     const removeMock = mock.method(api, 'removePlanItem', async () => updatedPlan);
 
     await act(async () => {
-      render(<TodayPlanView lang="en" onNavigateToSettings={() => {}} />);
+      render(<TodayPlanView lang="en" promptSwapFeedback={false} onNavigateToSettings={() => {}} />);
     });
 
     // Check initial items
@@ -1189,7 +1194,7 @@ describe('Phase 26: Today remove plan item UI', () => {
     const removeMock = mock.method(api, 'removePlanItem', async () => emptyPlan);
 
     await act(async () => {
-      render(<TodayPlanView lang="zh" onNavigateToSettings={() => {}} />);
+      render(<TodayPlanView lang="zh" promptSwapFeedback={false} onNavigateToSettings={() => {}} />);
     });
 
     // Verify remove button is enabled on the single remaining item
@@ -1225,7 +1230,7 @@ describe('Phase 26: Today remove plan item UI', () => {
     mock.method(api, 'removePlanItem', async () => pending.promise);
 
     await act(async () => {
-      render(<TodayPlanView lang="en" onNavigateToSettings={() => {}} />);
+      render(<TodayPlanView lang="en" promptSwapFeedback={false} onNavigateToSettings={() => {}} />);
     });
 
     const removeBtn = screen.getAllByRole('button', { name: translations.en.removeProblem })[0] as HTMLButtonElement;
@@ -1313,18 +1318,239 @@ it('keeps override policy changes local to the draft until explicit preview', as
   assert.equal(preview.mock.calls[0].arguments[0].rules.timeBudgetMinutes, 10);
 });
 
-it('saves optional feedback only with the explicit item action and uses distinct item labels', async () => {
+it('omits inline swap/removal feedback from TodayProblemRow and prompts optional reason in a modal when enabled', async () => {
   const { TodayProblemRow } = await import('../apps/web/src/components/TodayProblemRow.tsx');
-  const item = createMockPlan().items[0]; let replaced: unknown[] = [], removed: unknown[] = [];
-  render(<TodayProblemRow item={item} lang="en" isSaving={false} replacingBatch={false} replacingItemId={null}
-    onComplete={() => {}} onReplaceOne={(...args) => { replaced = args; }} onRemove={(...args) => { removed = args; }} />);
-  fireEvent.click(screen.getByText('Optional swap/removal feedback'));
-  const reason = screen.getByLabelText('Reason for next action: ' + item.problem.title);
-  fireEvent.change(reason, { target: { value: 'time_unavailable' } });
-  assert.equal(replaced.length, 0); assert.equal(removed.length, 0);
-  fireEvent.click(screen.getByRole('button', { name: translations.en.replaceOne }));
-  assert.equal(replaced[1], 'time_unavailable');
-  fireEvent.click(screen.getByRole('button', { name: translations.en.removeProblem })); assert.equal(removed[1], 'time_unavailable');
+  const item = createMockPlan().items[0];
+  render(
+    <TodayProblemRow
+      item={item}
+      lang="en"
+      isSaving={false}
+      replacingBatch={false}
+      replacingItemId={null}
+      onComplete={() => {}}
+      onReplaceOne={() => {}}
+      onRemove={() => {}}
+    />,
+  );
+  assert.equal(screen.queryByText('Optional swap/removal feedback'), null);
+  assert.equal(screen.queryByText('可选换题/移除反馈'), null);
+  cleanup();
+
+  const plan = createMockPlan();
+  const replacedCalls: Array<{ itemId: string; reason?: string }> = [];
+  const removedCalls: Array<{ itemId: string; reason?: string }> = [];
+  const controller: import('../apps/web/src/hooks/useDailyPlan.ts').UseDailyPlanReturn = {
+    loading: false,
+    ensureResult: { status: 'ready', plan },
+    plan,
+    error: null,
+    clearError: () => {},
+    replacingBatch: false,
+    replacingItemId: null,
+    appending: false,
+    removingItemId: null,
+    isPlanMutationPending: () => false,
+    refresh: async () => {},
+    replaceOne: async (target, reason) => {
+      replacedCalls.push({ itemId: target.id, reason });
+    },
+    replaceAllUnfinished: async () => {},
+    appendOne: async () => {},
+    removeOne: async (target, reason) => {
+      removedCalls.push({ itemId: target.id, reason });
+    },
+    onOverrideCommitted: () => {},
+    onPracticeLogged: async () => {},
+  };
+
+  await act(async () => {
+    render(<TodayPlanView lang="en" promptSwapFeedback onNavigateToSettings={() => {}} planController={controller} />);
+  });
+
+  // 1. Clicking Replace opens modal; cancelling performs no action
+  fireEvent.click(screen.getAllByRole('button', { name: translations.en.replaceOne })[0]);
+  assert.ok(screen.getByRole('dialog'));
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: translations.en.cancel }));
+  });
+  assert.equal(replacedCalls.length, 0);
+
+  // 2. Selecting a reason and confirming swap records the reason
+  fireEvent.click(screen.getAllByRole('button', { name: translations.en.replaceOne })[0]);
+  fireEvent.change(screen.getByLabelText('Reason (optional)'), { target: { value: 'time_unavailable' } });
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm swap' }));
+  });
+  assert.deepEqual(replacedCalls, [{ itemId: 'item-1', reason: 'time_unavailable' }]);
+
+  // 3. Confirming with "No reason" sends undefined
+  fireEvent.click(screen.getAllByRole('button', { name: translations.en.replaceOne })[0]);
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm swap' }));
+  });
+  assert.deepEqual(replacedCalls[1], { itemId: 'item-1', reason: undefined });
+
+  // 4. Uncompleted remove opens modal and sends selected reason on confirm
+  fireEvent.click(screen.getAllByRole('button', { name: translations.en.removeProblem })[0]);
+  fireEvent.change(screen.getByLabelText('Reason (optional)'), { target: { value: 'too_difficult' } });
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm removal' }));
+  });
+  assert.deepEqual(removedCalls, [{ itemId: 'item-1', reason: 'too_difficult' }]);
+
+  // 5. Completed remove combines confirmation warning and optional reason in a single dialog
+  fireEvent.click(screen.getAllByRole('button', { name: translations.en.removeProblem })[1]);
+  assert.ok(screen.getByText(translations.en.confirmRemoveCompletedTitle));
+  fireEvent.change(screen.getByLabelText('Reason (optional)'), { target: { value: 'already_familiar' } });
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: translations.en.confirmRemoveBtn }));
+  });
+  assert.deepEqual(removedCalls[1], { itemId: 'item-2', reason: 'already_familiar' });
+  cleanup();
+
+  // 6. When promptSwapFeedback={false}, Replace executes directly without opening a dialog
+  await act(async () => {
+    render(<TodayPlanView lang="en" promptSwapFeedback={false} onNavigateToSettings={() => {}} planController={controller} />);
+  });
+  fireEvent.click(screen.getAllByRole('button', { name: translations.en.replaceOne })[0]);
+  assert.equal(screen.queryByRole('dialog'), null);
+  assert.equal(replacedCalls.length, 3);
+});
+
+it('renders a single quiet notice strip for candidate shortages and breakdown notices with progressive disclosure', async () => {
+  const shortagePlan = createMockPlan({
+    rules: {
+      dailyCount: 4,
+      difficulty: { Easy: 50, Medium: 50, Hard: 0 },
+      tags: [],
+      premium: false,
+      reviewEnabled: true,
+      reviewPercent: 50,
+      preference: '',
+    },
+    notices: [
+      { en: 'Medium: review quota deficit of 1 problem(s).', zh: 'Medium：缺少 1 道复习题。' },
+      { en: 'Medium: 1 slots unavailable under the hard filters.', zh: 'Medium：硬条件下缺少 1 道题。' },
+    ],
+  });
+  const makeController = (plan: DailyPlan): import('../apps/web/src/hooks/useDailyPlan.ts').UseDailyPlanReturn => ({
+    loading: false,
+    ensureResult: { status: 'ready', plan },
+    plan,
+    error: null,
+    clearError: () => {},
+    replacingBatch: false,
+    replacingItemId: null,
+    appending: false,
+    removingItemId: null,
+    isPlanMutationPending: () => false,
+    refresh: async () => {},
+    replaceOne: async () => {},
+    replaceAllUnfinished: async () => {},
+    appendOne: async () => {},
+    removeOne: async () => {},
+    onOverrideCommitted: () => {},
+    onPracticeLogged: async () => {},
+  });
+
+  // Shortage + 2 breakdown notices -> single quiet strip, no loud .feedback.warning banners
+  let container!: HTMLElement;
+  await act(async () => {
+    ({ container } = render(
+      <TodayPlanView lang="zh" onNavigateToSettings={() => {}} planController={makeController(shortagePlan)} />,
+    ));
+  });
+  assert.equal(container.querySelectorAll('.feedback.warning').length, 0);
+  assert.equal(container.querySelectorAll('.plan-notice-strip').length, 1);
+  assert.ok(screen.getByText('今日计划缺口 2 题（已生成题目仍可练习）'));
+  assert.equal(screen.queryByText('Medium：缺少 1 道复习题。'), null);
+
+  const toggle = screen.getByRole('button', { name: '详情 (2)' });
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+  fireEvent.click(toggle);
+  assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+  assert.ok(screen.getByText('Medium：缺少 1 道复习题。'));
+  assert.ok(screen.getByText('Medium：硬条件下缺少 1 道题。'));
+  cleanup();
+
+  // Single notice without dailyCount shortage -> inline single line without toggle
+  const singleNoticePlan = createMockPlan({
+    notices: [{ en: 'Medium: review quota deficit of 1 problem(s).', zh: 'Medium：缺少 1 道复习题。' }],
+  });
+  let singleContainer!: HTMLElement;
+  await act(async () => {
+    ({ container: singleContainer } = render(
+      <TodayPlanView lang="en" onNavigateToSettings={() => {}} planController={makeController(singleNoticePlan)} />,
+    ));
+  });
+  assert.equal(singleContainer.querySelectorAll('.feedback.warning').length, 0);
+  assert.ok(screen.getByText('Medium: review quota deficit of 1 problem(s).'));
+  assert.equal(singleContainer.querySelector('.plan-notice-toggle'), null);
+});
+
+it('localizes TodayPlanView errors, version labels, and PromptOverrideModal issues in Chinese UI', async () => {
+  const basePlan = createMockPlan();
+  mock.method(api, 'ensureDailyPlan', async () => ({ status: 'ready' as const, plan: basePlan }));
+  mock.method(api, 'getStrategies', async () => []);
+  mock.method(api, 'appendPlanItem', async () => {
+    throw new Error('No eligible candidates found for target difficulty and type; adjust rules to continue');
+  });
+  mock.method(api, 'getPlanVersions', async () => [
+    { ...basePlan, source: 'local', model: null, action: 'ensure' },
+  ]);
+
+  await act(async () => {
+    render(<TodayPlanView lang="zh" onNavigateToSettings={() => {}} />);
+  });
+
+  // Trigger append error and verify pure Chinese localized error
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '加一题' }));
+  });
+  assert.ok(screen.getByText('没有符合当前难度与题型条件的候选题目，请调整规则后再试。'));
+  assert.equal(screen.queryByText(/No eligible candidates/i), null);
+
+  // Open Versions dialog and verify localized source & action labels
+  fireEvent.click(screen.getByLabelText('更多计划操作'));
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(translations.zh.planVersions) }));
+  });
+  const dialog = screen.getByRole('dialog');
+  assert.ok(dialog.textContent?.includes('本地规则'));
+  assert.ok(dialog.textContent?.includes('本地'));
+  assert.ok(dialog.textContent?.includes('生成计划'));
+  cleanup();
+
+  // PromptOverrideModal in zh localizes difficulty counts and validation issues
+  const previewWithIssues = {
+    id: 'p-zh',
+    date: basePlan.date,
+    expiresAt: Date.now() + 60000,
+    base: basePlan.rules,
+    rules: { ...basePlan.rules, difficulty: { Easy: 50, Medium: 50, Hard: 0 } },
+    changed: ['difficulty' as const],
+    issues: ['Difficulty percentages must sum to exactly 100%.'],
+    unresolved: ["Unknown tag 'nonexistent' is not in the local catalog."],
+    counts: { Easy: 1, Medium: 1, Hard: 0 },
+    candidateCount: 0,
+    planVersion: 1,
+    revision: { catalog: 1, practice: 1, planning: 1, timezone: basePlan.timezone },
+  };
+  mock.method(api, 'previewDailyPlanOverride', async () => previewWithIssues);
+  await act(async () => {
+    render(<PromptOverrideModal isOpen lang="zh" currentPlan={basePlan} onClose={() => {}} onApplied={() => {}} />);
+  });
+  fireEvent.click(screen.getByText('手动校对规则'));
+  assert.ok(screen.getByLabelText('简单 题数'));
+  assert.ok(screen.getByLabelText('中等 题数'));
+  assert.ok(screen.getByLabelText('困难 题数'));
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '预览校对后的规则' }));
+  });
+  assert.ok(screen.getByText('各难度比例之和必须等于 100%。'));
+  assert.ok(screen.getByText('本地题库中不存在标签“nonexistent”。'));
+  assert.equal(screen.getAllByText(/简单: 1, 中等: 1, 困难: 0/).length, 2);
 });
 
 it('shows budget infeasibility without changing quotas and opens explicit adjustment', async () => {
@@ -1335,6 +1561,7 @@ it('shows budget infeasibility without changing quotas and opens explicit adjust
     replaceAllUnfinished: async () => {}, appendOne: async () => {}, removeOne: async () => {}, onOverrideCommitted: () => {}, onPracticeLogged: async () => {},
   };
   await act(async () => { render(<TodayPlanView lang="en" onNavigateToSettings={() => {}} planController={controller} />); });
+  assert.equal(screen.queryByText(/Estimated effort .* Estimates only\./i), null);
   assert.ok(screen.getByText(/The estimate exceeds your budget. Counts and difficulty remain unchanged./i));
   assert.equal(plan.items.length, 2);
   fireEvent.click(screen.getByRole('button', { name: 'Adjust count or budget' }));

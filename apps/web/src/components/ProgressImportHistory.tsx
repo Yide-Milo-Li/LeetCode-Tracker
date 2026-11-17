@@ -4,6 +4,7 @@
 import React, { useEffect, useState } from 'react';
 import { api, type ProgressImportSummary } from '../api.ts';
 import type { Language } from '../i18n.ts';
+import { localizeApiError } from '../error-i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
 import { Dialog, Feedback, Pagination } from './ui.tsx';
 
@@ -76,7 +77,7 @@ export function ImportHistory({ lang }: { lang: Language }) {
         }
       })
       .catch((err) => {
-        if (active) setError(String(err.message));
+        if (active) setError(localizeApiError(err, lang));
       });
     return () => {
       active = false;
@@ -115,7 +116,7 @@ export function ImportHistory({ lang }: { lang: Language }) {
                   const detail = await api.getProgressImportResult(item.id);
                   setResult(detail);
                 } catch (err) {
-                  setError(String((err as Error).message));
+                  setError(localizeApiError(err, lang));
                 }
               }}
             >

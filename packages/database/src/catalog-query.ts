@@ -306,6 +306,8 @@ export function getUserSettings(db: DatabaseSync): UserSettings {
   }>;
 
   let language: 'en' | 'zh' = 'en';
+  let notesFormatOnSave = true;
+  let promptSwapFeedback = true;
   let theme: 'light' | 'dark' | 'system' = 'system';
   let palette: ThemePalette = 'default';
   let timezone: string | null = null;
@@ -331,6 +333,12 @@ export function getUserSettings(db: DatabaseSync): UserSettings {
   let maxUpdatedAt = 0;
 
   for (const r of rows) {
+    if (r.key === 'notes_format_on_save' && (r.value === 'true' || r.value === 'false')) {
+      notesFormatOnSave = r.value === 'true';
+    }
+    if (r.key === 'prompt_swap_feedback' && (r.value === 'true' || r.value === 'false')) {
+      promptSwapFeedback = r.value === 'true';
+    }
     if (r.key === 'language' && (r.value === 'en' || r.value === 'zh')) {
       language = r.value;
     }
@@ -441,6 +449,8 @@ export function getUserSettings(db: DatabaseSync): UserSettings {
 
   return {
     language,
+    notesFormatOnSave,
+    promptSwapFeedback,
     theme,
     palette,
     timezone,
@@ -480,6 +490,12 @@ export function updateUserSettingsTransaction(
   try {
     if (input.language) {
       updateStmt.run('language', input.language, now);
+    }
+    if (input.notesFormatOnSave !== undefined) {
+      updateStmt.run('notes_format_on_save', String(input.notesFormatOnSave), now);
+    }
+    if (input.promptSwapFeedback !== undefined) {
+      updateStmt.run('prompt_swap_feedback', String(input.promptSwapFeedback), now);
     }
     if (input.theme) {
       updateStmt.run('theme', input.theme, now);

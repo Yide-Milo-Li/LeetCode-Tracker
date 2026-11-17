@@ -142,7 +142,7 @@ export async function exportDataFile(apiPath: string, defaultFilename: string): 
 /**
  * Initializes global desktop listeners (e.g. intercepting external links).
  */
-export function initDesktopPlatform(): void {
+export function initDesktopPlatform(getLang?: () => 'en' | 'zh'): void {
   if (!isTauri() || typeof document === 'undefined') return;
 
   // Intercept external problem and documentation links to open in system default browser
@@ -156,7 +156,8 @@ export function initDesktopPlatform(): void {
         e.preventDefault();
         void openExternalUrl(href).catch(() => {
           // Native validation remains authoritative; show a failure instead of an unhandled rejection.
-          window.alert('Unable to open this link / 无法打开此链接');
+          const zh = getLang ? getLang() === 'zh' : document.documentElement.lang.toLowerCase().startsWith('zh');
+          window.alert(zh ? '无法打开此链接。' : 'Unable to open this link.');
         });
       }
     }

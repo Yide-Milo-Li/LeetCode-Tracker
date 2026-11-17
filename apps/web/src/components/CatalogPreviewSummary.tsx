@@ -4,7 +4,7 @@
 import React from 'react';
 import { CheckCircle2 } from 'lucide-react';
 import type { ImportPreview } from '../api.ts';
-import { translations, type Language } from '../i18n.ts';
+import { formatCatalogChangeField, formatDifficulty, translations, type Language } from '../i18n.ts';
 
 interface CatalogPreviewSummaryProps {
   preview: ImportPreview;
@@ -119,7 +119,7 @@ export const CatalogPreviewSummary: React.FC<CatalogPreviewSummaryProps> = ({
                     <td>{item.title}</td>
                     <td>
                       <span className={`badge badge-${item.difficulty.toLowerCase()}`}>
-                        {item.difficulty}
+                        {formatDifficulty(item.difficulty, lang)}
                       </span>
                     </td>
                     <td>
@@ -148,7 +148,9 @@ export const CatalogPreviewSummary: React.FC<CatalogPreviewSummaryProps> = ({
                       </span>
                     </td>
                     <td className="u-font-size-13px u-color-text-muted">
-                      {item.changes && item.changes.length > 0 ? item.changes.join(', ') : '-'}
+                      {item.changes && item.changes.length > 0
+                        ? item.changes.map((field) => formatCatalogChangeField(field, lang)).join(lang === 'zh' ? '、' : ', ')
+                        : '-'}
                     </td>
                   </tr>
                 ))}

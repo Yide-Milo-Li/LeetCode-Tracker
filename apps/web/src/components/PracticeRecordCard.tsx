@@ -5,6 +5,7 @@ import { Pencil } from 'lucide-react';
 import React, { useState } from 'react';
 import { api, type PracticeRecord } from '../api.ts';
 import type { Language } from '../i18n.ts';
+import { localizeApiError } from '../error-i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
 import { Feedback, IconButton } from './ui.tsx';
 
@@ -57,7 +58,7 @@ export function PracticeRecordCard({
       onChange(saved);
       setConfirming(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(localizeApiError(err, lang));
     } finally {
       setSaving(false);
     }

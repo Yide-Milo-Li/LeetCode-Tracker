@@ -9,6 +9,8 @@ import { normalizeUsage, sumUsage, type LLMUsage } from './usage.ts';
 import { emitDiagnostic, type DiagnosticSink } from './diagnostics.ts';
 import { quotas } from '../../../../packages/domain/src/index.ts';
 import type { ProgressCandidateInput } from '../../../../packages/contracts/src/practice.ts';
+import { noteLayoutSchema } from '../../../../packages/contracts/src/notes.ts';
+import type { AiFragment, LayoutGroup } from '../../../../packages/markdown/src/index.ts';
 import type { Bilingual, Rules, RulePatch, Candidate } from '../../../../packages/contracts/src/recommendations.ts';
 import {
   defaultGeminiFallbackModels,
@@ -25,6 +27,7 @@ import {
   planContentResponseSchema,
   overrideResponseSchema,
   problemSelectionResponseSchema,
+  noteLayoutResponseSchema,
 } from './schemas.ts';
 import { fallbackPlanContent, fallbackOverridePrompt } from './fallbacks.ts';
 import {
@@ -381,6 +384,48 @@ export class LLMAssistant implements ILLMAssistant {
     const run = this.formattingLock.then(() => this.executeFormatWithFallback(trimmed, batchYear));
     this.formattingLock = run.then(() => {}, () => {});
     return run;
+  }
+
+  /** Ask for layout instructions only; caller owns the immutable original fragments. */
+  public async formatNoteMarkdown(fragments: AiFragment[]): Promise<{ groups: LayoutGroup[]; model: string; provider: LLMProviderType }> {
+    const providerType = this.activeProviderType;
+    const active = this.providerConfigs[providerType];
+    if (!active.apiKey?.trim()) throw new LLMError('NOTE_FORMAT_NOT_CONFIGURED', 'Configure an AI provider in Settings', 503, providerType);
+    const config = { ...active, fallbackModels: [...active.fallbackModels] };
+    const generation = this.configurationGeneration;
+    const provider = this.providers[providerType];
+    const operation = { id: randomUUID(), attempt: 0, usages: [] as LLMUsage[] };
+    const deadline = Date.now() + 45_000;
+    const systemInstruction = `You format existing Markdown using layout instructions only. Return JSON with groups in original fragment order. Each fragment ID must appear exactly once. Never output source text, new words, explanations, or extra fields. A protected fragment must use the keep style. Styles: keep, paragraph, heading, bullet_list, ordered_list, quote, code. For heading give one text ID and a level from 1 to 6; do not add level for other styles. For lists each text fragment becomes one item. Use code only for consecutive plain source lines. Preserve the author's history, uncertainty and original sequence. If unsure, use keep.`;
+    const prompt = JSON.stringify({ fragments });
+    for (const model of [config.model, ...config.fallbackModels]) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0 || generation !== this.configurationGeneration) break;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), remaining);
+      try {
+        const result = await this.request(provider, {
+          model, systemInstruction, prompt, responseSchema: noteLayoutResponseSchema,
+          abortSignal: controller.signal, timeoutMs: remaining, maxOutputTokens: 8192,
+          reasoningEffort: resolveModelReasoningEffort(providerType, model, config.reasoningEffort), purpose: 'note_format',
+        }, operation);
+        let parsed: unknown;
+        try { parsed = JSON.parse(result.text ?? ''); }
+        catch { throw new LLMError('NOTE_FORMAT_INVALID_RESPONSE', 'The AI returned an invalid layout', 502, providerType); }
+        const validated = noteLayoutSchema.safeParse(parsed);
+        if (!validated.success) throw new LLMError('NOTE_FORMAT_INVALID_LAYOUT', 'The AI returned an invalid layout', 422, providerType);
+        return { groups: validated.data.groups, model, provider: providerType };
+      } catch (err) {
+        if (err instanceof LLMError) throw err;
+        const error = err instanceof Error ? err : new Error('Provider request failed');
+        if (provider.isFatalAuthError(error)) throw new LLMError('NOTE_FORMAT_AUTH_ERROR', 'AI provider authentication failed', 401, providerType);
+        if (/429|402|quota|balance/i.test(error.message)) throw new LLMError('NOTE_FORMAT_QUOTA', 'AI provider quota was exceeded', 429, providerType);
+        if (controller.signal.aborted || Date.now() >= deadline) throw new LLMError('NOTE_FORMAT_TIMEOUT', 'AI formatting timed out', 504, providerType);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    throw new LLMError('NOTE_FORMAT_UNAVAILABLE', 'AI formatting is unavailable', 503, providerType);
   }
 
   /**

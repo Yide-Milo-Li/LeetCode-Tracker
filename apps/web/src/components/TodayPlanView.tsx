@@ -1,7 +1,19 @@
-import React, { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { RefreshCw, CalendarDays, MoreHorizontal, Coffee, Globe, Sparkles, CheckCircle2, Plus, Target } from 'lucide-react';
+import React, { useEffect, useId, useRef, useState, type CSSProperties } from 'react';
+import {
+  RefreshCw,
+  CalendarDays,
+  MoreHorizontal,
+  Coffee,
+  Globe,
+  CheckCircle2,
+  Plus,
+  Target,
+  AlertTriangle,
+  ChevronDown,
+} from 'lucide-react';
 import { api, type DailyPlan, type PlanItem, type Strategy } from '../api.ts';
-import { translations, type Language } from '../i18n.ts';
+import { localizeApiError } from '../error-i18n.ts';
+import { formatPlanAction, formatPlanSource, translations, type Language } from '../i18n.ts';
 import { PromptOverrideModal } from './PromptOverrideModal.tsx';
 import { useDailyPlan, type UseDailyPlanReturn } from '../hooks/useDailyPlan.ts';
 import { useEncouragement } from '../hooks/useEncouragement.ts';
@@ -61,6 +73,126 @@ interface TodayPlanViewProps {
   onNavigateToSettings: () => void;
   onNavigateToDashboard?: () => void;
   planController?: UseDailyPlanReturn;
+  /** Whether clicking swap or remove on a problem prompts for optional feedback. Defaults to true. */
+  promptSwapFeedback?: boolean;
+}
+
+const FEEDBACK_REASONS: Array<{
+  value: RecommendationFeedbackReason;
+  en: string;
+  zh: string;
+}> = [
+  { value: 'time_unavailable', en: 'Time unavailable', zh: '时间不足' },
+  { value: 'already_familiar', en: 'Already familiar', zh: '已经熟悉' },
+  { value: 'topic_mismatch', en: 'Topic mismatch', zh: '专题不匹配' },
+  { value: 'too_difficult', en: 'Too difficult', zh: '过于困难' },
+  { value: 'other', en: 'Other', zh: '其他' },
+];
+
+/** Optional reason selector shared between swap/remove feedback and completed-item removal dialogs. */
+function FeedbackReasonField({
+  lang,
+  value,
+  onChange,
+  disabled = false,
+}: {
+  lang: Language;
+  value: RecommendationFeedbackReason | '';
+  onChange: (value: RecommendationFeedbackReason | '') => void;
+  disabled?: boolean;
+}) {
+  const zh = lang === 'zh';
+  const selectId = useId();
+  const helpId = `${selectId}-help`;
+
+  return (
+    <div className="form-field">
+      <label htmlFor={selectId}>{zh ? '反馈原因（可选）' : 'Reason (optional)'}</label>
+      <select
+        id={selectId}
+        className="form-input"
+        value={value}
+        disabled={disabled}
+        aria-describedby={helpId}
+        onChange={(event) => onChange(event.target.value as RecommendationFeedbackReason | '')}
+      >
+        <option value="">{zh ? '不提供原因' : 'No reason'}</option>
+        {FEEDBACK_REASONS.map((option) => (
+          <option key={option.value} value={option.value}>
+            {zh ? option.zh : option.en}
+          </option>
+        ))}
+      </select>
+      <small id={helpId} className="text-muted">
+        {zh
+          ? '仅在确认操作时保存；不是练习失败，也不会改变掌握评估。'
+          : 'Optional. Saved only when confirmed; this is not a failed attempt and does not change mastery evidence.'}
+      </small>
+    </div>
+  );
+}
+
+/** Quiet, single-line notice strip for candidate shortages and per-difficulty scheduling notes. */
+function PlanNoticesStrip({ plan, lang }: { plan: DailyPlan; lang: Language }) {
+  const zh = lang === 'zh';
+  const [expanded, setExpanded] = useState(false);
+  const detailsId = useId();
+
+  const shortageCount = Math.max(0, plan.rules.dailyCount - plan.items.length);
+  const noticeTexts = plan.notices.map((notice) => notice[lang] || notice.en).filter(Boolean);
+
+  useEffect(() => {
+    setExpanded(false);
+  }, [plan.id]);
+
+  if (shortageCount === 0 && noticeTexts.length === 0) return null;
+
+  const summaryText =
+    shortageCount > 0
+      ? zh
+        ? `今日计划缺口 ${shortageCount} 题（已生成题目仍可练习）`
+        : `${shortageCount} ${shortageCount === 1 ? 'problem' : 'problems'} short today (generated items ready)`
+      : noticeTexts[0];
+
+  const details = shortageCount > 0 ? noticeTexts : noticeTexts.slice(1);
+  const toggleLabel =
+    shortageCount > 0
+      ? zh
+        ? `详情 (${details.length})`
+        : `Details (${details.length})`
+      : zh
+        ? `其余 ${details.length} 项`
+        : `+${details.length} more`;
+
+  return (
+    <div className="plan-notice-strip" role="status">
+      <div className="plan-notice-row">
+        <div className="plan-notice-summary">
+          <AlertTriangle size={15} className="plan-notice-icon" aria-hidden="true" />
+          <span className="plan-notice-text">{summaryText}</span>
+        </div>
+        {details.length > 0 && (
+          <button
+            type="button"
+            className="plan-notice-toggle"
+            aria-expanded={expanded}
+            aria-controls={detailsId}
+            onClick={() => setExpanded((open) => !open)}
+          >
+            <span>{toggleLabel}</span>
+            <ChevronDown size={14} aria-hidden="true" />
+          </button>
+        )}
+      </div>
+      {expanded && details.length > 0 && (
+        <ul id={detailsId} className="plan-notice-details">
+          {details.map((text, index) => (
+            <li key={index}>{text}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 
@@ -69,6 +201,7 @@ function TodayPlanViewInner({
   lang,
   onNavigateToSettings,
   planController: controller,
+  promptSwapFeedback = true,
 }: TodayPlanViewProps & { planController: UseDailyPlanReturn }) {
   const zh = lang === 'zh';
   const t = translations[lang];
@@ -81,8 +214,10 @@ function TodayPlanViewInner({
   const [saving, setSaving] = useState<Set<string>>(new Set());
   const [recentCompletions, setRecentCompletions] = useState<Set<string>>(new Set());
   const [quickNoteProblem, setQuickNoteProblem] = useState<PlanItem | null>(null);
+  const [pendingAction, setPendingAction] = useState<{ type: 'replace' | 'remove'; item: PlanItem } | null>(null);
+  const [actionReason, setActionReason] = useState<RecommendationFeedbackReason | ''>('');
   const [problemToRemove, setProblemToRemove] = useState<PlanItem | null>(null);
-  const [removalReason, setRemovalReason] = useState<RecommendationFeedbackReason | undefined>();
+  const [removalReason, setRemovalReason] = useState<RecommendationFeedbackReason | ''>('');
   const completionTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
   useEffect(() => {
     const clearFeedback = () => {
@@ -107,7 +242,7 @@ function TodayPlanViewInner({
         if (active) setStrategies(items);
       })
       .catch((err) => {
-        if (active) setLocalError(String(err.message));
+        if (active) setLocalError(localizeApiError(err, lang));
       });
     return () => {
       active = false;
@@ -170,7 +305,7 @@ function TodayPlanViewInner({
       workspace.notifyMutation(record);
       workspace.openPractice({ mode: 'enrich', record, elapsedMinutes });
     } catch (err) {
-      setRowErrors((old) => ({ ...old, [item.id]: err instanceof Error ? err.message : String(err) }));
+      setRowErrors((old) => ({ ...old, [item.id]: localizeApiError(err, lang) }));
     } finally {
       locks.current.delete(item.id);
       setSaving(new Set(locks.current));
@@ -182,16 +317,48 @@ function TodayPlanViewInner({
     try {
       setVersions(await api.getPlanVersions(plan.id));
     } catch (err) {
-      setLocalError(String((err as Error).message));
+      setLocalError(localizeApiError(err, lang));
+    }
+  }
+
+  /** Execute uncompleted problem removal directly and notify workspace observers. */
+  async function executeRemoveUncompleted(target: PlanItem, reason?: RecommendationFeedbackReason) {
+    try {
+      await controller.removeOne(target, reason);
+      workspace.notifyMutation();
+    } catch (err) {
+      setRowErrors((old) => ({
+        ...old,
+        [target.id]: localizeApiError(err, lang),
+      }));
     }
   }
 
   /**
-   * Handle problem removal.
-   * Uncompleted problems are removed immediately with single click (no dialog).
-   * Completed problems prompt a confirmation dialog since removal cascades to revoking practice records.
+   * Handle single-problem replacement.
+   * When swap feedback prompting is enabled, opens an optional reason modal before replacing.
    */
-  async function handleRemoveItem(target: PlanItem, reason?: RecommendationFeedbackReason) {
+  function handleReplaceClick(target: PlanItem, explicitReason?: RecommendationFeedbackReason) {
+    if (
+      controller.appending ||
+      controller.isPlanMutationPending() ||
+      saving.size > 0
+    ) return;
+    if (explicitReason !== undefined || !promptSwapFeedback) {
+      void controller.replaceOne(target, explicitReason);
+      return;
+    }
+    setActionReason('');
+    setPendingAction({ type: 'replace', item: target });
+  }
+
+  /**
+   * Handle problem removal.
+   * Completed problems always require confirmation (removal revokes practice records); when enabled,
+   * the optional feedback selector is embedded in that confirmation dialog to avoid double modals.
+   * Uncompleted problems prompt for optional feedback when enabled, or remove immediately when disabled.
+   */
+  async function handleRemoveItem(target: PlanItem, explicitReason?: RecommendationFeedbackReason) {
     if (
       !plan ||
       controller.appending ||
@@ -201,36 +368,49 @@ function TodayPlanViewInner({
     ) return;
 
     if (target.completed) {
-      setRemovalReason(reason);
+      setRemovalReason(explicitReason ?? '');
       setProblemToRemove(target);
       return;
     }
 
-    try {
-      await controller.removeOne(target, reason);
-      workspace.notifyMutation();
-    } catch (err) {
-      setRowErrors((old) => ({
-        ...old,
-        [target.id]: err instanceof Error ? err.message : String(err),
-      }));
+    if (explicitReason !== undefined || !promptSwapFeedback) {
+      await executeRemoveUncompleted(target, explicitReason);
+      return;
+    }
+
+    setActionReason('');
+    setPendingAction({ type: 'remove', item: target });
+  }
+
+  function confirmPendingAction() {
+    if (!pendingAction) return;
+    const { type, item } = pendingAction;
+    const reason = actionReason || undefined;
+    setPendingAction(null);
+    setActionReason('');
+    if (type === 'replace') {
+      void controller.replaceOne(item, reason);
+    } else {
+      void executeRemoveUncompleted(item, reason);
     }
   }
 
   async function confirmRemoveCompleted() {
     if (!problemToRemove) return;
     const target = problemToRemove;
+    const reason = removalReason || undefined;
     try {
-      await controller.removeOne(target, removalReason);
+      await controller.removeOne(target, reason);
       workspace.notifyMutation();
       setProblemToRemove(null);
-      setRemovalReason(undefined);
+      setRemovalReason('');
     } catch (err) {
       setRowErrors((old) => ({
         ...old,
-        [target.id]: err instanceof Error ? err.message : String(err),
+        [target.id]: localizeApiError(err, lang),
       }));
       setProblemToRemove(null);
+      setRemovalReason('');
     }
   }
   return (
@@ -559,33 +739,15 @@ function TodayPlanViewInner({
 
             <TodayRecentOverview lang={lang} embedded={true} />
           </section>
-          {plan.timeEstimate && <section className="form-group" aria-label={zh ? '计划用时估计' : 'Plan effort estimate'}>
-            <p>{zh ? '预计用时 ' : 'Estimated effort '}{plan.timeEstimate.totalMinutes}{zh ? ' 分钟：新题 ' : ' min: new '}{plan.timeEstimate.newMinutes}{zh ? '，复习 ' : ', review '}{plan.timeEstimate.reviewMinutes}{zh ? '。仅为估计。' : '. Estimates only.'}</p>
-            {!plan.timeEstimate.feasible && <Feedback tone="warning">
-              <p>{zh ? '预计用时超出预算，题数与难度保持不变。' : 'The estimate exceeds your budget. Counts and difficulty remain unchanged.'}</p>
-              <button type="button" className="btn btn-secondary" disabled={controller.isPlanMutationPending()} onClick={() => setOverride(true)}>{zh ? '明确调整题数或预算' : 'Adjust count or budget'}</button>
-            </Feedback>}
-          </section>}
-          {plan.items.length < plan.rules.dailyCount && (
-            <Feedback tone="warning">
-              {zh ? '候选题目不足，缺口 ' : 'Not enough eligible candidates. Short by '}
-              {plan.rules.dailyCount - plan.items.length}
-              {zh ? ' 题。已生成题目仍可练习。' : ' problems. The generated plan is ready to use.'}
-            </Feedback>
+          {plan.timeEstimate && !plan.timeEstimate.feasible && (
+            <section className="form-group" aria-label={zh ? '计划用时估计' : 'Plan effort estimate'}>
+              <Feedback tone="warning">
+                <p>{zh ? '预计用时超出预算，题数与难度保持不变。' : 'The estimate exceeds your budget. Counts and difficulty remain unchanged.'}</p>
+                <button type="button" className="btn btn-secondary" disabled={controller.isPlanMutationPending()} onClick={() => setOverride(true)}>{zh ? '明确调整题数或预算' : 'Adjust count or budget'}</button>
+              </Feedback>
+            </section>
           )}
-          {plan.notices.length > 0 && (
-            <Feedback tone="warning">
-              {plan.notices.length === 1 ? (
-                plan.notices[0][lang] || plan.notices[0].en
-              ) : (
-                <ul>
-                  {plan.notices.map((notice, index) => (
-                    <li key={index}>{notice[lang] || notice.en}</li>
-                  ))}
-                </ul>
-              )}
-            </Feedback>
-          )}
+          <PlanNoticesStrip plan={plan} lang={lang} />
           <div className="today-problems">
             {plan.items.map((item) => (
               <TodayProblemRow
@@ -601,14 +763,7 @@ function TodayPlanViewInner({
                 canRemove={true}
                 isRemoving={controller.removingItemId === item.id}
                 onComplete={(target) => void complete(target)}
-                onReplaceOne={(target, reason) => {
-                  if (
-                    controller.appending ||
-                    controller.isPlanMutationPending() ||
-                    saving.size > 0
-                  ) return;
-                  void controller.replaceOne(target, reason);
-                }}
+                onReplaceOne={(target, reason) => handleReplaceClick(target, reason)}
                 onRemove={(target, reason) => void handleRemoveItem(target, reason)}
                 onOpenQuickNote={(target) => setQuickNoteProblem(target)}
               />
@@ -629,9 +784,12 @@ function TodayPlanViewInner({
         <Dialog title={t.planVersions} lang={lang} onClose={() => setVersions(null)} drawer>
           {versions.map((version) => (
             <article className="version-card" key={version.version}>
-              <p className="muted">{version.source} · {version.model ?? 'Local'} · {zh ? '策略版本' : 'Strategy version'} {version.strategyVersion ?? '—'}</p>
+              <p className="muted">
+                {formatPlanSource(version.source, lang)} · {version.model ?? (zh ? '本地' : 'Local')} ·{' '}
+                {zh ? '策略版本' : 'Strategy version'} {version.strategyVersion ?? '—'}
+              </p>
               <h3>
-                v{version.version} · {version.action}
+                v{version.version} · {formatPlanAction(version.action, lang)}
               </h3>
               <p className="muted">
                 {new Date(version.updatedAt).toLocaleString(zh ? 'zh-CN' : 'en-US', {
@@ -678,21 +836,88 @@ function TodayPlanViewInner({
           workspace.notifyMutation();
         }}
       />
+      {pendingAction && (
+        <Dialog
+          title={
+            pendingAction.type === 'replace'
+              ? zh
+                ? '换一题'
+                : 'Swap problem'
+              : zh
+                ? '移除题目'
+                : 'Remove problem'
+          }
+          onClose={() => {
+            setPendingAction(null);
+            setActionReason('');
+          }}
+          lang={lang}
+          footer={
+            <div className="action-dialog-footer">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => {
+                  setPendingAction(null);
+                  setActionReason('');
+                }}
+              >
+                {t.cancel}
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={confirmPendingAction}
+              >
+                {pendingAction.type === 'replace'
+                  ? zh
+                    ? '确认换题'
+                    : 'Confirm swap'
+                  : zh
+                    ? '确认移除'
+                    : 'Confirm removal'}
+              </button>
+            </div>
+          }
+        >
+          <div className="action-dialog-body">
+            <div className="action-dialog-problem">
+              <strong>
+                {pendingAction.item.problem.questionFrontendId}. {pendingAction.item.problem.title}
+              </strong>
+            </div>
+            <FeedbackReasonField
+              lang={lang}
+              value={actionReason}
+              onChange={setActionReason}
+            />
+          </div>
+        </Dialog>
+      )}
       {problemToRemove && (
         <Dialog
           title={t.confirmRemoveCompletedTitle}
-          onClose={() => setProblemToRemove(null)}
+          onClose={() => {
+            setProblemToRemove(null);
+            setRemovalReason('');
+          }}
           lang={lang}
+          closeDisabled={Boolean(controller.removingItemId)}
           footer={
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+            <div className="action-dialog-footer">
               <button
+                type="button"
                 className="btn btn-secondary"
-                onClick={() => setProblemToRemove(null)}
+                onClick={() => {
+                  setProblemToRemove(null);
+                  setRemovalReason('');
+                }}
                 disabled={Boolean(controller.removingItemId)}
               >
                 {t.cancel}
               </button>
               <button
+                type="button"
                 className="btn btn-danger"
                 onClick={() => void confirmRemoveCompleted()}
                 disabled={Boolean(controller.removingItemId)}
@@ -706,13 +931,19 @@ function TodayPlanViewInner({
             </div>
           }
         >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <p style={{ margin: 0, fontSize: '14px', lineHeight: '1.5' }}>
-              {t.confirmRemoveCompletedMessage}
-            </p>
-            <div style={{ padding: '10px 14px', borderRadius: '8px', background: 'var(--muted-surface)', fontSize: '13px', color: 'var(--text-muted)' }}>
+          <div className="action-dialog-body">
+            <p className="action-dialog-message">{t.confirmRemoveCompletedMessage}</p>
+            <div className="action-dialog-problem">
               <strong>{problemToRemove.problem.questionFrontendId}. {problemToRemove.problem.title}</strong>
             </div>
+            {promptSwapFeedback && (
+              <FeedbackReasonField
+                lang={lang}
+                value={removalReason}
+                onChange={setRemovalReason}
+                disabled={Boolean(controller.removingItemId)}
+              />
+            )}
           </div>
         </Dialog>
       )}
@@ -722,7 +953,7 @@ function TodayPlanViewInner({
 
 /** Standalone tests may supply no controller; the application always injects its single shared instance. */
 function TodayStandalone(props: TodayPlanViewProps) {
-  const controller = useDailyPlan();
+  const controller = useDailyPlan(props.lang);
   return <TodayPlanViewInner {...props} planController={controller} />;
 }
 /** Render Today without remounting the application-level plan lifecycle. */

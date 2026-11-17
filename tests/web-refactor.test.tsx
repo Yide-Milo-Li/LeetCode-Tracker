@@ -784,3 +784,57 @@ it('unified record edit recovers a time correction after closing a failed save',
   fireEvent.click(screen.getByRole('button', { name: 'Edit record' }));
   assert.equal(screen.getByRole('button', { name: /Change completion or time/ }).getAttribute('aria-expanded'), 'false', 'A saved recovery draft must not replay on the next edit');
 });
+
+for (const mode of ['pending', 'rejected'] as const) {
+  it(`App skips note formatting when initial settings request is ${mode}`, async () => {
+    location.hash = 'notes';
+    const pendingSettings = deferred<typeof preferences & { notesFormatOnSave: boolean }>();
+    mock.method(api, 'getSettings', () =>
+      mode === 'pending' ? pendingSettings.promise : Promise.reject(new Error('Settings unavailable')),
+    );
+    mock.method(api, 'listNotes', async () => ({
+      items: [{
+        questionId: problem.questionId,
+        questionFrontendId: problem.questionFrontendId,
+        title: problem.title,
+        titleSlug: problem.titleSlug,
+        url: problem.url,
+        difficulty: problem.difficulty,
+        tags: ['Array'],
+        totalPractices: 1,
+        hasAccepted: true,
+        hasCustomNote: true,
+        customNoteUpdatedAt: 1,
+        lastPracticedAt: null,
+        reviewStage: null,
+        latestPracticeNotes: null,
+      }],
+      total: 1,
+    }));
+    mock.method(api, 'getNote', async (id: string) => ({
+      note: { questionId: id, questionFrontendId: id, content: 'initial note', updatedAt: 1 },
+    }));
+    const save = mock.method(api, 'upsertNote', async (id: string, content: string) => ({
+      note: { questionId: id, questionFrontendId: id, content, updatedAt: 2 },
+    }));
+    let workers = 0;
+    const previousWorker = globalThis.Worker;
+    Object.assign(globalThis, { Worker: class { constructor() { workers++; } } });
+    try {
+      await act(async () => { render(<App />); });
+      const editor = await screen.findByPlaceholderText(/write your comprehensive solution/i) as HTMLTextAreaElement;
+      await act(async () => { fireEvent.change(editor, { target: { value: '* raw markdown' } }); });
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: /save note/i })); });
+      assert.equal(workers, 0);
+      assert.equal(save.mock.callCount(), 1);
+      assert.deepEqual(save.mock.calls[0].arguments, [problem.questionFrontendId, '* raw markdown']);
+      if (mode === 'pending') {
+        await act(async () => { pendingSettings.resolve({ ...preferences, notesFormatOnSave: false }); });
+        assert.equal(editor.value, '* raw markdown');
+      }
+    } finally {
+      if (previousWorker) Object.assign(globalThis, { Worker: previousWorker });
+      else Reflect.deleteProperty(globalThis, 'Worker');
+    }
+  });
+}

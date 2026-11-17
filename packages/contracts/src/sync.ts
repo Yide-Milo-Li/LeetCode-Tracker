@@ -437,6 +437,8 @@ export type LLMProvider = z.infer<typeof llmProviderSchema>;
 /** Persisted user preference settings. */
 export const userSettingsSchema = z.object({
   language: z.enum(['en', 'zh']),
+  notesFormatOnSave: z.boolean().optional(),
+  promptSwapFeedback: z.boolean().optional(),
   theme: z.enum(['light', 'dark', 'system']),
   palette: themePaletteSchema.default('default').optional(),
   timezone: z.string().max(100).nullable().default(null),
@@ -488,6 +490,8 @@ function hasUniqueFallbacks(
 /** Input schema for updating user preference settings. */
 export const updateSettingsInputSchema = z.object({
   language: z.enum(['en', 'zh']).optional(),
+  notesFormatOnSave: z.boolean().optional(),
+  promptSwapFeedback: z.boolean().optional(),
   theme: z.enum(['light', 'dark', 'system']).optional(),
   palette: themePaletteSchema.optional(),
   timezone: timeZoneSchema.nullable().optional(),
@@ -508,6 +512,8 @@ export const updateSettingsInputSchema = z.object({
   deepseekReasoningEffort: z.string().max(32).nullable().optional(),
 }).refine(data =>
   data.language !== undefined ||
+  data.notesFormatOnSave !== undefined ||
+  data.promptSwapFeedback !== undefined ||
   data.theme !== undefined ||
   data.palette !== undefined ||
   data.timezone !== undefined ||

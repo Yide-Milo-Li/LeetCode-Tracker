@@ -6,6 +6,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Plus, CheckCircle2, AlertCircle, Clock, ChevronDown } from 'lucide-react';
 import { api, type Strategy, type StrategyInput, type TopicTag, type TagMastery } from '../api.ts';
+import { localizeApiError } from '../error-i18n.ts';
 import { translations, type Language } from '../i18n.ts';
 import { Dialog } from './ui.tsx';
 import { useWorkspace } from '../workspace.tsx';
@@ -75,9 +76,15 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
       setStrategies(strats);
       setSchedule(sched);
       setAllTags(tagsRes.tags);
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (sequence === loadSequence.current)
-        setError(err.message || 'Failed to load strategies and schedule.');
+        setError(
+          localizeApiError(
+            err,
+            lang,
+            lang === 'zh' ? '加载策略与学习安排失败。' : 'Failed to load strategies and schedule.',
+          ),
+        );
     } finally {
       if (sequence === loadSequence.current) setLoading(false);
     }
@@ -234,8 +241,10 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
       setModalOpen(false);
       workspace.notifyMutation();
       await loadData();
-    } catch (err: any) {
-      setError(err.message || 'Failed to save strategy.');
+    } catch (err: unknown) {
+      setError(
+        localizeApiError(err, lang, lang === 'zh' ? '保存策略失败。' : 'Failed to save strategy.'),
+      );
     } finally {
       setSaving(false);
     }
@@ -248,8 +257,10 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
       await api.deleteStrategy(s.id, s.version);
       workspace.notifyMutation();
       await loadData();
-    } catch (err: any) {
-      setError(err.message || 'Failed to delete strategy.');
+    } catch (err: unknown) {
+      setError(
+        localizeApiError(err, lang, lang === 'zh' ? '删除策略失败。' : 'Failed to delete strategy.'),
+      );
     }
   }
 
@@ -375,7 +386,7 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
                     className="form-input"
                     min="1"
                     max="50"
-                    placeholder="e.g. 3"
+                    placeholder={lang === 'zh' ? '例如：3' : 'e.g. 3'}
                     aria-label={t.dailyCount}
                     value={dailyCount}
                     step="1"
@@ -585,7 +596,7 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
             </button>
             <button className="btn btn-primary" onClick={handleSave} disabled={saving || !isFormValid}>
               <CheckCircle2 size={16} />
-              {saving ? 'Saving...' : t.saveStrategy}
+              {saving ? t.saving : t.saveStrategy}
             </button>
           </div>
         </Dialog>

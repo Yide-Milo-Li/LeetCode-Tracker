@@ -4,7 +4,7 @@
  * - QuickCopyButtons (Obsidian callout and Notion rich card clipboard copies)
  * - QuickNoteDrawer (review problem inspection, jump to workspace)
  */
-import { afterEach, it, describe, mock } from 'node:test';
+import { afterEach, beforeEach, it, describe, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import type { PlanItem } from '../apps/web/src/api.ts';
@@ -46,6 +46,10 @@ const { NotesWorkspace } = await import('../apps/web/src/components/NotesWorkspa
 const { QuickCopyButtons } = await import('../apps/web/src/components/QuickCopyButtons.tsx');
 const { QuickNoteDrawer } = await import('../apps/web/src/components/QuickNoteDrawer.tsx');
 const { TodayProblemRow } = await import('../apps/web/src/components/TodayProblemRow.tsx');
+
+beforeEach(() => {
+  mock.method(api, 'getSettings', async () => ({ language: 'en', theme: 'light', timezone: null, updatedAt: 0 }));
+});
 
 afterEach(() => {
   cleanup();
@@ -179,6 +183,267 @@ describe('NotesWorkspace request ownership', () => {
     await act(async () => { pending.resolve({ note: editorNote('1', 'sent draft') }); });
     assert.equal(list.mock.callCount(), listCallsBeforeUnmount);
     assert.equal(save.mock.callCount(), 1);
+  });
+});
+
+describe('Notes formatting', () => {
+  it('preserves the original draft when formatting preferences cannot be loaded', async () => {
+    mockEditorProblems();
+    mock.method(api, 'getSettings', async () => { throw new Error('Settings unavailable'); });
+    const save = mock.method(api, 'upsertNote', async (id: string, content: string) => ({ note: editorNote(id, content) }));
+    let workers = 0;
+    const previousWorker = globalThis.Worker;
+    Object.assign(globalThis, { Worker: class { constructor() { workers++; } } });
+    try {
+      await act(async () => { render(<NotesWorkspace lang="en" />); });
+      await act(async () => { fireEvent.change(noteEditor(), { target: { value: '* original draft' } }); });
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: /save note/i })); });
+      assert.equal(workers, 0);
+      assert.equal(save.mock.calls[0].arguments[1], '* original draft');
+    } finally {
+      if (previousWorker) Object.assign(globalThis, { Worker: previousWorker });
+      else Reflect.deleteProperty(globalThis, 'Worker');
+    }
+  });
+
+  it('saves the captured formatted snapshot while retaining edits made during worker execution', async () => {
+    mockEditorProblems();
+    const save = mock.method(api, 'upsertNote', async (id: string, content: string) => ({ note: editorNote(id, content) }));
+    const ai = mock.method(api, 'formatNote', async () => { throw new Error('Must not call AI on save'); });
+    let worker: { onmessage: ((event: { data: unknown }) => void) | null; source: string } | undefined;
+    const previousWorker = globalThis.Worker;
+    class MockWorker {
+      onmessage: ((event: { data: unknown }) => void) | null = null;
+      onerror: (() => void) | null = null;
+      source = '';
+      constructor() { worker = this; }
+      postMessage(source: string) { this.source = source; }
+      terminate() {}
+    }
+    Object.assign(globalThis, { Worker: MockWorker });
+    try {
+      await act(async () => { render(<NotesWorkspace lang="en" />); });
+      await act(async () => { fireEvent.change(noteEditor(), { target: { value: '* old draft' } }); });
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: /save note/i })); });
+      assert.equal(save.mock.callCount(), 0);
+      assert.equal(worker?.source, '* old draft');
+      await act(async () => { fireEvent.change(noteEditor(), { target: { value: 'newer draft' } }); });
+      await act(async () => { worker?.onmessage?.({ data: { content: '- old draft\n', status: 'formatted' } }); });
+      assert.equal(save.mock.callCount(), 1);
+      assert.equal(save.mock.calls[0].arguments[1], '- old draft\n');
+      assert.equal(noteEditor().value, 'newer draft');
+      assert.equal(ai.mock.callCount(), 0);
+    } finally {
+      if (previousWorker) Object.assign(globalThis, { Worker: previousWorker });
+      else Reflect.deleteProperty(globalThis, 'Worker');
+    }
+  });
+
+  it('protects newer edits when switching problems during a pending save', async () => {
+    mockEditorProblems();
+    const pending = deferred<{ note: ReturnType<typeof editorNote> }>();
+    mock.method(api, 'upsertNote', () => pending.promise);
+    await act(async () => { render(<NotesWorkspace lang="en" />); });
+    await act(async () => { fireEvent.change(noteEditor(), { target: { value: 'captured draft' } }); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /save note/i })); });
+    await act(async () => { fireEvent.change(noteEditor(), { target: { value: 'newer draft' } }); });
+    await act(async () => { fireEvent.click(screen.getByText('Problem B')); });
+    assert.ok(screen.getByRole('dialog'));
+    assert.equal(noteEditor().value, 'newer draft');
+    await act(async () => { pending.resolve({ note: editorNote('1', 'captured draft') }); });
+    assert.equal(noteEditor().value, 'newer draft');
+  });
+
+  it('prevents a stale formatting worker from overwriting a newer save after switching A -> B -> A', async () => {
+    mockEditorProblems();
+    const save = mock.method(api, 'upsertNote', async (id: string, content: string) => ({ note: editorNote(id, content) }));
+    const workers: Array<{ onmessage: ((event: { data: unknown }) => void) | null; source: string }> = [];
+    const previousWorker = globalThis.Worker;
+    class MockWorker {
+      onmessage: ((event: { data: unknown }) => void) | null = null;
+      onerror: (() => void) | null = null;
+      source = '';
+      constructor() { workers.push(this); }
+      postMessage(source: string) { this.source = source; }
+      terminate() {}
+    }
+    Object.assign(globalThis, { Worker: MockWorker });
+    try {
+      await act(async () => { render(<NotesWorkspace lang="en" />); });
+      await act(async () => { fireEvent.change(noteEditor(), { target: { value: '* old draft' } }); });
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: /save note/i })); });
+      assert.equal(workers.length, 1);
+      assert.equal(workers[0].source, '* old draft');
+
+      await act(async () => { fireEvent.click(screen.getByText('Problem B')); });
+      await act(async () => { fireEvent.click(screen.getByText('Problem A')); });
+      await act(async () => { fireEvent.change(noteEditor(), { target: { value: '* new draft' } }); });
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: /save note/i })); });
+      assert.equal(workers.length, 2);
+      assert.equal(workers[1].source, '* new draft');
+
+      await act(async () => { workers[1].onmessage?.({ data: { content: '- new draft\n', status: 'formatted' } }); });
+      assert.equal(save.mock.callCount(), 1);
+      assert.deepEqual(save.mock.calls[0].arguments, ['1', '- new draft\n']);
+      assert.equal(noteEditor().value, '- new draft\n');
+      assert.equal((screen.getByRole('button', { name: /save note/i }) as HTMLButtonElement).disabled, true);
+
+      await act(async () => { workers[0].onmessage?.({ data: { content: '- old draft\n', status: 'formatted' } }); });
+      assert.equal(save.mock.callCount(), 1);
+      assert.equal(noteEditor().value, '- new draft\n');
+      assert.equal((screen.getByRole('button', { name: /save note/i }) as HTMLButtonElement).disabled, true);
+    } finally {
+      if (previousWorker) Object.assign(globalThis, { Worker: previousWorker });
+      else Reflect.deleteProperty(globalThis, 'Worker');
+    }
+  });
+
+  it('serializes per-problem writes across visits so an earlier in-flight save finishes before the next', async () => {
+    mockEditorProblems();
+    const first = deferred<{ note: ReturnType<typeof editorNote> }>();
+    const second = deferred<{ note: ReturnType<typeof editorNote> }>();
+    const save = mock.method(api, 'upsertNote', (_id: string, content: string) =>
+      content === 'first version' ? first.promise : second.promise,
+    );
+    await act(async () => { render(<NotesWorkspace lang="en" notesFormatOnSave={false} />); });
+
+    await act(async () => { fireEvent.change(noteEditor(), { target: { value: 'first version' } }); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /save note/i })); });
+    assert.equal(save.mock.callCount(), 1);
+
+    await act(async () => { fireEvent.click(screen.getByText('Problem B')); });
+    await act(async () => { fireEvent.click(screen.getByText('Problem A')); });
+    await act(async () => { fireEvent.change(noteEditor(), { target: { value: 'second version' } }); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /save note/i })); });
+    assert.equal(save.mock.callCount(), 1, 'Second write for the same problem must wait until first settles');
+
+    await act(async () => { first.resolve({ note: editorNote('1', 'first version') }); });
+    assert.equal(save.mock.callCount(), 2);
+    assert.deepEqual(save.mock.calls.map((call) => call.arguments), [
+      ['1', 'first version'],
+      ['1', 'second version'],
+    ]);
+
+    await act(async () => { second.resolve({ note: editorNote('1', 'second version') }); });
+    assert.equal(noteEditor().value, 'second version');
+    assert.equal((screen.getByRole('button', { name: /save note/i }) as HTMLButtonElement).disabled, true);
+  });
+
+  it('skips formatting while format-on-save preference is pending or controlled null', async () => {
+    mockEditorProblems();
+    const pendingSettings = deferred<{ language: 'en'; theme: 'light'; timezone: null; notesFormatOnSave: boolean; updatedAt: number }>();
+    mock.method(api, 'getSettings', () => pendingSettings.promise);
+    const save = mock.method(api, 'upsertNote', async (id: string, content: string) => ({ note: editorNote(id, content) }));
+    let workers = 0;
+    const previousWorker = globalThis.Worker;
+    Object.assign(globalThis, { Worker: class { constructor() { workers++; } } });
+    try {
+      await act(async () => { render(<NotesWorkspace lang="en" />); });
+      await act(async () => { fireEvent.change(noteEditor(), { target: { value: '* raw pending' } }); });
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: /save note/i })); });
+      assert.equal(workers, 0);
+      assert.equal(save.mock.calls[0].arguments[1], '* raw pending');
+      await act(async () => {
+        pendingSettings.resolve({ language: 'en', theme: 'light', timezone: null, notesFormatOnSave: false, updatedAt: 0 });
+      });
+      assert.equal(noteEditor().value, '* raw pending');
+
+      cleanup();
+      await act(async () => { render(<NotesWorkspace lang="en" notesFormatOnSave={null} />); });
+      await act(async () => { fireEvent.change(noteEditor(), { target: { value: '* raw null' } }); });
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: /save note/i })); });
+      assert.equal(workers, 0);
+      assert.equal(save.mock.calls[1].arguments[1], '* raw null');
+    } finally {
+      if (previousWorker) Object.assign(globalThis, { Worker: previousWorker });
+      else Reflect.deleteProperty(globalThis, 'Worker');
+    }
+  });
+
+  it('undoes an automatic format and saves the restored draft without formatting it again', async () => {
+    mockEditorProblems();
+    const save = mock.method(api, 'upsertNote', async (id: string, content: string) => ({ note: editorNote(id, content) }));
+    const previousWorker = globalThis.Worker;
+    let workerCount = 0;
+    class MockWorker {
+      onmessage: ((event: { data: unknown }) => void) | null = null;
+      onerror: (() => void) | null = null;
+      constructor() { workerCount++; }
+      postMessage() { queueMicrotask(() => this.onmessage?.({ data: { content: '- first\n', status: 'formatted' } })); }
+      terminate() {}
+    }
+    Object.assign(globalThis, { Worker: MockWorker });
+    try {
+      await act(async () => { render(<NotesWorkspace lang="en" />); });
+      await act(async () => { fireEvent.change(noteEditor(), { target: { value: '* first' } }); });
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: /save note/i })); });
+      assert.equal(noteEditor().value, '- first\n');
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: /undo formatting/i })); });
+      assert.equal(noteEditor().value, '* first');
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: /save note/i })); });
+      assert.equal(workerCount, 1);
+      assert.deepEqual(save.mock.calls.map(call => call.arguments[1]), ['- first\n', '* first']);
+    } finally {
+      if (previousWorker) Object.assign(globalThis, { Worker: previousWorker });
+      else Reflect.deleteProperty(globalThis, 'Worker');
+    }
+  });
+
+  it('reviews AI output before applying to the draft and can undo without writing a note', async () => {
+    mockEditorProblems();
+    const save = mock.method(api, 'upsertNote', async (id: string, content: string) => ({ note: editorNote(id, content) }));
+    mock.method(api, 'getNoteFormatStatus', async () => ({ configured: true, provider: 'gemini', model: 'mock' }));
+    const source = 'Title\nThought';
+    mock.method(api, 'formatNote', async () => ({ content: '## Title\n\nThought\n', range: { start: 0, end: source.length }, model: 'mock' }));
+    await act(async () => { render(<NotesWorkspace lang="en" />); });
+    await act(async () => { fireEvent.change(noteEditor(), { target: { value: source } }); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /AI format/i })); });
+    await act(async () => { fireEvent.click(await screen.findByRole('button', { name: /generate suggestion/i })); });
+    assert.equal(noteEditor().value, source);
+    assert.ok(await screen.findByText('Suggested format'));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /apply to draft/i })); });
+    assert.equal(noteEditor().value, '## Title\n\nThought\n');
+    assert.equal(save.mock.callCount(), 0);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /undo formatting/i })); });
+    assert.equal(noteEditor().value, source);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /save note/i })); });
+    assert.equal(save.mock.calls[0].arguments[1], source);
+  });
+
+  it('discards an AI response when the draft changed while it was pending', async () => {
+    mockEditorProblems();
+    mock.method(api, 'getNoteFormatStatus', async () => ({ configured: true, provider: 'gemini', model: 'mock' }));
+    const pending = deferred<{ content: string; range: { start: number; end: number }; model: string }>();
+    mock.method(api, 'formatNote', () => pending.promise);
+    const source = 'Title\nThought';
+    await act(async () => { render(<NotesWorkspace lang="en" />); });
+    await act(async () => { fireEvent.change(noteEditor(), { target: { value: source } }); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /AI format/i })); });
+    await act(async () => { fireEvent.click(await screen.findByRole('button', { name: /generate suggestion/i })); });
+    await act(async () => { fireEvent.change(noteEditor(), { target: { value: 'newer text' } }); });
+    await act(async () => { pending.resolve({ content: '## Title\n\nThought\n', range: { start: 0, end: source.length }, model: 'mock' }); });
+    assert.equal(noteEditor().value, 'newer text');
+    assert.ok(screen.getByText(/draft changed/i));
+    assert.equal(screen.queryByRole('button', { name: /apply to draft/i }), null);
+  });
+
+  it('renders GFM without executing HTML or fetching embedded images', async () => {
+    mockEditorProblems();
+    await act(async () => { render(<NotesWorkspace lang="en" />); });
+    const source = '| A | B |\n| - | - |\n| 1 | 2 |\n\n![Remote](https://example.com/image.png)\n\n[unsafe](javascript:alert(1)) [mail](mailto:test@example.com) [safe](https://github.com/example)\n\nFootnote[^1]\n\n[^1]: Explanation\n\n<script>alert(1)</script>';
+    await act(async () => { fireEvent.change(noteEditor(), { target: { value: source } }); });
+    assert.ok(screen.getByRole('table'));
+    assert.equal(document.querySelector('.notes-preview-pane img'), null);
+    assert.equal(document.querySelector('.notes-preview-pane script'), null);
+    assert.ok(document.querySelector('.notes-image-placeholder')?.textContent?.includes('Remote'));
+    assert.equal(document.querySelector('.notes-preview-pane a[href^="javascript:"]'), null);
+    assert.equal(document.querySelector('.notes-preview-pane a[href^="mailto:"]'), null);
+    assert.ok(document.querySelector('.notes-preview-pane a[href="https://github.com/example"]'));
+    const noteLink = document.querySelector('.notes-preview-pane a[data-footnote-ref]');
+    assert.ok(noteLink);
+    const originalHash = window.location.hash;
+    fireEvent.click(noteLink);
+    assert.equal(window.location.hash, originalHash, 'footnote links must not navigate the application router');
   });
 });
 
@@ -601,7 +866,7 @@ describe('NotesWorkspace Component', () => {
       assert.equal(saveBtnEn.textContent?.includes('(Ctrl+S)'), false);
 
       const zenButtonsEn = screen.getAllByRole('button', { name: /zen/i });
-      assert.equal(zenButtonsEn.length, 2);
+      assert.equal(zenButtonsEn.length, 1);
       for (const btn of zenButtonsEn) {
         assert.equal(btn.getAttribute('title'), 'Zen Mode Shortcut (⌘\\)');
       }
@@ -615,7 +880,7 @@ describe('NotesWorkspace Component', () => {
       assert.equal(saveBtnZh.textContent?.includes('(Ctrl+S)'), false);
 
       const zenButtonsZh = screen.getAllByRole('button', { name: /专注模式|专注/i });
-      assert.equal(zenButtonsZh.length, 2);
+      assert.equal(zenButtonsZh.length, 1);
       for (const btn of zenButtonsZh) {
         assert.equal(btn.getAttribute('title'), '专注模式快捷键 (⌘\\)');
       }
@@ -633,7 +898,7 @@ describe('NotesWorkspace Component', () => {
       assert.equal(saveBtnWin.textContent?.includes('(⌘S)'), false);
 
       const zenButtonsWin = screen.getAllByRole('button', { name: /zen/i });
-      assert.equal(zenButtonsWin.length, 2);
+      assert.equal(zenButtonsWin.length, 1);
       for (const btn of zenButtonsWin) {
         assert.equal(btn.getAttribute('title'), 'Zen Mode Shortcut (Ctrl+\\)');
       }
@@ -1171,5 +1436,37 @@ describe('TodayProblemRow note entry consolidation', () => {
     assert.equal(screen.queryByText('复习'), null);
     assert.equal(screen.queryByText('Review'), null);
     assert.equal(screen.getAllByRole('button', { name: '笔记' }).length, 1);
+  });
+
+  it('places AI format beside Save note, removes inline format-on-save toggle, and respects controlled notesFormatOnSave', async () => {
+    mockEditorProblems();
+    const save = mock.method(api, 'upsertNote', async (id: string, content: string) => ({ note: editorNote(id, content) }));
+    let workers = 0;
+    const previousWorker = globalThis.Worker;
+    Object.assign(globalThis, { Worker: class { constructor() { workers++; } } });
+    try {
+      await act(async () => {
+        render(<NotesWorkspace lang="en" notesFormatOnSave={false} />);
+      });
+
+      assert.equal(screen.queryByRole('checkbox', { name: /format on save/i }), null);
+      assert.equal(document.querySelector('.notes-format-controls'), null);
+
+      const saveBtn = screen.getByRole('button', { name: /save note/i });
+      const aiFormatBtn = screen.getByRole('button', { name: /AI format/i });
+      assert.equal(saveBtn.parentElement, aiFormatBtn.parentElement);
+
+      await act(async () => {
+        fireEvent.change(noteEditor(), { target: { value: '* raw draft' } });
+      });
+      await act(async () => {
+        fireEvent.click(saveBtn);
+      });
+      assert.equal(workers, 0);
+      assert.equal(save.mock.calls[0].arguments[1], '* raw draft');
+    } finally {
+      if (previousWorker) Object.assign(globalThis, { Worker: previousWorker });
+      else Reflect.deleteProperty(globalThis, 'Worker');
+    }
   });
 });

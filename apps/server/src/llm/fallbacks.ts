@@ -26,8 +26,26 @@ export function fallbackPlanContent(problems: CatalogProblem[] = [], _rules: Rul
 
     if (candidate.explanation?.reviewDecision) {
       const d = candidate.explanation.reviewDecision;
-      reasons[p.questionId] = { en: 'Review (' + d.policyVersion + ', ' + d.reason + '): stage ' + d.stage + ', interval ' + d.intervalDays + ' day(s), due ' + (d.dueDate ?? 'unknown') + '.',
-        zh: '复习（' + d.policyVersion + '，' + ({ independent: '独立完成', assisted: '辅助完成', unsolved: '未解决', duration_threshold: '达到用时阈值', legacy_unknown: '未记录解题方式', baseline: '历史基线' }[d.reason]) + '）：阶段 ' + d.stage + '，间隔 ' + d.intervalDays + ' 天，到期 ' + (d.dueDate ?? '日期未知') + '。' };
+      const enReason = {
+        independent: 'independent',
+        assisted: 'assisted',
+        unsolved: 'unsolved',
+        duration_threshold: 'duration threshold',
+        legacy_unknown: 'unknown outcome',
+        baseline: 'historical baseline',
+      }[d.reason];
+      const zhReason = {
+        independent: '独立完成',
+        assisted: '辅助完成',
+        unsolved: '未解决',
+        duration_threshold: '达到用时阈值',
+        legacy_unknown: '未记录解题方式',
+        baseline: '历史基线',
+      }[d.reason];
+      reasons[p.questionId] = {
+        en: 'Review (' + d.policyVersion + ', ' + enReason + '): stage ' + d.stage + ', interval ' + d.intervalDays + ' day(s), due ' + (d.dueDate ?? 'unknown') + '.',
+        zh: '复习（' + d.policyVersion + '，' + zhReason + '）：阶段 ' + d.stage + '，间隔 ' + d.intervalDays + ' 天，到期 ' + (d.dueDate ?? '日期未知') + '。',
+      };
     } else if (candidate.explanation?.recoveryPriority) {
       reasons[p.questionId] = { en: 'A recorded attempt remained unsolved. This recovery practice uses a new-problem slot.', zh: '已有一次未解决的记录；本次补练使用新题名额。' };
     } else if (candidate.kind === 'review') {

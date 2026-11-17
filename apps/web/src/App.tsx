@@ -73,6 +73,7 @@ function WorkspaceFallback({ label }: { label: string }) {
 import { useDailyPlan } from './hooks/useDailyPlan.ts';
 import { api, type PracticeRecord } from './api.ts';
 import type { Language } from './i18n.ts';
+import { localizeApiError } from './error-i18n.ts';
 import {
   WorkspaceContext,
   type PracticeOutcome,
@@ -106,13 +107,15 @@ export function App() {
   const [lang, setLang] = useState<Language>('en');
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
   const [palette, setPalette] = useState<ThemePalette>('default');
+  const [promptSwapFeedback, setPromptSwapFeedback] = useState<boolean>(true);
+  const [notesFormatOnSave, setNotesFormatOnSave] = useState<boolean | null>(null);
   const [resolvedDark, setResolvedDark] = useState(false);
   const [timezone, setTimezone] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   const [focusRequest,setFocusRequest]=useState(0);
   const [selectedNoteProblem, setSelectedNoteProblem] = useState<string | null>(null);
   const [recordsFilter, setRecordsFilter] = useState<RecordsFilterRequest | null>(null);
-  const [error, setError] = useState('');
+  const [errorCause, setErrorCause] = useState<unknown>(null);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('general');
   const [practiceQueue, setPracticeQueue] = useState<PracticeRequest[]>([]);
   const practice = practiceQueue[0];
@@ -120,7 +123,7 @@ export function App() {
   /** Concurrent row saves retain the active draft and present subsequent details in order. */
   const openPractice = useCallback((request: PracticeRequest) => setPracticeQueue((queue) => [...queue, request]), []);
   const reportPracticeOutcome = useCallback((outcome: PracticeOutcome) => setOutcomes((items) => [...items, outcome]), []);
-  const plan = useDailyPlan();
+  const plan = useDailyPlan(lang);
   const current = useRef(view);
   const scrolls = useRef<Partial<Record<View, number>>>({});
   const preferenceRevision = useRef(0);
@@ -206,15 +209,21 @@ export function App() {
     api
       .getSettings()
       .then((settings) => {
-        if (active && version === preferenceRevision.current) {
+        if (!active) return;
+        const formatOnSave = settings.notesFormatOnSave ?? true;
+        if (version === preferenceRevision.current) {
           setLang(settings.language);
           setTheme(settings.theme);
           setPalette(settings.palette ?? 'default');
+          setPromptSwapFeedback(settings.promptSwapFeedback ?? true);
+          setNotesFormatOnSave(formatOnSave);
           setTimezone(settings.timezone);
+        } else {
+          setNotesFormatOnSave((current) => current ?? formatOnSave);
         }
       })
       .catch((err) => {
-        if (active) setError(String(err.message));
+        if (active) setErrorCause(err);
       });
     return () => {
       active = false;
@@ -263,17 +272,25 @@ export function App() {
     return () => { clearInterval(timer); document.removeEventListener('visibilitychange', refreshDate); };
   }, [timezone]);
   /** Queue preference writes so a slow previous response cannot persist an older selection last. */
-  function persistPreference(value: { language?: Language; theme?: 'light' | 'dark' | 'system'; palette?: ThemePalette }) {
+  function persistPreference(value: {
+    language?: Language;
+    theme?: 'light' | 'dark' | 'system';
+    palette?: ThemePalette;
+    promptSwapFeedback?: boolean;
+    notesFormatOnSave?: boolean;
+  }) {
     preferenceRevision.current++;
-    setError('');
+    setErrorCause(null);
     if (value.language) setLang(value.language);
     if (value.theme) setTheme(value.theme);
     if (value.palette) setPalette(value.palette);
+    if (value.promptSwapFeedback !== undefined) setPromptSwapFeedback(value.promptSwapFeedback);
+    if (value.notesFormatOnSave !== undefined) setNotesFormatOnSave(value.notesFormatOnSave);
     preferenceQueue.current = preferenceQueue.current.then(async () => {
       try {
         await api.updateSettings(value);
       } catch (err) {
-        setError(String((err as Error).message));
+        setErrorCause(err);
       }
     });
   }
@@ -298,6 +315,7 @@ export function App() {
     [revision, timezone, selectedNoteProblem, navigate, openRecords, notifyMutation, openPractice, reportPracticeOutcome],
   );
   const zh = lang === 'zh';
+  const error = errorCause ? localizeApiError(errorCause, lang) : '';
   const progress = ['records', 'statistics', 'progress-import'].includes(view);
   const primary =
     view === 'schedule' ? 'today' : view === 'catalog-import' ? 'problems' : progress ? 'statistics' : view;
@@ -464,7 +482,7 @@ export function App() {
           {outcomes.map((outcome, index) => (
             <Feedback key={index} tone={outcome.error ? 'error' : 'success'}>
               {outcome.error
-                ? `${zh ? '保存失败，已保留输入：' : 'Save failed. Your draft is retained: '}${outcome.error}`
+                ? `${zh ? '保存失败，已保留输入：' : 'Save failed. Your draft is retained: '}${localizeApiError(new Error(outcome.error), lang, outcome.error)}`
                 : zh ? '练习更改已保存。' : 'Practice changes saved.'}
               {outcome.recovery && <button className="text-link" onClick={() => {
                 openPractice(outcome.recovery!);
@@ -547,6 +565,7 @@ export function App() {
                   <TodayPlanView
                     lang={lang}
                     planController={plan}
+                    promptSwapFeedback={promptSwapFeedback}
                     onNavigateToSettings={() => {
                       setSettingsSection('general');
                       navigate('settings');
@@ -573,6 +592,7 @@ export function App() {
               <div hidden={view !== 'notes'} id="view-notes">
                 <NotesWorkspace
                   lang={lang}
+                  notesFormatOnSave={notesFormatOnSave ?? undefined}
                   initialFrontendId={selectedNoteProblem}
                   onClearInitialFrontendId={() => setSelectedNoteProblem(null)}
                 />
@@ -622,6 +642,10 @@ export function App() {
                   resolvedDark={resolvedDark}
                   onPaletteChange={(palette) => persistPreference({ palette })}
                   currentPalette={palette}
+                  promptSwapFeedback={promptSwapFeedback}
+                  onPromptSwapFeedbackChange={(enabled) => persistPreference({ promptSwapFeedback: enabled })}
+                  notesFormatOnSave={notesFormatOnSave ?? undefined}
+                  onNotesFormatOnSaveChange={(enabled) => persistPreference({ notesFormatOnSave: enabled })}
                   onTimezoneSaved={setTimezone}
                   section={settingsSection}
                   onSectionChange={setSettingsSection}

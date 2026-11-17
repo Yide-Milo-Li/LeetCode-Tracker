@@ -2,7 +2,8 @@
 import { RotateCcw } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { api, type DashboardActivityListResponse, type RecentActivityItem } from '../api.ts';
-import type { Language } from '../i18n.ts';
+import { formatActivityAction, formatDifficulty, type Language } from '../i18n.ts';
+import { localizeApiError } from '../error-i18n.ts';
 import { useWorkspace, type RecordsFilterRequest } from '../workspace.tsx';
 import { Feedback, IconButton, Field, Pagination } from './ui.tsx';
 import { practiceTime } from './PracticeWorkspace.tsx';
@@ -93,7 +94,7 @@ export function ActivityRecords({
         }
       })
       .catch((err) => {
-        if (active) setError(String(err.message));
+        if (active) setError(localizeApiError(err, lang));
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -113,7 +114,7 @@ export function ActivityRecords({
     try {
       workspace.openPractice({ mode: 'detail', record: await api.getPracticeRecord(item.id) });
     } catch (err) {
-      setError(String((err as Error).message));
+      setError(localizeApiError(err, lang));
     } finally {
       setOpening(null);
     }
@@ -221,7 +222,7 @@ export function ActivityRecords({
                   <strong>
                     #{item.questionFrontendId} {item.problemTitle}
                   </strong>
-                  <span className={'difficulty ' + item.difficulty.toLowerCase()}>{zh ? { Easy: '简单', Medium: '中等', Hard: '困难' }[item.difficulty] : item.difficulty}</span>
+                  <span className={'difficulty ' + item.difficulty.toLowerCase()}>{formatDifficulty(item.difficulty, lang)}</span>
                 </td>
                 <td>
                   {item.status === 'completed'
@@ -233,8 +234,8 @@ export function ActivityRecords({
                         ? '未完成'
                         : 'Not completed'
                       : item.status === 'accepted'
-                        ? 'Accepted'
-                        : item.action}
+                        ? formatActivityAction('Accepted', lang)
+                        : formatActivityAction(item.action, lang)}
                 </td>
                 <td>
                   <span className="source-label">

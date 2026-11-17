@@ -2,12 +2,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   api,
+  ApiError,
   type GeminiStatus,
   type ProgressCandidateInput,
   type ProgressImportPreview,
   type ProgressImportSummary,
 } from '../api.ts';
 import type { Language } from '../i18n.ts';
+import { localizeApiError } from '../error-i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
 import { Feedback, Field, PageHeader } from './ui.tsx';
 import { SnapshotBrowser } from './SnapshotBrowser.tsx';
@@ -42,7 +44,7 @@ export function ProgressWorkbench({ lang }: { lang: Language }) {
         if (active) setStatus(value);
       })
       .catch((err) => {
-        if (active) setError(String(err.message));
+        if (active) setError(localizeApiError(err, lang));
       });
     return () => {
       active = false;
@@ -76,7 +78,7 @@ export function ProgressWorkbench({ lang }: { lang: Language }) {
       setUnparsed(data.unparsedSnippets);
       setStep(1);
     } catch (err) {
-      if (version === generation.current) setError(String((err as Error).message));
+      if (version === generation.current) setError(localizeApiError(err, lang));
     } finally {
       if (version === generation.current) setBusy(null);
     }
@@ -98,7 +100,7 @@ export function ProgressWorkbench({ lang }: { lang: Language }) {
       setPreview(data);
       setStep(2);
     } catch (err) {
-      if (version === generation.current) setError(String((err as Error).message));
+      if (version === generation.current) setError(localizeApiError(err, lang));
     } finally {
       if (version === generation.current) setBusy(null);
     }
@@ -126,8 +128,10 @@ export function ProgressWorkbench({ lang }: { lang: Language }) {
       commitIntent.current = null;
       workspace.notifyMutation();
     } catch (err) {
-      setError(String((err as Error).message));
-      const stale = /expired|stale|revision|not found/i.test(String((err as Error).message));
+      setError(localizeApiError(err, lang));
+      const stale =
+        (err instanceof ApiError && ['PREVIEW_EXPIRED', 'PREVIEW_NOT_FOUND', 'DATABASE_CHANGED'].includes(err.code)) ||
+        /expired|stale|revision|not found/i.test(String((err as Error).message));
       setUncertain(!stale);
       if (stale) {
         commitIntent.current = null;

@@ -9,7 +9,8 @@ import {
   type PracticeRecord,
   type TimePrecision,
 } from '../api.ts';
-import { translations, type Language } from '../i18n.ts';
+import { formatDifficulty, translations, type Language } from '../i18n.ts';
+import { localizeApiError } from '../error-i18n.ts';
 import { useWorkspace, type PracticeDraft } from '../workspace.tsx';
 import { createPractice, getPracticeIntent, fromZonedInput, zonedInput } from '../practice-service.ts';
 import {
@@ -25,11 +26,12 @@ import { Feedback, Field, DialogClosingContext } from './ui.tsx';
  * Validate and extract optional duration in minutes.
  * Unknown duration is null; only positive safe integers are persistable.
  */
-export function durationValue(value: string): number | null {
+export function durationValue(value: string, lang: Language = 'en'): number | null {
   if (!value.trim()) return null;
   const minutes = Number(value);
-  if (!Number.isSafeInteger(minutes) || minutes <= 0)
-    throw new Error('Duration must be a positive whole number / 耗时须为正整数');
+  if (!Number.isSafeInteger(minutes) || minutes <= 0) {
+    throw new Error(lang === 'zh' ? '耗时须为正整数' : 'Duration must be a positive whole number');
+  }
   return minutes;
 }
 
@@ -244,7 +246,7 @@ export function PracticeEditor({
             setSelected(result.items.find((p) => p.questionFrontendId === recovered.questionFrontendId));
         })
         .catch((err) => {
-          if (active) setError(String(err.message));
+          if (active) setError(localizeApiError(err, lang));
         })
         .finally(() => {
           if (active) setSearching(false);
@@ -265,7 +267,7 @@ export function PracticeEditor({
     setError('');
     try {
       const metadata = {
-        durationMinutes: durationValue(duration),
+        durationMinutes: durationValue(duration, lang),
         notes: notes.trim() || null,
         outcome,
       };
@@ -280,7 +282,7 @@ export function PracticeEditor({
                 precision === 'date'
                   ? time.slice(0, 10)
                   : timeEdited
-                    ? fromZonedInput(time, zone)
+                    ? fromZonedInput(time, zone, lang)
                     : (recovered?.practicedAt ?? new Date().toISOString()),
               timePrecision: precision,
               sourceTimezone: zone,
@@ -305,12 +307,13 @@ export function PracticeEditor({
       if (mounted.current && !closing.current) onSaved(saved);
       else workspace.reportPracticeOutcome?.({});
     } catch (err) {
+      const localized = localizeApiError(err, lang);
       if (mounted.current && !closing.current) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(localized);
         setUncertain(!record && Boolean(getPracticeIntent('manual')));
       } else {
         workspace.reportPracticeOutcome?.({
-          error: err instanceof Error ? err.message : String(err),
+          error: localized,
           recovery: record
             ? {
                 mode: detailsOnly ? ('enrich' as const) : ('detail' as const),
@@ -360,7 +363,7 @@ export function PracticeEditor({
                 onClick={() => setSelected(p)}
               >
                 #{p.questionFrontendId} {p.title}
-                <span className={`difficulty ${p.difficulty.toLowerCase()}`}>{p.difficulty}</span>
+                <span className={`difficulty ${p.difficulty.toLowerCase()}`}>{formatDifficulty(p.difficulty, lang)}</span>
               </button>
             ))
           )}

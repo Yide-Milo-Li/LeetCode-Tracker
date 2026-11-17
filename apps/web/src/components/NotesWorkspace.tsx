@@ -29,160 +29,36 @@ import {
   api,
   type ProblemNoteSummary,
   type PracticeRecord,
+  type NoteFormatResponse,
   NOTE_TEMPLATES,
   hasMeaningfulNoteContent,
 } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
+import { localizeApiError } from '../error-i18n.ts';
 import { PageHeader, Feedback, Field, Pagination, Dialog } from './ui.tsx';
 import { QuickCopyButtons } from './QuickCopyButtons.tsx';
+import { NotesMarkdownPreview } from './NotesMarkdownPreview.tsx';
+import { formatNoteInWorker } from '../markdown-format-client.ts';
+import { useWorkspace } from '../workspace.tsx';
 
-/**
- * Inline formatting renderer supporting backtick inline code, bold, italic, and LaTeX math.
- */
-function renderInlineMarkdown(text: string): React.ReactNode {
-  const parts = text.split(/(\$[^\$]+\$|`[^`]+`|\*\*[^\*]+\*\*|\*[^\*]+\*)/g);
-  return parts.map((part, index) => {
-    if (part.startsWith('$') && part.endsWith('$') && part.length > 2) {
-      return (
-        <span
-          key={index}
-          style={{
-            fontFamily: 'KaTeX_Main, "Times New Roman", serif',
-            fontStyle: 'italic',
-            padding: '0 2px',
-            color: 'var(--primary)',
-            fontWeight: 500,
-          }}
-        >
-          {part.slice(1, -1)}
-        </span>
-      );
-    }
-    if (part.startsWith('`') && part.endsWith('`') && part.length > 2) {
-      return <code key={index}>{part.slice(1, -1)}</code>;
-    }
-    if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
-      return <strong key={index}>{part.slice(2, -2)}</strong>;
-    }
-    if (part.startsWith('*') && part.endsWith('*') && part.length > 2) {
-      return <em key={index}>{part.slice(1, -1)}</em>;
-    }
-    return part;
-  });
-}
-
-/**
- * Safely parse markdown content into structured React elements with code blocks,
- * lists, task checkboxes, blockquotes, headings, and math formulas without third-party HTML parsers.
- */
-function MarkdownPreview({ content, lang }: { content: string; lang: Language }) {
-  const t = translations[lang];
-  if (!content || content.trim().length === 0) {
-    return (
-      <div className="notes-preview-pane" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-          {t.previewEmptyNote}
-        </div>
-      </div>
-    );
-  }
-
-  const lines = content.split(/\r?\n/);
-  const elements: React.ReactNode[] = [];
-  let inCodeBlock = false;
-  let codeLang = '';
-  let codeBuffer: string[] = [];
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-
-    if (line.trim().startsWith('```')) {
-      if (!inCodeBlock) {
-        inCodeBlock = true;
-        codeLang = line.trim().slice(3).trim();
-        codeBuffer = [];
-      } else {
-        inCodeBlock = false;
-        elements.push(
-          <div key={`code-${i}`} style={{ position: 'relative', marginBottom: '10px' }}>
-            {codeLang && (
-              <span
-                style={{
-                  position: 'absolute',
-                  top: '6px',
-                  right: '10px',
-                  fontSize: '11px',
-                  color: 'var(--text-muted)',
-                  textTransform: 'uppercase',
-                  fontFamily: 'monospace',
-                }}
-              >
-                {codeLang}
-              </span>
-            )}
-            <pre>
-              <code>{codeBuffer.join('\n')}</code>
-            </pre>
-          </div>
-        );
-        codeBuffer = [];
-      }
-      continue;
-    }
-
-    if (inCodeBlock) {
-      codeBuffer.push(line);
-      continue;
-    }
-
-    if (line.startsWith('### ')) {
-      elements.push(<h3 key={`h3-${i}`}>{renderInlineMarkdown(line.slice(4))}</h3>);
-    } else if (line.startsWith('## ')) {
-      elements.push(<h2 key={`h2-${i}`}>{renderInlineMarkdown(line.slice(3))}</h2>);
-    } else if (line.startsWith('# ')) {
-      elements.push(<h1 key={`h1-${i}`}>{renderInlineMarkdown(line.slice(2))}</h1>);
-    } else if (line.startsWith('> ')) {
-      elements.push(<blockquote key={`quote-${i}`}>{renderInlineMarkdown(line.slice(2))}</blockquote>);
-    } else if (/^[-*]\s+\[([ xX])\]\s+(.*)/.test(line)) {
-      const match = line.match(/^[-*]\s+\[([ xX])\]\s+(.*)/)!;
-      const checked = match[1].toLowerCase() === 'x';
-      elements.push(
-        <div key={`task-${i}`} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-          <input type="checkbox" checked={checked} readOnly style={{ accentColor: 'var(--primary)', cursor: 'default' }} />
-          <span style={{ textDecoration: checked ? 'line-through' : 'none', color: checked ? 'var(--text-muted)' : 'var(--text-main)' }}>
-            {renderInlineMarkdown(match[2])}
-          </span>
-        </div>
-      );
-    } else if (/^[-*]\s+(.*)/.test(line)) {
-      const itemText = line.replace(/^[-*]\s+/, '');
-      elements.push(
-        <li key={`li-${i}`} style={{ marginLeft: '16px', marginBottom: '3px' }}>
-          {renderInlineMarkdown(itemText)}
-        </li>
-      );
-    } else if (line.trim() === '---' || line.trim() === '***') {
-      elements.push(<hr key={`hr-${i}`} />);
-    } else if (line.trim().length === 0) {
-      elements.push(<div key={`empty-${i}`} style={{ height: '6px' }} />);
-    } else {
-      elements.push(<p key={`p-${i}`} style={{ margin: '0 0 6px 0' }}>{renderInlineMarkdown(line)}</p>);
-    }
-  }
-
-  if (inCodeBlock && codeBuffer.length > 0) {
-    elements.push(
-      <pre key="unclosed-code">
-        <code>{codeBuffer.join('\n')}</code>
-      </pre>
-    );
-  }
-
-  return <div className="notes-preview-pane">{elements}</div>;
-}
+type EditorSession = { active: boolean; saving: boolean; saveVersion: number };
+type AiReview = {
+  session: EditorSession;
+  revision: number;
+  source: string;
+  selection?: { start: number; end: number };
+  range?: { start: number; end: number };
+  stage: 'preparing' | 'ready' | 'generating' | 'review' | 'error';
+  configured?: boolean;
+  provider?: string;
+  result?: NoteFormatResponse;
+  error?: string;
+};
 
 export interface NotesWorkspaceProps {
   lang: Language;
+  /** Controlled format-on-save preference from Settings (`null` while loading); falls back to settings API when omitted. */
+  notesFormatOnSave?: boolean | null;
   initialFrontendId?: string | null;
   /** Clear external initial frontend ID once consumed to prevent deadlock on subsequent switches. */
   onClearInitialFrontendId?: () => void;
@@ -191,10 +67,12 @@ export interface NotesWorkspaceProps {
 /** Browse and edit notes while keeping asynchronous responses owned by their selection visit. */
 export function NotesWorkspace({
   lang,
+  notesFormatOnSave: controlledFormatOnSave,
   initialFrontendId,
   onClearInitialFrontendId,
 }: NotesWorkspaceProps) {
   const t = translations[lang];
+  const workspace = useWorkspace();
   const zh = lang === 'zh';
   const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform ?? '');
   const zenModeTitle = isMac
@@ -223,23 +101,158 @@ export function NotesWorkspace({
   const [showUnsavedModal, setShowUnsavedModal] = useState(false);
 
   const [selectedSummary, setSelectedSummary] = useState<ProblemNoteSummary | null>(null);
-  const [noteContent, setNoteContent] = useState('');
+  const [noteContent, setNoteContentState] = useState('');
+  const draft = useRef({ value: '', revision: 0 });
+  const [formatUndo, setFormatUndo] = useState<{ before: string; revision: number; session: EditorSession } | null>(null);
+  const bypassFormatRevision = useRef<number | null>(null);
+  /** Increment the draft revision on every editor mutation, including undo and template insertion. */
+  const setNoteContent = useCallback((value: string) => {
+    draft.current = { value, revision: draft.current.revision + 1 };
+    bypassFormatRevision.current = null;
+    setFormatUndo(null);
+    setNoteContentState(value);
+  }, []);
   const [savedContent, setSavedContent] = useState('');
   const [loadingNote, setLoadingNote] = useState(false);
   const [noteLoadError, setNoteLoadError] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState('');
+  const [formatNotice, setFormatNotice] = useState('');
+  const settingReady = useRef(typeof controlledFormatOnSave === 'boolean');
+  const settingValue = useRef(controlledFormatOnSave === true);
+  const [aiReview, setAiReview] = useState<AiReview | null>(null);
+  const aiSerial = useRef(0);
   const [retryRevision, setRetryRevision] = useState(0);
   const editorSession = useRef({ active: false, saving: false, saveVersion: 0 });
+  const savingRevision = useRef<number | null>(null);
+  const problemSaveVersion = useRef<Map<string, number>>(new Map());
+  const problemSaveChain = useRef<Map<string, Promise<void>>>(new Map());
 
   useEffect(() => {
     // A -> B -> A creates a new visit too; comparing question IDs alone is insufficient.
     const session = { active: true, saving: false, saveVersion: 0 };
     editorSession.current = session;
+    savingRevision.current = null;
     setSavingNote(false);
+    setFormatUndo(null);
+    setAiReview(null);
+    setFormatNotice('');
+    aiSerial.current++;
     return () => { session.active = false; };
   }, [selectedId]);
+
+  useEffect(() => {
+    if (typeof controlledFormatOnSave === 'boolean') {
+      settingValue.current = controlledFormatOnSave;
+      settingReady.current = true;
+      return;
+    }
+    if (controlledFormatOnSave === null) {
+      settingValue.current = false;
+      settingReady.current = false;
+      return;
+    }
+    let active = true;
+    settingReady.current = false;
+    settingValue.current = false;
+    // If preferences are unavailable or not yet loaded, preserve the draft rather than guessing an opt-in.
+    api
+      .getSettings()
+      .then((settings) => {
+        if (active) {
+          settingValue.current = settings.notesFormatOnSave ?? true;
+          settingReady.current = true;
+        }
+      })
+      .catch(() => {
+        if (active) {
+          settingValue.current = false;
+          settingReady.current = false;
+        }
+      });
+    return () => { active = false; };
+  }, [controlledFormatOnSave]);
+
+  /** Restore the last automatically formatted snapshot without immediately formatting it again. */
+  function handleUndoFormat() {
+    if (!formatUndo || formatUndo.session !== editorSession.current || draft.current.revision !== formatUndo.revision) return;
+    const before = formatUndo.before;
+    setNoteContent(before);
+    bypassFormatRevision.current = draft.current.revision;
+    setSaveSuccess(false);
+  }
+
+  /** Invalidate any pending proposal when the review closes. */
+  const closeAiReview = useCallback(() => { aiSerial.current++; setAiReview(null); }, []);
+
+  /** Determine the exact block scope and provider status before sending any note text. */
+  async function openAiReview() {
+    const session = editorSession.current;
+    const source = draft.current.value;
+    if (!session.active || !source.trim()) return;
+    const revision = draft.current.revision;
+    const el = textareaRef.current;
+    const selection = el && el.selectionEnd > el.selectionStart
+      ? { start: el.selectionStart, end: el.selectionEnd } : undefined;
+    const serial = ++aiSerial.current;
+    const review: AiReview = { session, revision, source, selection, stage: 'preparing' };
+    setAiReview(review);
+    try {
+      const [markdown, status] = await Promise.all([
+        import('../../../../packages/markdown/src/index.ts'), api.getNoteFormatStatus(),
+      ]);
+      const prepared = markdown.prepareAiFormat(source, selection);
+      if (aiSerial.current !== serial || !session.active) return;
+      if (draft.current.revision !== revision) { setAiReview({ ...review, stage: 'error', error: t.notesAiStale }); return; }
+      setAiReview({ ...review, stage: 'ready', range: prepared.range, configured: status.configured, provider: status.provider });
+    } catch (err) {
+      if (aiSerial.current !== serial || !session.active) return;
+      const code = err && typeof err === 'object' && 'code' in err ? String(err.code) : '';
+      setAiReview({ ...review, stage: 'error', error: code.includes('TOO_LARGE') ? t.notesAiTooLarge : t.notesAiFailed });
+    }
+  }
+
+  /** A stale response can never be shown or applied to a later draft or problem visit. */
+  async function generateAiSuggestion() {
+    const review = aiReview;
+    if (!review || review.stage !== 'ready' || !review.configured || !review.range) return;
+    if (!review.session.active || draft.current.revision !== review.revision) {
+      setAiReview({ ...review, stage: 'error', error: t.notesAiStale });
+      return;
+    }
+    const serial = ++aiSerial.current;
+    setAiReview({ ...review, stage: 'generating' });
+    try {
+      const result = await api.formatNote({ content: review.source, selection: review.selection });
+      if (aiSerial.current !== serial || !review.session.active) return;
+      if (draft.current.revision !== review.revision) { setAiReview({ ...review, stage: 'error', error: t.notesAiStale }); return; }
+      if (result.range.start !== review.range.start || result.range.end !== review.range.end
+        || result.content.length > 100000 || !result.content.startsWith(review.source.slice(0, review.range.start))
+        || !result.content.endsWith(review.source.slice(review.range.end))
+        || hasMeaningfulNoteContent(result.content) !== hasMeaningfulNoteContent(review.source)) {
+        throw new Error('Unsafe candidate');
+      }
+      setAiReview({ ...review, stage: 'review', result });
+    } catch (err) {
+      if (aiSerial.current !== serial || !review.session.active) return;
+      const code = err && typeof err === 'object' && 'code' in err ? String(err.code) : '';
+      setAiReview({ ...review, stage: 'error', error: code.includes('TOO_LARGE') ? t.notesAiTooLarge : t.notesAiFailed });
+    }
+  }
+
+  /** Apply only to the unchanged source visit; persistence remains an explicit save. */
+  function applyAiSuggestion() {
+    const review = aiReview;
+    if (!review?.result || !review.session.active || draft.current.revision !== review.revision) {
+      if (review) setAiReview({ ...review, stage: 'error', error: t.notesAiStale });
+      return;
+    }
+    const before = draft.current.value;
+    setNoteContent(review.result.content);
+    setFormatUndo({ before, revision: draft.current.revision, session: review.session });
+    closeAiReview();
+  }
 
   // Selected problem practice timeline
   const [practices, setPractices] = useState<PracticeRecord[]>([]);
@@ -437,10 +450,10 @@ export function NotesWorkspace({
     (isBlank ? savedContent.trim().length > 0 : hasMeaningful);
 
   // Phase 30: Unsaved note modifications check
-  // Clean if note is unchanged, actively saving, or if an empty note only had whitespace typed.
+  // A saved snapshot may switch safely, but newer edits made while saving still need protection.
   const hasUnsavedChanges =
     !loadingNote &&
-    !savingNote &&
+    (!savingNote || draft.current.revision !== savingRevision.current) &&
     isModified &&
     (savedContent.trim().length > 0 || noteContent.trim().length > 0);
 
@@ -455,7 +468,7 @@ export function NotesWorkspace({
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [hasUnsavedChanges]);
 
-  /** Persist one snapshot, retaining newer edits and ignoring responses from an obsolete visit. */
+  /** Persist one snapshot, serializing per-problem writes and ignoring responses from obsolete visits or superseded saves. */
   async function handleSaveNote() {
     const session = editorSession.current;
     if (!selectedId || !canSave || !session.active || session.saving) return;
@@ -463,16 +476,61 @@ export function NotesWorkspace({
     session.saving = true;
     const saveVersion = ++session.saveVersion;
     const targetId = selectedId;
-    const targetContent = noteContent;
+    const problemVersion = (problemSaveVersion.current.get(targetId) ?? 0) + 1;
+    problemSaveVersion.current.set(targetId, problemVersion);
+    const isLatestProblemSave = () =>
+      editorSession.current.active && problemSaveVersion.current.get(targetId) === problemVersion;
+    const targetContent = draft.current.value;
+    const targetRevision = draft.current.revision;
+    savingRevision.current = targetRevision;
+    const bypass = bypassFormatRevision.current === targetRevision;
+    const formatEnabled =
+      typeof controlledFormatOnSave === 'boolean'
+        ? controlledFormatOnSave
+        : controlledFormatOnSave === null
+          ? false
+          : settingReady.current && settingValue.current;
+    const shouldFormat = !bypass && formatEnabled;
     setSavingNote(true);
     setSaveSuccess(false);
     setSaveError('');
+    setFormatNotice('');
 
     try {
-      const { note } = await api.upsertNote(targetId, targetContent);
+      let formatted = { content: targetContent, status: 'unchanged' as 'unchanged' | 'formatted' | 'skipped' };
+      if (shouldFormat && targetContent.trim()) {
+        formatted = await formatNoteInWorker(targetContent);
+        if (!isLatestProblemSave()) return;
+        if (hasMeaningfulNoteContent(targetContent) !== hasMeaningfulNoteContent(formatted.content)) {
+          formatted = { content: targetContent, status: 'skipped' };
+        }
+      }
+      const previousWrite = problemSaveChain.current.get(targetId) ?? Promise.resolve();
+      const currentWrite = previousWrite
+        .catch(() => {})
+        .then(async () => {
+          if (!isLatestProblemSave()) return null;
+          return api.upsertNote(targetId, formatted.content);
+        });
+      problemSaveChain.current.set(
+        targetId,
+        currentWrite.then(
+          () => {},
+          () => {},
+        ),
+      );
+      const result = await currentWrite;
+      if (!result || !isLatestProblemSave()) return;
+      const { note } = result;
       if (session.active) {
         setSavedContent(note.content);
         setSaveSuccess(true);
+        if (formatted.status === 'skipped') setFormatNotice(t.notesFormatSkipped);
+        if (formatted.status === 'formatted' && note.content === formatted.content && draft.current.revision === targetRevision) {
+          setNoteContent(note.content);
+          setFormatUndo({ before: targetContent, revision: draft.current.revision, session });
+        }
+        if (bypass && bypassFormatRevision.current === targetRevision) bypassFormatRevision.current = null;
         setTimeout(() => {
           if (session.active && session.saveVersion === saveVersion) setSaveSuccess(false);
         }, 2500);
@@ -504,12 +562,13 @@ export function NotesWorkspace({
       // the latest filters while mounted, without reloading the current editor draft.
       if (editorSession.current.active) setListRevision((current) => current + 1);
     } catch (err) {
-      if (session.active) {
-        setSaveError(err instanceof Error ? err.message : String(err));
+      if (session.active && isLatestProblemSave()) {
+        setSaveError(localizeApiError(err, lang));
       }
     } finally {
       session.saving = false;
       if (session.active) {
+        savingRevision.current = null;
         setSavingNote(false);
       }
     }
@@ -597,28 +656,12 @@ export function NotesWorkspace({
         description={t.notesWorkspaceDesc}
         actions={
           <div style={{ display: 'flex', gap: '8px' }}>
-            <button
-              type="button"
-              className={`btn btn-secondary btn-sm ${zenMode ? 'active' : ''}`}
-              onClick={() => setZenMode((z) => !z)}
-              title={zenModeTitle}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                borderColor: zenMode ? 'var(--primary)' : undefined,
-                color: zenMode ? 'var(--primary)' : undefined,
-              }}
-            >
-              {zenMode ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-              <span>{zenMode ? (zh ? '退出专注' : 'Exit Zen') : (zh ? '专注模式' : 'Zen Mode')}</span>
-            </button>
             <ExportLink
                 lang={lang}
                 onExport={() => api.exportObsidianZip('all', lang)}
                 href={api.getObsidianZipUrl('all', lang)}
               className="btn btn-secondary btn-sm"
-              title="Download 4,000+ Obsidian markdown skeleton"
+              title={t.exportObsidianTitle}
               style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
             >
               <Archive size={14} />
@@ -629,7 +672,7 @@ export function NotesWorkspace({
                 onExport={() => api.exportNotionCsv('summary')}
                 href={api.getNotionCsvUrl('summary')}
               className="btn btn-secondary btn-sm"
-              title="Download Notion Problems Summary CSV"
+              title={t.exportNotionSummaryTitle}
               style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
             >
               <Download size={14} />
@@ -1104,7 +1147,7 @@ export function NotesWorkspace({
                 {showTimeline && (
                   <div style={{ marginTop: '8px' }}>
                     {loadingPractices ? (
-                      <div style={{ color: 'var(--text-muted)', fontSize: '0.8125rem', padding: '4px 8px' }}>Loading practice logs...</div>
+                      <div style={{ color: 'var(--text-muted)', fontSize: '0.8125rem', padding: '4px 8px' }}>{t.loadingPracticeLogs}</div>
                     ) : practices.length === 0 ? (
                       <div style={{ color: 'var(--text-muted)', fontSize: '0.8125rem', padding: '4px 8px' }}>
                         {zh ? '暂无打卡记录。' : 'No practice logs recorded yet.'}
@@ -1200,7 +1243,7 @@ export function NotesWorkspace({
                     )}
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
                     {saveSuccess && (
                       <span style={{ color: 'var(--primary)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
                         <Check size={13} />
@@ -1208,6 +1251,21 @@ export function NotesWorkspace({
                       </span>
                     )}
                     {saveError && <span style={{ color: 'var(--danger)', fontSize: '0.75rem' }}>{saveError}</span>}
+                    {formatNotice && <span role="status" style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>{formatNotice}</span>}
+                    {formatUndo && formatUndo.session === editorSession.current && formatUndo.revision === draft.current.revision && (
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={handleUndoFormat}>
+                        {t.notesUndoFormat}
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => void openAiReview()}
+                      disabled={!noteContent.trim() || loadingNote || noteLoadError || savingNote}
+                    >
+                      {t.notesAiFormat}
+                    </button>
 
                     <button
                       type="button"
@@ -1314,7 +1372,7 @@ export function NotesWorkspace({
                       onClick={() => wrapTextareaSelection('$', '$', 'O(N)')}
                       title={t.toolbarMath}
                       disabled={loadingNote || noteLoadError}
-                      style={{ fontFamily: 'KaTeX_Main, "Times New Roman", serif', fontWeight: 600 }}
+                      style={{ fontWeight: 600 }}
                     >
                       $
                     </button>
@@ -1463,7 +1521,7 @@ export function NotesWorkspace({
                         color: 'var(--text-main)',
                         fontSize: '0.875rem',
                         lineHeight: 1.65,
-                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                        fontFamily: 'ui-monospace, monospace',
                         resize: 'vertical',
                         minHeight: '340px',
                         outline: 'none',
@@ -1474,7 +1532,7 @@ export function NotesWorkspace({
                     />
                   </div>
 
-                  <MarkdownPreview content={noteContent} lang={lang} />
+                  <NotesMarkdownPreview content={noteContent} lang={lang} />
                 </div>
 
                 {/* Footer status line */}
@@ -1503,6 +1561,41 @@ export function NotesWorkspace({
           )}
         </div>
       </div>
+
+      {aiReview && (
+        <Dialog title={t.notesAiFormat} lang={lang} wide onClose={closeAiReview}
+          footer={<div className="action-row">
+            <button type="button" className="btn btn-secondary" onClick={closeAiReview}>{t.btnCancel}</button>
+            {aiReview.stage === 'ready' && !aiReview.configured && (
+              <button type="button" className="btn btn-secondary" onClick={() => { closeAiReview(); workspace.navigate('settings'); }}>{t.notesAiSettings}</button>
+            )}
+            {aiReview.stage === 'ready' && aiReview.configured && (
+              <button type="button" className="btn btn-primary" onClick={() => void generateAiSuggestion()}>{t.notesAiGenerate}</button>
+            )}
+            {aiReview.stage === 'review' && (
+              <button type="button" className="btn btn-primary" onClick={applyAiSuggestion}>{t.notesAiApply}</button>
+            )}
+          </div>}>
+          {(aiReview.stage === 'preparing' || aiReview.stage === 'generating') && (
+            <p role="status">{aiReview.stage === 'preparing' ? t.notesAiPreparing : t.notesAiGenerating}</p>
+          )}
+          {aiReview.stage === 'error' && <Feedback>{aiReview.error ?? t.notesAiFailed}</Feedback>}
+          {aiReview.stage === 'ready' && (
+            <div>
+              <p><strong>{aiReview.selection ? t.notesAiScopeSelection : t.notesAiScopeAll}</strong>
+                {aiReview.range && ` (${aiReview.range.start}–${aiReview.range.end})`}</p>
+              {aiReview.range && <pre className="notes-ai-scope">{aiReview.source.slice(aiReview.range.start, aiReview.range.end)}</pre>}
+              {aiReview.configured ? <p>{t.notesAiPrivacy}{aiReview.provider && ` (${aiReview.provider})`}</p> : <p>{t.notesAiNotConfigured}</p>}
+            </div>
+          )}
+          {aiReview.stage === 'review' && aiReview.result && (
+            <div className="notes-ai-compare">
+              <section><h3>{t.notesAiOriginal}</h3><pre>{aiReview.source}</pre></section>
+              <section><h3>{t.notesAiCandidate}</h3><pre>{aiReview.result.content}</pre></section>
+            </div>
+          )}
+        </Dialog>
+      )}
 
       {/* Phase 30: Unsaved Note Changes Confirmation Dialog */}
       {showUnsavedModal && (

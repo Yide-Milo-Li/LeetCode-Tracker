@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { api, ApiError, type ImportHistoryItem, type ImportPreview, type ImportSummary } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
+import { localizeApiError } from '../error-i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
 import { PageHeader, Feedback, InfoPopover } from './ui.tsx';
 import { CatalogPreviewSummary } from './CatalogPreviewSummary.tsx';
@@ -99,7 +100,7 @@ export function CatalogImportWorkspace({
       setHistoryTotal(res.total);
       setHistoryError('');
     } catch (err) {
-      if (seq === historySeq.current) setHistoryError(err instanceof Error ? err.message : String(err));
+      if (seq === historySeq.current) setHistoryError(localizeApiError(err, lang));
     }
   }
 
@@ -162,7 +163,10 @@ export function CatalogImportWorkspace({
       setPreview(p);
     } catch (err) {
       if (generation !== inputGeneration.current) return;
-      setAlertMsg({ type: 'danger', text: err instanceof Error ? err.message : 'Preview generation failed' });
+      setAlertMsg({
+        type: 'danger',
+        text: localizeApiError(err, lang, lang === 'zh' ? '预检生成失败，请重试。' : 'Preview generation failed'),
+      });
     } finally {
       if (generation === inputGeneration.current) setPreviewLoading(false);
     }
@@ -206,7 +210,10 @@ export function CatalogImportWorkspace({
       if (historyPage === 1) void loadHistory();
       else setHistoryPage(1);
     } catch (err) {
-      setAlertMsg({ type: 'danger', text: err instanceof Error ? err.message : 'Commit failed' });
+      setAlertMsg({
+        type: 'danger',
+        text: localizeApiError(err, lang, lang === 'zh' ? '导入提交失败，请重试。' : 'Commit failed'),
+      });
       // Only an explicit rejection releases the immutable preview. Lost responses retry its durable ID.
       setUncertain(!(err instanceof ApiError && err.status >= 400 && err.status < 500));
     } finally {
@@ -320,7 +327,9 @@ export function CatalogImportWorkspace({
               <UploadCloud size={36} className="u-margin-0-auto-0-5rem-auto u-color-text-muted" />
               <p className="u-font-weight-500 u-margin-bottom-0-25rem">{t.dropzoneText}</p>
               <p className="u-font-size-13px u-color-text-muted">
-                UTF-8 encoded JSONL (max 10 MiB, 20,000 lines)
+                {lang === 'zh'
+                  ? '支持 UTF-8 编码的 JSONL 文件（最大 10 MiB，最多 20,000 行）'
+                  : 'UTF-8 encoded JSONL (max 10 MiB, 20,000 lines)'}
               </p>
             </div>
             {selectedFileName && (
@@ -390,7 +399,7 @@ export function CatalogImportWorkspace({
           void api
             .getImportResult(id)
             .then(setResult)
-            .catch((err) => setHistoryError(String(err.message)));
+            .catch((err) => setHistoryError(localizeApiError(err, lang)));
         }}
         onCloseResult={() => setResult(null)}
       />}

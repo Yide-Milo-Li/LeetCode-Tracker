@@ -10,7 +10,17 @@ Object.assign(globalThis, { window: dom.window, document: dom.window.document, H
 Object.defineProperty(globalThis, 'navigator', { configurable: true, value: dom.window.navigator });
 const React = await import('react');
 const { render, fireEvent, screen, act, cleanup } = await import('@testing-library/react');
-const { api } = await import('../apps/web/src/api.ts');
+const { api, ApiError } = await import('../apps/web/src/api.ts');
+const { localizeApiError, localizePlanningIssue } = await import('../apps/web/src/error-i18n.ts');
+const {
+  formatDifficulty,
+  formatPlanSource,
+  formatPlanAction,
+  formatSnapshotStatus,
+  formatActivityAction,
+  formatCatalogChangeField,
+} = await import('../apps/web/src/i18n.ts');
+const { fromZonedInput } = await import('../apps/web/src/practice-service.ts');
 const { CatalogImportWorkspace } = await import('../apps/web/src/components/CatalogImportWorkspace.tsx');
 const { PracticeWorkspace } = await import('../apps/web/src/components/PracticeWorkspace.tsx');
 const { SettingsView } = await import('../apps/web/src/components/SettingsView.tsx');
@@ -688,4 +698,148 @@ it('renders vendor-specific reasoning effort choices for OpenAI and DeepSeek', a
   assert.equal(payload.openaiModel, 'gpt-6.1-terra');
   assert.equal(payload.openaiReasoningEffort, 'max');
   assert.equal(payload.deepseekReasoningEffort, 'none');
+});
+
+it('toggles promptSwapFeedback in SettingsView General tab and persists via API', async () => {
+  mock.method(api, 'getImportHistory', async () => ({ total: 0, items: [] }));
+  mock.method(api, 'getSettings', async () => ({
+    language: 'en',
+    theme: 'light',
+    timezone: 'UTC',
+    promptSwapFeedback: true,
+    updatedAt: 1,
+  }));
+  const writes = mock.method(api, 'updateSettings', async (payload: any) => ({
+    language: 'en' as const,
+    theme: 'light' as const,
+    timezone: 'UTC',
+    promptSwapFeedback: payload.promptSwapFeedback,
+    updatedAt: 2,
+  }));
+
+  await act(async () => {
+    render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} />);
+  });
+
+  const showBtn = screen.getByRole('button', { name: 'Show prompt' });
+  const hideBtn = screen.getByRole('button', { name: "Don't show" });
+  assert.equal(showBtn.getAttribute('aria-pressed'), 'true');
+  assert.equal(hideBtn.getAttribute('aria-pressed'), 'false');
+
+  await act(async () => {
+    fireEvent.click(hideBtn);
+  });
+
+  assert.equal(hideBtn.getAttribute('aria-pressed'), 'true');
+  assert.equal(showBtn.getAttribute('aria-pressed'), 'false');
+  assert.equal(writes.mock.callCount(), 1);
+  assert.deepEqual(writes.mock.calls[0].arguments[0], { promptSwapFeedback: false });
+});
+
+it('localizes API errors, planning issues, and enum formatters cleanly without EN/ZH mixing', () => {
+  const noCandidates = new ApiError(409, 'NO_CANDIDATES', 'No eligible candidates found for target difficulty and type; adjust rules to continue');
+  assert.match(localizeApiError(noCandidates, 'en'), /No eligible candidates found/i);
+  assert.equal(localizeApiError(noCandidates, 'zh'), '没有符合当前难度与题型条件的候选题目，请调整规则后再试。');
+
+  const notToday = new ApiError(409, 'STALE_PLAN', 'Only today can be modified; reload the current day');
+  assert.match(localizeApiError(notToday, 'en'), /Only today can be modified/);
+  assert.equal(localizeApiError(notToday, 'zh'), '仅支持修改今日计划，请刷新当前日期后重试。');
+
+  const stalePlan = new ApiError(409, 'STALE_PLAN', 'Plan changed; reload it');
+  assert.equal(localizeApiError(stalePlan, 'zh'), '今日计划已更新，请刷新后重试。');
+
+  // Mocked English Error falls back to Chinese fallback in zh mode, while preserving English in en mode.
+  const rawErr = new Error('Unexpected socket timeout');
+  assert.equal(localizeApiError(rawErr, 'en', 'Fallback EN'), 'Unexpected socket timeout');
+  assert.equal(localizeApiError(rawErr, 'zh', '请求失败'), '请求失败');
+
+  // Legacy slash-separated messages resolve cleanly per language.
+  assert.equal(localizeApiError(new Error('Invalid input / 输入无效'), 'en'), 'Invalid input');
+  assert.equal(localizeApiError(new Error('Invalid input / 输入无效'), 'zh'), '输入无效');
+
+  // Override planning issues translate cleanly in zh mode.
+  assert.equal(
+    localizePlanningIssue('Completed Medium problems (2) exceed the proposed quota (1).', 'zh'),
+    '已完成的中等题目（2 道）超过了调整后的配额（1 道）。',
+  );
+  assert.equal(
+    localizePlanningIssue("Unknown tag 'dp' is not in the local catalog.", 'zh'),
+    '本地题库中不存在标签“dp”。',
+  );
+
+  // Formatters localize enums.
+  assert.equal(formatDifficulty('Easy', 'zh'), '简单');
+  assert.equal(formatDifficulty('Hard', 'en'), 'Hard');
+  assert.equal(formatPlanSource('local', 'zh'), '本地规则');
+  assert.equal(formatPlanAction('replace_one', 'zh'), '换一题');
+  assert.equal(formatSnapshotStatus('revoked', 'zh'), '已撤销');
+  assert.equal(formatActivityAction('Accepted', 'zh'), '已通过');
+  assert.equal(formatCatalogChangeField('difficulty', 'zh'), '难度');
+
+  // fromZonedInput produces pure Chinese when lang='zh' and pure English by default.
+  assert.throws(() => fromZonedInput('2026-03-08T02:30:00', 'America/Los_Angeles', 'zh'), (err: Error) => {
+    assert.match(err.message, /夏令时/);
+    assert.ok(!err.message.includes('/'));
+    return true;
+  });
+});
+
+it('renders DeepSeek thinking labels in pure Chinese in SettingsView zh mode', async () => {
+  mock.method(api, 'getImportHistory', async () => ({ total: 0, items: [] }));
+  mock.method(api, 'getSettings', async () => ({
+    language: 'zh',
+    theme: 'light',
+    timezone: 'UTC',
+    llmProvider: 'deepseek',
+    deepseekApiKey: 'sk-d',
+    updatedAt: 1,
+  }));
+
+  await act(async () => {
+    render(<SettingsView lang="zh" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} section="ai" />);
+  });
+
+  fireEvent.click(screen.getByRole('button', { name: '高级选项：模型与接口地址' }));
+  const effortSelect = screen.getByLabelText('推理强度') as HTMLSelectElement;
+  const optionTexts = [...effortSelect.options].map((o) => o.textContent ?? '');
+  assert.ok(optionTexts.some((t) => t.includes('关闭思考模式')));
+  assert.ok(optionTexts.some((t) => t.includes('开启思考模式')));
+  assert.ok(optionTexts.every((t) => !t.includes('thinking:')));
+});
+
+it('toggles notesFormatOnSave in SettingsView General tab with On as default', async () => {
+  mock.method(api, 'getImportHistory', async () => ({ total: 0, items: [] }));
+  mock.method(api, 'getSettings', async () => ({
+    language: 'en',
+    theme: 'light',
+    timezone: 'UTC',
+    updatedAt: 1,
+  }));
+  const writes = mock.method(api, 'updateSettings', async (patch: Record<string, unknown>) => ({
+    language: 'en' as const,
+    theme: 'light' as const,
+    timezone: 'UTC',
+    updatedAt: 2,
+    ...patch,
+  }));
+
+  await act(async () => {
+    render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} />);
+  });
+
+  const group = screen.getByRole('group', { name: 'Format on save' });
+  const buttons = group.querySelectorAll('button');
+  assert.equal(buttons.length, 2);
+  const [onBtn, offBtn] = buttons;
+  assert.equal(onBtn.getAttribute('aria-pressed'), 'true');
+  assert.equal(offBtn.getAttribute('aria-pressed'), 'false');
+
+  await act(async () => {
+    fireEvent.click(offBtn);
+  });
+
+  assert.equal(offBtn.getAttribute('aria-pressed'), 'true');
+  assert.equal(onBtn.getAttribute('aria-pressed'), 'false');
+  assert.equal(writes.mock.callCount(), 1);
+  assert.deepEqual(writes.mock.calls[0].arguments[0], { notesFormatOnSave: false });
 });

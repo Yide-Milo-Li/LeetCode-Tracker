@@ -35,6 +35,7 @@ import {
   resolveReviewSettings,
   normalizeRules,
   type Candidate,
+  type Difficulty,
   type RecommendationFeedbackReason,
   type DailyPlan,
   type EnsureResult,
@@ -55,6 +56,8 @@ import {
 /**
  * Service orchestrating recommendation planning, daily schedules, and prompt overrides.
  */
+const ZH_DIFFICULTY: Record<Difficulty, string> = { Easy: '简单', Medium: '中等', Hard: '困难' };
+
 export class PlanningService {
   private readonly store: CatalogStore;
   private readonly planning: PlanningStore;
@@ -370,8 +373,8 @@ export class PlanningService {
           ? `Selected ${p.difficulty} problem targeting weak topic (${p.matchedWeakTags?.join(', ') || p.difficulty}) for focused breakthrough.`
           : `Selected ${p.difficulty} problem to practice core algorithms.`,
         zh: p.isFocusTopic
-          ? `精选薄弱专题${p.difficulty}题目（${p.matchedWeakTags?.join('、') || p.difficulty}），针对性训练核心算法。`
-          : `精选${p.difficulty}难度题目，针对性训练核心算法。`,
+          ? `精选薄弱专题${ZH_DIFFICULTY[p.difficulty]}题目（${p.matchedWeakTags?.join('、') || ZH_DIFFICULTY[p.difficulty]}），针对性训练核心算法。`
+          : `精选${ZH_DIFFICULTY[p.difficulty]}难度题目，针对性训练核心算法。`,
       },
       evidenceIds: [],
       completed: false,
@@ -523,8 +526,8 @@ export class PlanningService {
               ? `Replacement problem focusing on weak topic: ${candidate.matchedWeakTags?.join(', ') || candidate.difficulty}.`
               : `Replacement ${candidate.difficulty} problem to continue today's study focus.`,
             zh: candidate.isFocusTopic
-              ? `换题精选薄弱专题题目（${candidate.matchedWeakTags?.join('、') || candidate.difficulty}），强化突破。`
-              : `换题精选${candidate.difficulty}难度题目，延续今日训练目标。`,
+              ? `换题精选薄弱专题题目（${candidate.matchedWeakTags?.join('、') || ZH_DIFFICULTY[candidate.difficulty]}），强化突破。`
+              : `换题精选${ZH_DIFFICULTY[candidate.difficulty]}难度题目，延续今日训练目标。`,
           },
           evidenceIds: [],
           completed: false,
@@ -539,7 +542,7 @@ export class PlanningService {
       // No replacement available under hard filters preserving difficulty and kind
       notices.push({
         en: `No alternative ${item.problem.difficulty} (${item.kind}) problem available under current filters. Original retained.`,
-        zh: `当前硬条件下未找到可替换的${item.problem.difficulty} (${item.kind === 'review' ? '复习' : '新题'})题目，已保留原题目。`,
+        zh: `当前硬条件下未找到可替换的${ZH_DIFFICULTY[item.problem.difficulty]}（${item.kind === 'review' ? '复习' : '新题'}）题目，已保留原题目。`,
       });
       retained.push(item);
       return item;
@@ -673,8 +676,8 @@ export class PlanningService {
           ? `Selected ${candidate.difficulty} problem targeting weak topic (${candidate.matchedWeakTags?.join(', ') || candidate.difficulty}) for focused breakthrough.`
           : `Selected ${candidate.difficulty} problem to practice core algorithms.`,
         zh: candidate.isFocusTopic
-          ? `精选薄弱专题${candidate.difficulty}题目（${candidate.matchedWeakTags?.join('、') || candidate.difficulty}），针对性训练核心算法。`
-          : `精选${candidate.difficulty}难度题目，针对性训练核心算法。`,
+          ? `精选薄弱专题${ZH_DIFFICULTY[candidate.difficulty]}题目（${candidate.matchedWeakTags?.join('、') || ZH_DIFFICULTY[candidate.difficulty]}），针对性训练核心算法。`
+          : `精选${ZH_DIFFICULTY[candidate.difficulty]}难度题目，针对性训练核心算法。`,
       },
       evidenceIds: [],
       completed: false,
@@ -763,7 +766,7 @@ export class PlanningService {
 
     const analysisDate = localDate(now, plan.timezone);
     if (plan.date !== analysisDate) {
-      throw new PlanningError('STALE_PLAN', 'Only today can be modified; reload the current day / 仅支持修改今日计划，请刷新后重试', 409);
+      throw new PlanningError('STALE_PLAN', 'Only today can be modified; reload the current day', 409);
     }
 
     const targetIndex = plan.items.findIndex(i => i.id === options.itemId);
@@ -1184,7 +1187,7 @@ export class PlanningService {
       addedAt: Date.now(),
       reason: aiContent.reasons[p.questionId] ?? {
         en: `Selected ${p.difficulty} problem under temporary rule override.`,
-        zh: `根据今日临时调整规则精选${p.difficulty}题目。`,
+        zh: `根据今日临时调整规则精选${ZH_DIFFICULTY[p.difficulty]}题目。`,
       },
       evidenceIds: [],
       completed: false,

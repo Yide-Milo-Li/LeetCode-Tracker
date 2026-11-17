@@ -10,6 +10,7 @@ import {
   type PracticeStats,
 } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
+import { localizeApiError } from '../error-i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
 import { Dialog, Feedback, Field, PageHeader, Pagination, IconButton, Tooltip } from './ui.tsx';
 import { PracticeEditor, PracticeHistory } from './PracticeWorkspace.tsx';
@@ -78,7 +79,7 @@ export function CatalogView({
         }
       })
       .catch((err) => {
-        if (active) setOverviewError(t.overviewLoadFailed + ': ' + err.message);
+        if (active) setOverviewError(t.overviewLoadFailed + ': ' + localizeApiError(err, lang));
       })
       .finally(() => {
         if (active) setOverviewLoading(false);
@@ -109,7 +110,7 @@ export function CatalogView({
         }
       })
       .catch((err) => {
-        if (active) setError(t.catalogLoadFailed + ': ' + err.message);
+        if (active) setError(t.catalogLoadFailed + ': ' + localizeApiError(err, lang));
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -313,7 +314,7 @@ export function CatalogView({
                     <button className="problem-title-button" onClick={() => setSelected(problem)}>
                       {problem.title}
                     </button>
-                    {problem.isPaidOnly && <small className="pending-label">Premium</small>}
+                    {problem.isPaidOnly && <small className="pending-label">{t.statPremium}</small>}
                   </td>
                   <td>
                     <span className={'difficulty ' + problem.difficulty.toLowerCase()}>
@@ -393,7 +394,7 @@ export function CatalogView({
             <dt>{zh ? '来源' : 'Source'}</dt>
             <dd>{selected.source}</dd>
             <dt>{zh ? '访问' : 'Access'}</dt>
-            <dd>{selected.isPaidOnly ? 'Premium' : zh ? '免费' : 'Free'}</dd>
+            <dd>{selected.isPaidOnly ? t.statPremium : zh ? '免费' : 'Free'}</dd>
             <dt>{zh ? '本地题目标识' : 'Local problem ID'}</dt>
             <dd>{selected.questionId}</dd>
           </dl>

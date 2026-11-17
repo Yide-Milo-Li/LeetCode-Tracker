@@ -51,3 +51,22 @@ test('desktop errors preserve conflict metadata for idempotent retries', async (
   await assert.rejects(request('/practice-records/record'), (error: unknown) =>
     error instanceof ApiError && error.status === 409 && error.code === 'STALE_REVISION');
 });
+
+test('note format requests use the authenticated desktop API bridge', async () => {
+  const calls: Array<{ method: string; path: string; body?: string }> = [];
+  bridge(async (command, args) => {
+    assert.equal(command, 'api_request');
+    calls.push(args);
+    const result = args.method === 'GET'
+      ? { configured: true, provider: 'gemini', model: 'mock' }
+      : { content: '## Synthetic\n', range: { start: 0, end: 9 }, model: 'mock' };
+    return { status: 200, body: JSON.stringify(result), headers: {} };
+  });
+  assert.equal((await api.getNoteFormatStatus()).configured, true);
+  assert.equal((await api.formatNote({ content: 'Synthetic' })).content, '## Synthetic\n');
+  assert.deepEqual(calls.map(({ method, path }) => ({ method, path })), [
+    { method: 'GET', path: '/api/v1/notes/format/status' },
+    { method: 'POST', path: '/api/v1/notes/format' },
+  ]);
+  assert.deepEqual(JSON.parse(calls[1].body!), { content: 'Synthetic' });
+});

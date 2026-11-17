@@ -9,6 +9,7 @@ import React, { useEffect, useState, type ReactNode } from 'react';
 import { Check, CheckCircle2, Sparkles, CalendarDays, Settings2 } from 'lucide-react';
 import { api } from '../api.ts';
 import type { Language } from '../i18n.ts';
+import { localizeApiError } from '../error-i18n.ts';
 import type { ThemePalette } from '../../../../packages/contracts/src/sync.ts';
 import { strategyInputSchema, type StrategyInput } from '../../../../packages/contracts/src/recommendations.ts';
 import { percentagesForCounts, reviewPercentForCount } from '../strategy-counts.ts';
@@ -218,7 +219,7 @@ function SetupGuide({
       setStatus((s) => ({ ...s, hasSchedule: true }));
       setStep(3);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(localizeApiError(err, lang));
     } finally {
       setCreating(false);
     }

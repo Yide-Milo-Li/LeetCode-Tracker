@@ -22,6 +22,7 @@ import { ANALYSIS_VERSION, DURATION_THRESHOLDS, REVIEW_VERSION, validDuration } 
 /** Versioned opt-in topic priorities and duration-based review explanations. */
 export const ALGORITHM_VERSION = 'phase39-v1';
 export const intervals = [1, 3, 7, 14, 30] as const;
+const ZH_DIFFICULTY: Record<Difficulty, string> = { Easy: '简单', Medium: '中等', Hard: '困难' };
 
 /**
  * Largest remainder allocation with input-order tie breaking.
@@ -385,7 +386,7 @@ export function select(
       const deficit = targetDifficultyReviewCount - chosenReviews.length;
       notices.push({
         en: `${difficulty}: review quota deficit of ${deficit} problem(s).`,
-        zh: `${difficulty}：缺少 ${deficit} 道复习题。`,
+        zh: `${ZH_DIFFICULTY[difficulty]}：缺少 ${deficit} 道复习题。`,
       });
     }
 
@@ -394,7 +395,7 @@ export function select(
       const deficit = targetDifficultyFreshCount - chosenFresh.length;
       notices.push({
         en: `${difficulty}: fresh problem deficit of ${deficit} problem(s).`,
-        zh: `${difficulty}：缺少 ${deficit} 道新题。`,
+        zh: `${ZH_DIFFICULTY[difficulty]}：缺少 ${deficit} 道新题。`,
       });
     }
 
@@ -403,7 +404,7 @@ export function select(
       const shortage = remainingSlotCount - chosen.length;
       notices.push({
         en: `${difficulty}: ${shortage} slots unavailable under the hard filters.`,
-        zh: `${difficulty}：硬条件下缺少 ${shortage} 道题。`,
+        zh: `${ZH_DIFFICULTY[difficulty]}：硬条件下缺少 ${shortage} 道题。`,
       });
     }
 
