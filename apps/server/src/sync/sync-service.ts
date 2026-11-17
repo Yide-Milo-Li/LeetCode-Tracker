@@ -288,13 +288,13 @@ export class DeviceSyncService {
         return { published: false, snapshot: this.summarize(graph.heads[0], graph.heads) };
       }
       if (graph.classification === 'remote-ahead') {
-        throw new DeviceSyncError(409, 'SYNC_REMOTE_AHEAD', 'Another device published newer data; receive it first');
+        throw new DeviceSyncError(409, 'SYNC_REMOTE_AHEAD', 'Another device published newer data; receive the latest snapshot first');
       }
       if (graph.heads.some(head => !head.compatible)) {
         throw new DeviceSyncError(409, 'SYNC_INCOMPATIBLE', 'A newer app version published the latest snapshot; update this app first');
       }
       if (graph.classification === 'fork' && !input.allowFork) {
-        throw new DeviceSyncError(409, 'SYNC_FORK', 'Both devices changed data since the last sync; choose which version to keep');
+        throw new DeviceSyncError(409, 'SYNC_FORK', 'More than one device changed data since the last sync; choose which version to keep');
       }
       const known = new Set(listing.snapshots.map(s => s.snapshotId));
       const parentId = local.baseId && known.has(local.baseId) ? local.baseId : null;
@@ -720,6 +720,7 @@ export class DeviceSyncService {
       appVersion: this.options.appVersion,
       lastPublished: this.setting(K.lastPublished),
       lastReceived: this.setting(K.lastReceived),
+      currentSnapshotId: this.setting(K.baseSnapshotId),
       updatedAt: this.now(),
     };
     try {

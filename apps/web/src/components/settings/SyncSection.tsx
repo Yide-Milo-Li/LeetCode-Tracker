@@ -16,8 +16,8 @@ const STATE_COPY: Record<SyncClassification, { en: string; zh: string; tone: 'su
   'empty-remote': { en: 'Nothing published yet. Publish this device to start.', zh: '还没有快照。发布本机数据即可开始同步。', tone: 'info' },
   'up-to-date': { en: 'Up to date with the latest snapshot.', zh: '已与最新快照一致。', tone: 'success' },
   'local-ahead': { en: 'This device has changes that are not published yet.', zh: '本机有尚未发布的修改。', tone: 'info' },
-  'remote-ahead': { en: 'Another device published newer data.', zh: '另一台设备发布了更新的数据。', tone: 'info' },
-  fork: { en: 'Both sides changed since the last sync. Pick the version to keep; nothing is merged automatically.', zh: '两边在上次同步后都有修改。请选择保留哪一份，不会自动合并。', tone: 'warning' },
+  'remote-ahead': { en: 'Another device published newer data.', zh: '其他设备发布了更新的数据。', tone: 'info' },
+  fork: { en: 'More than one version changed independently since the last sync. Pick the one to keep; nothing is merged automatically.', zh: '上次同步后出现了多个各自修改过的版本。请选择保留哪一份，不会自动合并。', tone: 'warning' },
 };
 
 function formatTime(ms: number, zh: boolean): string {
@@ -36,6 +36,9 @@ export function SyncSection({ lang, sync }: SyncSectionProps) {
   const disabled = busy !== null;
   const classification = status?.classification ?? null;
   const head: SyncSnapshotSummary | undefined = status?.heads.find(h => h.compatible) ?? status?.heads[0];
+  // Competing versions (several heads) are all offered; none is preferred by time.
+  const receivable = status?.heads.filter(h => h.compatible) ?? [];
+  const latestId = status?.heads.length === 1 ? status.heads[0].snapshotId : null;
   const otherDevices = status?.devices.filter(d => d.deviceId !== status.deviceId) ?? [];
   const methods: Array<{ id: SyncTransportKind; label: string }> = [
     { id: 'none', label: zh ? '关闭' : 'Off' },
@@ -52,8 +55,8 @@ export function SyncSection({ lang, sync }: SyncSectionProps) {
           content={
             <div>
               <p>{zh
-                ? '同步以完整快照进行：在一台设备上“发布”，在另一台设备上“接收”。同一时间请只在一台设备上使用。'
-                : 'Sync works with complete snapshots: publish on one device, receive on the other. Use one device at a time.'}</p>
+                ? '同步以完整快照进行：在刚使用过的设备上“发布”，切换到任意其他设备时先“接收”。可以有任意多台设备，但同一时间请只在一台上修改。'
+                : 'Sync works with complete snapshots: publish on the device you just used, and receive first whenever you switch to any other device. Any number of devices can join; edit on one at a time.'}</p>
               <p>{zh
                 ? '接收前会自动生成本地安全备份。API Key、Google 授权和同步设置只保存在本机。'
                 : 'Receiving always creates a local safety backup first. API keys, Google access and sync settings stay on each device.'}</p>
@@ -150,7 +153,9 @@ export function SyncSection({ lang, sync }: SyncSectionProps) {
             {classification && (
               <Feedback tone={STATE_COPY[classification].tone}>
                 {zh ? STATE_COPY[classification].zh : STATE_COPY[classification].en}
-                {head && classification !== 'up-to-date' && (
+                {status.heads.length > 1 ? (
+                  <> {zh ? `当前有 ${status.heads.length} 个并列版本。` : `${status.heads.length} competing versions.`}</>
+                ) : head && classification !== 'up-to-date' && (
                   <> {zh ? '最新：' : 'Latest: '}{head.deviceName} · {formatTime(head.createdAt, zh)}{head.compatible ? '' : (zh ? '（需要更新版本的应用）' : ' (needs a newer app)')}</>
                 )}
               </Feedback>
@@ -172,10 +177,10 @@ export function SyncSection({ lang, sync }: SyncSectionProps) {
                   <span>{busy === 'publish' ? '…' : zh ? '发布本机数据' : 'Publish this device'}</span>
                 </button>
               )}
-              {(classification === 'remote-ahead' || classification === 'fork') && head?.compatible && (
-                <button type="button" className="btn btn-primary btn-sm" onClick={() => void sync.startPreview(head.snapshotId)} disabled={disabled}>
+              {(classification === 'remote-ahead' || classification === 'fork') && receivable.length === 1 && (
+                <button type="button" className="btn btn-primary btn-sm" onClick={() => void sync.startPreview(receivable[0].snapshotId)} disabled={disabled}>
                   <Download size={14} />
-                  <span>{busy === 'preview' ? '…' : zh ? `接收 ${head.deviceName} 的版本` : `Receive ${head.deviceName}’s version`}</span>
+                  <span>{busy === 'preview' ? '…' : zh ? `接收 ${receivable[0].deviceName} 的版本` : `Receive ${receivable[0].deviceName}’s version`}</span>
                 </button>
               )}
               {classification === 'fork' && status.heads.every(h => h.compatible) && (
@@ -190,15 +195,31 @@ export function SyncSection({ lang, sync }: SyncSectionProps) {
               </button>
             </div>
 
+            {(classification === 'remote-ahead' || classification === 'fork') && receivable.length > 1 && (
+              <ul className="sync-device-list" aria-label={zh ? '可接收的版本' : 'Versions you can receive'}>
+                {receivable.map(h => (
+                  <li key={h.snapshotId} className="sync-head-row">
+                    <span><strong>{h.deviceName}</strong> · {formatTime(h.createdAt, zh)}</span>
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => void sync.startPreview(h.snapshotId)} disabled={disabled}>
+                      <Download size={14} />
+                      <span>{zh ? `接收 ${h.deviceName} 的版本` : `Receive ${h.deviceName}’s version`}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
             {otherDevices.length > 0 && (
-              <ul className="sync-device-list">
+              <ul className="sync-device-list" aria-label={zh ? '其他设备' : 'Other devices'}>
                 {otherDevices.map(d => (
                   <li key={d.deviceId}>
                     <strong>{d.deviceName}</strong>
                     {' · '}
-                    {d.lastReceived
-                      ? (zh ? `已接收快照 ${d.lastReceived.slice(0, 8)}` : `received snapshot ${d.lastReceived.slice(0, 8)}`)
-                      : (zh ? '尚未接收' : 'nothing received yet')}
+                    {latestId && d.currentSnapshotId === latestId
+                      ? (zh ? '已是最新' : 'up to date')
+                      : d.currentSnapshotId === undefined
+                        ? (d.lastReceived ? (zh ? `已接收快照 ${d.lastReceived.slice(0, 8)}` : `received snapshot ${d.lastReceived.slice(0, 8)}`) : (zh ? '尚未接收' : 'nothing received yet'))
+                        : (zh ? '不是最新版本' : 'not on the latest version')}
                     {' · '}
                     {formatTime(d.updatedAt, zh)}
                   </li>

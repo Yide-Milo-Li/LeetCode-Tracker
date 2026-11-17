@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync, rmSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readdirSync, readFileSync, writeFileSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -133,7 +133,7 @@ test('sync folder hands a profile to a second device and back, with acknowledgem
   }
 });
 
-test('forks are never resolved silently and resolution converges both devices', async () => {
+test('forks are never resolved silently and resolution converges the devices', async () => {
   const shared = mkdtempSync(join(tmpdir(), 'fork drive '));
   const a = await profile('fork-a'), b = await profile('fork-b');
   const A = await device(a), B = await device(b);
@@ -164,7 +164,7 @@ test('forks are never resolved silently and resolution converges both devices', 
     assert.equal(history.find((s: any) => s.snapshotId === taken.body.forkSnapshotId).kind, 'fork');
     assert.equal((await A.call('POST', '/api/v1/sync/check')).body.classification, 'up-to-date');
 
-    // Keep-local over a fork supersedes the other head; the other device then simply receives.
+    // Keep-local over a fork supersedes the competing head; devices on it then simply receive.
     a.store.upsertProblemNote('1', '# A again');
     b.store.upsertProblemNote('1', '# B wins');
     await A.call('POST', '/api/v1/sync/publish', {});
@@ -178,6 +178,66 @@ test('forks are never resolved silently and resolution converges both devices', 
     assert.equal(statusA.classification, 'remote-ahead');
   } finally {
     await A.app.close(); await B.app.close(); a.close(); b.close(); rmSync(shared, { recursive: true, force: true });
+  }
+});
+
+test('three devices: concurrent publishes become competing heads, one choice converges everyone', async () => {
+  const shared = mkdtempSync(join(tmpdir(), 'three drive '));
+  const staging = mkdtempSync(join(tmpdir(), 'delayed drive '));
+  const a = await profile('n-a'), b = await profile('n-b'), c = await profile('n-c');
+  const A = await device(a), B = await device(b), C = await device(c);
+  const receiveLatest = async (d: typeof A, snapshotId?: string) => {
+    const status = (await d.call('POST', '/api/v1/sync/check')).body;
+    const preview = await d.call('POST', '/api/v1/sync/receive/preview', { snapshotId: snapshotId ?? status.heads[0].snapshotId });
+    const received = await d.call('POST', '/api/v1/sync/receive', { previewId: preview.body.previewId });
+    assert.equal(received.status, 200, JSON.stringify(received.body));
+    return received.body;
+  };
+  try {
+    await seedMigrationProfile(a.store);
+    for (const [d, name] of [[A, 'A'], [B, 'B'], [C, 'C']] as const) {
+      await d.call('PUT', '/api/v1/sync/config', { transport: 'folder', folderPath: shared, deviceName: name });
+    }
+    await A.call('POST', '/api/v1/sync/publish', {});
+    await receiveLatest(B);
+    await receiveLatest(C);
+
+    // B and C edit and publish before seeing each other: C writes into a delayed copy of the store.
+    cpSync(join(shared, 'LeetCodeTrackerSync'), join(staging, 'LeetCodeTrackerSync'), { recursive: true });
+    b.store.upsertProblemNote('1', '# from B');
+    c.store.upsertProblemNote('1', '# from C');
+    assert.equal((await B.call('POST', '/api/v1/sync/publish', {})).body.published, true);
+    await C.call('PUT', '/api/v1/sync/config', { transport: 'folder', folderPath: staging });
+    const fromC = (await C.call('POST', '/api/v1/sync/publish', {})).body.snapshot.snapshotId;
+    cpSync(join(staging, 'LeetCodeTrackerSync'), join(shared, 'LeetCodeTrackerSync'), { recursive: true, force: false });
+    await C.call('PUT', '/api/v1/sync/config', { transport: 'folder', folderPath: shared });
+
+    const statusA = (await A.call('POST', '/api/v1/sync/check')).body;
+    assert.equal(statusA.classification, 'fork', 'a clean third device still must choose between competing heads');
+    assert.equal(statusA.heads.length, 2);
+    assert.equal((await A.call('POST', '/api/v1/sync/publish', {})).body.error, 'SYNC_FORK');
+
+    // A picks C's version; the resolution supersedes B's head.
+    const picked = await receiveLatest(A, fromC);
+    assert.ok(picked.resolutionSnapshotId);
+    assert.equal(a.store.getProblemNote('1')?.content, '# from C');
+
+    for (const [d, p] of [[B, b], [C, c]] as const) {
+      assert.equal((await d.call('POST', '/api/v1/sync/check')).body.classification, 'remote-ahead');
+      await receiveLatest(d);
+      assert.equal(p.store.getProblemNote('1')?.content, '# from C');
+    }
+    const final = (await A.call('POST', '/api/v1/sync/check')).body;
+    assert.equal(final.classification, 'up-to-date');
+    assert.equal(final.heads.length, 1);
+    assert.deepEqual(
+      final.devices.map((d: any) => [d.deviceName, d.currentSnapshotId === final.heads[0].snapshotId]).sort(),
+      [['A', true], ['B', true], ['C', true]],
+      'every device reports the latest snapshot'
+    );
+  } finally {
+    await A.app.close(); await B.app.close(); await C.app.close(); a.close(); b.close(); c.close();
+    rmSync(shared, { recursive: true, force: true }); rmSync(staging, { recursive: true, force: true });
   }
 });
 

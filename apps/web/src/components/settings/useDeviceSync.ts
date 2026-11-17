@@ -14,12 +14,12 @@ import { useWorkspace } from '../../workspace.tsx';
 
 /** Error codes with dedicated copy; other failures fall back to the server message. */
 const SYNC_ERROR_COPY: Record<string, { en: string; zh: string }> = {
-  SYNC_FORK: { en: 'Both devices changed data since the last sync. Choose which version to keep.', zh: '两台设备在上次同步后都有修改，请选择保留哪一份。' },
-  SYNC_REMOTE_AHEAD: { en: 'Another device published newer data. Receive it first.', zh: '另一台设备发布了更新的数据，请先接收。' },
+  SYNC_FORK: { en: 'More than one device changed data since the last sync. Choose which version to keep.', zh: '上次同步后有多台设备各自修改了数据，请选择保留哪一份。' },
+  SYNC_REMOTE_AHEAD: { en: 'Another device published newer data. Receive the latest snapshot first.', zh: '其他设备发布了更新的数据，请先接收最新快照。' },
   SYNC_LOCAL_CHANGES: { en: 'This device has unpublished changes. Choose to archive or discard them.', zh: '本机有未发布的修改，请选择归档或丢弃。' },
   SYNC_INCOMPATIBLE: { en: 'This snapshot was made by a newer app version. Update this app first.', zh: '该快照来自更新的应用版本，请先升级本机应用。' },
   SYNC_CORRUPT: { en: 'The snapshot is incomplete or damaged. Wait for your sync client to finish, or pick another snapshot.', zh: '快照不完整或已损坏。请等待同步客户端完成，或选择其他快照。' },
-  SYNC_INVALID_DATA: { en: 'The snapshot is intact but its data failed validation. Update both devices to the same version.', zh: '快照完整，但其中的数据未通过校验。请把两台设备更新到同一版本。' },
+  SYNC_INVALID_DATA: { en: 'The snapshot is intact but its data failed validation. Update all devices to the same app version.', zh: '快照完整，但其中的数据未通过校验。请把所有设备更新到同一应用版本。' },
   SYNC_NOT_READY: { en: 'The snapshot has not finished downloading to this device yet.', zh: '快照尚未完整下载到本机。' },
   SYNC_PREVIEW_EXPIRED: { en: 'The preview expired. Preview the snapshot again.', zh: '预览已过期，请重新预览。' },
   SYNC_RECONNECT_REQUIRED: { en: 'Google Drive access expired or was revoked. Connect again.', zh: 'Google Drive 授权已过期或被撤销，请重新连接。' },
@@ -144,7 +144,7 @@ export function useDeviceSync(lang: Language, active: boolean) {
     if (!result) return;
     publishOperation.current = null;
     setNotice(result.published
-      ? (zh ? '快照已上传。其他设备接收后会在下方显示。' : 'Snapshot uploaded. Other devices show here once they receive it.')
+      ? (zh ? '快照已上传。各设备接收后会在下方显示为“已是最新”。' : 'Snapshot uploaded. Each device shows as up to date below once it receives it.')
       : (zh ? '没有新的修改需要发布。' : 'Nothing new to publish.'));
     if (result.warning) setError(result.warning);
     const next = await api.getSyncStatus().catch(() => null);

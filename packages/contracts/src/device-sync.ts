@@ -51,6 +51,11 @@ export const syncDeviceStateSchema = z.object({
   appVersion: z.string().min(1).max(40),
   lastPublished: uuid.nullable(),
   lastReceived: uuid.nullable(),
+  /**
+   * Snapshot whose content this device held when it last wrote this file (its sync base).
+   * Optional so files from earlier builds still parse.
+   */
+  currentSnapshotId: uuid.nullable().optional(),
   updatedAt: z.number().int().nonnegative(),
 }).strict();
 

@@ -142,11 +142,35 @@ it('requires an explicit choice before receiving over local changes in a fork', 
   }));
   const receive = mock.method(api, 'receiveSync', async () => { throw Object.assign(new Error('stop'), { code: 'SYNC_PREVIEW_EXPIRED' }); });
   await renderData();
-  assert.ok(screen.getByText(/Both sides changed/));
+  assert.ok(screen.getByText(/More than one version changed/));
   assert.ok(screen.getByRole('button', { name: /Keep this device/ }));
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Receive MacBook/ })); });
   assert.equal(screen.queryByRole('button', { name: 'Confirm & receive' }), null, 'no silent replace over local changes');
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Archive mine and receive' })); });
   assert.deepEqual(receive.mock.calls[0].arguments[0], { previewId: '44444444-4444-4444-8444-444444444444', localChanges: 'fork' });
   assert.ok(screen.getByText(/The preview expired/));
+});
+
+it('offers every competing version when several devices published', async () => {
+  stubSettings();
+  const second = { ...head, snapshotId: '55555555-5555-4555-8555-555555555555', deviceId: '66666666-6666-4666-8666-666666666666', deviceName: 'Desktop' };
+  const forked = status({
+    classification: 'fork',
+    heads: [head, second],
+    devices: [
+      { deviceId: head.deviceId, deviceName: 'MacBook', appVersion: '1.3.1', lastPublished: head.snapshotId, lastReceived: null, currentSnapshotId: head.snapshotId, updatedAt: 2 },
+      { deviceId: second.deviceId, deviceName: 'Desktop', appVersion: '1.3.1', lastPublished: second.snapshotId, lastReceived: null, currentSnapshotId: second.snapshotId, updatedAt: 3 },
+    ],
+  });
+  mock.method(api, 'getSyncStatus', async () => forked);
+  mock.method(api, 'checkSync', async () => forked);
+  const previews = mock.method(api, 'previewSyncReceive', async () => { throw Object.assign(new Error('stop'), { code: 'SYNC_NOT_READY' }); });
+  await renderData();
+  assert.ok(screen.getByText(/2 competing versions/));
+  assert.ok(screen.getByRole('button', { name: /Receive MacBook/ }));
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Receive Desktop/ })); });
+  assert.equal(previews.mock.calls[0].arguments[0], second.snapshotId);
+  // With competing heads no device is "up to date".
+  assert.equal(screen.queryByText(/up to date/), null);
+  assert.equal(screen.getAllByText(/not on the latest version/).length, 2);
 });
