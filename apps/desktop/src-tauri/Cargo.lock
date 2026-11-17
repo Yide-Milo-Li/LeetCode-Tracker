@@ -2088,6 +2088,7 @@ dependencies = [
  "tauri-plugin-wdio-webdriver",
  "tempfile",
  "tokio",
+ "windows",
  "windows-sys 0.59.0",
 ]
 

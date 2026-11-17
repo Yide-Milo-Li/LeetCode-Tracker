@@ -30,11 +30,11 @@ rand = "0.8"
 [features]
 desktop-e2e = ["dep:tauri-plugin-wdio", "dep:tauri-plugin-wdio-webdriver"]
 
-# Runtime Dock icon updates (palette-tinted app icon).
+# Runtime Dock icon updates and the persisted bundle icon (palette-tinted app icon).
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSImage", "NSResponder"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSBundle", "NSData", "NSString"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSImage", "NSResponder", "NSWorkspace"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
@@ -45,4 +45,10 @@ windows-sys = { version = "0.59", features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_HiDpi"
+] }
+# COM shell links for the persisted Start menu / taskbar shortcut icon.
+windows = { version = "0.61", features = [
+    "Win32_Storage_FileSystem",
+    "Win32_System_Com",
+    "Win32_UI_Shell"
 ] }

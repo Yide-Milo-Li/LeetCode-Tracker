@@ -58,11 +58,18 @@ The historical published 1.0.0 Windows host can fail before readiness because Ta
 | **Window Close vs Quit** | Closing main window initiates graceful sidecar shutdown (10s deadline) | Red close button hides window; Dock click reopens; `Cmd+Q` initiates graceful shutdown (10s deadline) |
 | **Process Containment** | Windows Job Object (`KILL_ON_JOB_CLOSE`) | `ManagedChild` stdin close + `Drop` reap/kill |
 | **Notes Shortcuts** | `Ctrl+S` (save), `Ctrl+\` (focus mode) | `⌘S` (save), `⌘\` (focus mode) |
-| **Palette-Tinted App Icon** | Win32 `WM_SETICON` (`ICON_SMALL` / `ICON_BIG`), DPI-aware refresh on scale change | Live Dock icon update (`NSApplication.setApplicationIconImage`) |
+| **Palette-Tinted App Icon** | Win32 `WM_SETICON` (`ICON_SMALL` / `ICON_BIG`), DPI-aware refresh on scale change; persisted to per-user Start menu, Desktop and pinned-taskbar shortcuts | Live Dock icon update (`NSApplication.setApplicationIconImage`); persisted as the `.app` bundle custom icon |
 | **External Links** | Parsed HTTPS allowlist via `ShellExecuteW` | Parsed HTTPS allowlist via `/usr/bin/open` |
 | **Native File Save Dialog** | Atomic temp-file persist via `AuthorizedSave` | Atomic temp-file persist via `AuthorizedSave` |
 | **Data Directory** | `%LOCALAPPDATA%\com.leetcodetracker.desktop\` | `~/Library/Application Support/com.leetcodetracker.desktop/` |
 | **Migration Format** | Snapshot Bundle v5 (`.json`, imports v1/v2/v3/v5) | Snapshot Bundle v5 (`.json`, imports v1/v2/v3/v5) |
+
+#### Persisted Palette Icon
+
+The palette-tinted icon also stays in place after the app quits, so the Start menu, taskbar pins, Finder, Launchpad and the Dock keep showing the chosen palette. The host re-applies it on every launch, which also repairs it after an upgrade replaces shortcuts or the bundle. Choosing the default palette in light mode (the shipped artwork) removes the customization. Failures are logged and leave the bundled icon in place.
+
+- **Windows**: a multi-size `.ico` is written to `%LOCALAPPDATA%\com.leetcodetracker.desktop\icons\`, and only `.lnk` files whose target is the running `LeetCode Tracker.exe` are repointed (Start menu programs, Desktop, `User Pinned\TaskBar` and `User Pinned\StartMenu`). The executable's embedded icon, shown when browsing the install folder, is never modified. Explorer caches pinned-taskbar bitmaps, so a pin may keep the previous icon until Explorer restarts.
+- **macOS**: `NSWorkspace.setIcon(_:forFile:options:)` sets a Finder custom icon (`Icon`) on the running `LeetCode Tracker.app`; `persisted-app-icon` in the data directory records the last applied icon so unchanged launches skip the write. Launchpad and the Dock may show the previous icon until their caches refresh. Source-mode runs (no `.app` bundle) and Windows source runs (no matching shortcut) leave the system untouched.
 
 #### macOS Troubleshooting
 - **Startup screen shows "Local service could not start or has stopped"**: Ensure no second LeetCode Tracker instance (packaged `.app` or `npm start` source server) already holds the same SQLite database lease (`tracker.sqlite.lock`), then click **Retry / 重试**.

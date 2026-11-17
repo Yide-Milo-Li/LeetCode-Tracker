@@ -18,7 +18,7 @@ const React = await import('react');
 const { render, fireEvent, screen, act, cleanup } = await import('@testing-library/react');
 const { api } = await import('../apps/web/src/api.ts');
 const { SettingsView, PALETTE_OPTIONS } = await import('../apps/web/src/components/SettingsView.tsx');
-const { applyAppIcon, brandIconUrl, iconColors, resetNativeIconCache } = await import('../apps/web/src/brand-icons.ts');
+const { applyAppIcon, brandIconUrl, iconColors, isBundledArtwork, resetNativeIconCache } = await import('../apps/web/src/brand-icons.ts');
 
 afterEach(() => {
   cleanup();
@@ -302,6 +302,15 @@ it('tints the app icon per palette and keeps the original artwork for the defaul
   assert.match(svg, /fill="#bd93f9"/);
 });
 
+it('marks only the default light artwork as the bundled icon to persist', () => {
+  assert.equal(isBundledArtwork('default', false), true);
+  assert.equal(isBundledArtwork('default', true), false, 'the dark plate differs from the shipped icon');
+  assert.equal(isBundledArtwork('dracula', true), false);
+  for (const option of PALETTE_OPTIONS.filter((item) => item.id !== 'default')) {
+    assert.equal(isBundledArtwork(option.id, option.type === 'dark'), false, option.id);
+  }
+});
+
 it('points the favicon at the active palette icon outside the desktop host', async () => {
   await applyAppIcon('nord', true);
   const link = document.querySelector('link[rel="icon"]') as HTMLLinkElement;
@@ -367,12 +376,17 @@ it('rasterizes each host target size directly from SVG when running inside Tauri
     assert.equal(invokes.length, 2);
     assert.equal(invokes[0].cmd, 'get_icon_target_sizes');
     assert.equal(invokes[1].cmd, 'set_app_icon');
-    const payload = invokes[1].args as { png: number[]; variants: Array<{ size: number; png: number[] }> };
+    const payload = invokes[1].args as {
+      png: number[];
+      variants: Array<{ size: number; png: number[] }>;
+      bundled: boolean;
+    };
     assert.deepEqual(
       payload.variants.map((v) => v.size),
       [16, 20, 32, 40, 256],
     );
     assert.deepEqual(payload.png, [256 & 0xff, (256 >> 8) & 0xff]);
+    assert.equal(payload.bundled, false, 'a tinted palette is persisted as a custom icon');
   } finally {
     if (originalImage === undefined) {
       Reflect.deleteProperty(globalThis, 'Image');

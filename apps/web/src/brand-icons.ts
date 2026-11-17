@@ -6,7 +6,8 @@
  * palette updates every icon immediately with no extra assets or network requests.
  *
  * `applyAppIcon` also updates the document favicon and, inside the desktop host, the native
- * window/taskbar (Windows) or Dock (macOS) icon.
+ * window/taskbar (Windows) or Dock (macOS) icon, which the host also persists for when the app
+ * is not running (Windows shortcuts, macOS bundle icon).
  */
 import type { ThemePalette } from '../../../packages/contracts/src/sync.ts';
 import { PALETTE_OPTIONS } from './palettes.ts';
@@ -99,6 +100,11 @@ export function brandIconUrl(palette: ThemePalette, dark: boolean, size = 1024):
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(iconSvg(iconColors(palette, dark), size))}`;
 }
 
+/** Whether this palette/mode renders exactly the artwork shipped as the bundled app icon. */
+export function isBundledArtwork(palette: ThemePalette, dark: boolean): boolean {
+  return !dark && iconColors(palette, dark) === ORIGINAL;
+}
+
 /** Default fallback PNG edge length when the host does not report target sizes (e.g. macOS Retina Dock). */
 const FALLBACK_NATIVE_ICON_SIZE = 512;
 let lastNativeIcon = '';
@@ -189,7 +195,10 @@ export async function applyAppIcon(palette: ThemePalette, dark: boolean): Promis
     }
 
     const fallbackPng = variants[variants.length - 1].png;
-    await tauri.invoke('set_app_icon', { png: fallbackPng, variants });
+    // The host persists the icon in shortcuts / the app bundle so it survives quitting; the
+    // shipped artwork asks it to remove that customization instead of storing a copy.
+    const bundled = isBundledArtwork(palette, dark);
+    await tauri.invoke('set_app_icon', { png: fallbackPng, variants, bundled });
   } catch {
     // Keep the bundled icon; allow a later palette change to retry.
     if (lastNativeIcon === url) lastNativeIcon = '';
