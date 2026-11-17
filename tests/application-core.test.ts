@@ -1,4 +1,4 @@
-/** Direct application, HTTP concurrency and runtime ownership use synthetic profiles only. */
+/** Direct application, concurrency and runtime ownership use synthetic profiles only. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
@@ -9,7 +9,6 @@ import { CatalogStore } from '../packages/database/src/store.ts';
 import { createTrackerApplication } from '../packages/application/src/application.ts';
 import { ApplicationError } from '../packages/application/src/errors.ts';
 import { openTrackerRuntime } from '../packages/application/src/runtime.ts';
-import { buildApp } from '../apps/server/src/app.ts';
 import type { ModelService } from '../packages/application/src/types.ts';
 
 const model: ModelService = {
@@ -44,36 +43,32 @@ test('direct catalog, practice, notes, statistics and exports require no HTTP se
   } finally {await f.application.close(); f.db.close();}
 });
 
-test('HTTP and direct methods preserve validation details and practice replay', async () => {
-  const f=fixture(); const http=await buildApp({application:f.application,disableStatic:true});
+test('direct methods preserve validation details and practice replay', async () => {
+  const f=fixture();
   try {
-    await assert.rejects(f.application.catalog.query({limit:0}), error=>error instanceof ApplicationError&&error.code==='INVALID_QUERY');
-    assert.equal((await http.inject('/api/v1/catalog?limit=0')).statusCode,400);
+    await assert.rejects(f.application.catalog.query({limit:0}), error=>error instanceof ApplicationError&&error.code==='INVALID_QUERY'&&error.status===400);
     const preview=await f.application.catalog.preview({content}); await f.application.catalog.commit({previewId:preview.previewId});
     const payload={questionFrontendId:'1',completed:true,practicedAt:'2026-09-30',timePrecision:'date',operationId:'synthetic-replay'};
     const record=await f.application.practice.create(payload);
-    const replay=await http.inject({method:'POST',url:'/api/v1/practice-records',payload});
-    assert.equal(replay.json().id,record.id);
-    const conflict=await http.inject({method:'POST',url:'/api/v1/practice-records',payload:{...payload,completed:false}});
-    assert.equal(conflict.statusCode,409);
-  } finally {await http.close();await f.application.close(); f.db.close();}
+    assert.equal((await f.application.practice.create(payload)).id,record.id);
+    await assert.rejects(f.application.practice.create({...payload,completed:false}), error=>error instanceof ApplicationError&&error.status===409);
+  } finally {await f.application.close(); f.db.close();}
 });
 
 test('provider work blocks restore but allows ordinary reads; errors release admission', async () => {
   let release!:()=>void;
   const wait=new Promise<void>(resolve=>{release=resolve;});
   const f=fixture(undefined,{...model,formatProgressText:async()=>{await wait;throw new Error('synthetic provider error');}});
-  const http=await buildApp({application:f.application,disableStatic:true});
   try {
     const saved=await f.application.bundle.exportBundle();
     const pending=f.application.progress.format({rawText:'synthetic input'});
     assert.equal(f.application.isBusy(),true);
-    assert.equal((await http.inject('/api/v1/catalog/stats')).statusCode,200);
-    assert.equal((await http.inject({method:'POST',url:'/api/v1/bundle/import',payload:saved.content})).statusCode,409);
+    assert.ok(await f.application.catalog.stats());
+    await assert.rejects(f.application.bundle.restore(saved.content), error=>error instanceof ApplicationError&&error.code==='PROFILE_BUSY');
     release(); await assert.rejects(pending,/synthetic provider error/);
     assert.equal(f.application.isBusy(),false);
     await f.application.bundle.restore(saved.content);
-  } finally {release();await http.close();await f.application.close();f.db.close();}
+  } finally {release();await f.application.close();f.db.close();}
 });
 
 test('successful restore invalidates pending previews and returns configuration warning', async () => {
