@@ -4622,8 +4622,8 @@ input.form-input[aria-invalid="true"] { border-color: var(--danger); outline-col
 .review-sub-options {
   padding: 12px 14px;
   background: color-mix(in srgb, var(--primary) 5%, var(--surface));
-  border-left: 3px solid var(--primary);
-  border-radius: 0 var(--radius) var(--radius) 0;
+  border: 1px solid color-mix(in srgb, var(--primary) 18%, var(--border-color));
+  border-radius: var(--radius);
 }
 .strategy-advanced-details {
   border: 1px solid var(--border-color);
