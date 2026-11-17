@@ -8,6 +8,8 @@ Run `npm run build` then `npm start` from the repository root with Node.js 26.13
 
 For source-mode startup with browser launch, run `npm run desktop` (`scripts/start-desktop.ts`). On Windows, `npm run desktop` delegates to `scripts/start-desktop.ps1` (also invoked by one-click `start.bat`). On macOS, run `npm run desktop`, `npm run desktop:mac`, or `./scripts/start-desktop.sh` directly. The macOS/POSIX launcher probes `http://127.0.0.1:${PORT:-3000}/api/v1/catalog/stats` (opening the existing URL via `/usr/bin/open` if already running), aborts if another process holds the port, runs `npm run build` when `apps/web/dist/index.html` is missing, spawns `node apps/server/src/server.ts`, polls `/api/v1/catalog/stats` for up to 15 seconds, opens the default browser via `/usr/bin/open`, and forwards `SIGINT`/`SIGTERM` for clean database shutdown. Native Tauri builds are separate: `npm run desktop:build` packages the Windows installer, `npm run desktop:build:mac` builds the Apple Silicon macOS bundle, and `npm run desktop:dev` starts the native development host. See the [desktop guide](../docs/desktop.md).
 
+`npm run mcp:build` (`scripts/build-mcp.ts`) bundles the standalone MCP server into `apps/mcp/dist/leetcode-tracker-mcp.mjs` plus code-split chunks. Splitting is required: a single-file bundle initializes zod lazily and fails at startup. See the [MCP server guide](../apps/mcp/README.md).
+
 `npm run docs:check` validates maintained Markdown titles and local links without modifying files. See [tests](../tests/README.md) for isolated verification commands.
 
 ## Backup policy

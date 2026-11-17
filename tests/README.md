@@ -26,6 +26,10 @@ Coverage includes:
 
 `tests/device-sync.test.ts` covers the Phase 41 sync graph rules, row-order-independent content hashing that skips device-local settings, a two-device round trip through a temporary sync folder with acknowledgements and publish replay, fork detection and both resolutions, incomplete/truncated/conflict-copy/future-version snapshots, and the Google Drive adapter with PKCE loopback OAuth against an in-memory fake of the token and Drive v3 endpoints. `tests/web-device-sync.test.tsx` covers the Settings panel. No real Google account or network is used.
 
+## Standalone MCP server coverage
+
+`tests/mcp-standalone.test.ts` starts the real `leetcode-tracker-mcp` process over stdio against temporary synthetic profiles. It covers default profile paths per platform, CLI dry run and import with timezone initialization, tool annotations and every read tool, reads while another process holds the profile lease with `PROFILE_IN_USE` for imports, a missing profile, and the rebuilt bundle negotiating MCP `2025-11-25`. `tests/application-core.test.ts` covers the application layer it uses.
+
 ## Complete cross-device migration coverage
 
 The migration suites retain Snapshot Bundle v2/v3 compatibility tests for all 22 business tables and add Phase 39 Bundle v5/schema12 policy, feedback and replay round-trips. Schema11/Bundle4 are a separate incompatible lineage, not intermediate imports. They verify Windows/macOS-shaped export and restore into an empty profile, API-key exclusion and target-key preservation, invalid version/missing-table/reference rejection, size and schema boundaries, backup failure isolation, transactional write rollback, API v1/v2/v3 compatibility, and concurrent restore/write rejection. The isolated `tests/desktop/` WebdriverIO package and Tauri permissions are installed only by the macOS native CI job; they are not part of the ordinary application dependency set.

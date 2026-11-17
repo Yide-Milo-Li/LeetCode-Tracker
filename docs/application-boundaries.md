@@ -1,14 +1,16 @@
-# Application and workspace boundaries
+# Application boundaries
 
-Phase 35 is in progress. Real ChatGPT and DSH acceptance remains incomplete.
+`packages/application` holds the business operations as transport-neutral methods over an opened `CatalogStore`. On this branch the standalone MCP server (`apps/mcp`) is its only production caller. The HTTP server (`apps/server`) still serves the same behavior through its own routes and `planning-service.ts`; the two planning implementations differ only in import paths and an optional model service, and should converge when the HTTP routes are moved onto the application layer.
 
-`openTrackerRuntime` acquires the database lease before opening backed storage. The injected application owns operation admission, the write lock, planning and previews. `buildApp` assembles HTTP authentication, routing and static resources. Ordinary requests may overlap. Restore requires an idle application and rejects new work until replacement ends. Close drains admitted work before releasing SQLite and its lease. Provider construction and environment resolution remain in the server composition root.
+`openTrackerRuntime` acquires the database lease before opening backed storage. The application owns operation admission, the write lock, planning and previews. Ordinary operations may overlap. Restore requires an idle application and rejects new work until replacement ends. Close drains admitted work before releasing SQLite and its lease.
 
-## HTTP capability map
+The standalone MCP server adds one rule on top: reads construct an application over a fresh read-only connection per call and never take the lease, so they run while the desktop app owns the profile. Only writes go through `openTrackerRuntime`. See the [MCP server guide](../apps/mcp/README.md).
 
-Existing contracts validate inputs inside each application method. Outputs are inferred `Awaited<ReturnType<TrackerApplication[group][method]>>`; HTTP serializes them or delivers `ExportArtifact` content, media type and filename. Business errors preserve HTTP status and detail fields. Inputs listed below refer to the existing body/query schemas and named route parameters.
+## Capability map
 
-| Route | Application method | Input / params | Side effects | Regression suite |
+Existing contracts validate inputs inside each application method. Outputs are inferred `Awaited<ReturnType<TrackerApplication[group][method]>>`; exports return `ExportArtifact` content, media type and filename. Business errors are `ApplicationError` values carrying the HTTP-compatible status and detail fields.
+
+| Equivalent HTTP route | Application method | Input / params | Side effects | Regression suite |
 | --- | --- | --- | --- | --- |
 | `POST /api/v1/imports/preview` | `catalog.preview` | body; no params | Catalog preview/commit and history | server-api |
 | `POST /api/v1/imports` | `catalog.commit` | body; no params | Catalog preview/commit and history | server-api |
@@ -63,13 +65,3 @@ Existing contracts validate inputs inside each application method. Outputs are i
 | `PATCH /api/v1/settings` | `settings.update` | body; no params | Settings writes and injected provider refresh | server-settings-ai; server-settings-llm |
 | `POST /api/v1/settings/test-llm` | `settings.test` | body; no params | Settings writes and injected provider refresh | server-settings-ai; server-settings-llm |
 | `POST /api/v1/settings/test-gemini` | `settings.testGemini` | body; no params | Settings writes and injected provider refresh | server-settings-ai; server-settings-llm |
-
-## Shared workspace
-
-Today and Notes have one implementation in `packages/workspace`; desktop compatibility files only adapt or re-export it. The provider owns per-instance services and subscriptions. Host adapters inject transport, storage, clipboard, external links, navigation and file delivery. Experimental hosts use temporary storage and disable unsupported capabilities. Shared CSS, portals, modal focus and scroll locks stay inside the workspace root. Browser document sizing remains in the desktop host.
-
-Tool notifications and UI writes share refresh events. Dirty notes show an external-update notice without replacing drafts. Save responses establish the submitted snapshot as baseline and retain newer edits. Retained views preserve drafts during navigation. Experimental Today reads existing plans and never calls ensure.
-
-## Evidence
-
-The three new suites have named behavioral assertions in the default chain. SDK tests use real MCP Apps registration and initialization over an in-process transport, which is offline evidence. See [experimental startup and acceptance](../experiments/phase35/README.md). No experimental SDK is imported by the desktop launch chain.

@@ -1,43 +1,93 @@
 /**
- * Implementation of the 9 official read-only LeetCode Tracker MCP tools.
- * Exposes problem catalog, practice history, today's schedule, review notes,
- * and overall progress to external AI clients while strictly enforcing read-only access.
+ * LeetCode Tracker MCP tools for the standalone stdio server.
+ *
+ * Nine read tools expose the problem catalog, practice history, today's plan,
+ * review notes and progress. One write tool imports a JSON Lines problem
+ * catalog; it takes the profile lease only while it runs.
  */
+import { readFile, stat } from 'node:fs/promises';
+import * as path from 'node:path';
 import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/server';
-import type { TrackerApplication } from '@leetcode-tracker/application';
-import { isTimeZone, localDate } from '../../../../packages/contracts/src/time.ts';
-import type { CatalogProblem } from '../../../../packages/contracts/src/sync.ts';
-import { McpConfigError } from './config.ts';
+import type { CallToolResult, McpServer } from '@modelcontextprotocol/server';
+import type { TrackerApplication } from '../../../packages/application/src/application.ts';
+import { ApplicationError } from '../../../packages/application/src/errors.ts';
+import { isTimeZone, localDate } from '../../../packages/contracts/src/time.ts';
+import type { CatalogProblem } from '../../../packages/contracts/src/sync.ts';
+import { ProfileError, type TrackerProfile } from './profile.ts';
+import { importCatalog, TIMEZONE_HINT } from './operations.ts';
+import { MCP_SERVER_VERSION } from './version.ts';
+
+type ToolResult = { content: Array<{ type: 'text'; text: string }>; isError?: boolean };
+type ToolAccess = 'read' | 'preview' | 'write';
+
+const READ_ANNOTATIONS = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
+const IMPORT_ANNOTATIONS = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
+
+export const TOOL_NAMES = [
+  'tracker_status',
+  'tracker_search_problems',
+  'tracker_get_problem',
+  'tracker_get_today',
+  'tracker_list_practices',
+  'tracker_get_practice',
+  'tracker_list_notes',
+  'tracker_get_note',
+  'tracker_get_progress',
+  'tracker_import_catalog',
+] as const;
+
+/** Convert any failure into a coded tool error the model can explain to the user. */
+function toolError(error: unknown): ToolResult & { structuredContent: Record<string, unknown> } {
+  let code = 'MCP_QUERY_FAILED';
+  let message = 'The request failed. See the server log for details.';
+  if (error instanceof ProfileError || error instanceof ApplicationError) {
+    code = error.code;
+    message = error.message;
+  } else {
+    console.error('[leetcode-tracker-mcp] unexpected tool failure:', error);
+  }
+  return { isError: true, structuredContent: { error: code, message }, content: [{ type: 'text', text: `${code}: ${message}` }] };
+}
 
 /**
- * Registers the 9 read-only tracker tools with the given McpServer instance.
+ * Registers the tracker tools. Each call gets its own application instance:
+ * reads use a short-lived read-only connection, writes hold the lease only
+ * for that one call.
  */
-export function registerTrackerTools(
-  rawServer: McpServer,
-  application: TrackerApplication,
-  guard: { assert: () => void },
-): void {
-  const server = { registerTool: ((name: string, config: Parameters<McpServer['registerTool']>[1], callback: (...args: any[]) => any) =>
-    rawServer.registerTool(name, { ...config, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async (...args: any[]) => {
-      try {
-        guard.assert();
-        const result = await callback(...args);
-        guard.assert();
-        const text = result.content?.find((item: { type: string }) => item.type === 'text')?.text;
-        return text && !result.isError ? { ...result, structuredContent: JSON.parse(text) } : result;
-      } catch (error) {
-        const code = error instanceof McpConfigError ? error.code : 'MCP_QUERY_FAILED';
-        return { isError: true, structuredContent: { error: code }, content: [{ type: 'text', text: code }] };
-      }
-    })) as McpServer['registerTool'] };
+export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfile): void {
+  const server = {
+    registerTool<S extends z.ZodObject>(
+      name: (typeof TOOL_NAMES)[number],
+      config: { description: string; inputSchema: S },
+      handler: (application: TrackerApplication, args: z.infer<S>) => Promise<ToolResult>,
+      access: ToolAccess | ((args: z.infer<S>) => ToolAccess) = 'read',
+    ) {
+      const annotations = access === 'read' ? READ_ANNOTATIONS : IMPORT_ANNOTATIONS;
+      // Widen the schema so the SDK's conditional callback type resolves; args are validated by the SDK.
+      const inputSchema: z.ZodObject = config.inputSchema;
+      rawServer.registerTool(name, { description: config.description, inputSchema, annotations }, async (rawArgs: unknown): Promise<CallToolResult> => {
+        try {
+          const args = rawArgs as z.infer<S>;
+          const run = (application: TrackerApplication) => handler(application, args);
+          const mode = typeof access === 'function' ? access(args) : access;
+          const result = await (mode === 'read' ? profile.read(run) : mode === 'preview' ? profile.preview(run) : profile.write(run));
+          const text = result.content.find(item => item.type === 'text')?.text;
+          return text && !result.isError ? { ...result, structuredContent: JSON.parse(text) as Record<string, unknown> } : result;
+        } catch (error) {
+          return toolError(error);
+        }
+      });
+    },
+  };
+
   // 1. tracker_status
   server.registerTool(
     'tracker_status',
     {
-      description: 'Get runtime version, catalog problem counts, streak metrics, configured timezone, and read-only capabilities.',
+      description: 'Get server version, profile location, catalog problem counts, streak metrics, configured timezone and available tools. Call this first.',
+      inputSchema: z.object({}),
     },
-    async () => {
+    async (application) => {
 
       const stats = await application.catalog.stats();
       const settings = await application.settings.get();
@@ -70,8 +120,9 @@ export function registerTrackerTools(
       }
 
       const data = {
-        runtimeVersion: '1.2.0',
-        readOnly: true,
+        serverVersion: MCP_SERVER_VERSION,
+        profile: profile.location.dbPath,
+        writeTools: ['tracker_import_catalog'],
         database: {
           totalProblems: stats.totalProblems,
           easy: stats.easy,
@@ -83,7 +134,7 @@ export function registerTrackerTools(
           configured: isTzConfigured,
           timezone: isTzConfigured ? tz : null,
           activeDate,
-          warning: isTzConfigured ? null : 'Timezone is not configured in settings. Please set your timezone in Settings.',
+          warning: isTzConfigured ? null : TIMEZONE_HINT,
         },
         streak: {
           currentStreak: dashboard.overview.currentStreak,
@@ -92,17 +143,7 @@ export function registerTrackerTools(
           totalManualPractices: dashboard.overview.totalManualPractices,
         },
         today: todayPlanSummary,
-        tools: [
-          'tracker_status',
-          'tracker_search_problems',
-          'tracker_get_problem',
-          'tracker_get_today',
-          'tracker_list_practices',
-          'tracker_get_practice',
-          'tracker_list_notes',
-          'tracker_get_note',
-          'tracker_get_progress',
-        ],
+        tools: TOOL_NAMES,
       };
 
       return {
@@ -124,7 +165,7 @@ export function registerTrackerTools(
         limit: z.number().int().min(1).max(100).optional().default(20).describe('Items per page, max 100 (default 20)'),
       }),
     },
-    async ({ query, difficulty, tag, page = 1, limit = 20 }) => {
+    async (application, { query, difficulty, tag, page = 1, limit = 20 }) => {
 
       const catalogResult = await application.catalog.query({
         page,
@@ -168,7 +209,7 @@ export function registerTrackerTools(
         frontendId: z.string().min(1).describe('Problem frontend ID (e.g. "1", "15", "42")'),
       }),
     },
-    async ({ frontendId }) => {
+    async (application, { frontendId }) => {
 
       const trimmedId = frontendId.trim();
       const { problem } = await application.catalog.read({}, { frontendId: trimmedId });
@@ -257,7 +298,7 @@ export function registerTrackerTools(
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Explicit date in YYYY-MM-DD format (defaults to current date in configured timezone)'),
       }),
     },
-    async ({ date }) => {
+    async (application, { date }) => {
 
       let targetDate = date;
       if (!targetDate) {
@@ -270,7 +311,7 @@ export function registerTrackerTools(
               text: JSON.stringify({
                 hasPlan: false,
                 error: 'TIMEZONE_NOT_CONFIGURED',
-                message: 'Timezone is not configured in LeetCode Tracker. Please configure your timezone in Settings before querying today\'s plan.',
+                message: TIMEZONE_HINT,
               }, null, 2),
             }],
           };
@@ -314,7 +355,7 @@ export function registerTrackerTools(
             date: targetDate,
             strategyId: plan.strategyId,
             rules: plan.rules,
-            completedCount: items.filter((i: any) => i.completed).length,
+            completedCount: items.filter((i) => i.completed).length,
             totalCount: items.length,
             items,
           }, null, 2),
@@ -335,7 +376,7 @@ export function registerTrackerTools(
         order: z.enum(['asc', 'desc']).optional().default('desc').describe('Sort order by timestamp (default "desc")'),
       }),
     },
-    async ({ frontendId, page = 1, limit = 20, order = 'desc' }) => {
+    async (application, { frontendId, page = 1, limit = 20, order = 'desc' }) => {
 
       let problemId: string | undefined;
       if (frontendId) {
@@ -404,7 +445,7 @@ export function registerTrackerTools(
         recordId: z.string().min(1).describe('The unique practice record ID'),
       }),
     },
-    async ({ recordId }) => {
+    async (application, { recordId }) => {
 
       try {
         const result = await application.practice.read({}, { id: recordId });
@@ -458,7 +499,7 @@ export function registerTrackerTools(
         limit: z.number().int().min(1).max(100).optional().default(20).describe('Items per page, max 100 (default 20)'),
       }),
     },
-    async ({ hasNote = 'all', search, difficulty = 'all', page = 1, limit = 20 }) => {
+    async (application, { hasNote = 'all', search, difficulty = 'all', page = 1, limit = 20 }) => {
 
       const result = await application.notes.list({
         hasNote,
@@ -494,7 +535,7 @@ export function registerTrackerTools(
         chunkSize: z.number().int().min(500).max(10000).optional().default(3000).describe('Character limit per chunk (default 3000, max 10000)'),
       }),
     },
-    async ({ frontendId, chunkIndex = 0, chunkSize = 3000 }) => {
+    async (application, { frontendId, chunkIndex = 0, chunkSize = 3000 }) => {
 
       const trimmedId = frontendId.trim();
       const result = await application.notes.read({}, { frontendId: trimmedId });
@@ -548,9 +589,9 @@ export function registerTrackerTools(
         year: z.number().int().min(2000).max(2100).optional().describe('Target calendar year for heatmap data (defaults to current year)'),
       }),
     },
-    async ({ year }) => {
+    async (application, { year }) => {
       const settings = await application.settings.get();
-      if (!settings.timezone || !isTimeZone(settings.timezone)) return { isError: true, content: [{ type: 'text', text: 'TIMEZONE_REQUIRED' }] };
+      if (!settings.timezone || !isTimeZone(settings.timezone)) return { isError: true, content: [{ type: 'text', text: `TIMEZONE_REQUIRED: ${TIMEZONE_HINT}` }] };
       const dashboard = await application.dashboard.summary({ year });
 
       const result = {
@@ -572,5 +613,30 @@ export function registerTrackerTools(
         content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
       };
     },
+  );
+
+  // 10. tracker_import_catalog
+  server.registerTool(
+    'tracker_import_catalog',
+    {
+      description: 'Import or update problems from a local JSON Lines catalog file (one problem per line with id, title, difficulty and tags). Existing practice records and notes are kept. Set dryRun to preview counts and errors without saving. Fails with PROFILE_IN_USE while the desktop app is running.',
+      inputSchema: z.object({
+        path: z.string().min(1).describe('Absolute path to a .jsonl catalog file on this machine'),
+        dryRun: z.boolean().optional().default(false).describe('Validate and count changes without saving (default false)'),
+      }),
+    },
+    async (application, { path: filePath, dryRun = false }) => {
+      if (!path.isAbsolute(filePath)) {
+        return { isError: true, content: [{ type: 'text', text: 'INVALID_PATH: Provide an absolute file path.' }] };
+      }
+      const info = await stat(filePath).catch(() => null);
+      if (!info?.isFile()) {
+        return { isError: true, content: [{ type: 'text', text: `FILE_NOT_FOUND: ${filePath}` }] };
+      }
+      const content = await readFile(filePath, 'utf8');
+      const result = await importCatalog(application, content, { dryRun });
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    },
+    ({ dryRun }) => (dryRun ? 'preview' : 'write'),
   );
 }

@@ -1,0 +1,35 @@
+{
+  "name": "leetcode-tracker-mcp",
+  "version": "0.1.0",
+  "description": "Standalone MCP server for LeetCode Tracker: read your local practice catalog, today's plan, notes and progress from any MCP client.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "leetcode-tracker-mcp": "dist/leetcode-tracker-mcp.mjs"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=26.13.0 <27"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "leetcode",
+    "practice-tracker"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Yide-Milo-Li/Leetcode-Tracker.git",
+    "directory": "apps/mcp"
+  },
+  "scripts": {
+    "build": "node --import tsx ../../scripts/build-mcp.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.2.0",
+    "zod": "^4.1.0"
+  }
+}
