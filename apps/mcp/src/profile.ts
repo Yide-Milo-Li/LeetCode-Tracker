@@ -152,7 +152,7 @@ export class TrackerProfile {
       if (error instanceof Error && error.message.startsWith('Database is in use')) {
         throw new ProfileError(
           'PROFILE_IN_USE',
-          'The LeetCode Tracker desktop app is using this profile. Quit it (tray > Quit), then retry, or import from the desktop app instead.',
+          'The LeetCode Tracker desktop app is using this profile, so changes are blocked. Quit it (tray > Quit) and retry, or make the change in the desktop app. Reads still work.',
         );
       }
       throw error;

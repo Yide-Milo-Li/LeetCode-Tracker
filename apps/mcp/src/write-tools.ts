@@ -102,7 +102,7 @@ export function registerWriteTools({ register }: Registrar): void {
         questionFrontendId: z.string().min(1).describe('Problem frontend ID, e.g. "1"'),
         completed: z.boolean().describe('Whether the problem was solved in this attempt'),
         practicedAt: z.string().min(1).optional()
-          .describe('When it happened: "YYYY-MM-DD", or ISO 8601 with offset such as "2026-11-17T20:30:00-08:00". Defaults to today in the configured timezone.'),
+          .describe('When it happened: ISO 8601 with offset such as "2026-11-17T20:30:00-08:00", or "YYYY-MM-DD" for a past day. Defaults to now. A date-only value does not complete a plan item added that same day.'),
         timePrecision: z.enum(['datetime', 'date']).optional().describe('Inferred from practicedAt when omitted'),
         durationMinutes: z.number().int().min(1).max(1440).nullable().optional(),
         outcome: outcomeSchema.nullable().optional()
@@ -113,7 +113,11 @@ export function registerWriteTools({ register }: Registrar): void {
     async (application, args) => {
       const operationId = args.operationId ?? randomUUID();
       const zone = await configuredZone(application);
-      const practicedAt = args.practicedAt?.trim() || localDate(Date.now(), zone);
+      // Default to an exact timestamp, as the desktop does: plan completion only
+      // counts date-only evidence from days after the item was added.
+      // A retry without practicedAt reuses the first call's timestamp so the replay matches.
+      const earlier = args.practicedAt ? null : await application.practice.byOperation(operationId);
+      const practicedAt = args.practicedAt?.trim() || earlier?.practicedAt || new Date().toISOString();
       const record = await application.practice.create({
         questionFrontendId: args.questionFrontendId.trim(),
         completed: args.completed,
@@ -123,7 +127,7 @@ export function registerWriteTools({ register }: Registrar): void {
         outcome: args.outcome,
         notes: args.notes,
         operationId,
-        sourceTimezone: zone,
+        sourceTimezone: earlier ? earlier.sourceTimezone : zone,
       });
       return json({ status: 'applied', operationId, record });
     },

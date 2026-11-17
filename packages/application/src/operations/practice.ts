@@ -119,5 +119,13 @@ export function createPracticeOperations(context: ApplicationContext) {
     const stats = store.getPracticeStats();
     return stats;
   };
-  return { create, query, read, update, revoke, stats };
+  /** Record created by an earlier call with this operation ID, so callers can rebuild an identical replay. */
+  const byOperation = async (operationId: string) => {
+    const row = store.db
+      .prepare('SELECT record_id FROM practice_operations WHERE id=?')
+      .get(operationId) as { record_id: string } | undefined;
+    return row ? store.getPracticeRecord(row.record_id) : null;
+  };
+
+  return { create, query, read, update, revoke, stats, byOperation };
 }

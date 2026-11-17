@@ -55,7 +55,8 @@ test('practice create replays by operationId; update and revoke require the curr
     assert.equal(created.structuredContent.status, 'applied');
     const record = created.structuredContent.record;
     assert.equal(record.revision, 1);
-    assert.equal(record.practicedAt, today());
+    assert.equal(record.timePrecision, 'datetime');
+    assert.equal(record.practicedAt.slice(0, 10), today());
 
     const replay = await client.call('tracker_create_practice', args);
     assert.equal(replay.structuredContent.record.id, record.id, 'same operationId returns the first record');
@@ -147,13 +148,25 @@ test('strategy and today plan: create, append with replay, replace, remove and a
     assert.equal(removed.plan.totalCount, 3);
     assert.equal(errorCode(await client.call('tracker_remove_today_item', { expectedVersion: removed.plan.version, frontendId: '999' })), 'PLAN_ITEM_NOT_FOUND');
 
-    const rules = { dailyCount: 2, difficulty: { Easy: 0, Medium: 0, Hard: 100 }, reviewEnabled: false, reviewPercent: null };
+    // Solving a plan item through the practice tool completes it, and rule changes must keep it.
+    const solved = removed.plan.items.find((item: any) => item.difficulty === 'Easy') ?? removed.plan.items[0];
+    await client.call('tracker_create_practice', { questionFrontendId: solved.frontendId, completed: true, outcome: 'assisted' });
+    const afterPractice = (await client.call('tracker_get_today')).structuredContent;
+    assert.equal(afterPractice.items.find((item: any) => item.frontendId === solved.frontendId).completed, true);
+    assert.equal(afterPractice.completedCount, 1);
+    const conflicting = { dailyCount: 2, difficulty: { Easy: 0, Medium: 0, Hard: 100 }, reviewEnabled: false, reviewPercent: null };
+    if (solved.difficulty !== 'Hard') {
+      assert.equal(errorCode(await client.call('tracker_apply_today_rules', { rules: conflicting, expectedVersion: removed.plan.version })), 'RULES_NOT_APPLICABLE');
+    }
+
+    const rules = { dailyCount: 3, difficulty: { Easy: 0, Medium: 0, Hard: 100 }, reviewEnabled: false, reviewPercent: null };
+    rules.difficulty = { Easy: solved.difficulty === 'Easy' ? 100 / 3 : 0, Medium: solved.difficulty === 'Medium' ? 100 / 3 : 0, Hard: solved.difficulty === 'Hard' ? 100 : 200 / 3 };
     const preview = (await client.call('tracker_preview_today_rules', { rules })).structuredContent;
     assert.deepEqual(preview.issues, []);
-    assert.equal(preview.counts.Hard, 2);
     const applied = (await client.call('tracker_apply_today_rules', { rules, expectedVersion: removed.plan.version })).structuredContent;
-    assert.equal(applied.plan.totalCount, 2);
-    assert.equal(applied.plan.items.every((item: any) => item.difficulty === 'Hard'), true);
+    assert.equal(applied.plan.totalCount, 3);
+    assert.ok(applied.plan.items.some((item: any) => item.frontendId === solved.frontendId && item.completed), 'completed item is kept');
+    assert.equal(applied.plan.items.filter((item: any) => item.difficulty === 'Hard').length, solved.difficulty === 'Hard' ? 3 : 2);
     const unknownTag = await client.call('tracker_apply_today_rules', { rules: { tags: ['no-such-tag'] }, expectedVersion: applied.plan.version });
     assert.equal(errorCode(unknownTag), 'RULES_NOT_APPLICABLE');
     assert.match(unknownTag.structuredContent.message, /no-such-tag/);
