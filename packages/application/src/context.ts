@@ -3,6 +3,7 @@ import type { ImportPreview } from '../../contracts/src/sync.ts';
 import type { ProgressImportPreview } from '../../contracts/src/practice.ts';
 import type { CatalogStore, ValidatedImportOp } from '../../database/src/store.ts';
 import type { ModelService } from './types.ts';
+import type { DiagnosticSink } from './telemetry.ts';
 import type { PlanningService } from './planning.ts';
 import type { AsyncLock } from './locks.ts';
 
@@ -21,6 +22,7 @@ export interface ActiveProgressPreview {
 export interface ApplicationDependencies {
   store: CatalogStore;
   modelService: ModelService;
+  diagnosticSink?: DiagnosticSink;
   /** Re-resolve persisted provider configuration; exceptions after restore become warnings. */
   refreshModelConfiguration?: () => void | Promise<void>;
 }

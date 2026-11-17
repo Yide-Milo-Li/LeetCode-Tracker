@@ -8,15 +8,21 @@ import { fail, artifact } from '../errors.ts';
 /** Create operations over the owning application's shared context. */
 export function createBundleOperations(context: ApplicationContext) {
   const { store, writeLock } = context;
-  /** exportBundle: validates input and preserves existing business rules. */
+  /** Validate the requested format and reject lossy legacy exports. */
   const exportBundle = async (input: unknown = {}) => {
     const version = (input as {version?: string}).version ?? '1';
-    if (!['1', '2', '3'].includes(version)) return fail(400, {error: 'INVALID_BUNDLE_VERSION'});
-    const bundle = version === '3'
-      ? store.exportMigrationBundle(3)
-      : version === '2'
-        ? store.exportMigrationBundle(2)
-        : store.exportSnapshotBundle();
+    if (!['1', '2', '3', '5'].includes(version)) return fail(400, {error: 'INVALID_BUNDLE_VERSION'});
+    let bundle;
+    try {
+      bundle = version === '5' ? store.exportMigrationBundle(5) : version === '3'
+        ? store.exportMigrationBundle(3) : version === '2'
+          ? store.exportMigrationBundle(2) : store.exportSnapshotBundle();
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('BUNDLE_VERSION_REQUIRED:')) {
+        return fail(409, {error: 'BUNDLE_VERSION_REQUIRED', message: error.message, requiredVersion: 5});
+      }
+      throw error;
+    }
     const filename = `leetcode-tracker-snapshot-${new Date().toISOString().slice(0, 10)}.json`;
 
     return artifact(bundle, 'application/json; charset=utf-8', filename);
@@ -32,7 +38,7 @@ export function createBundleOperations(context: ApplicationContext) {
       });
     }
 
-    if (parseRes.data.version === 2 || parseRes.data.version === 3) {
+    if (parseRes.data.version === 2 || parseRes.data.version === 3 || parseRes.data.version === 5) {
       try { validateMigrationBundle(parseRes.data); }
       catch { return fail(400, {error: 'INVALID_BUNDLE_FORMAT', message: 'Invalid migration data or references.'}); }
     }

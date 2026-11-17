@@ -11,6 +11,7 @@
     "@leetcode-tracker/contracts": "file:../contracts",
     "@leetcode-tracker/database": "file:../database",
     "@leetcode-tracker/domain": "file:../domain",
+    "@leetcode-tracker/markdown": "file:../markdown",
     "zod": "^4.1.0"
   }
 }

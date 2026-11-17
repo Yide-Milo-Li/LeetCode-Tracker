@@ -4,12 +4,43 @@
 import {
   problemNoteListQuerySchema,
   upsertProblemNoteSchema,
+  noteFormatRequestSchema,
+  noteLayoutSchema,
 } from '../../../contracts/src/notes.ts';
+import { applyAiLayout, MarkdownFormatError, prepareAiFormat } from '../../../markdown/src/index.ts';
 import type { ApplicationContext } from '../context.ts';
-import { fail, artifact } from '../errors.ts';
+import { ApplicationError, fail } from '../errors.ts';
+import { LLMError } from '../types.ts';
 /** Create operations over the owning application's shared context. */
 export function createNotesOperations(context: ApplicationContext) {
-  const { store, writeLock } = context;
+  const { store, writeLock, gemini } = context;
+  /** Report public provider metadata without exposing credentials. */
+  const formatStatus = async () => {
+    const { configured, provider, model } = gemini.getStatus();
+    return { configured, provider, model };
+  };
+
+  /** Prepare a proposed layout without writing the note. */
+  const format = async (input: unknown = {}) => {
+    const parsed = noteFormatRequestSchema.safeParse(input);
+    if (!parsed.success) return fail(400, { error: 'INVALID_NOTE_FORMAT_REQUEST', message: 'Invalid note or selection' });
+    try {
+      const prepared = prepareAiFormat(parsed.data.content, parsed.data.selection);
+      if (!gemini.formatNoteMarkdown) return fail(503, { error: 'NOTE_FORMAT_UNAVAILABLE', message: 'AI note formatting is unavailable' });
+      const result = await gemini.formatNoteMarkdown(prepared.fragments);
+      const layout = noteLayoutSchema.safeParse({ groups: result.groups });
+      if (!layout.success) return fail(422, { error: 'NOTE_FORMAT_INVALID_LAYOUT', message: 'The suggested layout could not be applied safely' });
+      return { content: applyAiLayout(prepared, layout.data.groups), range: prepared.range, provider: result.provider, model: result.model };
+    } catch (error) {
+      if (error instanceof ApplicationError) throw error;
+      if (error instanceof MarkdownFormatError) {
+        const status = error.code === 'FORMAT_TOO_LARGE' ? 413 : error.code.startsWith('INVALID_') && error.code !== 'INVALID_LAYOUT' ? 400 : 422;
+        return fail(status, { error: `NOTE_FORMAT_${error.code}`, message: error.message });
+      }
+      if (error instanceof LLMError) return fail(error.status, { error: error.code, message: error.message });
+      return fail(500, { error: 'NOTE_FORMAT_ERROR', message: 'Could not format the note' });
+    }
+  };
   /** list: validates input and preserves existing business rules. */
   const list = async (input: unknown = {}) => {
     const parseRes = problemNoteListQuerySchema.safeParse(input);
@@ -60,5 +91,5 @@ export function createNotesOperations(context: ApplicationContext) {
         return fail(404, { error: 'NOTE_SAVE_FAILED', message });
       }
     };
-  return { list, read, save };
+  return { formatStatus, format, list, read, save };
 }
