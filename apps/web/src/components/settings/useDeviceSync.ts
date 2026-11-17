@@ -19,6 +19,7 @@ const SYNC_ERROR_COPY: Record<string, { en: string; zh: string }> = {
   SYNC_LOCAL_CHANGES: { en: 'This device has unpublished changes. Choose to archive or discard them.', zh: '本机有未发布的修改，请选择归档或丢弃。' },
   SYNC_INCOMPATIBLE: { en: 'This snapshot was made by a newer app version. Update this app first.', zh: '该快照来自更新的应用版本，请先升级本机应用。' },
   SYNC_CORRUPT: { en: 'The snapshot is incomplete or damaged. Wait for your sync client to finish, or pick another snapshot.', zh: '快照不完整或已损坏。请等待同步客户端完成，或选择其他快照。' },
+  SYNC_INVALID_DATA: { en: 'The snapshot is intact but its data failed validation. Update both devices to the same version.', zh: '快照完整，但其中的数据未通过校验。请把两台设备更新到同一版本。' },
   SYNC_NOT_READY: { en: 'The snapshot has not finished downloading to this device yet.', zh: '快照尚未完整下载到本机。' },
   SYNC_PREVIEW_EXPIRED: { en: 'The preview expired. Preview the snapshot again.', zh: '预览已过期，请重新预览。' },
   SYNC_RECONNECT_REQUIRED: { en: 'Google Drive access expired or was revoked. Connect again.', zh: 'Google Drive 授权已过期或被撤销，请重新连接。' },
@@ -54,7 +55,11 @@ export function useDeviceSync(lang: Language, active: boolean) {
   const describe = useCallback((err: unknown, fallback: string) => {
     const code = (err as { code?: string })?.code;
     const copy = code ? SYNC_ERROR_COPY[code] : undefined;
-    return copy ? (zh ? copy.zh : copy.en) : localizeApiError(err, lang, fallback);
+    if (!copy) return localizeApiError(err, lang, fallback);
+    const text = zh ? copy.zh : copy.en;
+    // Validation failures name the offending field; keep it visible for diagnosis.
+    const detail = code === 'SYNC_INVALID_DATA' && err instanceof Error ? ` (${err.message})` : '';
+    return text + detail;
   }, [lang, zh]);
 
   const applyStatus = useCallback((next: SyncStatus, syncDrafts = false) => {

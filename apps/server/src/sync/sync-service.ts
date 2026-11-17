@@ -138,6 +138,14 @@ const futureEnvelopeSchema = z.object({
 
 const PREVIEW_TTL_MS = 30 * 60 * 1000;
 
+/** Short, path-bearing description of a bundle validation failure (Zod issues or a plain error). */
+function summarizeValidationError(error: unknown): string {
+  if (error instanceof z.ZodError) {
+    return error.issues.slice(0, 3).map(issue => `${issue.path.join('.') || '(root)'}: ${issue.message}`).join('; ');
+  }
+  return error instanceof Error ? error.message.slice(0, 300) : 'unknown error';
+}
+
 /** Coordinates configuration, OAuth, remote listing, publish and receive for this device. */
 export class DeviceSyncService {
   private readonly ctx: DeviceSyncContext;
@@ -268,6 +276,14 @@ export class DeviceSyncService {
       const contentHash = computeContentHash(bundle.tables);
       const local = this.localState(contentHash);
       const graph = classifySyncState(listing.snapshots, local.baseId, local.dirty);
+      if (graph.classification !== 'up-to-date') {
+        // Refuse to publish what no receiver would accept.
+        try {
+          validateMigrationBundle(bundle);
+        } catch (error) {
+          throw new DeviceSyncError(422, 'SYNC_INVALID_DATA', `Local data failed validation: ${summarizeValidationError(error)}`);
+        }
+      }
       if (graph.classification === 'up-to-date') {
         return { published: false, snapshot: this.summarize(graph.heads[0], graph.heads) };
       }
@@ -324,18 +340,26 @@ export class DeviceSyncService {
       }
       throw this.toApiError(error);
     }
-    let bundle: SnapshotBundleV5;
+    // Integrity first (transport damage), then content validity (data this build cannot accept).
+    let payload: unknown;
     try {
       const decoded = decodeSnapshotFile(bytes);
       if (decoded.envelope.snapshotId !== snapshot.snapshotId || decoded.envelope.contentHash !== snapshot.envelope.contentHash) {
         throw new Error('Envelope mismatch');
       }
-      const validated = validateMigrationBundle(decoded.payload);
-      if (validated.version !== DEVICE_SYNC_BUNDLE_VERSION) throw new Error('Unexpected bundle version');
-      bundle = validated as SnapshotBundleV5;
-      if (computeContentHash(bundle.tables) !== snapshot.envelope.contentHash) throw new Error('Content hash mismatch');
+      payload = decoded.payload;
+      const tables = (payload as { tables?: SnapshotBundleV5['tables'] })?.tables;
+      if (!tables || computeContentHash(tables) !== snapshot.envelope.contentHash) throw new Error('Content hash mismatch');
     } catch {
       throw new DeviceSyncError(422, 'SYNC_CORRUPT', 'Snapshot is incomplete or corrupted; wait for sync to finish or choose another snapshot');
+    }
+    let bundle: SnapshotBundleV5;
+    try {
+      const validated = validateMigrationBundle(payload);
+      if (validated.version !== DEVICE_SYNC_BUNDLE_VERSION) throw new Error('Unexpected bundle version');
+      bundle = validated as SnapshotBundleV5;
+    } catch (error) {
+      throw new DeviceSyncError(422, 'SYNC_INVALID_DATA', `Snapshot data failed validation: ${summarizeValidationError(error)}`);
     }
     const local = this.localState();
     const db = this.ctx.store.db;

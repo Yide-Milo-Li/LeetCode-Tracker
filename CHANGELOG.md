@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 - Add device sync (Settings → Data → Device sync): publish and receive complete snapshots through a sync folder (for example Google Drive for desktop) or directly through your own Google Drive app data folder, with fork detection, preview-then-receive, per-device acknowledgements, snapshot history and safety backups. See [device sync](docs/sync.md).
+- Fix migration bundle import rejecting profiles in which a Today plan was emptied by removing its last item; daily plan rule snapshots now get a structural check while strategies keep full rule validation.
 
 ## [1.3.1] - 2026-11-16
 

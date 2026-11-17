@@ -15,7 +15,8 @@ import {
   type AnyMigrationBundle,
 } from '../../contracts/src/migration.ts';
 import { assertLegacyRecommendationExport, hasRecommendationFields } from './recommendation-format.ts';
-import { rulesSchema, recommendationFeedbackSchema } from '../../contracts/src/recommendations.ts';
+import { z } from 'zod';
+import { rulesSchema, ruleFieldsSchema, recommendationFeedbackSchema } from '../../contracts/src/recommendations.ts';
 import { initOrMigrateSchema } from './migrations.ts';
 import { inspectCatalogSchema } from './schema.ts';
 import { isDeviceLocalSetting } from './secrets.ts';
@@ -40,6 +41,15 @@ function replaceRows(db: DatabaseSync, bundle: AnyMigrationBundle): void {
   inspectCatalogSchema(db);
 }
 
+/**
+ * Daily plans freeze the rules they were generated or edited with. Removing the last Today item
+ * legitimately stores `dailyCount: 0` with a zero review share, so plan snapshots get a structural
+ * check only; strategies keep the full `rulesSchema` invariants.
+ */
+const planRulesSnapshotSchema = ruleFieldsSchema.extend({
+  dailyCount: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+});
+
 /** Reject unsupported structures and broken relations before touching the target database. */
 export function validateMigrationBundle(raw: unknown): AnyMigrationBundle {
   if (Buffer.byteLength(JSON.stringify(raw) ?? '') > MAX_BUNDLE_BYTES) throw new Error('Migration exceeds 64 MiB');
@@ -52,7 +62,7 @@ export function validateMigrationBundle(raw: unknown): AnyMigrationBundle {
       const value = JSON.parse('rules_json' in row ? row.rules_json : row.payload_json);
       if (bundle.version !== 5 && hasRecommendationFields(value)) throw new Error('Phase 39 data requires Bundle v5');
       const rules = 'rules_json' in row ? value : value.rules;
-      if (rules && bundle.version === 5) rulesSchema.parse(rules);
+      if (rules && bundle.version === 5) (table.startsWith('strateg') ? rulesSchema : planRulesSnapshotSchema).parse(rules);
       if (bundle.version === 5 && Array.isArray(value.feedback)) recommendationFeedbackSchema.array().parse(value.feedback);
       else if (bundle.version === 5 && value.feedback !== undefined) throw new Error('Invalid recommendation feedback');
     }

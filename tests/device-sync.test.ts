@@ -181,6 +181,33 @@ test('forks are never resolved silently and resolution converges both devices', 
   }
 });
 
+test('a plan emptied on Today (dailyCount 0) still publishes and receives', async () => {
+  const shared = mkdtempSync(join(tmpdir(), 'empty plan drive '));
+  const a = await profile('plan-a'), b = await profile('plan-b');
+  const A = await device(a), B = await device(b);
+  try {
+    await seedMigrationProfile(a.store);
+    // Exact rule shape remove-one leaves after the last Today item is removed (seen in real data).
+    const emptied = { dailyCount: 0, reviewEnabled: true, reviewPercent: 0, reviewCount: 0, reviewMode: 'partial' };
+    for (const table of ['daily_plans', 'daily_plan_versions']) {
+      for (const row of a.db.prepare(`SELECT rowid, payload_json FROM ${table}`).all() as Array<{ rowid: number; payload_json: string }>) {
+        const payload = JSON.parse(row.payload_json);
+        payload.rules = { ...payload.rules, ...emptied };
+        a.db.prepare(`UPDATE ${table} SET payload_json = ? WHERE rowid = ?`).run(JSON.stringify(payload), row.rowid);
+      }
+    }
+    for (const d of [A, B]) await d.call('PUT', '/api/v1/sync/config', { transport: 'folder', folderPath: shared });
+    assert.equal((await A.call('POST', '/api/v1/sync/publish', {})).body.published, true);
+    const head = (await B.call('POST', '/api/v1/sync/check')).body.heads[0].snapshotId;
+    const preview = await B.call('POST', '/api/v1/sync/receive/preview', { snapshotId: head });
+    assert.equal(preview.status, 200, JSON.stringify(preview.body));
+    assert.equal((await B.call('POST', '/api/v1/sync/receive', { previewId: preview.body.previewId })).status, 200);
+    assert.equal((await B.call('GET', '/api/v1/daily-plans?date=2099-01-01')).body.items[0].rules.dailyCount, 0);
+  } finally {
+    await A.app.close(); await B.app.close(); a.close(); b.close(); rmSync(shared, { recursive: true, force: true });
+  }
+});
+
 test('incomplete, corrupt, foreign and future snapshots are rejected without touching data', async () => {
   const shared = mkdtempSync(join(tmpdir(), 'faulty drive '));
   const root = join(shared, 'LeetCodeTrackerSync');
@@ -207,6 +234,26 @@ test('incomplete, corrupt, foreign and future snapshots are rejected without tou
     writeFileSync(join(root, data), original.subarray(0, Math.floor(original.length / 2)));
     assert.equal((await B.call('POST', '/api/v1/sync/receive/preview', { snapshotId: published.snapshotId })).body.error, 'SYNC_CORRUPT');
     writeFileSync(join(root, data), original);
+
+    // Intact file whose data a receiver rejects is reported as invalid data, not corruption.
+    const { gunzipSync, gzipSync } = await import('node:zlib');
+    const parsed = JSON.parse(gunzipSync(original).toString('utf8'));
+    const rules = JSON.parse(parsed.payload.tables.strategies[0].rules_json);
+    parsed.payload.tables.strategies[0].rules_json = JSON.stringify({ ...rules, reviewEnabled: true, reviewPercent: 0 });
+    const { computeContentHash: hash } = await import('../packages/database/src/device-sync.ts');
+    const tamperedHash = hash(parsed.payload.tables);
+    parsed.envelope.contentHash = tamperedHash;
+    const metaJson = JSON.parse(readFileSync(join(root, meta), 'utf8'));
+    writeFileSync(join(root, data), gzipSync(JSON.stringify(parsed)));
+    writeFileSync(join(root, meta), JSON.stringify({ ...metaJson, contentHash: tamperedHash }));
+    const fresh = await device(b);
+    try {
+      const invalid = await fresh.call('POST', '/api/v1/sync/receive/preview', { snapshotId: published.snapshotId });
+      assert.equal(invalid.body.error, 'SYNC_INVALID_DATA');
+      assert.match(invalid.body.message, /reviewPercent/);
+    } finally { await fresh.app.close(); }
+    writeFileSync(join(root, data), original);
+    writeFileSync(join(root, meta), JSON.stringify(metaJson));
 
     // A snapshot from a newer app version is listed but cannot be received or superseded.
     const futureId = randomUUID();
