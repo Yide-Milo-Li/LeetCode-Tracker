@@ -7,7 +7,6 @@ pub const MAX_APP_ICON_BYTES: usize = 1024 * 1024;
 /// Maximum number of rasterized variants accepted in a single update.
 pub const MAX_ICON_VARIANTS: usize = 16;
 /// Maximum pixel edge length accepted for a decoded icon variant.
-#[cfg(any(not(target_os = "macos"), test))]
 pub const MAX_ICON_DIMENSION: u32 = 1024;
 
 /// A single rasterized PNG variant at a specific target edge length.
@@ -27,7 +26,7 @@ pub struct IconTargetSizes {
 }
 
 /// Decoded RGBA icon variant retained for DPI-change refreshes on Windows.
-#[cfg(any(not(target_os = "macos"), test))]
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DecodedIconVariant {
     pub size: u32,
@@ -67,7 +66,6 @@ pub fn decode_variants(
     Ok(decoded)
 }
 
-#[cfg(any(not(target_os = "macos"), test))]
 fn decode_png(bytes: &[u8]) -> Result<DecodedIconVariant, String> {
     if bytes.is_empty() || bytes.len() > MAX_APP_ICON_BYTES {
         return Err("Invalid icon".into());
@@ -119,30 +117,36 @@ pub fn select_variant_for_size(
         .or_else(|| variants.iter().max_by_key(|v| v.size))
 }
 
-/// Pick raw PNG bytes for macOS Dock icons without unnecessary re-encoding.
-#[cfg(target_os = "macos")]
+/// Validate and pick raw PNG bytes for macOS Dock icons without unnecessary re-encoding.
+#[cfg(any(target_os = "macos", test))]
 pub fn pick_macos_png(
     png: Option<Vec<u8>>,
     variants: Option<Vec<IconVariantInput>>,
 ) -> Result<Vec<u8>, String> {
-    if let Some(bytes) = png {
-        if !bytes.is_empty() && bytes.len() <= MAX_APP_ICON_BYTES {
-            return Ok(bytes);
-        }
-    }
+    let mut best: Option<(u32, Vec<u8>)> = None;
     if let Some(items) = variants {
         if items.len() > MAX_ICON_VARIANTS {
             return Err("Too many icon variants".into());
         }
-        if let Some(best) = items
-            .into_iter()
-            .filter(|v| !v.png.is_empty() && v.png.len() <= MAX_APP_ICON_BYTES)
-            .max_by_key(|v| v.size)
-        {
-            return Ok(best.png);
+        for item in items {
+            if item.size == 0 || item.size > MAX_ICON_DIMENSION {
+                return Err("Invalid icon size".into());
+            }
+            let variant = decode_png(&item.png)?;
+            if variant.width != item.size || variant.height != item.size {
+                return Err("Icon variant dimensions do not match declared size".into());
+            }
+            if best.as_ref().is_none_or(|(size, _)| variant.size >= *size) {
+                best = Some((variant.size, item.png));
+            }
         }
     }
-    Err("Invalid icon".into())
+    if let Some((_, bytes)) = best {
+        return Ok(bytes);
+    }
+    let fallback = png.ok_or_else(|| "Invalid icon".to_string())?;
+    decode_png(&fallback)?;
+    Ok(fallback)
 }
 
 /// Report the OS-preferred icon sizes for the active window.
@@ -533,5 +537,50 @@ mod tests {
         let single = decode_variants(Some(png32), None).unwrap();
         assert_eq!(single.len(), 1);
         assert_eq!(single[0].size, 32);
+    }
+
+    #[test]
+    fn pick_macos_png_validates_variants_and_rejects_invalid_payloads() {
+        let png16 = encode_rgba_png(16, &vec![255u8; 16 * 16 * 4]);
+        let png32 = encode_rgba_png(32, &vec![128u8; 32 * 32 * 4]);
+
+        // Selects the largest validated variant even when fallback `png` is smaller.
+        let picked = pick_macos_png(
+            Some(png16.clone()),
+            Some(vec![
+                IconVariantInput {
+                    size: 16,
+                    png: png16.clone(),
+                },
+                IconVariantInput {
+                    size: 32,
+                    png: png32.clone(),
+                },
+            ]),
+        )
+        .unwrap();
+        assert_eq!(picked, png32);
+
+        // Falls back to validated `png` when variants are absent or empty.
+        assert_eq!(
+            pick_macos_png(Some(png16.clone()), None).unwrap(),
+            png16.clone()
+        );
+        assert_eq!(
+            pick_macos_png(Some(png16.clone()), Some(Vec::new())).unwrap(),
+            png16
+        );
+
+        // Rejects corrupt PNG payloads, mismatched variant sizes, and empty payloads.
+        assert!(pick_macos_png(Some(b"not-a-png".to_vec()), None).is_err());
+        assert!(pick_macos_png(
+            Some(png32),
+            Some(vec![IconVariantInput {
+                size: 64,
+                png: png16,
+            }]),
+        )
+        .is_err());
+        assert!(pick_macos_png(None, None).is_err());
     }
 }

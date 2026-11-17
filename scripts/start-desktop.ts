@@ -101,11 +101,30 @@ function openBrowser(url: string): void {
   child.unref();
 }
 
+/** Normalize cross-platform CLI port flags to PowerShell `-Port` syntax before forwarding. */
+function normalizeWindowsArgs(args: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg.startsWith('--port=')) {
+      out.push('-Port', arg.slice('--port='.length));
+    } else if (arg.startsWith('-p=')) {
+      out.push('-Port', arg.slice('-p='.length));
+    } else if ((arg === '--port' || arg === '-p') && i + 1 < args.length) {
+      out.push('-Port', args[i + 1]);
+      i += 1;
+    } else {
+      out.push(arg);
+    }
+  }
+  return out;
+}
+
 /** Delegate Windows execution to the existing PowerShell launcher with full args/stdio forwarding. */
 function runWindowsLauncher(): void {
   const child = spawn(
     'powershell',
-    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', './scripts/start-desktop.ps1', ...process.argv.slice(2)],
+    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', './scripts/start-desktop.ps1', ...normalizeWindowsArgs(process.argv.slice(2))],
     { cwd: REPO_ROOT, stdio: 'inherit' },
   );
 

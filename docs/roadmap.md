@@ -1,12 +1,11 @@
 # Roadmap
 
-Release 1.1.0 updates the Windows desktop package, planning controls, knowledge feedback, and desktop workspaces. An Apple Silicon macOS port is available for internal builds. Implemented features and historical benchmark observations below are distinct from the open acceptance work listed here. See [current status](status.md).
+Release 1.3.0 ships Windows 11 x64 and Apple Silicon macOS 14+ desktop distributions with guided setup, SQLite schema v12 / Snapshot Bundle v5, local recommendation selection, searchable Topic Insights, local/AI note formatting, and palette-tinted native app icons. Implemented features and historical benchmark observations below are distinct from the open acceptance work listed here. See [current status](status.md).
 
 ## Desktop distribution: implemented and remaining
 
-- Implemented: Tauri host, private Node 24.15.0, authenticated IPC bridge, native export authorization, sidecar lifecycle/retry, and unsigned Windows x64 installer.
-- Remaining: complete SQLite migration and custom paths, clean-machine installation/upgrade/downgrade, real WebView2/native-dialog acceptance, performance measurements, signing and automatic updates.
-- macOS/Linux/ARM64 native packages and mobile UI are not part of Release 1.0.
+- Implemented: Tauri host, private Node 26.13.0, authenticated IPC bridge, native export authorization, sidecar lifecycle/retry, palette-tinted native icons, unsigned Windows x64 NSIS installer, and ad-hoc signed Apple Silicon macOS `.app`/`.dmg` package.
+- Remaining: clean-machine installation/upgrade/downgrade, real WebView2/native-dialog acceptance, performance measurements, Windows code signing, Apple notarization, and automatic updates.
 
 ## Historical milestones carried into v1.0.0
 

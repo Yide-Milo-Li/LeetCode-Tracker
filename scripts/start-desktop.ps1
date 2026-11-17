@@ -15,7 +15,7 @@
 #>
 
 param(
-  [int]$Port = 3000,
+  [int]$Port = 0,
   [string]$HostName = "127.0.0.1",
   [switch]$Minimize
 )
@@ -34,7 +34,26 @@ Write-Host "=====================================================" -ForegroundCo
 # 1. Verify Node.js
 if (-not (Get-Command "node" -ErrorAction SilentlyContinue)) {
   Write-Host "Error: Node.js is not found in PATH." -ForegroundColor Red
-  Write-Host "Please install Node.js 24.x from https://nodejs.org/" -ForegroundColor Yellow
+  Write-Host "Please install Node.js 26.x from https://nodejs.org/" -ForegroundColor Yellow
+  Read-Host "Press Enter to exit..."
+  exit 1
+}
+
+# Resolve PORT from explicit -Port, $env:PORT, optional .env, or default 3000
+if (-not $PSBoundParameters.ContainsKey('Port')) {
+  $portRaw = $env:PORT
+  if ([string]::IsNullOrWhiteSpace($portRaw)) {
+    $portRaw = (& node -e "if (typeof process.loadEnvFile === 'function') { try { process.loadEnvFile(); } catch {} } process.stdout.write(process.env.PORT || '3000');")
+  }
+  $parsedPort = 0
+  if (-not [int]::TryParse($portRaw, [ref]$parsedPort) -or $parsedPort -lt 1 -or $parsedPort -gt 65535) {
+    Write-Host "Error: Invalid PORT '$portRaw'. Expected an integer between 1 and 65535." -ForegroundColor Red
+    Read-Host "Press Enter to exit..."
+    exit 1
+  }
+  $Port = $parsedPort
+} elseif ($Port -lt 1 -or $Port -gt 65535) {
+  Write-Host "Error: Invalid PORT '$Port'. Expected an integer between 1 and 65535." -ForegroundColor Red
   Read-Host "Press Enter to exit..."
   exit 1
 }

@@ -1,6 +1,6 @@
 # Local recommendations and efficiency
 
-This describes the Phase 39 development candidate, not a published release or installed-host acceptance. It uses algorithm phase39-v1, SQLite schema 12 and portable Bundle v5. Published 1.2.0 used schema 10 / Bundle v3. Schema 11 / Bundle v4 belong to the separate LC-2.0 lineage and are deliberately not accepted here.
+This describes the `phase39-v1` recommendation and efficiency architecture shipped in Release 1.3.0, using SQLite schema 12 and portable Snapshot Bundle v5 (prior Release 1.2.0 used schema 10 / Bundle v3). Schema 11 / Bundle v4 belong to the separate LC-2.0 lineage and are deliberately not accepted here.
 
 ## Deterministic pipeline
 

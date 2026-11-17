@@ -366,19 +366,25 @@ $$dp[i] = \\min(dp[i], dp[i - c] + 1) \\quad \\forall c \\in \\text{coins}, i \\
   await capture('#problems', '03-problems-catalog.png', 'Problems Catalog with Instant Search & Tags', 1500);
 
   // 4. Notes Workspace
-  await capture('#notes', '04-notes-workspace.png', 'Master-Detail Notes Workspace & Markdown Editor', 1500, `document.querySelector('.notes-master-pane button')?.click()`);
+  await capture('#notes', '04-notes-workspace.png', 'Master-Detail Notes Workspace & Markdown Editor', 1500, `document.querySelector('.notes-problem-card')?.click()`);
 
   // 5. Weekly Study Schedule
   await capture('#schedule', '05-study-schedule.png', 'Weekly Strategy & Quota Planner', 1500);
 
   // 6. Settings - Theme Palettes Gallery
-  await capture('#settings', '06-theme-palettes.png', '10 Developer Theme Palettes Gallery', 1500, `(() => {
-    const el = document.querySelector('.palette-selection-section') || document.querySelector('.theme-palette-grid');
+  await capture('#settings', '06-theme-palettes.png', '10 Developer Theme Palettes Gallery', 1500, `(async () => {
+    document.getElementById('settings-tab-appearance')?.click();
+    await new Promise((r) => setTimeout(r, 150));
+    const el = document.querySelector('.palette-grid') || document.querySelector('#settings-panel-appearance');
     if (el) el.scrollIntoView({ behavior: 'instant', block: 'center' });
   })()`);
 
   // 7. Settings - Multi-Provider AI Configuration
-  await capture('#settings', '07-ai-configuration.png', 'Multi-Provider AI Configuration Panel', 1500, `(() => {
+  await capture('#settings', '07-ai-configuration.png', 'Multi-Provider AI Configuration Panel', 1500, `(async () => {
+    document.getElementById('settings-tab-ai')?.click();
+    await new Promise((r) => setTimeout(r, 150));
+    document.querySelector('.disclosure-toggle')?.click();
+    await new Promise((r) => setTimeout(r, 150));
     const el = document.querySelector('.ai-settings-form')?.closest('.preference-row') || document.querySelector('.ai-settings-form');
     if (el) el.scrollIntoView({ behavior: 'instant', block: 'start' });
   })()`);
@@ -392,7 +398,7 @@ $$dp[i] = \\min(dp[i], dp[i - c] + 1) \\quad \\forall c \\in \\text{coins}, i \\
   // Exercise the newly delivered focus control after capturing the normal workspace.
   await cdp.send('Page.navigate', { url: `http://${host}:${port}/#notes` });
   await new Promise((resolve) => setTimeout(resolve, 1000));
-  await cdp.send('Runtime.evaluate', { expression: `Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'Zen Mode')?.click()` });
+  await cdp.send('Runtime.evaluate', { expression: `Array.from(document.querySelectorAll('button')).find(b => ['Zen', 'Zen Mode'].includes(b.textContent.trim()))?.click()` });
   await new Promise((resolve) => setTimeout(resolve, 250));
   const focused = await cdp.send('Runtime.evaluate', { expression: `document.querySelector('.notes-master-pane').style.display === 'none'`, returnByValue: true });
   if (!focused.result.value) throw new Error('Notes focus control did not hide the master list');

@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.3.0] - 2026-11-16
+
+- Add guided three-step first-run setup (`Timezone` → `Problems` → `Study rhythm`) with weekday preset and quick language/theme selection, and reorganize Settings into four tabs (`General`, `Appearance`, `AI assistant`, `Data`).
+- Upgrade storage to SQLite schema v12 and portable Snapshot Bundle v5 (`phase39-v1`), adding local semantic recommendation selection, opt-in `outcome-v2` review progression, personal duration calibration, daily time budgets, optional swap/removal feedback reasons, and bounded `diagnostics/llm-usage.jsonl` token accounting.
+- Add local Notes format-on-save (with one-click undo) and guarded AI note formatting for whole notes or selections, alongside bilingual Today/Notes UX refinements.
+- Reorganize Progress Statistics around outcome KPIs, topics worth attention, and a searchable, recency-ordered Topic Insights table with expandable 30-day evidence.
+- Tint native window/taskbar icons (Windows DPI-aware `HICON`) and Dock icons (macOS) with the active theme palette; align Windows and macOS migration bundle previews, icon validation, keyboard shortcut help, and source-mode launcher flags.
+- Support `gpt-6-luna`, `gpt-6.1-terra`, `gemini-3.8-flash`, `gemini-4-hydrogen`, and `deepseek-flash` with per-model reasoning effort controls and reserved reasoning token budgets.
+- See [release notes](docs/releases/1.3.0.md) for download, upgrade, and verification details.
+
 ## [1.2.0] - 2026-09-22
 
 - Add a built-in single-problem practice timer: start/stop from Today rows or Problems, one active timer persisted across reloads, stop keeps whole minutes (rounded up, minimum 1) pending for the next record. Clicking the completion circle stops the same-problem timer and pre-fills the enrich dialog; manual editors pre-fill pending minutes and offer stop-and-fill while running.

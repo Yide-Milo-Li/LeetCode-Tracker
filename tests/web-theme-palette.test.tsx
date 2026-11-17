@@ -432,3 +432,71 @@ it('falls back to 512 px when an older desktop host lacks get_icon_target_sizes'
     }
   }
 });
+
+it('renders Complete migration summary instead of Legacy v1 warning when importing a v5 snapshot bundle', async () => {
+  mock.method(api, 'getSettings', async () => ({
+    language: 'en' as const,
+    theme: 'light' as const,
+    palette: 'default' as ThemePalette,
+    timezone: 'UTC',
+    updatedAt: 1,
+  }));
+
+  await act(async () => {
+    render(
+      <SettingsView
+        lang="en"
+        currentTheme="light"
+        currentPalette="default"
+        onLanguageChange={() => {}}
+        onThemeChange={() => {}}
+        onPaletteChange={() => {}}
+        section="data"
+      />
+    );
+  });
+
+  const bundleV5 = {
+    format: 'leetcode-tracker-snapshot',
+    version: 5,
+    appVersion: '1.3.0',
+    schemaVersion: 12,
+    exportedAt: 1700000000000,
+    tables: {
+      problems: [],
+      tags: [],
+      problem_tags: [],
+      import_history: [],
+      import_results: [],
+      catalog_meta: [],
+      settings: [],
+      practice_records: [],
+      practice_operations: [],
+      progress_import_history: [],
+      progress_import_results: [],
+      progress_snapshots: [],
+      progress_snapshot_history: [],
+      problem_notes: [],
+      strategies: [],
+      strategy_versions: [],
+      weekday_assignments: [],
+      daily_plans: [],
+      daily_plan_versions: [],
+      planning_operations: [],
+      snapshot_successes: [],
+      problem_review_state: [],
+    },
+  };
+
+  const fileInput = document.querySelector('#settings-panel-data input[type="file"]') as HTMLInputElement;
+  assert.ok(fileInput);
+  const file = new dom.window.File([JSON.stringify(bundleV5)], 'migration-v5.json', { type: 'application/json' });
+  await act(async () => {
+    fireEvent.change(fileInput, { target: { files: [file] } });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+  });
+
+  const dialog = screen.getByRole('alertdialog');
+  assert.match(dialog.textContent ?? '', /Complete migration · v1\.3\.0 · 0 problems/);
+  assert.equal((dialog.textContent ?? '').includes('Legacy v1'), false);
+});

@@ -16,8 +16,37 @@ echo "====================================================="
 
 if ! command -v node >/dev/null 2>&1; then
   echo "Error: Node.js is not found in PATH." >&2
-  echo "Please install Node.js 24.x from https://nodejs.org/" >&2
+  echo "Please install Node.js 26.x from https://nodejs.org/" >&2
   exit 1
+fi
+
+CLI_PORT=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --port=*)
+      CLI_PORT="${1#--port=}"
+      shift
+      ;;
+    -p=*)
+      CLI_PORT="${1#-p=}"
+      shift
+      ;;
+    --port|-p)
+      if [ "$#" -lt 2 ]; then
+        echo "Error: Missing value for $1." >&2
+        exit 1
+      fi
+      CLI_PORT="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+if [ -n "$CLI_PORT" ]; then
+  PORT="$CLI_PORT"
 fi
 
 if [ -z "${PORT:-}" ]; then

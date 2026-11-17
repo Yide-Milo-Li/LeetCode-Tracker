@@ -12,6 +12,7 @@ interface ShortcutHelpModalProps {
 
 export function ShortcutHelpModal({ lang, onClose }: ShortcutHelpModalProps) {
   const zh = lang === 'zh';
+  const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform ?? '');
 
   const shortcuts = [
     {
@@ -30,6 +31,13 @@ export function ShortcutHelpModal({ lang, onClose }: ShortcutHelpModalProps) {
         { key: 'N', desc: zh ? '快速唤起手动记录' : 'Log new manual practice' },
         { key: '?', desc: zh ? '打开快捷键速查' : 'Open keyboard shortcuts' },
         { key: 'Esc', desc: zh ? '关闭弹窗 / 取消聚焦' : 'Close modal or drawer' },
+      ],
+    },
+    {
+      category: zh ? '复盘笔记' : 'Notes Workspace',
+      items: [
+        { key: isMac ? '⌘S' : 'Ctrl+S', desc: zh ? '保存当前笔记' : 'Save active note' },
+        { key: isMac ? '⌘\\' : 'Ctrl+\\', desc: zh ? '切换专注模式' : 'Toggle focus mode' },
       ],
     },
     {

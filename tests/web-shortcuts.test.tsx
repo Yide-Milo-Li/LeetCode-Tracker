@@ -145,6 +145,9 @@ it('opens keyboard shortcut help modal on key "?"', async () => {
   assert.ok(screen.getByRole('dialog'));
   assert.ok(screen.getByText('Keyboard Shortcuts'));
   assert.ok(screen.getByText('Navigate to Problems'));
+  assert.ok(screen.getByText('Notes Workspace'));
+  assert.ok(screen.getByText('Save active note'));
+  assert.ok(screen.getByText('Toggle focus mode'));
 
   // Close help modal with Escape
   await act(async () => {

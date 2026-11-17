@@ -14,7 +14,7 @@ assignees: ''
 ## Environment
 
 - **Commit / Revision**: (e.g. `main` or commit hash)
-- **Node.js version**: (e.g. `24.15.0`)
+- **Node.js version**: (e.g. `26.13.0` when running from source, or `Packaged desktop app`)
 - **Operating System**: (e.g. Windows 11, macOS Sequoia, Ubuntu 24.04)
 - **Desktop Browser & Window Width**: (e.g. Chrome 130, 1440px wide)
 
@@ -34,4 +34,4 @@ A clear and concise description of what actually happened, including any console
 
 ## Sanitized evidence
 
-Include only synthetic or redacted screenshots/logs. Do not attach real API keys or personal account data. Follow [SECURITY.md](file:///d:/Python%20code/Leetcode-Tracker/SECURITY.md) for security issues.
+Include only synthetic or redacted screenshots/logs. Do not attach real API keys or personal account data. Follow [SECURITY.md](../../SECURITY.md) for security issues.

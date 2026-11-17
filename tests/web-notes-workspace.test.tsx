@@ -910,6 +910,38 @@ describe('NotesWorkspace Component', () => {
       }
     }
   });
+
+  it('ignores Ctrl+S and Ctrl+\\ when NotesWorkspace is mounted inside a hidden view container', async () => {
+    mockEditorProblems();
+    let saves = 0;
+    mock.method(api, 'upsertNote', async (id: string, content: string) => {
+      saves++;
+      return { note: editorNote(id, content) };
+    });
+
+    await act(async () => {
+      render(
+        <div hidden id="view-notes">
+          <NotesWorkspace lang="en" />
+        </div>
+      );
+    });
+
+    await act(async () => {
+      fireEvent.change(noteEditor(), { target: { value: 'Draft while hidden' } });
+    });
+
+    const masterPane = document.querySelector('.notes-master-pane') as HTMLElement;
+    assert.notEqual(masterPane.style.display, 'none');
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 's', ctrlKey: true });
+      fireEvent.keyDown(window, { key: '\\', ctrlKey: true });
+    });
+
+    assert.equal(saves, 0);
+    assert.notEqual(masterPane.style.display, 'none');
+  });
 });
 
 describe('NotesWorkspace unsaved changes guard', () => {

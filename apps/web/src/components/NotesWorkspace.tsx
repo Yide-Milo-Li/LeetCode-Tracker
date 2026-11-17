@@ -264,6 +264,7 @@ export function NotesWorkspace({
   const [zenMode, setZenMode] = useState(false);
   const [showCodeMenu, setShowCodeMenu] = useState(false);
   const codeMenuRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Close code menu on outside click
@@ -578,6 +579,7 @@ export function NotesWorkspace({
   useEffect(() => {
     /** Route keyboard shortcuts for saving and focus mode. */
     function handleKeyDown(e: KeyboardEvent) {
+      if (rootRef.current?.closest('[hidden]')) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
         if (canSave) {
@@ -650,7 +652,7 @@ export function NotesWorkspace({
   const totalPages = Math.max(1, Math.ceil(total / limit));
 
   return (
-    <div className="notes-workspace-view" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div ref={rootRef} className="notes-workspace-view" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <PageHeader
         title={t.notesWorkspaceTitle}
         description={t.notesWorkspaceDesc}

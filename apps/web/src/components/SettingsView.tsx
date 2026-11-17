@@ -997,7 +997,7 @@ export function SettingsView({
                     <span>{zh ? '确认替换当前设备的数据？' : 'Replace This Device’s Data?'}</span>
                   </div>
                   <p>
-                    {pendingBundle.version === 2
+                    {pendingBundle.version !== 1
                       ? `${zh ? '完整迁移' : 'Complete migration'} · v${pendingBundle.appVersion} · ${pendingBundle.tables.problems.length} ${zh ? '题目' : 'problems'} · ${pendingBundle.tables.practice_records.length} ${zh ? '练习记录' : 'practice records'} · ${pendingBundle.tables.progress_snapshots.length} ${zh ? '进度记录' : 'progress snapshots'} · ${pendingBundle.tables.problem_notes.length} ${zh ? '笔记' : 'notes'}`
                       : zh ? '旧版 v1：仅部分恢复，不包含题库或完整历史。请先确保本机已有对应题库。' : 'Legacy v1: partial restore only; no catalog or complete history. The matching catalog must already exist.'}
                   </p>

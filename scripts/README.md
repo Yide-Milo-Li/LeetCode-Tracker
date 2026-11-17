@@ -12,7 +12,7 @@ For source-mode startup with browser launch, run `npm run desktop` (`scripts/sta
 
 ## Backup policy
 
-Startup verifies schema compatibility and awaits a pre-migration snapshot before upgrading older schemas to v9. Before any catalog-changing import, it creates `pre-import-latest.sqlite` and, if absent, the first snapshot for that UTC date as `daily-YYYY-MM-DD.sqlite`. The latest 14 distinct daily snapshots are retained. Migration snapshots and pre-restore safety snapshots are retained separately. A failed required snapshot aborts migration or import; unchanged-only imports preserve the existing pre-change snapshot.
+Startup verifies schema compatibility and awaits a pre-migration snapshot before upgrading older schemas to v12. Before any catalog-changing import, it creates `pre-import-latest.sqlite` and, if absent, the first snapshot for that UTC date as `daily-YYYY-MM-DD.sqlite`. The latest 14 distinct daily snapshots are retained. Migration snapshots and pre-restore safety snapshots are retained separately. A failed required snapshot aborts migration or import; unchanged-only imports preserve the existing pre-change snapshot.
 
 ## Offline restore
 
@@ -22,7 +22,7 @@ Stop the server and close other database clients, then run:
 npm run restore -- <backup-file.sqlite> [target-db.sqlite]
 ```
 
-The default target is `.local/tracker.sqlite`. Supported sources have valid schema v3, v4, v5, v6, v7, v8, v9, or v10. Unsupported or structurally incomplete sources are rejected before changing the target. An existing target must be readable and pass validation to produce its safety snapshot; if it cannot, restore into a new target path and retain the original for investigation.
+The default target is `.local/tracker.sqlite`. Supported sources have valid schema v3 through v10, or v12. Unsupported or structurally incomplete sources are rejected before changing the target. An existing target must be readable and pass validation to produce its safety snapshot; if it cannot, restore into a new target path and retain the original for investigation.
 
 The command uses SQLite snapshots for both source and destination, so committed WAL data is included. It preserves the current destination as `<target>.pre-restore-<unique-id>.sqlite`, restores the selected snapshot, and verifies the result. A failed replacement triggers a rollback attempt; the safety snapshot remains available. Do not manually delete WAL or SHM files to perform recovery.
 
