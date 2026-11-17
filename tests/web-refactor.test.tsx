@@ -34,8 +34,9 @@ Object.defineProperty(window, 'matchMedia', {
   }),
 });
 const React = await import('react');
-const { render, fireEvent, screen, act, cleanup, within } = await import('@testing-library/react');
-const { api } = await import('../apps/web/src/api.ts');
+const { render, fireEvent, screen, act, cleanup, within, waitFor } = await import('@testing-library/react');
+const { api, mcpApi } = await import('../apps/web/src/api.ts');
+const { DesktopWorkspaceProvider } = await import('../apps/web/src/workspace-adapter.tsx');
 const { App } = await import('../apps/web/src/App.tsx');
 const { PracticeWorkspace } = await import('../apps/web/src/components/PracticeWorkspace.tsx');
 const { ProgressWorkbench } = await import('../apps/web/src/components/ProgressWorkbench.tsx');
@@ -390,6 +391,101 @@ it('problem detail uses the shared editor within one drawer and restores the inn
   assert.ok(!screen.queryByRole('dialog'));
 });
 
+it('refreshes the retained catalog overview after a desktop MCP approval', async () => {
+  location.hash = 'problems';
+  let pending = true;
+  const now = Date.now();
+  const operation = {
+    id: 'synthetic-operation', clientId: 'synthetic-client', toolName: 'tracker_create_practice',
+    fingerprint: 'synthetic-fingerprint', status: 'pending' as const, reviewState: 'complete' as const,
+    summaryJson: JSON.stringify({ action: 'create_practice', target: 'Problem 901: Synthetic Search Window' }),
+    createdAt: now, updatedAt: now, expiresAt: now + 60_000,
+  };
+  mock.method(api, 'getBusinessVersions', async () => ({ today: '2026-11-16', timezone: 'UTC', libraryGeneration: 1, catalog: 1, practice: 0, planning: 1, notes: 0, approvals: 0 }));
+  mock.method(mcpApi, 'getConfig', async () => ({ port: 30138, clients: [], aiAccessPaused: false }));
+  mock.method(mcpApi, 'getStatus', async () => ({ state: 'ready', configuredPort: 30138, listeningPort: 30138, restartRequired: false, aiAccessPaused: false, errorCode: null }));
+  mock.method(mcpApi, 'listPendingOperations', async () => ({ operations: pending ? [operation] : [] }));
+  mock.method(mcpApi, 'proceedOperation', async () => {
+    records.push(record());
+    pending = false;
+    return { status: 'applied' };
+  });
+
+  await act(async () => { render(<App />); });
+  const solved = () => screen.getByText('Solved Problems').parentElement!.querySelector('strong')!.textContent;
+  await waitFor(() => assert.equal(solved(), '0'));
+  fireEvent.change(screen.getByLabelText('Search problems'), { target: { value: '901' } });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Settings' })); });
+  await waitFor(() => assert.ok(screen.getByRole('button', { name: 'Proceed' })));
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Proceed' })); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Problems' })); });
+  await waitFor(() => assert.equal(solved(), '1'));
+  assert.equal((screen.getByLabelText('Search problems') as HTMLInputElement).value, '901');
+  assert.equal(records.length, 1);
+});
+
+it('refreshes the visible catalog after an external practice write', async () => {
+  location.hash = 'problems';
+  let practiceVersion = 0;
+  const intervals: Array<() => void> = [];
+  mock.method(globalThis, 'setInterval', (callback: () => void, ms?: number) => {
+    if (ms === 2000) intervals.push(callback);
+    return 1 as any;
+  });
+  mock.method(api, 'getBusinessVersions', async () => ({ today: '2026-11-16', timezone: 'UTC', libraryGeneration: 1, catalog: 1, practice: practiceVersion, planning: 1, notes: 0, approvals: 0 }));
+  await act(async () => { render(<App />); });
+  const solved = () => screen.getByText('Solved Problems').parentElement!.querySelector('strong')!.textContent;
+  await waitFor(() => assert.equal(solved(), '0'));
+  fireEvent.change(screen.getByLabelText('Search problems'), { target: { value: '901' } });
+  records.push(record());
+  practiceVersion = 1;
+  await act(async () => { intervals.forEach((callback) => callback()); });
+  await waitFor(() => assert.equal(solved(), '1'));
+  assert.equal((screen.getByLabelText('Search problems') as HTMLInputElement).value, '901');
+});
+
+it('refreshes a retained catalog when returning after an external write', async () => {
+  location.hash = 'problems';
+  let practiceVersion = 0;
+  const intervals: Array<() => void> = [];
+  mock.method(globalThis, 'setInterval', (callback: () => void, ms?: number) => {
+    if (ms === 2000) intervals.push(callback);
+    return 1 as any;
+  });
+  mock.method(api, 'getBusinessVersions', async () => ({ today: '2026-11-16', timezone: 'UTC', libraryGeneration: 1, catalog: 1, practice: practiceVersion, planning: 1, notes: 0, approvals: 0 }));
+  await act(async () => { render(<App />); });
+  const solved = () => document.querySelector('.catalog-view .summary-counts .stats-capsule:last-child strong')!.textContent;
+  await waitFor(() => assert.equal(solved(), '0'));
+  fireEvent.change(screen.getByLabelText('Search problems'), { target: { value: '901' } });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Today' })); });
+  records.push(record());
+  practiceVersion = 1;
+  await act(async () => { intervals.forEach((callback) => callback()); });
+  assert.equal(solved(), '0');
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Problems' })); });
+  await act(async () => { intervals.forEach((callback) => callback()); });
+  await waitFor(() => assert.equal(solved(), '1'));
+  assert.equal((screen.getByLabelText('Search problems') as HTMLInputElement).value, '901');
+});
+
+it('refreshes visible progress after an external practice write', async () => {
+  location.hash = 'statistics';
+  let practiceVersion = 0;
+  const intervals: Array<() => void> = [];
+  mock.method(globalThis, 'setInterval', (callback: () => void, ms?: number) => {
+    if (ms === 2000) intervals.push(callback);
+    return 1 as any;
+  });
+  mock.method(api, 'getBusinessVersions', async () => ({ today: '2026-11-16', timezone: 'UTC', libraryGeneration: 1, catalog: 1, practice: practiceVersion, planning: 1, notes: 0, approvals: 0 }));
+  await act(async () => { render(<App />); });
+  const solved = () => screen.getByText('Unique Solved').closest('.kpi-card')!.querySelector('.kpi-value')!.textContent;
+  await waitFor(() => assert.equal(solved(), '0'));
+  records.push(record());
+  practiceVersion = 1;
+  await act(async () => { intervals.forEach((callback) => callback()); });
+  await waitFor(() => assert.equal(solved(), '1'));
+});
+
 it('source totals can retry independently while hidden statistics suspends its chart renderer', async () => {
   const getStats = api.getPracticeStats;
   let attempts = 0;
@@ -397,7 +493,7 @@ it('source totals can retry independently while hidden statistics suspends its c
     if (++attempts === 1) throw new Error('Source totals unavailable');
     return getStats();
   });
-  await act(async () => { render(<DashboardView lang="en" active={false} />); });
+  await act(async () => { render(<DesktopWorkspaceProvider><DashboardView lang="en" active={false} /></DesktopWorkspaceProvider>); });
   const details = document.querySelector<HTMLDetailsElement>('.workspace-details')!;
   details.open = true;
   assert.ok(screen.getByText('Source totals unavailable'));

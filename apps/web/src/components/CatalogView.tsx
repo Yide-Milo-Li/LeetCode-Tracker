@@ -1,6 +1,7 @@
 /** Local catalog discovery, filtering, metadata details and contextual manual recording. */
 import { RotateCcw, Plus, ExternalLink, Download, Upload } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
+import { useBusinessRefresh } from '../../../../packages/workspace/src/hooks/useBusinessRefresh.ts';
 import {
   api,
   type CatalogProblem,
@@ -39,6 +40,8 @@ export function CatalogView({
   const t = translations[lang];
   const zh = lang === 'zh';
   const workspace = useWorkspace();
+  const root = useRef<HTMLDivElement>(null);
+  const externalRevision = useBusinessRefresh(['libraryGeneration', 'catalog', 'practice'], root);
   const [stats, setStats] = useState<CatalogStats | null>(null);
   const [tags, setTags] = useState<TopicTag[]>([]);
   const [practiceStats, setPracticeStats] = useState<PracticeStats | null>(null);
@@ -88,7 +91,7 @@ export function CatalogView({
     return () => {
       active = false;
     };
-  }, [workspace.revision, retry]);
+  }, [workspace.revision, externalRevision, retry]);
   useEffect(() => {
     let active = true;
     setLoading(true);
@@ -119,7 +122,7 @@ export function CatalogView({
     return () => {
       active = false;
     };
-  }, [search, difficulty, tag, premium, page, limit, workspace.revision, retry]);
+  }, [search, difficulty, tag, premium, page, limit, workspace.revision, externalRevision, retry]);
   /** Reset all query dimensions together, including the current page. */
   function reset() {
     setSearch('');
@@ -129,7 +132,7 @@ export function CatalogView({
     setPage(1);
   }
   return (
-    <div className="catalog-view">
+    <div className="catalog-view" ref={root}>
       <PageHeader
         title={zh ? '题库' : 'Problems'}
         actions={

@@ -11,6 +11,7 @@ Object.defineProperty(globalThis, 'navigator', { configurable: true, value: dom.
 const React = await import('react');
 const { render, fireEvent, screen, act, cleanup } = await import('@testing-library/react');
 const { api, ApiError } = await import('../apps/web/src/api.ts');
+const { DesktopWorkspaceProvider } = await import('../apps/web/src/workspace-adapter.tsx');
 const { localizeApiError, localizePlanningIssue } = await import('../apps/web/src/error-i18n.ts');
 const {
   formatDifficulty,
@@ -198,6 +199,7 @@ it('clear discards a delayed preview failure without resurrecting an alert', asy
 
 /** Make overview data available independently of the problem-request outcome. */
 function overview() {
+  mock.method(api, 'getBusinessVersions', async () => ({ today: '2026-11-16', timezone: 'UTC', libraryGeneration: 1, catalog: 1, practice: 0, planning: 1, notes: 0, approvals: 0 }));
   mock.method(api, 'getCatalogStats', async () => ({ totalProblems: 2, easy: 2, medium: 0, hard: 0, paidOnly: 0, totalTags: 0, lastImportedAt: 1, catalogRevision: 1 }));
   mock.method(api, 'getAllTags', async () => ({ tags: [] }));
   mock.method(api, 'getPracticeStats', async () => ({ uniqueSolvedProblems: 0, totalManualPractices: 0, completedManualPractices: 0, uncompletedManualPractices: 0, totalSnapshots: 0, acceptedSnapshots: 0, lastActivityAt: null, practiceRevision: 0 }));
@@ -217,7 +219,7 @@ it('shows failed requests explicitly and retry recovers without a false empty ca
     return { totalProblems: 1, easy: 1, medium: 0, hard: 0, paidOnly: 0, totalTags: 0, lastImportedAt: 1, catalogRevision: 1 };
   });
   mock.method(api, 'getCatalog', async () => { if (failed) throw new Error('503'); return results('Recovered'); });
-  const view = await act(async () => render(<CatalogView lang="en" onNavigateSettings={() => {}} />));
+  const view = await act(async () => render(<DesktopWorkspaceProvider><CatalogView lang="en" onNavigateSettings={() => {}} /></DesktopWorkspaceProvider>));
   assert.match(screen.getByRole('alert').textContent!, /Unable to load/);
   assert.equal(screen.queryByText('No matching problems found.'), null);
   assert.equal(screen.queryByText('Never'), null);
@@ -232,7 +234,7 @@ it('a delayed old filter response cannot replace the newer search results', asyn
   overview();
   const old = deferred<ReturnType<typeof results>>();
   mock.method(api, 'getCatalog', (query: { search?: string }) => query.search ? Promise.resolve(results('New result')) : old.promise);
-  await act(async () => { render(<CatalogView lang="en" onNavigateSettings={() => {}} />); });
+  await act(async () => { render(<DesktopWorkspaceProvider><CatalogView lang="en" onNavigateSettings={() => {}} /></DesktopWorkspaceProvider>); });
   await act(async () => { fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'new' } }); });
   assert.ok(screen.getByRole('button', { name: 'New result' }));
   await act(async () => { old.resolve(results('Old result')); });
@@ -260,7 +262,7 @@ it('handles pagination navigation and disables boundary controls correctly', asy
     return { items: [item], total: 75, page, limit: 50 };
   });
 
-  await act(async () => { render(<CatalogView lang="en" onNavigateSettings={() => {}} />); });
+  await act(async () => { render(<DesktopWorkspaceProvider><CatalogView lang="en" onNavigateSettings={() => {}} /></DesktopWorkspaceProvider>); });
 
   // On page 1: total 75 with limit 50 means 2 pages
   assert.ok(screen.getByText('Page 1 of 2 · 75 records'));

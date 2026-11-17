@@ -5,6 +5,7 @@
  * and a collapsed data-source section. Day drilldowns open the Records tab via the workspace.
  */
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useBusinessRefresh } from '../../../../packages/workspace/src/hooks/useBusinessRefresh.ts';
 import { AlertTriangle, ArrowRight } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -65,6 +66,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ lang, active = tru
   const t = translations[lang];
   const zh = lang === 'zh';
   const workspace = useWorkspace();
+  const root = useRef<HTMLDivElement>(null);
+  const externalRevision = useBusinessRefresh(['libraryGeneration', 'catalog', 'practice', 'planning', 'notes', 'timezone', 'today'], root);
 
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<DashboardResponse | null>(null);
@@ -121,7 +124,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ lang, active = tru
     return () => {
       active = false;
     };
-  }, [workspace.revision, workspace.timezone, sourceRetry]);
+  }, [workspace.revision, workspace.timezone, externalRevision, sourceRetry]);
 
   // Keyboard navigation & roving tabIndex for heatmap
   const [focusedDate, setFocusedDate] = useState<string | null>(null);
@@ -158,7 +161,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ lang, active = tru
 
   useEffect(() => {
     fetchDashboard(selectedYear);
-  }, [selectedYear, fetchDashboard, workspace.revision]);
+  }, [selectedYear, fetchDashboard, workspace.revision, externalRevision]);
 
   // 30-day trend: label only the first, middle and last day so the axis stays quiet.
   const trendDays = data?.trend30Days ?? [];
@@ -281,7 +284,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ lang, active = tru
   const pendingDateCount = data?.dataStatus.pendingDateCount ?? 0;
 
   return (
-    <div className="dashboard-view-container progress-stats">
+    <div className="dashboard-view-container progress-stats" ref={root}>
       {Boolean(error) && (
         <Feedback retry={{ label: t.retry, run: () => void fetchDashboard(selectedYear) }}>
           {localizeApiError(error, lang, lang === 'zh' ? '加载学习总览失败，请重试。' : 'Failed to load dashboard data.')}

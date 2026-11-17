@@ -325,6 +325,8 @@ export function SettingsView({
   const handleProceedOperation = async (id: string) => {
     try {
       await mcpApi.proceedOperation(id);
+      // Approval can change business data while other desktop views remain mounted.
+      workspace.notifyMutation();
       setMcpSuccess(zh ? '操作已批准执行' : 'Operation approved and applied');
       const ops = await mcpApi.listPendingOperations();
       setPendingOperations(ops.operations);

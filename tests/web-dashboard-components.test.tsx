@@ -3,7 +3,7 @@
  * - DashboardView (outcome KPIs, pending-date notice, heatmap drilldown into Records, quiet 30-day state)
  * - ActivityRecords (filter handoff requests, filters, pagination)
  */
-import { afterEach, it, mock } from 'node:test';
+import { afterEach, beforeEach, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import type {
@@ -36,10 +36,15 @@ Object.defineProperty(globalThis, 'navigator', { configurable: true, value: dom.
 const React = await import('react');
 const { render, fireEvent, screen, act, cleanup } = await import('@testing-library/react');
 const { api } = await import('../apps/web/src/api.ts');
+const { DesktopWorkspaceProvider } = await import('../apps/web/src/workspace-adapter.tsx');
 const { DashboardView } = await import('../apps/web/src/components/DashboardView.tsx');
 const { ActivityRecords } = await import('../apps/web/src/components/ActivityRecords.tsx');
 const { WorkspaceContext } = await import('../apps/web/src/workspace.tsx');
 const { translations } = await import('../apps/web/src/i18n.ts');
+
+beforeEach(() => {
+  mock.method(api, 'getBusinessVersions', async () => ({ today: '2026-11-16', timezone: 'UTC', libraryGeneration: 1, catalog: 1, practice: 0, planning: 1, notes: 0, approvals: 0 }));
+});
 
 afterEach(() => {
   cleanup();
@@ -290,7 +295,7 @@ function renderWithWorkspace(ui: React.ReactElement) {
     openPractice: () => {},
     openRecords: (filter) => { requests.push(filter); },
   };
-  const view = render(<WorkspaceContext.Provider value={value}>{ui}</WorkspaceContext.Provider>);
+  const view = render(<DesktopWorkspaceProvider><WorkspaceContext.Provider value={value}>{ui}</WorkspaceContext.Provider></DesktopWorkspaceProvider>);
   return { requests, view };
 }
 
@@ -342,7 +347,7 @@ it('keeps Statistics read-only when timezone setup is required', async () => {
   mock.method(api, 'getDashboard', async () => data);
   const writes = mock.method(api, 'updateSettings', async () => { throw new Error('Unexpected write'); });
   const ensure = mock.method(api, 'ensureDailyPlan', async () => { throw new Error('Unexpected generation'); });
-  await act(async () => { render(<DashboardView lang="en" />); });
+  await act(async () => { render(<DesktopWorkspaceProvider><DashboardView lang="en" /></DesktopWorkspaceProvider>); });
   assert.equal(writes.mock.callCount(), 0);
   assert.equal(ensure.mock.callCount(), 0);
   assert.ok(screen.getByText(translations.en.setupTimezoneTitle));
