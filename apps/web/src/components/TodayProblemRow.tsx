@@ -2,13 +2,13 @@
  * Single task row component in Today's plan view.
  * Renders reliable completion circle, topic tags with overflow dropdown, and contextual action links.
  */
-import React, { useState, useRef, useEffect } from 'react';
+import React from 'react';
 import { Check, Circle, RefreshCw, Plus, BookMarked, BookOpen, PenLine, Trash2 } from 'lucide-react';
 import type { PlanItem } from '../api.ts';
 import type { RecommendationFeedbackReason } from '../../../../packages/contracts/src/recommendations.ts';
 import { translations, type Language } from '../i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
-import { Feedback, InfoPopover, Tooltip } from './ui.tsx';
+import { Feedback, InfoPopover, Tooltip, useActionPopover } from './ui.tsx';
 import { PracticeTimerButton } from './PracticeTimer.tsx';
 import { QuickCopyButtons } from './QuickCopyButtons.tsx';
 
@@ -53,29 +53,8 @@ export function TodayProblemRow({
   const t = translations[lang];
   const workspace = useWorkspace();
 
-  const [isNoteMenuOpen, setIsNoteMenuOpen] = useState(false);
-  const noteMenuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (noteMenuRef.current && !noteMenuRef.current.contains(e.target as Node)) {
-        setIsNoteMenuOpen(false);
-      }
-    }
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        setIsNoteMenuOpen(false);
-      }
-    }
-    if (isNoteMenuOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-      window.addEventListener('keydown', handleKeyDown);
-    }
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [isNoteMenuOpen]);
+  // Native popover handles outside clicks, Escape and the top layer; see useActionPopover.
+  const noteMenu = useActionPopover({ align: 'end' });
 
   const reasonText = item.reason[lang] || item.reason.en;
   const problemUrl = /^https?:\/\//i.test(item.problem.url) ? item.problem.url : undefined;
@@ -169,7 +148,7 @@ export function TodayProblemRow({
               title={zh ? '推荐理由' : 'Why recommended'}
               label={zh ? '推荐理由' : 'Why recommended'}
               content={<div className="recommendation-popover-text"><p>{reasonText}</p>
-                {item.explanation?.reviewDecision && <p>{zh ? '结果反馈策略 v2；阶段 ' : 'Outcome policy v2; stage '}{item.explanation.reviewDecision.stage}
+                {item.explanation?.reviewDecision && <p>{zh ? '参考用时与结果；阶段 ' : 'Time and outcome spacing; stage '}{item.explanation.reviewDecision.stage}
                   {zh ? '；间隔 ' : '; interval '}{item.explanation.reviewDecision.intervalDays}{zh ? ' 天；到期 ' : ' days; due '}{item.explanation.reviewDecision.dueDate ?? '—'}</p>}
                 {item.explanation?.freshness && <p>{zh ? '90 天证据：' : '90-day evidence: '}{item.explanation.freshness.distinctProblems}{zh ? ' 道题，' : ' problems, '}{item.explanation.freshness.practiceDays}{zh ? ' 天；' : ' days; '}{({ recent: zh ? '近期有记录' : 'recent', stale: zh ? '仅有较旧证据，不能视为近期稳定' : 'stale, not recent stability', unseen: zh ? '尚无记录' : 'unseen' })[item.explanation.freshness.status]}</p>}
                 {item.explanation?.durationEstimate && <p>{zh ? '预计用时：' : 'Estimated effort: '}{item.explanation.durationEstimate.minutes}{zh ? ' 分钟；' : ' min; '}{item.explanation.durationEstimate.source === 'personal' ? (zh ? '个人样本中位数' : 'personal sample median') : (zh ? '难度启发式，非承诺' : 'difficulty heuristic, not a promise')}</p>}
@@ -186,53 +165,49 @@ export function TodayProblemRow({
       </div>
 
       <div className="problem-actions">
-        <div className="notes-dropdown" ref={noteMenuRef} style={{ position: 'relative', display: 'inline-block' }}>
-          <Tooltip text={t.noteButtonLabel} position="top" disabled={isNoteMenuOpen}>
+        <div className="notes-dropdown">
+          <Tooltip text={t.noteButtonLabel} position="top" disabled={noteMenu.open}>
             <button
               type="button"
               className="btn-icon"
               aria-label={t.noteButtonLabel}
-              aria-expanded={isNoteMenuOpen}
-              aria-haspopup="true"
-              onClick={() => setIsNoteMenuOpen((open) => !open)}
+              {...noteMenu.triggerProps}
             >
               <BookMarked size={18} />
             </button>
           </Tooltip>
 
-          {isNoteMenuOpen && (
+          {noteMenu.rendered && (
             <div
+              {...noteMenu.panelProps}
               className="notes-dropdown-menu notes-dropdown-menu-right"
-              role="menu"
-              style={{ minWidth: '180px', whiteSpace: 'nowrap' }}
+              style={{ minWidth: '180px' }}
             >
               <button
                 type="button"
                 className="notes-dropdown-item"
-                role="menuitem"
                 onClick={() => {
-                  setIsNoteMenuOpen(false);
+                  noteMenu.close();
                   workspace.navigate('notes', item.problem.questionFrontendId);
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <PenLine size={14} style={{ color: 'var(--primary)' }} />
+                <span className="notes-dropdown-label">
+                  <PenLine size={14} className="notes-dropdown-icon" aria-hidden="true" />
                   <span>{t.writeNewNoteInWorkspace}</span>
-                </div>
+                </span>
               </button>
               <button
                 type="button"
                 className="notes-dropdown-item"
-                role="menuitem"
                 onClick={() => {
-                  setIsNoteMenuOpen(false);
+                  noteMenu.close();
                   onOpenQuickNote?.(item);
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <BookOpen size={14} style={{ color: 'var(--accent, #6366f1)' }} />
+                <span className="notes-dropdown-label">
+                  <BookOpen size={14} className="notes-dropdown-icon is-secondary" aria-hidden="true" />
                   <span>{t.quickCheckPastNotes}</span>
-                </div>
+                </span>
               </button>
             </div>
           )}

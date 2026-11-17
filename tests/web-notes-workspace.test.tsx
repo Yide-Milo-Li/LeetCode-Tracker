@@ -1189,6 +1189,32 @@ describe('QuickCopyButtons Component', () => {
     assert.ok(lastCopiedText.includes('Array one pass'));
   });
 
+  it('exposes a disclosure (not an ARIA menu) that closes on Escape and returns focus', async () => {
+    await act(async () => {
+      render(<QuickCopyButtons lang="en" problem={sampleProblem} />);
+    });
+    const trigger = screen.getByRole('button', { name: /Copy/i });
+    assert.equal(trigger.getAttribute('aria-haspopup'), null);
+    assert.equal(trigger.getAttribute('aria-expanded'), 'false');
+
+    await act(async () => {
+      fireEvent.click(trigger);
+    });
+    const panel = document.querySelector('.notes-dropdown-menu');
+    assert.ok(panel);
+    assert.equal(panel.getAttribute('role'), null);
+    assert.equal(screen.queryAllByRole('menuitem').length, 0);
+    assert.equal(trigger.getAttribute('aria-expanded'), 'true');
+    assert.equal(trigger.getAttribute('aria-controls'), panel.id);
+
+    await act(async () => {
+      fireEvent.keyDown(panel, { key: 'Escape' });
+    });
+    assert.equal(document.querySelector('.notes-dropdown-menu'), null);
+    assert.equal(trigger.getAttribute('aria-expanded'), 'false');
+    assert.equal(document.activeElement, trigger);
+  });
+
   it('respects align prop for dropdown menu position', async () => {
     // Default / left alignment
     const { unmount } = render(
