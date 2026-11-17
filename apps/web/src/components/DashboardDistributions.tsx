@@ -1,48 +1,41 @@
 /**
- * Mastery overview: solved-out-of-catalog bars by difficulty, then by the most-solved topics.
+ * Difficulty mastery: solved-out-of-catalog bars for Easy / Medium / Hard. Topic coverage lives in
+ * FocusTopicsCard (highlights) and TopicInsights (full table) so topics are not listed twice.
  */
 import React from 'react';
-import type { DashboardResponse, TagMasteryReport } from '../api.ts';
+import type { DashboardResponse } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
 
 interface DashboardDistributionsProps {
   data: DashboardResponse | null;
   lang: Language;
-  masteryReport?: TagMasteryReport | null;
 }
 
-/** Topic rows shown beside the 30-day trend; the full list lives in TopicInsights below. */
-const TOPIC_ROW_LIMIT = 6;
+/** Whole-percent label that never rounds a non-zero share down to a misleading "0%". */
+function percentLabel(solved: number, total: number): string {
+  if (total <= 0 || solved <= 0) return '0%';
+  const pct = (solved / total) * 100;
+  return pct < 1 ? '<1%' : `${Math.round(pct)}%`;
+}
 
-/**
- * One labelled bar. When the catalog total is unknown (mastery report not loaded yet), the bar is
- * scaled against the largest solved count instead and only the solved count is printed.
- */
+/** One labelled meter; the bar keeps a visible minimum so tiny non-zero shares are not lost. */
 function MasteryRow({
   label,
   solved,
   total,
-  scaleMax,
   tone,
   lang,
 }: {
   label: string;
   solved: number;
-  total: number | null;
-  scaleMax: number;
-  tone: 'easy' | 'medium' | 'hard' | 'topic';
+  total: number;
+  tone: 'easy' | 'medium' | 'hard';
   lang: Language;
 }) {
-  const ratio = total !== null ? (total > 0 ? solved / total : 0) : scaleMax > 0 ? solved / scaleMax : 0;
+  const ratio = total > 0 ? solved / total : 0;
   const pct = Math.round(ratio * 100);
   const description =
-    total !== null
-      ? lang === 'zh'
-        ? `${label}：已完成 ${solved} / ${total}（${pct}%）`
-        : `${label}: ${solved} of ${total} solved (${pct}%)`
-      : lang === 'zh'
-        ? `${label}：已完成 ${solved}`
-        : `${label}: ${solved} solved`;
+    lang === 'zh' ? `${label}：已完成 ${solved} / ${total}（${pct}%）` : `${label}: ${solved} of ${total} solved (${pct}%)`;
 
   return (
     <div className={`mastery-row is-${tone}`} title={description}>
@@ -55,30 +48,30 @@ function MasteryRow({
         aria-valuemax={100}
         aria-valuenow={pct}
       >
-        <span className="mastery-row-fill" style={{ '--fill': ratio } as React.CSSProperties} />
+        <span
+          className={'mastery-row-fill' + (solved > 0 ? ' has-value' : '')}
+          style={{ '--fill': ratio } as React.CSSProperties}
+        />
       </span>
-      <span className="mastery-row-frac num-tabular">{total !== null ? `${solved}/${total}` : solved}</span>
+      <span className="mastery-row-frac num-tabular">
+        {solved}/{total}
+        <span className="mastery-row-pct">{percentLabel(solved, total)}</span>
+      </span>
     </div>
   );
 }
 
-/**
- * Render difficulty and topic coverage as one card. Topic totals come from the mastery report's
- * catalog counts; nothing is estimated when it is missing.
- */
-export const DashboardDistributions: React.FC<DashboardDistributionsProps> = ({ data, lang, masteryReport }) => {
+/** Render difficulty coverage as one card; totals come straight from the dashboard response. */
+export const DashboardDistributions: React.FC<DashboardDistributionsProps> = ({ data, lang }) => {
   const t = translations[lang];
   const zh = lang === 'zh';
-  const catalogTotals = new Map(masteryReport?.tags.map((tag) => [tag.tagSlug, tag.totalCatalogProblems]) ?? []);
-  const topics = (data?.topTags ?? []).slice(0, TOPIC_ROW_LIMIT);
-  const topicScaleMax = Math.max(0, ...topics.map((tag) => tag.solvedCount));
 
   return (
     <section className="distribution-card mastery-card" aria-labelledby="mastery-card-title">
       <div className="insight-card-head">
         <div>
-          <h2 id="mastery-card-title">{zh ? '掌握度' : 'Mastery'}</h2>
-          <p>{zh ? '按难度与主题统计的已完成 / 题库总数' : 'Solved out of catalog, by difficulty and topic'}</p>
+          <h2 id="mastery-card-title">{zh ? '难度掌握度' : 'Mastery by difficulty'}</h2>
+          <p>{zh ? '已完成 / 题库总数' : 'Solved out of catalog'}</p>
         </div>
       </div>
 
@@ -91,30 +84,11 @@ export const DashboardDistributions: React.FC<DashboardDistributionsProps> = ({ 
               label={String(t[`stat${diff}` as keyof typeof t] || diff)}
               solved={count.solved}
               total={count.total}
-              scaleMax={count.total}
               tone={diff.toLowerCase() as 'easy' | 'medium' | 'hard'}
               lang={lang}
             />
           );
         })}
-
-        <div className="mastery-rows-sep" aria-hidden="true" />
-
-        {topics.length > 0 ? (
-          topics.map((tag) => (
-            <MasteryRow
-              key={tag.tagSlug}
-              label={tag.tagName}
-              solved={tag.solvedCount}
-              total={catalogTotals.get(tag.tagSlug) ?? null}
-              scaleMax={topicScaleMax}
-              tone="topic"
-              lang={lang}
-            />
-          ))
-        ) : (
-          <p className="mastery-empty">{t.noProblems}</p>
-        )}
       </div>
     </section>
   );

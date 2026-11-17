@@ -1,24 +1,11 @@
 /**
- * Dashboard View component.
- * Read-only statistics tab displaying cumulative metrics,
- * interactive yearly activity heatmap, 30-day activity trend chart,
- * difficulty & tag distributions, recent activities, and drawer triggers.
+ * Progress → Statistics tab (read-only).
+ * Order: pending-date notice, outcome KPIs, yearly heatmap (with a quiet line when the last 30 days
+ * are empty), difficulty mastery + 30-day trend beside the topics worth attention, the topic table,
+ * and a collapsed data-source section. Day drilldowns open the Records tab via the workspace.
  */
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import {
-  Trophy,
-  Calendar,
-  Flame,
-  CheckCircle2,
-  Circle,
-  FileText,
-  ChevronRight,
-  AlertTriangle,
-  RefreshCw,
-  Sparkles,
-  Layers,
-  ArrowRight,
-} from 'lucide-react';
+import { AlertTriangle, ArrowRight } from 'lucide-react';
 import {
   ResponsiveContainer,
   AreaChart,
@@ -29,16 +16,22 @@ import {
   CartesianGrid,
   ReferenceDot,
 } from 'recharts';
-import { api, type DashboardResponse, type RecentActivityItem, type YearlyActivityDay, type TagMasteryReport, type KnowledgeProfileReport } from '../api.ts';
+import {
+  api,
+  type DashboardResponse,
+  type RecentActivityItem,
+  type YearlyActivityDay,
+  type TagMasteryReport,
+  type KnowledgeProfileReport,
+} from '../api.ts';
 import type { UseDailyPlanReturn } from '../hooks/useDailyPlan.ts';
 import { translations, type Language } from '../i18n.ts';
-import { ActivityHistoryDrawer } from './ActivityHistoryDrawer.tsx';
 import { useWorkspace } from '../workspace.tsx';
-import { IconButton, Feedback } from './ui.tsx';
-import { DashboardKpiGrid } from './DashboardKpiGrid.tsx';
+import { Feedback } from './ui.tsx';
+import { DashboardKpiGrid, shortDate } from './DashboardKpiGrid.tsx';
 import { DashboardDistributions } from './DashboardDistributions.tsx';
+import { FocusTopicsCard } from './FocusTopicsCard.tsx';
 import { TopicInsights } from './TopicInsights.tsx';
-import { RecentActivitySection } from './RecentActivitySection.tsx';
 
 interface DashboardViewProps {
   lang: Language;
@@ -49,16 +42,26 @@ interface DashboardViewProps {
   onNavigateToStrategies?: () => void;
 }
 
+/**
+ * Local calendar date of a confirmed activity. Date-only rows already are local dates; datetime rows
+ * are converted in the user's zone (UTC when unset) so the label matches the heatmap.
+ */
+function activityDate(item: RecentActivityItem, zone: string | null): string {
+  if (item.timePrecision === 'date') return item.timestamp.slice(0, 10);
+  const instant = new Date(item.timestamp);
+  if (Number.isNaN(instant.getTime())) return item.timestamp.slice(0, 10);
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: zone ?? 'UTC',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(instant);
+}
+
 /** Render read-only analysis; plan generation belongs exclusively to the application controller. */
-export const DashboardView: React.FC<DashboardViewProps> = ({
-  lang,
-  active = true,
-  planController,
-  onNavigateToToday,
-  onNavigateToSettings,
-  onNavigateToStrategies,
-}) => {
+export const DashboardView: React.FC<DashboardViewProps> = ({ lang, active = true, onNavigateToStrategies }) => {
   const t = translations[lang];
+  const zh = lang === 'zh';
   const workspace = useWorkspace();
 
   const [loading, setLoading] = useState(true);
@@ -70,8 +73,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   );
   const [sourceError, setSourceError] = useState('');
   const [sourceRetry, setSourceRetry] = useState(0);
-  const [masteryError,setMasteryError]=useState(false);
-  const [masteryLoading,setMasteryLoading]=useState(true);
+  const [masteryError, setMasteryError] = useState(false);
+  const [masteryLoading, setMasteryLoading] = useState(true);
   const [masteryReport, setMasteryReport] = useState<TagMasteryReport | null>(null);
   const [profileReport, setProfileReport] = useState<KnowledgeProfileReport | null>(null);
 
@@ -99,8 +102,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       .then((report) => {
         if (active) setMasteryReport(report);
       })
-      .catch(() => {if(active)setMasteryError(true);})
-      .finally(()=>{if(active)setMasteryLoading(false);});
+      .catch(() => {
+        if (active) setMasteryError(true);
+      })
+      .finally(() => {
+        if (active) setMasteryLoading(false);
+      });
 
     api
       .getKnowledgeProfile()
@@ -113,10 +120,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       active = false;
     };
   }, [workspace.revision, workspace.timezone, sourceRetry]);
-
-  // History Drawer state
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [drawerInitialDate, setDrawerInitialDate] = useState<string | null>(null);
 
   // Keyboard navigation & roving tabIndex for heatmap
   const [focusedDate, setFocusedDate] = useState<string | null>(null);
@@ -157,20 +160,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   // 30-day trend: label only the first, middle and last day so the axis stays quiet.
   const trendDays = data?.trend30Days ?? [];
+  const hasRecentActivity = trendDays.some((day) => day.activeCount > 0 || day.completedCount > 0);
   const trendTicks = trendDays.length
     ? [...new Set([0, Math.floor((trendDays.length - 1) / 2), trendDays.length - 1])].map((i) => trendDays[i].date)
     : [];
   // Trend dates are local calendar days; format in UTC so the label never shifts by a day.
-  const formatTrendDate = (date: string) =>
-    new Date(`${date}T00:00:00Z`).toLocaleDateString(lang === 'zh' ? 'zh-CN' : 'en-US', {
-      day: 'numeric',
-      month: 'short',
-      timeZone: 'UTC',
-    });
+  const formatTrendDate = (date: string) => shortDate(date, lang);
   const reduceMotion = useMemo(
     () => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true,
     [],
   );
+
+  // Latest activity with a confirmed date; pending-date rows cannot anchor "last active".
+  const lastActiveDate = useMemo(() => {
+    const item = data?.recentActivities.find((activity) => !activity.isDatePending);
+    return item ? activityDate(item, workspace.timezone) : null;
+  }, [data?.recentActivities, workspace.timezone]);
 
   // Year choices (current year and past 2 years)
   const currentCalYear = new Date().getFullYear();
@@ -233,14 +238,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     }
   }, [selectedYear]);
 
+  /** A heatmap day opens the Records tab filtered to that date. */
   const handleCellClick = (dateStr: string) => {
-    setDrawerInitialDate(dateStr);
-    setIsDrawerOpen(true);
-  };
-
-  const handleOpenDrawerAll = () => {
-    setDrawerInitialDate(null);
-    setIsDrawerOpen(true);
+    setHoveredDay(null);
+    workspace.openRecords?.({ date: dateStr });
   };
 
   const handleCellKeyDown = (e: React.KeyboardEvent, dateStr: string, wIdx: number, dIdx: number) => {
@@ -275,37 +276,53 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     }
   };
 
-  return (
-    <div className="dashboard-view-container">
-      <div className="dashboard-header-row dashboard-toolbar">
-        <IconButton icon={RefreshCw} label={lang === 'zh' ? '刷新' : 'Refresh'}
-          disabled={loading} onClick={() => void fetchDashboard(selectedYear)} />
-      </div>
+  const pendingDateCount = data?.dataStatus.pendingDateCount ?? 0;
 
-      {/* KPI Cards Grid */}
+  return (
+    <div className="dashboard-view-container progress-stats">
       {error && (
         <Feedback retry={{ label: t.retry, run: () => void fetchDashboard(selectedYear) }}>{error}</Feedback>
       )}
-      <DashboardKpiGrid data={data} lang={lang} />
+
+      {pendingDateCount > 0 && (
+        <div className="progress-notice" role="status">
+          <AlertTriangle className="progress-notice-icon" aria-hidden="true" />
+          <span className="progress-notice-text">{t.pendingDatesNotice.replace('{count}', String(pendingDateCount))}</span>
+          <button
+            type="button"
+            className="progress-notice-action"
+            onClick={() => workspace.openRecords?.({ pendingOnly: true })}
+          >
+            {zh ? '去确认' : 'Review dates'}
+            <ArrowRight aria-hidden="true" />
+          </button>
+        </div>
+      )}
+
+      <DashboardKpiGrid
+        data={data}
+        lang={lang}
+        reviewSummary={masteryReport?.reviewSummary ?? null}
+        lastActiveDate={lastActiveDate}
+      />
 
       {/* Yearly Activity Heatmap */}
-      <div className="heatmap-card">
-        <div className="u-display-flex u-justify-content-space-between u-align-items-center u-margin-bottom-1rem u-flex-wrap-wrap u-gap-0-5rem">
-          <div className="u-display-flex u-align-items-center u-gap-0-5rem">
-            <Calendar className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-            <h2 className="u-font-size-1rem u-font-weight-700 u-margin-0">{t.heatmapTitle}</h2>
+      <section className="heatmap-card" aria-labelledby="heatmap-card-title">
+        <div className="insight-card-head heatmap-card-head">
+          <div>
+            <h2 id="heatmap-card-title">{t.heatmapTitle}</h2>
+            <p>{zh ? '点击某一天，在「记录」中查看当天的练习' : 'Select a day to see its practice in Records'}</p>
           </div>
 
           {/* Year selector */}
-          <div className="u-display-flex u-gap-0-25rem u-background-bg-card-muted u-padding-0-25rem u-border-radius-radius">
+          <div className="heatmap-year-select" role="group" aria-label={zh ? '选择年份' : 'Select year'}>
             {availableYears.map((year) => (
               <button
                 key={year}
+                type="button"
+                aria-pressed={selectedYear === year}
                 onClick={() => setSelectedYear(year)}
-                className={
-                  `btn ${selectedYear === year ? 'btn-primary' : 'btn-ghost'}` +
-                  ' u-font-size-13px u-padding-0-2rem-0-5rem'
-                }
+                className={'topic-filter-tab' + (selectedYear === year ? ' active' : '')}
               >
                 {year}
               </button>
@@ -334,10 +351,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     }
                   }
 
-                  const label =
-                    lang === 'zh'
-                      ? `${dateStr}：${activeCount} 题有活动，${solvedCount} 题完成`
-                      : `${dateStr}: ${activeCount} active, ${solvedCount} solved`;
+                  const label = zh
+                    ? `${dateStr}：${activeCount} 题有活动，${solvedCount} 题完成`
+                    : `${dateStr}: ${activeCount} active, ${solvedCount} solved`;
                   const isCurrentFocused =
                     inYear && (dateStr === focusedDate || (!focusedDate && wIdx === 0 && dIdx === 0));
 
@@ -388,7 +404,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <div className="tooltip-header">
               <span className="tooltip-date">{hoveredDay.day.date}</span>
               {Boolean(hoveredDay.day.totalMinutes) && (
-                <span className="tooltip-duration">⏱️ {hoveredDay.day.totalMinutes} {lang === 'zh' ? '分钟' : 'min'}</span>
+                <span className="tooltip-duration">⏱️ {hoveredDay.day.totalMinutes} {zh ? '分钟' : 'min'}</span>
               )}
             </div>
             <div className="tooltip-counts">
@@ -418,19 +434,26 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   </li>
                 ))}
                 {hoveredDay.day.problemSummaries.length > 3 && (
-                  <li className="tooltip-more">+{hoveredDay.day.problemSummaries.length - 3} {lang === 'zh' ? '更多' : 'more'}</li>
+                  <li className="tooltip-more">+{hoveredDay.day.problemSummaries.length - 3} {zh ? '更多' : 'more'}</li>
                 )}
               </ul>
             )}
-            <div className="tooltip-hint">{lang === 'zh' ? '点击展开当日复盘与详情' : 'Click to drill down into records'}</div>
+            <div className="tooltip-hint">{zh ? '点击在「记录」中查看' : 'Click to open in Records'}</div>
           </div>
         )}
 
-        {/* Heatmap Legend */}
+        {/* Heatmap footer: activity summary (and the quiet 30-day note) beside the legend */}
         <div className="heatmap-legend">
-          <span className="u-font-size-13px">
-            {data?.yearlyActivity.days.length ?? 0}{' '}
-            {lang === 'zh' ? '天有已知记录' : 'days with known activity'}
+          <span className="heatmap-summary">
+            {data && !hasRecentActivity && (
+              <span className="heatmap-quiet">
+                <span className="heatmap-quiet-dot" aria-hidden="true" />
+                {zh ? '近 30 天没有练习记录' : 'No practice in the last 30 days'}
+                {lastActiveDate && (zh ? ` · 最近一次 ${lastActiveDate}` : ` · last active ${lastActiveDate}`)}
+                {' · '}
+              </span>
+            )}
+            {data?.yearlyActivity.days.length ?? 0} {zh ? '天有已知记录' : 'days with known activity'}
           </span>
           <div className="heatmap-legend-scale">
             <span>{t.heatmapLess}</span>
@@ -441,150 +464,167 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <span>{t.heatmapMore}</span>
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* 30-day trend beside the mastery overview */}
+      {/* Difficulty mastery (+ trend when there is recent data) beside the topics worth attention */}
       <div className="progress-insights-grid">
-        <section className="trend-card" aria-labelledby="trend-card-title">
-          <div className="insight-card-head">
-            <div>
-              <h2 id="trend-card-title">{t.trend30DaysTitle}</h2>
-              <p>{lang === 'zh' ? '完成题数与当天活跃题数的对比' : 'Solved problems against problems you touched'}</p>
-            </div>
-            <div className="chart-legend">
-              <span>
-                <i className="legend-completed" />
-                {t.trendSolvedProblems}
-              </span>
-              <span>
-                <i className="legend-active" />
-                {t.trendActiveProblems}
-              </span>
-            </div>
-          </div>
-          <div className="trend-chart-wrapper">
-            {active && trendDays.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%" minHeight={240}>
-                <AreaChart data={trendDays} margin={{ top: 10, right: 28, left: -16, bottom: 0 }}>
-                  <CartesianGrid vertical={false} stroke="var(--border-color)" />
-                  <XAxis
-                    dataKey="date"
-                    ticks={trendTicks}
-                    interval={0}
-                    tickFormatter={formatTrendDate}
-                    axisLine={false}
-                    tickLine={false}
-                    tickMargin={8}
-                  />
-                  <YAxis allowDecimals={false} axisLine={false} tickLine={false} width={40} />
-                  <RechartsTooltip
-                    cursor={{ stroke: 'var(--outline)', strokeWidth: 1 }}
-                    content={({ active, payload, label }) => {
-                      if (!active || !payload?.length) return null;
-                      const point = payload[0]?.payload as { activeCount: number; completedCount: number };
-                      return (
-                        <div className="trend-tooltip">
-                          <div className="trend-tooltip-date">{formatTrendDate(String(label))}</div>
-                          <div className="trend-tooltip-row is-solved">
-                            {t.trendSolvedProblems}: <strong className="num-tabular">{point.completedCount}</strong>
-                          </div>
-                          <div className="trend-tooltip-row">
-                            {t.trendActiveProblems}: <strong className="num-tabular">{point.activeCount}</strong>
-                          </div>
-                        </div>
-                      );
-                    }}
-                  />
-                  <Area
-                    isAnimationActive={false}
-                    type="linear"
-                    dataKey="activeCount"
-                    name={t.trendActiveProblems}
-                    stroke="var(--text-muted)"
-                    strokeDasharray="4 4"
-                    strokeWidth={1.5}
-                    fill="none"
-                    activeDot={false}
-                  />
-                  <Area
-                    isAnimationActive={!reduceMotion}
-                    animationDuration={700}
-                    animationEasing="ease-out"
-                    type="linear"
-                    dataKey="completedCount"
-                    name={t.trendSolvedProblems}
-                    stroke="var(--primary)"
-                    strokeWidth={2}
-                    strokeLinejoin="round"
-                    fill="var(--primary)"
-                    fillOpacity={0.08}
-                    activeDot={{ r: 4, fill: 'var(--primary)', stroke: 'var(--surface)', strokeWidth: 2 }}
-                  />
-                  <ReferenceDot
-                    x={trendDays[trendDays.length - 1].date}
-                    y={trendDays[trendDays.length - 1].completedCount}
-                    r={3.5}
-                    fill="var(--primary)"
-                    stroke="none"
-                    ifOverflow="visible"
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="u-height-100 u-display-flex u-align-items-center u-justify-content-center u-font-size-13px u-color-text-muted">
-                {t.noProblems}
+        <div className="progress-insights-main">
+          <DashboardDistributions data={data} lang={lang} />
+
+          {hasRecentActivity && (
+            <section className="trend-card" aria-labelledby="trend-card-title">
+              <div className="insight-card-head">
+                <div>
+                  <h2 id="trend-card-title">{t.trend30DaysTitle}</h2>
+                  <p>{zh ? '完成题数与当天活跃题数的对比' : 'Solved problems against problems you touched'}</p>
+                </div>
+                <div className="chart-legend">
+                  <span>
+                    <i className="legend-completed" />
+                    {t.trendSolvedProblems}
+                  </span>
+                  <span>
+                    <i className="legend-active" />
+                    {t.trendActiveProblems}
+                  </span>
+                </div>
               </div>
-            )}
-          </div>
-        </section>
+              <div className="trend-chart-wrapper">
+                {active && (
+                  <ResponsiveContainer width="100%" height="100%" minHeight={200}>
+                    <AreaChart data={trendDays} margin={{ top: 10, right: 28, left: -16, bottom: 0 }}>
+                      <CartesianGrid vertical={false} stroke="var(--border-color)" />
+                      <XAxis
+                        dataKey="date"
+                        ticks={trendTicks}
+                        interval={0}
+                        tickFormatter={formatTrendDate}
+                        axisLine={false}
+                        tickLine={false}
+                        tickMargin={8}
+                      />
+                      <YAxis allowDecimals={false} axisLine={false} tickLine={false} width={40} />
+                      <RechartsTooltip
+                        cursor={{ stroke: 'var(--outline)', strokeWidth: 1 }}
+                        content={({ active, payload, label }) => {
+                          if (!active || !payload?.length) return null;
+                          const point = payload[0]?.payload as { activeCount: number; completedCount: number };
+                          return (
+                            <div className="trend-tooltip">
+                              <div className="trend-tooltip-date">{formatTrendDate(String(label))}</div>
+                              <div className="trend-tooltip-row is-solved">
+                                {t.trendSolvedProblems}: <strong className="num-tabular">{point.completedCount}</strong>
+                              </div>
+                              <div className="trend-tooltip-row">
+                                {t.trendActiveProblems}: <strong className="num-tabular">{point.activeCount}</strong>
+                              </div>
+                            </div>
+                          );
+                        }}
+                      />
+                      <Area
+                        isAnimationActive={false}
+                        type="linear"
+                        dataKey="activeCount"
+                        name={t.trendActiveProblems}
+                        stroke="var(--text-muted)"
+                        strokeDasharray="4 4"
+                        strokeWidth={1.5}
+                        fill="none"
+                        activeDot={false}
+                      />
+                      <Area
+                        isAnimationActive={!reduceMotion}
+                        animationDuration={700}
+                        animationEasing="ease-out"
+                        type="linear"
+                        dataKey="completedCount"
+                        name={t.trendSolvedProblems}
+                        stroke="var(--primary)"
+                        strokeWidth={2}
+                        strokeLinejoin="round"
+                        fill="var(--primary)"
+                        fillOpacity={0.08}
+                        activeDot={{ r: 4, fill: 'var(--primary)', stroke: 'var(--surface)', strokeWidth: 2 }}
+                      />
+                      <ReferenceDot
+                        x={trendDays[trendDays.length - 1].date}
+                        y={trendDays[trendDays.length - 1].completedCount}
+                        r={3.5}
+                        fill="var(--primary)"
+                        stroke="none"
+                        ifOverflow="visible"
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+            </section>
+          )}
+        </div>
 
-        <DashboardDistributions data={data} lang={lang} masteryReport={masteryReport} />
-      </div>
-
-      {masteryLoading && <p role="status">{t.insightLoading}</p>}
-      {masteryError && <Feedback retry={{label:t.retry,run:()=>setSourceRetry(v=>v+1)}}>{t.insightLoadError}</Feedback>}
-      {masteryReport && (
-        <TopicInsights
+        <FocusTopicsCard
           report={masteryReport}
-          profileReport={profileReport}
+          topTags={data?.topTags ?? []}
           lang={lang}
           onConfigure={onNavigateToStrategies}
         />
+      </div>
+
+      {masteryLoading && <p role="status" className="text-muted">{t.insightLoading}</p>}
+      {masteryError && (
+        <Feedback retry={{ label: t.retry, run: () => setSourceRetry((v) => v + 1) }}>{t.insightLoadError}</Feedback>
       )}
+      {masteryReport && <TopicInsights report={masteryReport} profileReport={profileReport} lang={lang} />}
 
-      {/* Recent Activities Section & History Drawer Trigger */}
-      <RecentActivitySection
-        recentActivities={data?.recentActivities}
-        onOpenDrawer={handleOpenDrawerAll}
-        lang={lang}
-      />
-
-      <details className="workspace-details">
-        <summary>{lang === 'zh' ? '活动数据表与来源说明' : 'Activity data and source coverage'}</summary>
+      <details className="workspace-details progress-source-details">
+        <summary>{zh ? '数据来源与统计说明' : 'Data sources and coverage'}</summary>
         <p className="coverage-note">
-          {lang === 'zh'
+          {zh
             ? '没有记录不代表没有练习。手动记录和有效导入依据按题目与日期去重；这不是历史任务完成率。标签可重叠，分布之和可能超过已完成题数。'
             : 'No record does not prove inactivity. Manual records and valid imported evidence are deduplicated by problem and date; this is not a historical task completion rate. Tags overlap, so their totals may exceed solved problems.'}
         </p>
-        {sourceError && <Feedback retry={{ label: lang === 'zh' ? '重试来源统计' : 'Retry source totals', run: () => setSourceRetry((value) => value + 1) }}>{sourceError}</Feedback>}
-        {sourceStats && (
-          <dl className="detail-grid">
-            <dt>{lang === 'zh' ? '手动练习 / 完成 / 未完成' : 'Manual / completed / not completed'}</dt>
-            <dd>
-              {sourceStats.totalManualPractices} / {sourceStats.completedManualPractices} /{' '}
-              {sourceStats.uncompletedManualPractices}
-            </dd>
-            <dt>{lang === 'zh' ? '有效快照 / 含通过记录' : 'Active snapshots / with Accepted evidence'}</dt>
-            <dd>
-              {sourceStats.totalSnapshots} / {sourceStats.acceptedSnapshots}
-            </dd>
-          </dl>
+        {sourceError && (
+          <Feedback
+            retry={{ label: zh ? '重试来源统计' : 'Retry source totals', run: () => setSourceRetry((value) => value + 1) }}
+          >
+            {sourceError}
+          </Feedback>
         )}
+        <dl className="detail-grid">
+          {sourceStats && (
+            <>
+              <dt>{zh ? '手动练习 / 完成 / 未完成' : 'Manual / completed / not completed'}</dt>
+              <dd>
+                {sourceStats.totalManualPractices} / {sourceStats.completedManualPractices} /{' '}
+                {sourceStats.uncompletedManualPractices}
+              </dd>
+              <dt>{zh ? '有效快照 / 含通过记录' : 'Active snapshots / with Accepted evidence'}</dt>
+              <dd>
+                {sourceStats.totalSnapshots} / {sourceStats.acceptedSnapshots}
+              </dd>
+            </>
+          )}
+          {data?.dataStatus && (
+            <>
+              <dt>{t.catalogLastUpdated}</dt>
+              <dd>
+                {data.dataStatus.catalogUpdatedAt ? new Date(data.dataStatus.catalogUpdatedAt).toLocaleString() : t.never}
+              </dd>
+              <dt>{t.practiceLastUpdated}</dt>
+              <dd>
+                {data.dataStatus.practiceUpdatedAt ? new Date(data.dataStatus.practiceUpdatedAt).toLocaleString() : t.never}
+              </dd>
+              <dt>{t.userTimezoneLabel}</dt>
+              <dd>{data.dataStatus.userTimezone || t.setupTimezoneTitle}</dd>
+            </>
+          )}
+        </dl>
         <table className="data-table">
-          <caption>{lang === 'zh' ? '最近 30 天活动' : 'Last 30 days of activity'}</caption>
+          <caption>{zh ? '最近 30 天活动' : 'Last 30 days of activity'}</caption>
           <thead>
             <tr>
-              <th>{lang === 'zh' ? '日期' : 'Date'}</th>
+              <th>{zh ? '日期' : 'Date'}</th>
               <th>{t.trendActiveProblems}</th>
               <th>{t.trendSolvedProblems}</th>
             </tr>
@@ -600,45 +640,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </tbody>
         </table>
       </details>
-      {/* Data Status & Freshness Footer */}
-      {data?.dataStatus && (
-        <div className="data-status-bar">
-          <div className="data-status-row">
-            <div className="u-display-flex u-align-items-center u-gap-1rem u-flex-wrap-wrap">
-              <span>
-                <strong>{t.catalogLastUpdated}:</strong>{' '}
-                {data.dataStatus.catalogUpdatedAt
-                  ? new Date(data.dataStatus.catalogUpdatedAt).toLocaleString()
-                  : t.never}
-              </span>
-              <span>
-                <strong>{t.practiceLastUpdated}:</strong>{' '}
-                {data.dataStatus.practiceUpdatedAt
-                  ? new Date(data.dataStatus.practiceUpdatedAt).toLocaleString()
-                  : t.never}
-              </span>
-              <span>
-                <strong>{t.userTimezoneLabel}:</strong> {data.dataStatus.userTimezone || t.setupTimezoneTitle}
-              </span>
-            </div>
-          </div>
-
-          {data.dataStatus.pendingDateCount > 0 && (
-            <div className="u-display-flex u-align-items-center u-gap-0-5rem u-color-warning u-padding-0-4rem-0">
-              <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-              <span>{t.pendingDatesNotice.replace('{count}', String(data.dataStatus.pendingDateCount))}</span>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Activity History Drawer Modal */}
-      <ActivityHistoryDrawer
-        isOpen={isDrawerOpen}
-        onClose={() => setIsDrawerOpen(false)}
-        lang={lang}
-        initialDate={drawerInitialDate}
-      />
+      {loading && !data && <p role="status" className="text-muted">{zh ? '加载中…' : 'Loading…'}</p>}
     </div>
   );
 };

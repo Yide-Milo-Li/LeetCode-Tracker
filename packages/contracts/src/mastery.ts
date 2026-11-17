@@ -12,9 +12,16 @@ export const tagMasterySchema = z.object({
     level: tagMasteryLevelSchema, reasons: z.array(z.enum(['duration_threshold', 'overdue_reviews'])),
 }).strict();
 export type TagMastery = z.infer<typeof tagMasterySchema>;
+/**
+ * Problem-level review totals. Tags overlap, so summing per-tag due counts would double count a
+ * problem; this summary counts each solved catalog problem with a known due date once.
+ */
+export const reviewSummarySchema = z.object({ knownDueCount: count, dueTodayCount: count, overdueCount: count }).strict();
+export type ReviewSummary = z.infer<typeof reviewSummarySchema>;
 export const tagMasteryReportSchema = z.object({
     analysisVersion: z.literal('mastery-v2'), generatedAt: count, asOfDate: z.string(), timezone: z.string(), windowDays: z.literal(30),
     revision: z.object({ catalog: count, practice: count, planning: count, timezone: z.string().nullable() }),
+    reviewSummary: reviewSummarySchema,
     tags: z.array(tagMasterySchema),
 }).strict();
 export type TagMasteryReport = z.infer<typeof tagMasteryReportSchema>;

@@ -15,6 +15,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Languages,
+  RefreshCw,
 } from 'lucide-react';
 import { CatalogView } from './components/CatalogView.tsx';
 import { ActivityRecords } from './components/ActivityRecords.tsx';
@@ -26,7 +27,7 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.ts';
 import { SetupGate } from './components/SetupGuide.tsx';
 import { applyAppIcon, brandIconUrl } from './brand-icons.ts';
 import type { SettingsSection } from './components/SettingsView.tsx';
-import { Feedback, PageHeader, Tooltip } from './components/ui.tsx';
+import { Feedback, IconButton, PageHeader, Tooltip } from './components/ui.tsx';
 import type { ThemePalette } from '../../../packages/contracts/src/sync.ts';
 
 
@@ -72,7 +73,14 @@ function WorkspaceFallback({ label }: { label: string }) {
 import { useDailyPlan } from './hooks/useDailyPlan.ts';
 import { api, type PracticeRecord } from './api.ts';
 import type { Language } from './i18n.ts';
-import { WorkspaceContext, type PracticeOutcome, type PracticeRequest, type View } from './workspace.tsx';
+import {
+  WorkspaceContext,
+  type PracticeOutcome,
+  type PracticeRequest,
+  type RecordsFilter,
+  type RecordsFilterRequest,
+  type View,
+} from './workspace.tsx';
 
 const views: View[] = [
   'today',
@@ -103,6 +111,7 @@ export function App() {
   const [revision, setRevision] = useState(0);
   const [focusRequest,setFocusRequest]=useState(0);
   const [selectedNoteProblem, setSelectedNoteProblem] = useState<string | null>(null);
+  const [recordsFilter, setRecordsFilter] = useState<RecordsFilterRequest | null>(null);
   const [error, setError] = useState('');
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('general');
   const [practiceQueue, setPracticeQueue] = useState<PracticeRequest[]>([]);
@@ -276,9 +285,17 @@ export function App() {
     },
     [plan.onPracticeLogged],
   );
+  /** Statistics drilldowns hand their filter to the Records tab instead of opening a nested drawer. */
+  const openRecords = useCallback(
+    (filter: RecordsFilter) => {
+      setRecordsFilter((prior) => ({ ...filter, id: (prior?.id ?? 0) + 1 }));
+      navigate('records');
+    },
+    [navigate],
+  );
   const workspace = useMemo(
-    () => ({ revision, timezone, selectedNoteProblem, navigate, notifyMutation, openPractice, reportPracticeOutcome }),
-    [revision, timezone, selectedNoteProblem, navigate, notifyMutation, openPractice, reportPracticeOutcome],
+    () => ({ revision, timezone, selectedNoteProblem, navigate, openRecords, notifyMutation, openPractice, reportPracticeOutcome }),
+    [revision, timezone, selectedNoteProblem, navigate, openRecords, notifyMutation, openPractice, reportPracticeOutcome],
   );
   const zh = lang === 'zh';
   const progress = ['records', 'statistics', 'progress-import'].includes(view);
@@ -469,6 +486,11 @@ export function App() {
                 title={zh ? '进展' : 'Progress'}
                 actions={
                   <>
+                    <IconButton
+                      icon={RefreshCw}
+                      label={zh ? '刷新进展数据' : 'Refresh progress data'}
+                      onClick={() => setRevision((n) => n + 1)}
+                    />
                     <button className="btn btn-secondary" onClick={() => navigate('progress-import')}>
                       <Upload size={16} />
                       {zh ? '导入进度' : 'Import progress'}
@@ -568,7 +590,7 @@ export function App() {
             )}
             {visited.has('records') && (
               <div hidden={view !== 'records'} role="tabpanel" aria-labelledby="tab-records" id="view-records">
-                <ActivityRecords lang={lang} />
+                <ActivityRecords lang={lang} filterRequest={recordsFilter} />
               </div>
             )}
             {visited.has('statistics') && (

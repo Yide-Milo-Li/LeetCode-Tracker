@@ -122,15 +122,18 @@ describe('macOS native profile migration',()=>{
     const statisticsView = await navigateTo('Progress', '#statistics', '#view-statistics');
     await (await statisticsView.$('.dashboard-view-container')).waitForDisplayed();
     await (await statisticsView.$('.heatmap-card')).waitForDisplayed();
-    const trendCard = await statisticsView.$('.progress-insights-grid section.trend-card');
-    await trendCard.waitForDisplayed();
+    // The 30-day trend renders only with recent activity; otherwise the heatmap shows a quiet note.
+    await browser.waitUntil(async () =>
+      (await statisticsView.$('.progress-insights-grid section.trend-card').isDisplayed()) ||
+      (await statisticsView.$('.heatmap-quiet').isDisplayed()));
     const masteryCard = await statisticsView.$('.progress-insights-grid section.distribution-card.mastery-card');
     await masteryCard.waitForDisplayed();
     assert.match(await masteryCard.getText(), /Mastery/);
-    await browser.waitUntil(async () => (await masteryCard.$$('.mastery-row-track[role="meter"]')).length >= 4);
+    await browser.waitUntil(async () => (await masteryCard.$$('.mastery-row-track[role="meter"]')).length === 3);
+    await (await statisticsView.$('.progress-insights-grid section.focus-topics-card')).waitForDisplayed();
     const topicInsights = await statisticsView.$('.topic-insights');
     await topicInsights.waitForDisplayed();
-    await (await statisticsView.$('.topic-difficulty-pills')).waitForDisplayed();
+    await (await topicInsights.$('table.topic-table')).waitForDisplayed();
     assert.match(await topicInsights.getText(), /Array/);
     await assertNoViewErrors(statisticsView);
 

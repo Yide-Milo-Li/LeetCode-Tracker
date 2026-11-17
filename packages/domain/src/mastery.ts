@@ -80,10 +80,19 @@ export function calculateTagMastery(input: TagMasteryInput): TagMasteryReport {
         recentSolved: number;
         sum: number;
     }>();
+    const reviewSummary = { knownDueCount: 0, dueTodayCount: 0, overdueCount: 0 };
     for (const p of problems) {
         const days = samples.get(p.questionId);
         const durations = [...(days?.values() ?? [])].filter(validDuration);
         const state = states.get(p.questionId);
+        // Count each problem once, independent of how many tags it carries.
+        if (state?.solved && state.dueDate) {
+            reviewSummary.knownDueCount++;
+            if (state.dueDate < today)
+                reviewSummary.overdueCount++;
+            if (state.dueDate === today)
+                reviewSummary.dueTodayCount++;
+        }
         for (const t of p.topicTags) {
             let acc = tags.get(t.slug);
             if (!acc) {
@@ -142,6 +151,7 @@ export function calculateTagMastery(input: TagMasteryInput): TagMasteryReport {
     }
     return { analysisVersion: ANALYSIS_VERSION, generatedAt: now, asOfDate: today, timezone: zone, windowDays: 30,
         revision: input.revision ?? { catalog: 0, practice: 0, planning: 0, timezone: input.userZone ?? null },
+        reviewSummary,
         tags: [...tags.values()].map(a => a.tag).sort((a, b) => a.tagSlug.localeCompare(b.tagSlug)) };
 }
 /** Rank only evidence-backed attention topics; deterministic ties make reports reproducible. */

@@ -1,26 +1,29 @@
-/** Filterable activity records shared by Progress and the statistics drilldown. */
+/** Filterable activity records for the Progress → Records tab, including statistics drilldowns. */
 import { RotateCcw } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { api, type DashboardActivityListResponse, type RecentActivityItem } from '../api.ts';
 import type { Language } from '../i18n.ts';
-import { useWorkspace } from '../workspace.tsx';
+import { useWorkspace, type RecordsFilterRequest } from '../workspace.tsx';
 import { Feedback, IconButton, Field, Pagination } from './ui.tsx';
 import { practiceTime } from './PracticeWorkspace.tsx';
 import { SnapshotDetails } from './SnapshotBrowser.tsx';
 
-/** Keep filters and pagination local; late requests cannot replace newer results or detail selections. */
+/**
+ * Keep filters and pagination local; late requests cannot replace newer results or detail selections.
+ * A new `filterRequest` (heatmap day, pending-date notice) replaces every filter and returns to page 1.
+ */
 export function ActivityRecords({
   lang,
-  initialDate = null,
+  filterRequest = null,
 }: {
   lang: Language;
-  initialDate?: string | null;
+  filterRequest?: RecordsFilterRequest | null;
 }) {
   const zh = lang === 'zh';
   const workspace = useWorkspace();
-  const [date, setDate] = useState(initialDate ?? '');
+  const [date, setDate] = useState(filterRequest?.date ?? '');
   const [source, setSource] = useState<'all' | 'manual' | 'snapshot'>('all');
-  const [pending, setPending] = useState<'all' | 'true' | 'false'>('all');
+  const [pending, setPending] = useState<'all' | 'true' | 'false'>(filterRequest?.pendingOnly ? 'true' : 'all');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
   const [data, setData] = useState<DashboardActivityListResponse | null>(null);
@@ -71,9 +74,12 @@ export function ActivityRecords({
     };
   }, [date, workspace.timezone, workspace.revision]);
   useEffect(() => {
-    setDate(initialDate ?? '');
+    if (!filterRequest) return;
+    setDate(filterRequest.date ?? '');
+    setSource('all');
+    setPending(filterRequest.pendingOnly ? 'true' : 'all');
     setPage(1);
-  }, [initialDate]);
+  }, [filterRequest]);
   useEffect(() => {
     let active = true;
     setLoading(true);

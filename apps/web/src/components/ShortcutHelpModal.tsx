@@ -36,7 +36,7 @@ export function ShortcutHelpModal({ lang, onClose }: ShortcutHelpModalProps) {
       category: zh ? '图表与看板' : 'Dashboard & Heatmap',
       items: [
         { key: '↑ ↓ ← →', desc: zh ? '热力图日期格子游标' : 'Navigate heatmap calendar cells' },
-        { key: 'Enter / Space', desc: zh ? '打开选中日期的活动抽屉' : 'Drilldown into selected date in drawer' },
+        { key: 'Enter / Space', desc: zh ? '在「记录」中查看选中日期' : 'Open the selected date in Records' },
       ],
     },
   ];

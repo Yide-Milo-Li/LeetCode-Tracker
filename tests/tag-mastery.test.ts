@@ -52,6 +52,7 @@ it('separates due-today from overdue and requires known due evidence for stabili
     assert.equal(result.tags[0].level, 'needs_practice');
     assert.equal(result.tags[0].dueTodayCount, 1);
     assert.equal(result.tags[0].overdueRate, 2 / 3);
+    assert.deepEqual(result.reviewSummary, { knownDueCount: 3, dueTodayCount: 1, overdueCount: 2 });
     const stable = calculateTagMastery({ problems, manualRecords: records.map(r => ({ ...r, durationMinutes: 10 })), snapshots: [], now, userZone: 'UTC',
         reviewStates: states.map(s => ({ ...s, dueDate: '2026-09-20' })) });
     assert.equal(stable.tags[0].level, 'recently_stable');

@@ -4,7 +4,7 @@ Topic Practice Insights summarizes local practice evidence. It does not assign m
 
 ## Evidence and states
 
-The read-only `GET /api/v1/mastery` report uses a 30-calendar-day window in the configured timezone. It returns `mastery-v2`, analysis date, timezone, revisions and one aggregate entry per catalog tag. It contains no raw notes or practice history. Lifetime solved coverage is separate from recent distinct problems/days, completed duration samples, mean duration, threshold rate and fixed-schedule due/overdue counts. Unknown rates are `null`.
+The read-only `GET /api/v1/mastery` report uses a 30-calendar-day window in the configured timezone. It returns `mastery-v2`, analysis date, timezone, revisions, a problem-level `reviewSummary` (known-due, due-today and overdue counts, each solved problem counted once regardless of its tags) and one aggregate entry per catalog tag. It contains no raw notes or practice history. Lifetime solved coverage is separate from recent distinct problems/days, completed duration samples, mean duration, threshold rate and fixed-schedule due/overdue counts. Unknown rates are `null`.
 
 - Basic evidence requires three distinct recent problems on two dates. Otherwise the state is `insufficient_data`.
 - Duration trends require three completed question/day samples across two problems. Within one question/day, retain the largest valid completed manual duration. Snapshot submission totals never become attempts or duration samples.

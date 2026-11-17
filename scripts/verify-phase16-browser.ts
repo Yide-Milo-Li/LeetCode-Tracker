@@ -324,6 +324,8 @@ try {
       await store.updateSettings({ language, theme });
       await send('Emulation.setDeviceMetricsOverride', {width,height,deviceScaleFactor:1,mobile:false});
       await reload('statistics');
+      await until("document.querySelector('.topic-filter-tabs button:last-child')");
+      await evaluate("document.querySelector('.topic-filter-tabs button:last-child').click()");
       await until("document.querySelectorAll('.topic-insight-row').length === 10");
       await evaluate("document.querySelector('.topic-insights').scrollIntoView({block:'start'})");
       const layout = await evaluate("({scroll:document.documentElement.scrollWidth,width:innerWidth,theme:document.documentElement.getAttribute('data-theme')})");
@@ -420,7 +422,7 @@ try {
   assert.equal(store.getPracticeRevision(),practiceRevision+2);
   await navigate('statistics');
   await until("document.querySelector('.topic-insights')");
-  await until("[...document.querySelectorAll('.topic-insight-row')].some(e=>e.querySelector('strong').textContent==='Dynamic Programming'&&e.querySelector('dd').textContent==='6/20')");
+  await until("[...document.querySelectorAll('.topic-insight-row')].some(e=>e.querySelector('strong').textContent==='Dynamic Programming'&&e.querySelector('td.num').textContent==='6/20')");
   await screenshot('after-practice-edit');
   await navigate('today');
   await evaluate("document.querySelector('.completion-circle[aria-pressed=true]').click()");
@@ -432,11 +434,13 @@ try {
   await click('Close');
   await navigate('statistics');
   await until("document.querySelector('.topic-insights')");
-  await until("[...document.querySelectorAll('.topic-insight-row')].some(e=>e.querySelector('strong').textContent==='Dynamic Programming'&&e.querySelector('dd').textContent==='5/20')");
+  await until("[...document.querySelectorAll('.topic-insight-row')].some(e=>e.querySelector('strong').textContent==='Dynamic Programming'&&e.querySelector('td.num').textContent==='5/20')");
   assert.equal(store.getPracticeRevision(),practiceRevision+3);
   assert.ok(report.apiRequests.filter(url=>url.includes('/mastery')).length>analysisRequests);
   report.flows.push('Keyboard completion, duration edit and revocation refresh visible topic analysis.');
   await reload('statistics');
+  await until("document.querySelector('.topic-filter-tabs button:last-child')");
+  await evaluate("document.querySelector('.topic-filter-tabs button:last-child').click()");
   await until("document.querySelectorAll('.topic-insight-row').length === 10");
   await evaluate("document.querySelector('.topic-insights').scrollIntoView()");
   await click('Show all topics');

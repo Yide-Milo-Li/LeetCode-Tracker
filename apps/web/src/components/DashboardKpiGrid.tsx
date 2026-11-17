@@ -1,72 +1,87 @@
 /**
- * Dashboard KPI Grid component displaying high-level problem solving metrics.
+ * Progress KPI row: outcome metrics only. Source counts (manual records, imported snapshots) live in
+ * the collapsed data-source section, because they describe provenance rather than progress.
  */
 import React from 'react';
-import { Calendar, FileText, Flame, Layers, Trophy } from 'lucide-react';
-import type { DashboardResponse } from '../api.ts';
+import { Calendar, CalendarClock, Flame, Trophy } from 'lucide-react';
+import type { DashboardResponse, ReviewSummary } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
 
 interface DashboardKpiGridProps {
   data: DashboardResponse | null;
   lang: Language;
+  /** Problem-level review totals from the mastery report; `null` while loading or unavailable. */
+  reviewSummary: ReviewSummary | null;
+  /** Latest confirmed activity date (YYYY-MM-DD), used to explain a zero streak. */
+  lastActiveDate: string | null;
 }
 
-/**
- * Render cumulative KPI metrics cards.
- */
-export const DashboardKpiGrid: React.FC<DashboardKpiGridProps> = ({ data, lang }) => {
+/** Format a calendar date as a short local label without shifting it across time zones. */
+export function shortDate(date: string, lang: Language): string {
+  return new Date(`${date}T00:00:00Z`).toLocaleDateString(lang === 'zh' ? 'zh-CN' : 'en-US', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
+/** Render the four outcome metrics; missing data shows an em dash instead of a misleading zero. */
+export const DashboardKpiGrid: React.FC<DashboardKpiGridProps> = ({ data, lang, reviewSummary, lastActiveDate }) => {
   const t = translations[lang];
+  const zh = lang === 'zh';
+  const streak = data?.overview.currentStreak;
+  const streakNote =
+    streak === 0 && lastActiveDate
+      ? zh
+        ? `天 · 最近一次 ${shortDate(lastActiveDate, lang)}`
+        : `days · last active ${shortDate(lastActiveDate, lang)}`
+      : t.daysUnit;
 
   return (
     <div className="kpi-grid">
-      {/* Unique Solved */}
       <div className="kpi-card">
         <div className="kpi-header">
-          <Trophy className="w-4 h-4 text-emerald-500" />
+          <Trophy aria-hidden="true" />
           {t.kpiUniqueSolved}
         </div>
-        <div className="kpi-value">{data ? data.overview.uniqueSolvedProblems : '—'}</div>
+        <div className="kpi-value num-tabular">{data ? data.overview.uniqueSolvedProblems : '—'}</div>
         <div className="kpi-unit">{t.problemsUnit}</div>
       </div>
 
-      {/* Solved This Week */}
       <div className="kpi-card">
         <div className="kpi-header">
-          <Calendar className="w-4 h-4 text-indigo-500" />
+          <Calendar aria-hidden="true" />
           {t.kpiSolvedThisWeek}
         </div>
-        <div className="kpi-value u-color-primary">{data ? data.overview.solvedThisWeek : '—'}</div>
+        <div className="kpi-value num-tabular u-color-primary">{data ? data.overview.solvedThisWeek : '—'}</div>
         <div className="kpi-unit">{t.problemsUnit}</div>
       </div>
 
-      {/* Current Streak */}
       <div className="kpi-card">
         <div className="kpi-header">
-          <Flame className="w-4 h-4 text-amber-500" />
+          <Flame aria-hidden="true" />
           {t.kpiStreak}
         </div>
-        <div className="kpi-value u-color-warning">{data ? data.overview.currentStreak : '—'}</div>
-        <div className="kpi-unit">{t.daysUnit}</div>
+        <div className="kpi-value num-tabular u-color-warning">{data ? streak : '—'}</div>
+        <div className="kpi-unit">{streakNote}</div>
       </div>
 
-      {/* Total Manual Practices */}
       <div className="kpi-card">
         <div className="kpi-header">
-          <FileText className="w-4 h-4 text-blue-500" />
-          {t.kpiTotalManual}
+          <CalendarClock aria-hidden="true" />
+          {t.insightDue}
         </div>
-        <div className="kpi-value">{data ? data.overview.totalManualPractices : '—'}</div>
-        <div className="kpi-unit">{t.sourceManual}</div>
-      </div>
-
-      {/* Total Snapshot Submissions */}
-      <div className="kpi-card">
-        <div className="kpi-header">
-          <Layers className="w-4 h-4 text-purple-500" />
-          {t.kpiTotalSnapshots}
+        <div className="kpi-value num-tabular">
+          {reviewSummary ? (
+            <>
+              {reviewSummary.dueTodayCount}
+              <span className="kpi-value-secondary"> / {reviewSummary.overdueCount}</span>
+            </>
+          ) : (
+            '—'
+          )}
         </div>
-        <div className="kpi-value">{data ? data.overview.totalSnapshotSubmissions : '—'}</div>
-        <div className="kpi-unit">{t.sourceSnapshot}</div>
+        <div className="kpi-unit">{zh ? '道复习题' : 'review problems'}</div>
       </div>
     </div>
   );

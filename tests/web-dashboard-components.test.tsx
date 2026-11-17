@@ -1,7 +1,7 @@
 /**
- * Web UI component tests for Phase 5 dashboard views:
- * - DashboardView (cumulative KPIs, today summary card, heatmap interactions, distributions, freshness status)
- * - ActivityHistoryDrawer (filters, pagination, keyboard accessibility ESC, empty states)
+ * Web UI component tests for the Progress views:
+ * - DashboardView (outcome KPIs, pending-date notice, heatmap drilldown into Records, quiet 30-day state)
+ * - ActivityRecords (filter handoff requests, filters, pagination)
  */
 import { afterEach, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
@@ -10,7 +10,9 @@ import type {
   DashboardResponse,
   DashboardActivityListResponse,
   DailyPlan,
+  TagMasteryReport,
 } from '../apps/web/src/api.ts';
+import type { RecordsFilter, WorkspaceState } from '../apps/web/src/workspace.tsx';
 import type { UseDailyPlanReturn } from '../apps/web/src/hooks/useDailyPlan.ts';
 
 // Configure virtual DOM environment before React renders
@@ -35,7 +37,8 @@ const React = await import('react');
 const { render, fireEvent, screen, act, cleanup } = await import('@testing-library/react');
 const { api } = await import('../apps/web/src/api.ts');
 const { DashboardView } = await import('../apps/web/src/components/DashboardView.tsx');
-const { ActivityHistoryDrawer } = await import('../apps/web/src/components/ActivityHistoryDrawer.tsx');
+const { ActivityRecords } = await import('../apps/web/src/components/ActivityRecords.tsx');
+const { WorkspaceContext } = await import('../apps/web/src/workspace.tsx');
 const { translations } = await import('../apps/web/src/i18n.ts');
 
 afterEach(() => {
@@ -255,44 +258,82 @@ function createMockPlanController(overrides: Partial<UseDailyPlanReturn> = {}): 
   };
 }
 
-it('renders DashboardView with cumulative KPIs, distributions, and freshness status', async () => {
-  const mockData = createMockDashboardData();
-  mock.method(api, 'getDashboard', async () => mockData);
+/** Mastery report with problem-level review totals and one practiced topic. */
+function createMockMasteryReport(): TagMasteryReport {
+  return {
+    analysisVersion: 'mastery-v2',
+    generatedAt: 0,
+    asOfDate: '2026-03-30',
+    timezone: 'UTC',
+    windowDays: 30,
+    revision: { catalog: 1, practice: 1, planning: 1, timezone: 'UTC' },
+    reviewSummary: { knownDueCount: 6, dueTodayCount: 2, overdueCount: 3 },
+    tags: [
+      {
+        tagSlug: 'array', tagName: 'Array', totalCatalogProblems: 50, solvedCount: 15, coverageRate: 0.3,
+        recentProblemCount: 1, recentDayCount: 1, durationSampleCount: 0, avgDurationMinutes: null,
+        longDurationCount: 0, longDurationRate: null, knownDueCount: 0, dueTodayCount: 0, overdueCount: 0,
+        overdueRate: null, unknownDateCount: 0, level: 'insufficient_data', reasons: [],
+      },
+    ],
+  };
+}
 
-  const planController = createMockPlanController();
-  let navigatedToday = false;
-  let navigatedSettings = false;
+/** Render inside a workspace whose Records handoff is recorded for assertions. */
+function renderWithWorkspace(ui: React.ReactElement) {
+  const requests: RecordsFilter[] = [];
+  const value: WorkspaceState = {
+    revision: 0,
+    timezone: 'UTC',
+    navigate: () => {},
+    notifyMutation: () => {},
+    openPractice: () => {},
+    openRecords: (filter) => { requests.push(filter); },
+  };
+  const view = render(<WorkspaceContext.Provider value={value}>{ui}</WorkspaceContext.Provider>);
+  return { requests, view };
+}
 
+/** Empty activity page used by drilldown tests that only inspect the request. */
+const emptyActivities: DashboardActivityListResponse = {
+  total: 0,
+  page: 1,
+  limit: 20,
+  totalPages: 0,
+  revision: { catalog: 1, practice: 1, planning: 1, timezone: 'UTC' },
+  items: [],
+};
+
+it('renders outcome KPIs, the pending-date notice and topic highlights without a recent-activity list', async () => {
+  mock.method(api, 'getDashboard', async () => createMockDashboardData());
+  mock.method(api, 'getMasteryReport', async () => createMockMasteryReport());
+
+  let requests: RecordsFilter[] = [];
   await act(async () => {
-    render(
-      <DashboardView
-        lang="en"
-        planController={planController}
-        onNavigateToToday={() => { navigatedToday = true; }}
-        onNavigateToSettings={() => { navigatedSettings = true; }}
-      />
-    );
+    ({ requests } = renderWithWorkspace(<DashboardView lang="en" planController={createMockPlanController()} />));
   });
 
-  // Verify KPI cards
-  assert.ok(screen.getByText('42'), 'Should render unique solved count');
-  assert.ok(screen.getByText('7'), 'Should render solved this week count');
-  assert.ok(screen.getByText('5'), 'Should render streak count');
-  assert.ok(screen.getByText('25'), 'Should render total manual count');
-  assert.ok(screen.getByText('30'), 'Should render total snapshot count');
+  // Outcome KPIs, including problem-level due / overdue reviews.
+  const values = [...document.querySelectorAll('.kpi-card .kpi-value')].map((node) => node.textContent);
+  assert.deepEqual(values, ['42', '7', '5', '2 / 3']);
+  // Source counts moved out of the KPI row.
+  assert.equal(screen.queryByText(translations.en.kpiTotalManual), null);
 
   // Execution controls moved to Today; this tab remains read-only analysis.
   assert.equal(screen.queryByRole('button', { name: translations.en.todaySummaryGoToToday }), null);
 
-  // Verify Distributions & Tags
-  assert.ok(screen.getByText('Dynamic Programming'), 'Should display top tag');
-  assert.ok(screen.getByText('Two Sum'), 'Should display recent activity title');
+  // Difficulty mastery and the most-practiced topic fallback.
+  assert.equal(document.querySelectorAll('.mastery-card .mastery-row-track[role="meter"]').length, 3);
+  assert.ok(document.querySelector('.focus-topics-card')?.textContent?.includes('Array'));
+  assert.ok(document.querySelector('.focus-topics-card')?.textContent?.includes('15/50'));
 
-  // Verify Pending dates warning
-  assert.ok(
-    screen.getByText(translations.en.pendingDatesNotice.replace('{count}', '2')),
-    'Should show pending date warning'
-  );
+  // Recent activity now lives in Records only.
+  assert.equal(screen.queryByText('Two Sum'), null);
+
+  // The pending-date notice sits at the top and hands off to Records.
+  assert.ok(screen.getByText(translations.en.pendingDatesNotice.replace('{count}', '2')));
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Review dates' })); });
+  assert.deepEqual(requests, [{ pendingOnly: true }]);
 });
 
 it('keeps Statistics read-only when timezone setup is required', async () => {
@@ -307,79 +348,45 @@ it('keeps Statistics read-only when timezone setup is required', async () => {
   assert.ok(screen.getByText(translations.en.setupTimezoneTitle));
 });
 
-it('opens ActivityHistoryDrawer pre-filtered by date when clicking a heatmap cell', async () => {
-  const mockData = createMockDashboardData();
-  mock.method(api, 'getDashboard', async () => mockData);
-
-  const mockActivities: DashboardActivityListResponse = {
-    total: 1,
-    page: 1,
-    limit: 20,
-    totalPages: 1,
-    revision: { catalog: 1, practice: 1, planning: 1, timezone: 'UTC' },
-    items: [
-      {
-        id: 'rec-1',
-        source: 'manual',
-        questionId: '1',
-        questionFrontendId: '1',
-        problemTitle: 'Two Sum',
-        difficulty: 'Easy',
-        action: 'solved',
-        timestamp: '2026-03-30',
-        timePrecision: 'date',
-        status: 'completed',
-        sourceTimezone: null,
-        isDatePending: true,
-      },
-    ],
-  };
-
-  let requestedDate: string | undefined;
-  mock.method(api, 'getDashboardActivities', async (query: { date?: string }) => {
-    requestedDate = query.date;
-    return mockActivities;
-  });
-
-  const planController = createMockPlanController();
-
-  await act(async () => {
-    render(
-      <DashboardView
-        lang="en"
-        planController={planController}
-        onNavigateToToday={() => {}}
-        onNavigateToSettings={() => {}}
-      />
-    );
-  });
-
-  // Find the heatmap cell with label for 2026-03-30
-  const cell = screen.getByLabelText(/2026-03-30: 3 active, 3 solved/i);
-  assert.ok(cell, 'Heatmap cell should be rendered with accessible label');
-
-  await act(async () => {
-    fireEvent.click(cell);
-  });
-
-  // Drawer should open and fetch activities for 2026-03-30
-  assert.equal(requestedDate, '2026-03-30', 'getDashboardActivities should be called with clicked date');
-  assert.ok(screen.getByRole('dialog'), 'ActivityHistoryDrawer should be open');
-  assert.ok(screen.getByRole('heading', { name: 'Activity history' }), 'Drawer title should be visible');
+it('replaces an all-zero 30-day trend with a quiet note naming the last active date', async () => {
+  const data = createMockDashboardData();
+  data.trend30Days = data.trend30Days.map((day) => ({ ...day, activeCount: 0, completedCount: 0 }));
+  mock.method(api, 'getDashboard', async () => data);
+  await act(async () => { renderWithWorkspace(<DashboardView lang="en" />); });
+  assert.equal(document.querySelector('.trend-card'), null);
+  const quiet = document.querySelector('.heatmap-quiet')?.textContent ?? '';
+  assert.match(quiet, /No practice in the last 30 days/);
+  // The newest confirmed activity (a datetime row) is resolved in the workspace time zone.
+  assert.match(quiet, /last active 2026-03-30/);
 });
 
-it('ActivityHistoryDrawer handles filtering, pagination, and keyboard escape close', async () => {
+it('opens the Records tab filtered by date when clicking a heatmap cell', async () => {
+  mock.method(api, 'getDashboard', async () => createMockDashboardData());
+
+  let requests: RecordsFilter[] = [];
+  await act(async () => {
+    ({ requests } = renderWithWorkspace(<DashboardView lang="en" />));
+  });
+
+  const cell = screen.getByLabelText(/2026-03-30: 3 active, 3 solved/i);
+  await act(async () => { fireEvent.click(cell); });
+
+  assert.deepEqual(requests, [{ date: '2026-03-30' }]);
+  assert.equal(screen.queryByRole('dialog'), null, 'No nested history drawer should open');
+});
+
+it('ActivityRecords applies a filter request, then supports filtering, pagination and reset', async () => {
   let queryParams: any = null;
-  const mockActivitiesPage1: DashboardActivityListResponse = {
+  const page = (n: number): DashboardActivityListResponse => ({
     total: 40,
-    page: 1,
+    page: n,
     limit: 20,
     totalPages: 2,
     revision: { catalog: 1, practice: 1, planning: 1, timezone: 'UTC' },
     items: [
       {
-        id: 'rec-1',
-        source: 'manual',
+        id: 'rec-' + n,
+        source: n === 1 ? 'manual' : 'snapshot',
         questionId: '1',
         questionFrontendId: '1',
         problemTitle: 'Two Sum',
@@ -389,159 +396,67 @@ it('ActivityHistoryDrawer handles filtering, pagination, and keyboard escape clo
         timePrecision: 'date',
         status: 'completed',
         sourceTimezone: null,
-        isDatePending: true,
+        isDatePending: n === 1,
       },
     ],
-  };
-
-  const mockActivitiesPage2: DashboardActivityListResponse = {
-    total: 40,
-    page: 2,
-    limit: 20,
-    totalPages: 2,
-    revision: { catalog: 1, practice: 1, planning: 1, timezone: 'UTC' },
-    items: [
-      {
-        id: 'rec-2',
-        source: 'snapshot',
-        questionId: '15',
-        questionFrontendId: '15',
-        problemTitle: '3Sum',
-        difficulty: 'Medium',
-        action: 'accepted',
-        timestamp: '2026-03-29T10:00:00Z',
-        timePrecision: 'datetime',
-        status: 'accepted',
-        sourceTimezone: 'Asia/Shanghai',
-        isDatePending: false,
-      },
-    ],
-  };
-
+  });
   mock.method(api, 'getDashboardActivities', async (query: any) => {
     queryParams = query;
-    return query.page === 2 ? mockActivitiesPage2 : mockActivitiesPage1;
+    return page(query.page === 2 ? 2 : 1);
   });
 
-  let closed = false;
-
   await act(async () => {
-    render(
-      <ActivityHistoryDrawer
-        isOpen={true}
-        onClose={() => { closed = true; }}
-        lang="en"
-        initialDate="2026-03-30"
-      />
-    );
+    render(<ActivityRecords lang="en" filterRequest={{ id: 1, date: '2026-03-30' }} />);
   });
 
   assert.equal(queryParams?.date, '2026-03-30');
   assert.equal(queryParams?.page, 1);
 
-  // Switch source filter to 'manual'
   const sourceSelect = screen.getByLabelText(translations.en.filterSource) as HTMLSelectElement;
-  await act(async () => {
-    fireEvent.change(sourceSelect, { target: { value: 'manual' } });
-  });
+  await act(async () => { fireEvent.change(sourceSelect, { target: { value: 'manual' } }); });
   assert.equal(queryParams?.source, 'manual');
 
-  // Go to next page
   const nextBtn = screen.getByRole('button', { name: translations.en.next });
   assert.equal(nextBtn.hasAttribute('disabled'), false);
-  await act(async () => {
-    fireEvent.click(nextBtn);
-  });
+  await act(async () => { fireEvent.click(nextBtn); });
   assert.equal(queryParams?.page, 2);
 
-  // Clear filters
-  const clearBtn = screen.getByRole('button', { name: 'Reset filters' });
-  await act(async () => {
-    fireEvent.click(clearBtn);
-  });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Reset filters' })); });
   assert.equal(queryParams?.date, undefined);
   assert.equal(queryParams?.source, 'all');
-
-  // Keyboard Escape key closes the drawer
-  fireEvent.keyDown(document, { key: 'Escape' });
-  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 180)); });
-  assert.equal(closed, true, 'Escape key should trigger onClose');
 });
 
-it('ActivityHistoryDrawer clears dateFilter when initialDate transitions from date to null', async () => {
+it('ActivityRecords replaces every filter when a new request arrives', async () => {
   let queryParams: any = null;
-  const mockActivities: DashboardActivityListResponse = {
-    total: 0,
-    page: 1,
-    limit: 20,
-    totalPages: 0,
-    revision: { catalog: 1, practice: 1, planning: 1, timezone: 'UTC' },
-    items: [],
-  };
-
   mock.method(api, 'getDashboardActivities', async (query: any) => {
     queryParams = query;
-    return mockActivities;
+    return emptyActivities;
   });
 
-  const { rerender } = render(
-    <ActivityHistoryDrawer
-      isOpen={true}
-      onClose={() => {}}
-      lang="en"
-      initialDate="2026-03-30"
-    />
-  );
-
+  const { rerender } = render(<ActivityRecords lang="en" filterRequest={{ id: 1, date: '2026-03-30' }} />);
   await act(async () => {});
-  assert.equal(queryParams?.date, '2026-03-30', 'Should initialize with date filter');
+  assert.equal(queryParams?.date, '2026-03-30');
 
-  // Rerender with initialDate set to null (simulating user clicking "View all activities" or parent reset)
+  const sourceSelect = screen.getByLabelText(translations.en.filterSource) as HTMLSelectElement;
+  await act(async () => { fireEvent.change(sourceSelect, { target: { value: 'snapshot' } }); });
+  assert.equal(queryParams?.source, 'snapshot');
+
   await act(async () => {
-    rerender(
-      <ActivityHistoryDrawer
-        isOpen={true}
-        onClose={() => {}}
-        lang="en"
-        initialDate={null}
-      />
-    );
+    rerender(<ActivityRecords lang="en" filterRequest={{ id: 2, pendingOnly: true }} />);
   });
-
-  assert.equal(queryParams?.date, undefined, 'Date filter should be cleared when initialDate becomes null');
+  assert.equal(queryParams?.date, undefined, 'Date filter should be cleared by a request without a date');
+  assert.equal(queryParams?.source, 'all');
+  assert.equal(queryParams?.pendingDate, 'true');
 });
 
 it('supports heatmap keyboard roving tabIndex and navigation (Arrow keys and Enter)', async (t) => {
   // Start midweek: ArrowDown intentionally stops at the end of a week, including Sundays.
   t.mock.timers.enable({ apis: ['Date'], now: Date.UTC(2026, 8, 9, 12) });
-  const mockData = createMockDashboardData();
-  mock.method(api, 'getDashboard', async () => mockData);
+  mock.method(api, 'getDashboard', async () => createMockDashboardData());
 
-  const mockActivities: DashboardActivityListResponse = {
-    total: 0,
-    page: 1,
-    limit: 20,
-    totalPages: 0,
-    revision: { catalog: 1, practice: 1, planning: 1, timezone: 'UTC' },
-    items: [],
-  };
-  let requestedDate: string | undefined;
-  mock.method(api, 'getDashboardActivities', async (query: { date?: string }) => {
-    requestedDate = query.date;
-    return mockActivities;
-  });
-
-  const planController = createMockPlanController();
-
+  let requests: RecordsFilter[] = [];
   await act(async () => {
-    render(
-      <DashboardView
-        lang="en"
-        planController={planController}
-        onNavigateToToday={() => {}}
-        onNavigateToSettings={() => {}}
-      />
-    );
+    ({ requests } = renderWithWorkspace(<DashboardView lang="en" />));
   });
 
   // Verify roving tabIndex exists: one cell has tabIndex="0", others have tabIndex="-1"
@@ -550,21 +465,14 @@ it('supports heatmap keyboard roving tabIndex and navigation (Arrow keys and Ent
   const initialDateStr = currentActiveCell.getAttribute('data-date');
   assert.ok(initialDateStr, 'Active cell must have data-date attribute');
 
-  // Trigger ArrowDown to move to the next day in the same week
-  await act(async () => {
-    fireEvent.keyDown(currentActiveCell, { key: 'ArrowDown' });
-  });
+  await act(async () => { fireEvent.keyDown(currentActiveCell, { key: 'ArrowDown' }); });
 
   const newlyFocusedCell = document.querySelector<HTMLButtonElement>('.heatmap-cell[tabindex="0"]');
   assert.ok(newlyFocusedCell, 'Heatmap should retain a tabIndex=0 cell after ArrowDown');
   const nextDateStr = newlyFocusedCell.getAttribute('data-date');
   assert.notEqual(nextDateStr, initialDateStr, 'Focused cell date should change after ArrowDown');
 
-  // Press Enter on the focused cell to activate drawer for that date
-  await act(async () => {
-    fireEvent.keyDown(newlyFocusedCell, { key: 'Enter' });
-  });
+  await act(async () => { fireEvent.keyDown(newlyFocusedCell, { key: 'Enter' }); });
 
-  assert.equal(requestedDate, nextDateStr, 'Enter key should open activity drawer for the keyboard-focused date');
+  assert.deepEqual(requests, [{ date: nextDateStr }], 'Enter should open Records for the keyboard-focused date');
 });
-
