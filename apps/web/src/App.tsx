@@ -25,10 +25,9 @@ import { PracticeTimerPill } from './components/PracticeTimer.tsx';
 import { ShortcutHelpModal } from './components/ShortcutHelpModal.tsx';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.ts';
 import { SetupGate } from './components/SetupGuide.tsx';
-import { applyAppIcon, brandIconUrl } from './brand-icons.ts';
+import { brandIconUrl } from './brand-icons.ts';
 import type { SettingsSection } from './components/SettingsView.tsx';
 import { Feedback, IconButton, PageHeader, Tooltip } from './components/ui.tsx';
-import type { ThemePalette } from '../../../packages/contracts/src/sync.ts';
 
 
 /** Lazy-load heavy contextual workspaces and charting views to optimize desktop bundle size. */
@@ -71,8 +70,8 @@ function WorkspaceFallback({ label }: { label: string }) {
   );
 }
 import { useDailyPlan } from './hooks/useDailyPlan.ts';
-import { api, type PracticeRecord } from './api.ts';
-import type { Language } from './i18n.ts';
+import { usePreferences } from './hooks/usePreferences.ts';
+import type { PracticeRecord } from './api.ts';
 import { localizeApiError } from './error-i18n.ts';
 import {
   WorkspaceContext,
@@ -104,18 +103,22 @@ function initialView(): View {
 export function App() {
   const [view, setView] = useState<View>(initialView);
   const [visited, setVisited] = useState<Set<View>>(() => new Set([initialView()]));
-  const [lang, setLang] = useState<Language>('en');
-  const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
-  const [palette, setPalette] = useState<ThemePalette>('default');
-  const [promptSwapFeedback, setPromptSwapFeedback] = useState<boolean>(true);
-  const [notesFormatOnSave, setNotesFormatOnSave] = useState<boolean | null>(null);
-  const [resolvedDark, setResolvedDark] = useState(false);
-  const [timezone, setTimezone] = useState<string | null>(null);
+  const {
+    lang,
+    theme,
+    palette,
+    promptSwapFeedback,
+    notesFormatOnSave,
+    resolvedDark,
+    timezone,
+    setTimezone,
+    errorCause,
+    persistPreference,
+  } = usePreferences();
   const [revision, setRevision] = useState(0);
   const [focusRequest,setFocusRequest]=useState(0);
   const [selectedNoteProblem, setSelectedNoteProblem] = useState<string | null>(null);
   const [recordsFilter, setRecordsFilter] = useState<RecordsFilterRequest | null>(null);
-  const [errorCause, setErrorCause] = useState<unknown>(null);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('general');
   const [practiceQueue, setPracticeQueue] = useState<PracticeRequest[]>([]);
   const practice = practiceQueue[0];
@@ -126,8 +129,6 @@ export function App() {
   const plan = useDailyPlan(lang);
   const current = useRef(view);
   const scrolls = useRef<Partial<Record<View, number>>>({});
-  const preferenceRevision = useRef(0);
-  const preferenceQueue = useRef(Promise.resolve());
   const priorTimezone = useRef<string | null>(null);
   /** Save outgoing scroll before moving; visited child views retain their unsaved input state. */
   const navigate = useCallback((next: View, targetId?: string) => {
@@ -204,56 +205,6 @@ export function App() {
     window.scrollTo({ top: scrolls.current[view] ?? 0, behavior: 'instant' });
   }, [view]);
   useEffect(() => {
-    const version = preferenceRevision.current;
-    let active = true;
-    api
-      .getSettings()
-      .then((settings) => {
-        if (!active) return;
-        const formatOnSave = settings.notesFormatOnSave ?? true;
-        if (version === preferenceRevision.current) {
-          setLang(settings.language);
-          setTheme(settings.theme);
-          setPalette(settings.palette ?? 'default');
-          setPromptSwapFeedback(settings.promptSwapFeedback ?? true);
-          setNotesFormatOnSave(formatOnSave);
-          setTimezone(settings.timezone);
-        } else {
-          setNotesFormatOnSave((current) => current ?? formatOnSave);
-        }
-      })
-      .catch((err) => {
-        if (active) setErrorCause(err);
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-  useEffect(() => {
-    const media = window.matchMedia('(prefers-color-scheme: dark)');
-    const apply = () => {
-      const dark = theme === 'dark' || (theme === 'system' && media.matches);
-      document.documentElement.classList.toggle('dark', dark);
-      document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
-      setResolvedDark(dark);
-    };
-    apply();
-    media.addEventListener('change', apply);
-    if (palette && palette !== 'default') {
-      document.documentElement.setAttribute('data-palette', palette);
-    } else {
-      document.documentElement.removeAttribute('data-palette');
-    }
-    return () => media.removeEventListener('change', apply);
-  }, [theme, palette]);
-  // The favicon and the native window/Dock icon follow the palette and the effective mode.
-  useEffect(() => {
-    void applyAppIcon(palette, resolvedDark);
-  }, [palette, resolvedDark]);
-  useEffect(() => {
-    document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
-  }, [lang]);
-  useEffect(() => {
     if (priorTimezone.current !== timezone) {
       priorTimezone.current = timezone;
       setRevision((value) => value + 1);
@@ -271,29 +222,6 @@ export function App() {
     document.addEventListener('visibilitychange', refreshDate);
     return () => { clearInterval(timer); document.removeEventListener('visibilitychange', refreshDate); };
   }, [timezone]);
-  /** Queue preference writes so a slow previous response cannot persist an older selection last. */
-  function persistPreference(value: {
-    language?: Language;
-    theme?: 'light' | 'dark' | 'system';
-    palette?: ThemePalette;
-    promptSwapFeedback?: boolean;
-    notesFormatOnSave?: boolean;
-  }) {
-    preferenceRevision.current++;
-    setErrorCause(null);
-    if (value.language) setLang(value.language);
-    if (value.theme) setTheme(value.theme);
-    if (value.palette) setPalette(value.palette);
-    if (value.promptSwapFeedback !== undefined) setPromptSwapFeedback(value.promptSwapFeedback);
-    if (value.notesFormatOnSave !== undefined) setNotesFormatOnSave(value.notesFormatOnSave);
-    preferenceQueue.current = preferenceQueue.current.then(async () => {
-      try {
-        await api.updateSettings(value);
-      } catch (err) {
-        setErrorCause(err);
-      }
-    });
-  }
   /** Invalidate dependent data after durable mutations; the shared controller reconciles completion evidence. */
   const notifyMutation = useCallback(
     (record?: PracticeRecord) => {
