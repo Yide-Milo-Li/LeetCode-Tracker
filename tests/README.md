@@ -2,7 +2,7 @@
 
 ## Release 1.3.1 verification baseline
 
-The Release 1.3.1 suite passes **524 JavaScript/Web/sidecar tests (333 backend/domain/storage + 190 Web DOM + 1 isolated bundle)**. Rust tests, packaging, screenshots, and WKWebView E2E specs were last recorded for 1.3.0 below; see [1.3.1 release notes](../docs/releases/1.3.1.md).
+The Release 1.3.1 suite passes **525 JavaScript/Web/sidecar tests (333 backend/domain/storage + 191 Web DOM + 1 isolated bundle)** and **17 Rust unit tests**. Packaging and WKWebView E2E specs run in CI; screenshots were last recorded for 1.3.0 below; see [1.3.1 release notes](../docs/releases/1.3.1.md).
 
 The Release 1.3.0 suite passed **519 JavaScript/Web/sidecar tests (333 backend/domain/storage + 185 Web DOM + 1 isolated bundle) and 11 Rust tests**, plus remote CI `2/2` isolated WKWebView E2E specs. Older phase counts below are historical. Typecheck, docs, production Vite build, 8 regenerated showcase screenshots, Rust fmt/clippy, macOS `.app`/`.dmg` packaging, and Windows NSIS packaging are covered across local and CI runs. Remote CI and manual Gatekeeper/clean-VM acceptance are separate; see [current status](../docs/status.md) and [release notes](../docs/releases/1.3.0.md).
 
