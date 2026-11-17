@@ -9,7 +9,7 @@ export function createServer(profile: TrackerProfile): McpServer {
     { name: 'leetcode-tracker', version: MCP_SERVER_VERSION },
     {
       instructions:
-        'LeetCode Tracker practice data. Call tracker_status first. Tools read the local profile; tracker_import_catalog is the only tool that writes.',
+        'LeetCode Tracker practice data. Call tracker_status first. Read before you write: practice edits need the record revision, plan changes need the plan version from tracker_get_today, and note saves need the contentHash from tracker_get_note. Writes fail with PROFILE_IN_USE while the desktop app is open.',
     },
   );
   registerTrackerTools(server, profile);

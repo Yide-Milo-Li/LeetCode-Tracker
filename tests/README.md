@@ -28,7 +28,7 @@ Coverage includes:
 
 ## Standalone MCP server coverage
 
-`tests/mcp-standalone.test.ts` starts the real `leetcode-tracker-mcp` process over stdio against temporary synthetic profiles. It covers default profile paths per platform, CLI dry run and import with timezone initialization, tool annotations and every read tool, reads while another process holds the profile lease with `PROFILE_IN_USE` for imports, a missing profile, and the rebuilt bundle negotiating MCP `2025-11-25`. `tests/application-core.test.ts` covers the application layer it uses.
+`tests/mcp-standalone.test.ts` starts the real `leetcode-tracker-mcp` process over stdio against temporary synthetic profiles. It covers default profile paths per platform, CLI dry run and import with timezone initialization, tool annotations and every read tool, reads while another process holds the profile lease with `PROFILE_IN_USE` for imports, a missing profile, and the rebuilt bundle negotiating MCP `2025-11-25`. `tests/mcp-write.test.ts` covers the write tools: annotations, practice replay by operation ID and revision checks, note saves guarded by content hash, strategy creation from counts, and the today plan flow (create, append with replay, replace, remove, rule preview and apply) plus `PROFILE_IN_USE` under a held lease. `tests/application-core.test.ts` covers the application layer it uses.
 
 ## Complete cross-device migration coverage
 

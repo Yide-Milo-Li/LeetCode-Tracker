@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-- Add `leetcode-tracker-mcp`, a standalone stdio MCP server that reads the local profile (catalog, today's plan, practice, notes, progress) and imports JSON Lines catalogs, without the desktop app. See [the MCP server guide](apps/mcp/README.md).
+- Add `leetcode-tracker-mcp`, a standalone stdio MCP server for the local profile without the desktop app: read the catalog, today's plan, practice, notes and progress; import JSON Lines catalogs; record and edit practice, save notes, manage strategies and change today's plan. Writes rely on the MCP client's tool approval and are guarded by record revisions, plan versions, note content hashes and operation IDs. See [the MCP server guide](apps/mcp/README.md).
 - Add device sync (Settings → Data → Device sync): publish and receive complete snapshots through a sync folder (for example Google Drive for desktop) or directly through your own Google Drive app data folder, with fork detection, preview-then-receive, per-device acknowledgements, snapshot history and safety backups. See [device sync](docs/sync.md).
 - Fix migration bundle import rejecting profiles in which a Today plan was emptied by removing its last item; daily plan rule snapshots now get a structural check while strategies keep full rule validation.
 

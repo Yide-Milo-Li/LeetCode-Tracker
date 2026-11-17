@@ -1,53 +1,22 @@
 /**
  * LeetCode Tracker MCP tools for the standalone stdio server.
  *
- * Nine read tools expose the problem catalog, practice history, today's plan,
- * review notes and progress. One write tool imports a JSON Lines problem
- * catalog; it takes the profile lease only while it runs.
+ * Read tools expose the problem catalog, practice history, today's plan,
+ * review notes and progress. The catalog import lives here; the other write
+ * and preview tools are in write-tools.ts.
  */
 import { readFile, stat } from 'node:fs/promises';
 import * as path from 'node:path';
 import { z } from 'zod';
-import type { CallToolResult, McpServer } from '@modelcontextprotocol/server';
-import type { TrackerApplication } from '../../../packages/application/src/application.ts';
-import { ApplicationError } from '../../../packages/application/src/errors.ts';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { isTimeZone, localDate } from '../../../packages/contracts/src/time.ts';
 import type { CatalogProblem } from '../../../packages/contracts/src/sync.ts';
-import { ProfileError, type TrackerProfile } from './profile.ts';
+import type { TrackerProfile } from './profile.ts';
 import { importCatalog, TIMEZONE_HINT } from './operations.ts';
 import { MCP_SERVER_VERSION } from './version.ts';
-
-type ToolResult = { content: Array<{ type: 'text'; text: string }>; isError?: boolean };
-type ToolAccess = 'read' | 'preview' | 'write';
-
-const READ_ANNOTATIONS = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
-const IMPORT_ANNOTATIONS = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
-
-export const TOOL_NAMES = [
-  'tracker_status',
-  'tracker_search_problems',
-  'tracker_get_problem',
-  'tracker_get_today',
-  'tracker_list_practices',
-  'tracker_get_practice',
-  'tracker_list_notes',
-  'tracker_get_note',
-  'tracker_get_progress',
-  'tracker_import_catalog',
-] as const;
-
-/** Convert any failure into a coded tool error the model can explain to the user. */
-function toolError(error: unknown): ToolResult & { structuredContent: Record<string, unknown> } {
-  let code = 'MCP_QUERY_FAILED';
-  let message = 'The request failed. See the server log for details.';
-  if (error instanceof ProfileError || error instanceof ApplicationError) {
-    code = error.code;
-    message = error.message;
-  } else {
-    console.error('[leetcode-tracker-mcp] unexpected tool failure:', error);
-  }
-  return { isError: true, structuredContent: { error: code, message }, content: [{ type: 'text', text: `${code}: ${message}` }] };
-}
+import { createRegistrar, TOOL_NAMES, WRITE_TOOL_NAMES } from './registrar.ts';
+import { contentHash, summarizePlan } from './views.ts';
+import { registerWriteTools } from './write-tools.ts';
 
 /**
  * Registers the tracker tools. Each call gets its own application instance:
@@ -55,30 +24,9 @@ function toolError(error: unknown): ToolResult & { structuredContent: Record<str
  * for that one call.
  */
 export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfile): void {
-  const server = {
-    registerTool<S extends z.ZodObject>(
-      name: (typeof TOOL_NAMES)[number],
-      config: { description: string; inputSchema: S },
-      handler: (application: TrackerApplication, args: z.infer<S>) => Promise<ToolResult>,
-      access: ToolAccess | ((args: z.infer<S>) => ToolAccess) = 'read',
-    ) {
-      const annotations = access === 'read' ? READ_ANNOTATIONS : IMPORT_ANNOTATIONS;
-      // Widen the schema so the SDK's conditional callback type resolves; args are validated by the SDK.
-      const inputSchema: z.ZodObject = config.inputSchema;
-      rawServer.registerTool(name, { description: config.description, inputSchema, annotations }, async (rawArgs: unknown): Promise<CallToolResult> => {
-        try {
-          const args = rawArgs as z.infer<S>;
-          const run = (application: TrackerApplication) => handler(application, args);
-          const mode = typeof access === 'function' ? access(args) : access;
-          const result = await (mode === 'read' ? profile.read(run) : mode === 'preview' ? profile.preview(run) : profile.write(run));
-          const text = result.content.find(item => item.type === 'text')?.text;
-          return text && !result.isError ? { ...result, structuredContent: JSON.parse(text) as Record<string, unknown> } : result;
-        } catch (error) {
-          return toolError(error);
-        }
-      });
-    },
-  };
+  const registrar = createRegistrar(rawServer, profile);
+  const server = { registerTool: registrar.register };
+  registerWriteTools(registrar);
 
   // 1. tracker_status
   server.registerTool(
@@ -122,7 +70,7 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
       const data = {
         serverVersion: MCP_SERVER_VERSION,
         profile: profile.location.dbPath,
-        writeTools: ['tracker_import_catalog'],
+        writeTools: WRITE_TOOL_NAMES,
         database: {
           totalProblems: stats.totalProblems,
           easy: stats.easy,
@@ -245,6 +193,7 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
         durationMinutes: number | null;
         completed: boolean;
         outcome: string | null;
+        revision: number;
       }> = [];
       let totalPractices = 0;
 
@@ -261,6 +210,7 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
           durationMinutes: r.durationMinutes,
           completed: r.completed,
           outcome: r.outcome,
+          revision: r.revision,
         }));
       } catch {
         // Empty
@@ -293,7 +243,7 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
   server.registerTool(
     'tracker_get_today',
     {
-      description: "Get today's scheduled study plan items, completion status, and review reasons. Does not generate new plans.",
+      description: "Get the stored study plan for today (or a date): items with itemId and frontendId, completion, review reasons, and the plan version that plan-changing tools need as expectedVersion. Does not generate plans; use tracker_create_today for that.",
       inputSchema: z.object({
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Explicit date in YYYY-MM-DD format (defaults to current date in configured timezone)'),
       }),
@@ -335,32 +285,7 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
         };
       }
 
-      const items = plan.items.map((it) => ({
-        itemId: it.id,
-        questionId: it.problem.questionId,
-        frontendId: it.problem.questionFrontendId,
-        title: it.problem.title,
-        difficulty: it.problem.difficulty,
-        kind: it.kind,
-        reason: it.reason,
-        completed: Boolean(it.completed),
-      }));
-
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            hasPlan: true,
-            planId: plan.id,
-            date: targetDate,
-            strategyId: plan.strategyId,
-            rules: plan.rules,
-            completedCount: items.filter((i) => i.completed).length,
-            totalCount: items.length,
-            items,
-          }, null, 2),
-        }],
-      };
+      return { content: [{ type: 'text', text: JSON.stringify(summarizePlan(plan), null, 2) }] };
     },
   );
 
@@ -368,7 +293,7 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
   server.registerTool(
     'tracker_list_practices',
     {
-      description: 'List paginated practice session records with duration, timestamp, notes, and completion details.',
+      description: 'List paginated practice session records with duration, timestamp, notes, completion details and the revision that update/revoke need.',
       inputSchema: z.object({
         frontendId: z.string().optional().describe('Filter by problem frontend ID (e.g. "1")'),
         page: z.number().int().min(1).optional().default(1).describe('Page number, 1-indexed (default 1)'),
@@ -419,6 +344,7 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
         notes: r.notes,
         outcome: r.outcome,
         status: r.status,
+        revision: r.revision,
       }));
 
       return {
@@ -528,7 +454,7 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
   server.registerTool(
     'tracker_get_note',
     {
-      description: 'Get the markdown solution note for a specific problem by its frontend ID, with segmented chunk reading for long notes.',
+      description: 'Get the markdown solution note for a specific problem by its frontend ID, with segmented chunk reading for long notes. Returns contentHash, which tracker_save_note needs as expectedContentHash.',
       inputSchema: z.object({
         frontendId: z.string().min(1).describe('Problem frontend ID (e.g. "1", "42")'),
         chunkIndex: z.number().int().min(0).optional().default(0).describe('Zero-based chunk index for paginated reading of long notes (default 0)'),
@@ -547,6 +473,7 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
             text: JSON.stringify({
               frontendId: trimmedId,
               hasNote: false,
+              contentHash: contentHash(''),
               message: `No custom note found for problem "${trimmedId}".`,
             }, null, 2),
           }],
@@ -574,6 +501,7 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
             nextChunkIndex: hasMore ? chunkIndex + 1 : null,
             content: chunkText,
             updatedAt: result.note.updatedAt,
+            contentHash: contentHash(fullContent),
           }, null, 2),
         }],
       };
