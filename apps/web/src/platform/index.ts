@@ -116,6 +116,18 @@ export async function openExternalUrl(url: string): Promise<void> {
 }
 
 /**
+ * Choose a folder with the native desktop dialog. Returns null when cancelled or in a browser,
+ * where the user types the absolute path instead.
+ */
+export async function pickFolder(): Promise<string | null> {
+  if (!isTauri()) return null;
+  const tauri = (window as unknown as {
+    __TAURI_INTERNALS__: { invoke: <R>(cmd: string, args?: unknown) => Promise<R> };
+  }).__TAURI_INTERNALS__;
+  return (await tauri.invoke<string | null>('pick_folder')) ?? null;
+}
+
+/**
  * Triggers native file export in desktop mode, or initiates standard browser download.
  */
 export async function exportDataFile(apiPath: string, defaultFilename: string): Promise<void> {

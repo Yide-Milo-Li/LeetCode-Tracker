@@ -69,6 +69,10 @@ Practice creation normalizes and fingerprints the creation payload. A SQLite tra
 
 The workbench invalidates pending file reads and preview responses on input changes. Only the current preview is eligible for commit, and inputs are frozen while committing. Catalog request failures have visible errors and retry controls; superseded filter responses cannot overwrite current results.
 
+## Device sync
+
+`apps/server/src/sync/` implements personal device sync on top of Snapshot Bundle v5 (see [device sync](sync.md)). `DeviceSyncService` owns configuration, remote listing, publish and preview-then-receive; adapters only move named blobs (`FolderBlobStore` for a user-chosen sync folder, `GoogleDriveBlobStore` for the Drive `appDataFolder`). Graph rules (heads, fork detection, supersedes) are pure functions in `packages/domain/src/device-sync.ts`; content hashing, snapshot encoding and the device-local `sync_*` settings live in `packages/database/src/device-sync.ts`. `isDeviceLocalSetting` extends the credential filter so sync configuration and OAuth tokens are never exported and are preserved on import. Publish and receive run under the server write lock; receive goes through `importSnapshotBundle`, so the safety backup precedes replacement, and then shares the post-restore refresh with bundle import.
+
 ## Topic analysis and adaptive projections
 
 The planning store builds a request-local indexed evidence context. Insights use fixed review states; adaptive states remain separate and never overwrite the fixed cache. Generation, replacement and overrides share the candidate builder, constrain model reordering locally and persist minimal explanation facts. Read-only insights do not write revisions or call providers. Phase 39 uses one fixed-slot allocator, optional outcome-v2 replay, bounded per-profile caches and local bilingual content; semantic selection remains advisory. See [local recommendation contracts](local-recommendations.md) for policy, usage/privacy and Bundle v5 boundaries. See [topic practice insights](topic-practice-insights.md) for thresholds and compatibility.

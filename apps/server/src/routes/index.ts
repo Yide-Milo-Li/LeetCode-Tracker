@@ -14,6 +14,7 @@ import { registerExportRoutes } from './export.ts';
 import { registerBundleRoutes } from './bundle.ts';
 import { registerMasteryRoutes } from './mastery.ts';
 import { registerKnowledgeProfileRoutes } from './knowledge-profile.ts';
+import { registerSyncRoutes } from './sync.ts';
 
 export * from './types.ts';
 
@@ -35,4 +36,5 @@ export function registerAllRoutes(app: FastifyInstance, context: RouteContext): 
   registerBundleRoutes(app, context);
   registerMasteryRoutes(app, context);
   registerKnowledgeProfileRoutes(app, context);
+  registerSyncRoutes(app, context);
 }

@@ -1,5 +1,9 @@
 # Changelog
 
+## [Unreleased]
+
+- Add device sync (Settings → Data → Device sync): publish and receive complete snapshots through a sync folder (for example Google Drive for desktop) or directly through your own Google Drive app data folder, with fork detection, preview-then-receive, per-device acknowledgements, snapshot history and safety backups. See [device sync](docs/sync.md).
+
 ## [1.3.1] - 2026-11-16
 
 - Name the configured AI provider in the Progress import hint instead of always naming Gemini, and show review spacing strategies by plain name with a one-line description instead of internal version ids.

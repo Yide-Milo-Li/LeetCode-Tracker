@@ -7,6 +7,7 @@ import type { CatalogStore, ValidatedImportOp } from '../../../../packages/datab
 import type { IGeminiAssistant } from '../gemini.ts';
 import type { PlanningService } from '../planning-service.ts';
 import type { AsyncLock } from '../async-lock.ts';
+import type { DeviceSyncService } from '../sync/sync-service.ts';
 
 /** In-memory storage for active, uncommitted catalog import previews. */
 export interface ActivePreview {
@@ -32,4 +33,5 @@ export interface RouteContext {
   planningService: PlanningService;
   activePreviews: Map<string, ActivePreview>;
   activeProgressPreviews: Map<string, ActiveProgressPreview>;
+  deviceSync: DeviceSyncService;
 }

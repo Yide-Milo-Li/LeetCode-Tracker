@@ -7,8 +7,8 @@ import * as path from 'node:path';
 import { snapshotBundleSchema, type SnapshotBundleV1 as SnapshotBundle } from '../../contracts/src/notes.ts';
 import { assertLegacyRecommendationExport } from './recommendation-format.ts';
 import { importMigrationBundle } from './migration-bundle.ts';
-import { isSecretSetting } from './secrets.ts';
-export { isSecretSetting } from './secrets.ts';
+import { isDeviceLocalSetting } from './secrets.ts';
+export { isSecretSetting, isDeviceLocalSetting } from './secrets.ts';
 import type { BackupManager } from './backup.ts';
 
 
@@ -23,7 +23,7 @@ export function exportSnapshotBundle(db: DatabaseSync): SnapshotBundle {
   const settingsRows = db.prepare('SELECT key, value FROM settings').all() as Array<{ key: string; value: string }>;
   const settings: Record<string, string> = {};
   for (const row of settingsRows) {
-    if (!isSecretSetting(row.key)) {
+    if (!isDeviceLocalSetting(row.key)) {
       settings[row.key] = row.value;
     }
   }
@@ -153,7 +153,7 @@ export async function importSnapshotBundle(
     // Restore Settings
     const insertSetting = db.prepare('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)');
     for (const [key, value] of Object.entries(bundle.settings)) {
-      if (!isSecretSetting(key)) insertSetting.run(key, String(value), timestamp);
+      if (!isDeviceLocalSetting(key)) insertSetting.run(key, String(value), timestamp);
     }
 
     // Restore Strategies

@@ -455,6 +455,10 @@ it('renders Complete migration summary instead of Legacy v1 warning when importi
     timezone: 'UTC',
     updatedAt: 1,
   }));
+  // The Data tab also loads device sync status; keep it off the network.
+  mock.method(api, 'getSyncStatus', async () => {
+    throw new Error('sync not stubbed in this test');
+  });
 
   await act(async () => {
     render(

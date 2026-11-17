@@ -51,7 +51,8 @@ pub fn external_url(value: &str) -> Result<Url, String> {
         || url.port().is_some()
         || !matches!(
             url.host_str(),
-            Some("leetcode.com" | "leetcode.cn" | "github.com")
+            // accounts.google.com hosts the OAuth consent page for Google Drive sync.
+            Some("leetcode.com" | "leetcode.cn" | "github.com" | "accounts.google.com")
         )
     {
         return Err("External URL is not allowed".into());
@@ -125,11 +126,17 @@ mod tests {
             "javascript:alert(1)",
             "file:///C:/test",
             "https://github.com:1234/",
+            "https://accounts.google.com.evil.test/",
+            "http://accounts.google.com/o/oauth2/v2/auth",
         ] {
             assert!(external_url(url).is_err(), "{url}");
         }
         // Query separators stay data passed to ShellExecuteW, never shell commands.
         assert!(external_url("https://leetcode.com/?a=1&b=2").is_ok());
+        assert!(external_url(
+            "https://accounts.google.com/o/oauth2/v2/auth?client_id=x&state=y&scope=z"
+        )
+        .is_ok());
         for path in [
             "/api/v1/../../secret",
             "/api/v1/%2e%2e/secret",

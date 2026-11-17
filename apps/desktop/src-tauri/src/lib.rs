@@ -352,6 +352,24 @@ async fn export_data_file(
     Ok(true)
 }
 
+/// Native folder picker for the device sync folder. The path is only a suggestion to the local
+/// API, which validates it again before storing it.
+#[tauri::command]
+async fn pick_folder(app: AppHandle) -> Result<Option<String>, String> {
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    app.dialog().file().pick_folder(move |selected| {
+        let _ = sender.send(selected);
+    });
+    let Some(selected) = receiver
+        .await
+        .map_err(|_| "Folder dialog closed unexpectedly")?
+    else {
+        return Ok(None);
+    };
+    let path = selected.into_path().map_err(|_| "Select a local folder")?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
 /// Report OS-preferred target icon sizes so the webview can rasterize SVG directly at each size.
 #[tauri::command]
 fn get_icon_target_sizes(app: AppHandle) -> icon::IconTargetSizes {
@@ -506,6 +524,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             api_request,
             export_data_file,
+            pick_folder,
             open_external,
             get_desktop_status,
             retry_sidecar,

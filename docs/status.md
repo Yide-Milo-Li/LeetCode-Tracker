@@ -1,5 +1,11 @@
 # Implementation status
 
+## Unreleased — Phase 41 device sync (in progress on `main`)
+
+Device sync through a sync folder or the Google Drive app data folder is implemented in source ([device sync](sync.md)): snapshot envelope contracts, content hashing, fork-aware graph rules, folder and Drive adapters, loopback PKCE OAuth, `/api/v1/sync/*` routes, the Settings → Data panel, a desktop folder picker and the Google consent host allowlist. No schema or bundle format change.
+
+Verified locally with synthetic data only: type-check, `tests/device-sync.test.ts` (graph rules, hash stability, two-device sync-folder round trip, forks, corrupt/incomplete/future snapshots, OAuth state handling and a fake Drive API round trip), the full `npm test` chain, and Rust fmt/tests. Not verified: a real Google account and OAuth client, Google Drive for desktop file arrival behavior, packaged Windows/macOS apps, and a two-machine handoff.
+
 ## Release 1.3.1 — current delivery baseline
 
 Release `v1.3.1` is a frontend patch on 1.3.0: the progress import hint names the configured AI provider, review spacing options use plain names, the heatmap and several controls follow the active palette, the Today Note menu and quick-copy dropdowns use native popovers, the quick-note drawer reuses the shared dialog for focus handling, and the web client is split into smaller Settings, Notes, style, and hook modules. SQLite schema v12, Snapshot Bundle v5, the `/api/v1` surface, and the native hosts are unchanged. See [1.3.1 release notes](releases/1.3.1.md).

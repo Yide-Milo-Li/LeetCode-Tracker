@@ -18,19 +18,19 @@ import { assertLegacyRecommendationExport, hasRecommendationFields } from './rec
 import { rulesSchema, recommendationFeedbackSchema } from '../../contracts/src/recommendations.ts';
 import { initOrMigrateSchema } from './migrations.ts';
 import { inspectCatalogSchema } from './schema.ts';
-import { isSecretSetting } from './secrets.ts';
+import { isDeviceLocalSetting } from './secrets.ts';
 import type { BackupManager } from './backup.ts';
 import type { BundleRestoreResult } from './bundle.ts';
 
 /** SQL identifiers originate only in the compiled schema, never imported JSON. */
 function replaceRows(db: DatabaseSync, bundle: AnyMigrationBundle): void {
-  const secrets = (db.prepare('SELECT key,value,updated_at FROM settings').all() as Array<{key: string; value: string; updated_at: number}>).filter(row => isSecretSetting(row.key));
+  const secrets = (db.prepare('SELECT key,value,updated_at FROM settings').all() as Array<{key: string; value: string; updated_at: number}>).filter(row => isDeviceLocalSetting(row.key));
   for (const table of [...MIGRATION_TABLES].reverse()) db.exec(`DELETE FROM "${table}"`);
   for (const table of MIGRATION_TABLES) {
     const columns = Object.keys(migrationRows[table].shape);
     const statement = db.prepare(`INSERT INTO "${table}" (${columns.map(c => `"${c}"`).join(',')}) VALUES (${columns.map(() => '?').join(',')})`);
     for (const row of bundle.tables[table]) {
-      if (table === 'settings' && isSecretSetting((row as {key: string}).key)) continue;
+      if (table === 'settings' && isDeviceLocalSetting((row as {key: string}).key)) continue;
       statement.run(...columns.map(column => (row as Record<string, SQLInputValue>)[column] ?? null));
     }
   }
@@ -84,7 +84,7 @@ export function exportMigrationBundle(
     for (const table of MIGRATION_TABLES) {
       const columns = Object.keys(migrationRows[table].shape).map(c => `"${c}"`).join(',');
       const rows = db.prepare(`SELECT ${columns} FROM "${table}"`).all();
-      let processedRows: unknown[] = table === 'settings' ? rows.filter(row => !isSecretSetting(String(row.key))) : rows;
+      let processedRows: unknown[] = table === 'settings' ? rows.filter(row => !isDeviceLocalSetting(String(row.key))) : rows;
       if (version === 2 && table === 'practice_records') {
         processedRows = (processedRows as Record<string, unknown>[]).map(r => {
           const copy = { ...r };

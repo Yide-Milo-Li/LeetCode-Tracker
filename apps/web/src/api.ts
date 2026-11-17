@@ -43,6 +43,12 @@ import type {
   UpdateSettingsInput,
   LLMProvider,
   UserSettings,
+  SyncConfigInput,
+  SyncPublishResult,
+  SyncReceivePreview,
+  SyncReceiveResult,
+  SyncSnapshotSummary,
+  SyncStatus,
 } from '../../../packages/contracts/src/index.ts';
 
 // Re-export all contract types for full backward compatibility across web components
@@ -541,6 +547,46 @@ export const bundleApi = {
   },
 };
 
+/** Personal device sync (Phase 41): sync folder or Google Drive snapshots. */
+export const syncApi = {
+  getSyncStatus(): Promise<SyncStatus> {
+    return request<SyncStatus>('/sync/status');
+  },
+
+  configureSync(input: SyncConfigInput): Promise<SyncStatus> {
+    return request<SyncStatus>('/sync/config', { method: 'PUT', body: JSON.stringify(input) });
+  },
+
+  checkSync(): Promise<SyncStatus> {
+    return request<SyncStatus>('/sync/check', { method: 'POST' });
+  },
+
+  getSyncHistory(): Promise<{ items: SyncSnapshotSummary[] }> {
+    return request<{ items: SyncSnapshotSummary[] }>('/sync/history');
+  },
+
+  /** Retries of one publish intent reuse `operationId` so a lost response is not published twice. */
+  publishSync(input: { operationId: string; allowFork?: boolean }): Promise<SyncPublishResult> {
+    return request<SyncPublishResult>('/sync/publish', { method: 'POST', body: JSON.stringify(input) });
+  },
+
+  previewSyncReceive(snapshotId: string): Promise<SyncReceivePreview> {
+    return request<SyncReceivePreview>('/sync/receive/preview', { method: 'POST', body: JSON.stringify({ snapshotId }) });
+  },
+
+  receiveSync(input: { previewId: string; localChanges?: 'fork' | 'discard' }): Promise<SyncReceiveResult> {
+    return request<SyncReceiveResult>('/sync/receive', { method: 'POST', body: JSON.stringify(input) });
+  },
+
+  connectGoogleDrive(): Promise<{ authUrl: string }> {
+    return request<{ authUrl: string }>('/sync/google/connect', { method: 'POST' });
+  },
+
+  disconnectGoogleDrive(): Promise<SyncStatus> {
+    return request<SyncStatus>('/sync/google/disconnect', { method: 'POST' });
+  },
+};
+
 /** Unified API client instance aggregating all endpoint domains. */
 export const api = {
   ...catalogApi,
@@ -552,4 +598,5 @@ export const api = {
   ...notesApi,
   ...exportApi,
   ...bundleApi,
+  ...syncApi,
 };

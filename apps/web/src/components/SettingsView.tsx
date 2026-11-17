@@ -8,6 +8,7 @@ import { PageHeader, Feedback } from './ui.tsx';
 import { SECTIONS, type SettingsSection, type ThemeMode } from './settings/settings-model.ts';
 import { useAiProviderSettings } from './settings/useAiProviderSettings.ts';
 import { useBundleRestore } from './settings/useBundleRestore.ts';
+import { useDeviceSync } from './settings/useDeviceSync.ts';
 import { GeneralSection } from './settings/GeneralSection.tsx';
 import { AppearanceSection } from './settings/AppearanceSection.tsx';
 import { AiProviderSection } from './settings/AiProviderSection.tsx';
@@ -105,6 +106,7 @@ export function SettingsView({
 
   const ai = useAiProviderSettings(lang);
   const bundle = useBundleRestore(lang);
+  const sync = useDeviceSync(lang, section === 'data');
 
   useEffect(() => {
     let active = true;
@@ -185,7 +187,7 @@ export function SettingsView({
 
       {section === 'ai' && <AiProviderSection lang={lang} ai={ai} />}
 
-      {section === 'data' && <DataSection lang={lang} bundle={bundle} />}
+      {section === 'data' && <DataSection lang={lang} bundle={bundle} sync={sync} />}
     </div>
   );
 }

@@ -5,8 +5,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { snapshotBundleSchema } from '../../../../packages/contracts/src/notes.ts';
 import { MAX_BUNDLE_BYTES } from '../../../../packages/contracts/src/migration.ts';
 import { validateMigrationBundle } from '../../../../packages/database/src/migration-bundle.ts';
-import { resolveAssistantSettings } from '../llm/settings.ts';
-import { LLMAssistant } from '../llm/assistant.ts';
+import { refreshAfterProfileReplace } from '../profile-refresh.ts';
 import type { RouteContext } from './types.ts';
 
 export function registerBundleRoutes(app: FastifyInstance, context: RouteContext): void {
@@ -53,19 +52,7 @@ export function registerBundleRoutes(app: FastifyInstance, context: RouteContext
 
     try {
       const result = await writeLock.run(() => store.importSnapshotBundle(parseRes.data));
-      context.activePreviews.clear();
-      context.activeProgressPreviews.clear();
-      context.planningService.clearTransientState();
-      let warning: string | undefined;
-      try {
-        const options = resolveAssistantSettings(store);
-        const resolved = new LLMAssistant(options);
-        const active = options.providers?.[options.provider ?? 'gemini'];
-        context.gemini.updateConfig?.({ ...active, provider: options.provider, providers: resolved.getProviderConfigs() });
-      } catch {
-        // The database replacement is already committed; restart-time settings resolution must not report a false restore failure.
-        warning = 'Profile restored; AI settings will be reloaded on the next restart.';
-      }
+      const warning = refreshAfterProfileReplace(context);
       return reply.status(200).send({ ok: true, result, ...(warning ? { warning } : {}) });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

@@ -46,3 +46,13 @@ export {
   PROFILE_ANALYSIS_VERSION,
   type KnowledgeProfileInput,
 } from './knowledge-profile.ts';
+
+// Personal device sync snapshot graph
+export {
+  findHeads,
+  descendsFrom,
+  classifySyncState,
+  type SyncGraphNode,
+  type SyncGraphClassification,
+  type SyncGraphState,
+} from './device-sync.ts';

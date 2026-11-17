@@ -20,6 +20,12 @@ import {
   type ActivePreview,
   type ActiveProgressPreview,
 } from './routes/index.ts';
+import { GOOGLE_CALLBACK_PATH } from './routes/sync.ts';
+import { DeviceSyncService, type DeviceSyncOptions } from './sync/sync-service.ts';
+import { refreshAfterProfileReplace } from './profile-refresh.ts';
+
+/** Version reported by health checks and written into sync snapshots. */
+export const APP_VERSION = '1.3.1';
 
 /** Options for building Fastify app. */
 export interface AppOptions {
@@ -29,6 +35,8 @@ export interface AppOptions {
   disableStatic?: boolean;
   sessionSecret?: string;
   profileDirectory?: string;
+  /** Test seams for device sync (fetch, Google endpoints, clock); defaults use real Google. */
+  deviceSync?: Partial<DeviceSyncOptions>;
 }
 
 /**
@@ -68,6 +76,9 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   if (options.sessionSecret) {
     const requiredSecret = options.sessionSecret;
     app.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
+      // The system browser delivers the OAuth redirect without the session header; that route
+      // only accepts a single-use state created by an authenticated connect request.
+      if (request.method === 'GET' && request.url.split('?')[0] === GOOGLE_CALLBACK_PATH) return;
       const token = request.headers['x-desktop-session-token'];
       if (token !== requiredSecret) {
         return reply.status(401).send({
@@ -105,13 +116,25 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   app.get('/api/v1/health', async () => {
     return {
       status: 'ok',
-      version: '1.3.1',
+      version: APP_VERSION,
       timestamp: new Date().toISOString(),
     };
   });
 
   // Register all modular API v1 routes
   registerMigrationGate(app);
+  const routeState = { store, gemini, planningService, activePreviews, activeProgressPreviews };
+  const deviceSync = new DeviceSyncService(
+    { store, writeLock, refreshAfterReplace: () => refreshAfterProfileReplace(routeState) },
+    {
+      appVersion: APP_VERSION,
+      googleClient: {
+        clientId: process.env.GOOGLE_OAUTH_CLIENT_ID || undefined,
+        clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || undefined,
+      },
+      ...options.deviceSync,
+    }
+  );
   registerAllRoutes(app, {
     store,
     gemini,
@@ -119,6 +142,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     planningService,
     activePreviews,
     activeProgressPreviews,
+    deviceSync,
   });
 
   // Static Assets Serving (Production Web UI)

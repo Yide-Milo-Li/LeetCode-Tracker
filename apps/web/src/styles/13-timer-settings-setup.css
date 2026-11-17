@@ -422,3 +422,25 @@
   height: 28px;
   flex: none;
 }
+.sync-device-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.sync-device-list strong {
+  color: var(--text-main);
+  font-weight: 600;
+}
+.sync-history {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+}
+.sync-history .data-table {
+  margin: 0;
+}
