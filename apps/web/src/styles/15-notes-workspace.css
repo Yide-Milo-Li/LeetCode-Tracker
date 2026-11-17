@@ -1,0 +1,664 @@
+/* Notes workspace component styles (formerly inline styles in NotesWorkspace and its parts). */
+/*
+ * These rules replace inline styles, which used to win over every non-!important rule.
+ * Selectors are scoped (`.notes-workspace-view ...`, element-qualified or double-class)
+ * so they still beat the base element, `.btn*` and `.notes-*` rules (including their
+ * :hover/:focus states) that the inline declarations used to override.
+ * Dialog content is portaled outside `.notes-workspace-view`, so it uses class chains.
+ */
+
+/* Page shell and header actions */
+.notes-workspace-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.nw-header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.notes-workspace-view .nw-export-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Master-detail grid (zen mode collapses it via `.notes-master-detail.zen` in 12-notes.css) */
+.nw-master-detail {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 16px;
+  flex: 1;
+  min-height: 620px;
+  align-items: start;
+}
+
+.nw-master-detail.zen {
+  grid-template-columns: 1fr;
+}
+
+/* Master pane: scope tabs, search, filters, problem list */
+.nw-master-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background-color: var(--surface);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 14px;
+  height: 100%;
+  max-height: calc(100vh - 160px);
+  overflow: hidden;
+}
+
+.nw-scope-tabs {
+  display: flex;
+  padding: 3px;
+  background-color: var(--muted-surface);
+  border-radius: 8px;
+  gap: 2px;
+}
+
+.notes-workspace-view .nw-scope-tab {
+  flex: 1;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: none;
+  font-size: 0.8125rem;
+  font-weight: 450;
+  background-color: transparent;
+  color: var(--text-muted);
+  box-shadow: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.notes-workspace-view .nw-scope-tab[aria-selected='true'] {
+  font-weight: 600;
+  background-color: var(--surface);
+  color: var(--text-main);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.nw-search {
+  position: relative;
+}
+
+.notes-workspace-view .nw-search-icon {
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+/* Element-qualified to outrank `input:not(...):not(...)` and its :hover/:focus border colors. */
+.notes-workspace-view input.nw-search-input {
+  width: 100%;
+  padding: 6px 10px 6px 28px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background-color: var(--surface);
+  color: var(--text-main);
+  font-size: 0.8125rem;
+  min-height: 32px;
+  box-sizing: border-box;
+}
+
+/* Filter row: high contrast in both light and dark mode */
+.nw-filters {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.notes-workspace-view select.nw-filter-select {
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background-color: var(--surface);
+  color: var(--text-main);
+  font-size: 0.8125rem;
+  min-height: 32px;
+  cursor: pointer;
+}
+
+.notes-workspace-view select.nw-filter-select option {
+  background-color: var(--surface);
+  color: var(--text-main);
+}
+
+.nw-list-items {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-right: 2px;
+}
+
+.nw-list-loading {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}
+
+.nw-list-empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}
+
+/* Problem row: left accent bar; overrides the bordered card look from 12-notes.css. */
+.notes-problem-card.nw-problem-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border-top: none;
+  border-right: none;
+  border-bottom: none;
+  border-left: 3px solid transparent;
+  background-color: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.notes-problem-card.nw-problem-card.active {
+  border-left-color: var(--primary);
+  background-color: var(--selected);
+}
+
+.notes-problem-card.nw-problem-card:not(.active):hover {
+  background-color: var(--muted-surface);
+}
+
+.nw-problem-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.nw-problem-id {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-family: monospace;
+  flex-shrink: 0;
+}
+
+.nw-problem-title {
+  font-size: 0.8125rem;
+  font-weight: 450;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.nw-problem-card.active .nw-problem-title {
+  font-weight: 600;
+}
+
+.nw-problem-badges {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.nw-solved-mark {
+  color: var(--primary);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.nw-note-mark {
+  color: var(--text-muted);
+  display: inline-flex;
+}
+
+.nw-pagination {
+  padding-top: 6px;
+  border-top: 1px solid var(--border-color);
+}
+
+/* Detail pane */
+.nw-detail-pane {
+  background-color: var(--surface);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: calc(100vh - 160px);
+  overflow-y: auto;
+}
+
+.nw-detail-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-muted);
+  gap: 12px;
+  min-height: 400px;
+}
+
+.nw-detail-empty-icon {
+  opacity: 0.5;
+}
+
+/* Problem header & copy/export bar */
+.nw-problem-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 14px;
+  gap: 12px;
+}
+
+.nw-problem-heading {
+  flex: 1;
+  min-width: 0;
+}
+
+.nw-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.notes-workspace-view .nw-title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 620;
+  color: var(--text-main);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Three classes to outrank `.btn-icon:hover:not(:disabled)` color. */
+.notes-workspace-view .btn-icon.nw-external-link {
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+}
+
+.nw-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 0.75rem;
+}
+
+.nw-solved-label {
+  font-size: 0.75rem;
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.nw-review-stage {
+  font-size: 0.6875rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background-color: var(--warning-bg);
+  color: var(--warning);
+  font-weight: 500;
+}
+
+.nw-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.notes-tag-chip.nw-tag-chip {
+  font-size: 0.6875rem;
+  background-color: var(--muted-surface);
+  padding: 1px 6px;
+  border-radius: 3px;
+  color: var(--text-muted);
+}
+
+.nw-header-tools {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.notes-workspace-view .nw-md-export {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.notes-workspace-view .nw-zen-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Four classes to outrank `.btn-secondary:hover:not(:disabled)` border color. */
+.notes-workspace-view .btn.nw-zen-btn.active {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+/* Practice timeline accordion */
+.nw-timeline {
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 0;
+}
+
+.nw-timeline.is-open {
+  padding-bottom: 12px;
+}
+
+.notes-workspace-view .nw-timeline-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background-color: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: background-color 0.12s ease;
+}
+
+.notes-workspace-view .nw-timeline-toggle:hover {
+  background-color: var(--muted-surface);
+}
+
+.nw-timeline-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.nw-timeline-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.nw-timeline-body {
+  margin-top: 8px;
+}
+
+.nw-timeline-status {
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  padding: 4px 8px;
+}
+
+.nw-timeline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 130px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.nw-timeline-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background-color: var(--muted-surface);
+  border-radius: 6px;
+  font-size: 0.75rem;
+}
+
+.nw-timeline-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nw-timeline-date {
+  font-weight: 500;
+}
+
+.nw-timeline-duration {
+  color: var(--text-muted);
+}
+
+.nw-timeline-note {
+  color: var(--text-secondary);
+  font-style: italic;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Note editor section */
+.nw-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+}
+
+.nw-editor-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.nw-editor-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nw-template-warning {
+  font-size: 0.6875rem;
+  background-color: var(--warning-bg, rgba(234, 179, 8, 0.15));
+  color: var(--warning, #eab308);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--warning, #eab308);
+}
+
+.nw-editor-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.nw-save-success {
+  color: var(--primary);
+  font-size: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.nw-save-error {
+  color: var(--danger);
+  font-size: 0.75rem;
+}
+
+.nw-format-notice {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+
+.notes-workspace-view .nw-save-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.nw-shortcut-hint {
+  font-size: 0.6875rem;
+  opacity: 0.75;
+}
+
+.nw-load-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background-color: var(--danger-bg, rgba(239, 68, 68, 0.1));
+  color: var(--danger, #ef4444);
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  border: 1px solid var(--danger, #ef4444);
+}
+
+.notes-workspace-view .nw-retry-btn {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+}
+
+.notes-tool-btn.nw-tool-math {
+  font-weight: 600;
+}
+
+/* View mode segmented control */
+.nw-view-mode {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nw-view-toggle {
+  display: inline-flex;
+  background-color: var(--surface);
+  border-radius: 5px;
+  border: 1px solid var(--border-color);
+  padding: 2px;
+  gap: 2px;
+}
+
+.notes-workspace-view .nw-view-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-weight: 450;
+  font-size: 11.5px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.notes-workspace-view .nw-view-btn.is-active {
+  background: var(--selected);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+/* Element-qualified to outrank base textarea :hover/:focus outline and border rules. */
+.notes-workspace-view textarea.nw-editor-textarea {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background-color: var(--canvas);
+  color: var(--text-main);
+  font-size: 0.875rem;
+  line-height: 1.65;
+  font-family: ui-monospace, monospace;
+  resize: vertical;
+  min-height: 340px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.notes-workspace-view textarea.nw-editor-textarea:focus {
+  border-color: var(--focus);
+}
+
+.nw-editor-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+}
+
+/* Unsaved-changes dialog (portaled; class chains instead of the view scope) */
+.nw-unsaved-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  width: 100%;
+}
+
+.btn.btn-secondary.nw-discard-btn {
+  color: var(--danger, #ef4444);
+  border-color: var(--danger, #ef4444);
+}
+
+.nw-unsaved-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.nw-unsaved-body .nw-unsaved-desc {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.nw-unsaved-target {
+  padding: 10px 12px;
+  background-color: var(--muted-surface);
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nw-unsaved-target-label {
+  color: var(--text-muted);
+}
+
+.nw-unsaved-target-name {
+  font-weight: 600;
+}

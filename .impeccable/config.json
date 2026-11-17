@@ -7,7 +7,8 @@
         "rule": "design-system-font",
         "value": "sfmono-regular",
         "files": [
-          "apps/web/src/styles.css"
+          "apps/web/src/styles/11-interactions-misc.css",
+          "apps/web/src/styles/12-notes.css"
         ],
         "createdAt": "2026-11-16T02:34:39.691Z",
         "reason": "Agent: existing monospace font is intentional for keyboard shortcuts, problem IDs, and code blocks"

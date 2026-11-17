@@ -1,0 +1,535 @@
+/* Notes workspace: problem list, editor toolbar, preview and zen mode. */
+/* ==========================================================================
+   Phase 31: Notes Workspace Workbench (Crisp Rounded Rectangles & Contrast)
+   ========================================================================== */
+
+/* Problem Card in Master List (Matching User Screenshot) */
+.notes-problem-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--surface);
+  cursor: pointer;
+  transition: all 0.14s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+  text-align: left;
+  width: 100%;
+  box-sizing: border-box;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.notes-problem-card:hover {
+  background: var(--muted-surface);
+  border-color: var(--outline);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.06);
+}
+
+.notes-problem-card.active {
+  background: var(--selected);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary);
+}
+
+.notes-problem-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.notes-problem-id {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  min-width: 26px;
+  flex-shrink: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.notes-problem-title {
+  font-size: 13.5px;
+  font-weight: 550;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.notes-problem-check {
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.notes-meta-dot {
+  color: var(--border-color);
+  font-weight: 600;
+  user-select: none;
+}
+
+.notes-stage-pill {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--muted-surface);
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+  font-weight: 500;
+}
+
+.notes-timeline-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  font-family: inherit;
+}
+
+.notes-timeline-trigger:hover {
+  background: var(--muted-surface);
+  color: var(--text-main);
+  border-color: var(--border-color);
+}
+
+.notes-timeline-trigger.active {
+  background: var(--selected);
+  color: var(--primary);
+  border-color: var(--primary);
+  font-weight: 550;
+}
+
+/* Denoised 2-Row Right Header */
+.notes-detail-header-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 12px;
+}
+
+.notes-header-top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.notes-title-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.notes-problem-heading {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 620;
+  color: var(--text-main);
+  letter-spacing: -0.015em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+.notes-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.notes-header-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.2;
+}
+
+/* Collapsible Practice History Drawer */
+.notes-history-drawer {
+  background: var(--muted-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  overflow: hidden;
+  transition: all 0.16s ease;
+  flex-shrink: 0;
+}
+
+.notes-history-drawer-inner {
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.notes-drawer-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 2px;
+}
+
+.notes-history-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-main);
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+}
+
+/* Crisp Rectangular Difficulty Badge (4px radius, WCAG AA high-contrast) */
+.notes-diff-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  display: inline-block;
+  line-height: 1.25;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+/* Same difficulty tokens as .badge-easy/.badge-medium/.badge-hard, so every palette retints them.
+   The border is the text colour blended into the fill (oklab, per the colour guidance). */
+.notes-diff-badge.Easy {
+  background: var(--easy-bg);
+  color: var(--easy);
+  border-color: color-mix(in oklab, var(--easy) 30%, var(--easy-bg));
+}
+
+.notes-diff-badge.Medium {
+  background: var(--medium-bg);
+  color: var(--medium);
+  border-color: color-mix(in oklab, var(--medium) 30%, var(--medium-bg));
+}
+
+.notes-diff-badge.Hard {
+  background: var(--hard-bg);
+  color: var(--hard);
+  border-color: color-mix(in oklab, var(--hard) 30%, var(--hard-bg));
+}
+
+/* Tag Chip (4px radius) */
+.notes-tag-chip {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--muted-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 1px 5px;
+  white-space: nowrap;
+  line-height: 1.25;
+}
+
+/* Markdown Toolbar & Dropdown (6px radius) */
+.notes-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: var(--muted-surface);
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.notes-tool-group {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.notes-tool-btn {
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.12s ease;
+  user-select: none;
+  font-family: inherit;
+}
+
+.notes-tool-btn:hover {
+  background: var(--surface);
+  color: var(--text-main);
+  border-color: var(--border-color);
+}
+
+.notes-tool-btn.active {
+  background: var(--selected);
+  color: var(--primary);
+  border-color: var(--primary);
+  font-weight: 600;
+}
+
+.notes-tool-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.notes-tool-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--border-color);
+  margin: 0 2px;
+}
+
+/* Dropdown */
+.notes-dropdown {
+  position: relative;
+  display: inline-block;
+}
+
+.notes-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: var(--shadow-md);
+  min-width: 160px;
+  padding: 4px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.notes-dropdown-menu-right {
+  left: auto;
+  right: 0;
+}
+
+.notes-dropdown-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text-main);
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  transition: background-color 0.12s ease;
+}
+
+.notes-dropdown-item:hover {
+  background: var(--muted-surface);
+}
+
+/* Native popover panels render in the top layer; useActionPopover writes left/top. */
+.notes-dropdown-menu[popover] {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  color: var(--text-main);
+}
+/* The base rule sets display: flex, which would otherwise override the UA hidden state. */
+.notes-dropdown-menu[popover]:not(:popover-open) {
+  display: none;
+}
+.notes-dropdown-menu {
+  white-space: nowrap;
+}
+.notes-dropdown-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.notes-dropdown-icon {
+  color: var(--primary);
+}
+.notes-dropdown-icon.is-secondary {
+  color: var(--review);
+}
+.notes-dropdown-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.notes-dropdown-hint.is-code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+/* Canvas Split Grid */
+.notes-canvas-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  min-height: 380px;
+  flex: 1;
+}
+
+.notes-canvas-grid.edit-only {
+  grid-template-columns: 1fr;
+}
+
+.notes-canvas-grid.preview-only {
+  grid-template-columns: 1fr;
+}
+
+.notes-canvas-grid.edit-only .notes-preview-pane {
+  display: none;
+}
+
+.notes-canvas-grid.preview-only .notes-editor-pane {
+  display: none;
+}
+
+.notes-editor-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.notes-preview-pane {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 14px 18px;
+  background: var(--surface);
+  color: var(--text-main);
+  font-size: 13.5px;
+  line-height: 1.65;
+  overflow-y: auto;
+  max-height: 520px;
+  box-sizing: border-box;
+}
+
+/* Preview Markdown Typography */
+.notes-preview-pane h1,
+.notes-preview-pane h2,
+.notes-preview-pane h3 {
+  font-weight: 650;
+  color: var(--text-main);
+  margin-top: 14px;
+  margin-bottom: 6px;
+  letter-spacing: -0.01em;
+}
+
+.notes-preview-pane h1 { font-size: 16px; border-bottom: 1px solid var(--border-color); padding-bottom: 4px; }
+.notes-preview-pane h2 { font-size: 14.5px; }
+.notes-preview-pane h3 { font-size: 13.5px; }
+
+.notes-preview-pane p {
+  margin-bottom: 10px;
+  color: var(--text-main);
+}
+
+.notes-preview-pane ul,
+.notes-preview-pane ol {
+  margin-bottom: 10px;
+  padding-left: 20px;
+}
+
+.notes-preview-pane li {
+  margin-bottom: 4px;
+  color: var(--text-main);
+}
+
+.notes-preview-pane blockquote {
+  border-left: 3px solid var(--primary);
+  padding: 6px 12px;
+  background: var(--muted-surface);
+  border-radius: 0 4px 4px 0;
+  margin-bottom: 10px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.notes-preview-pane pre {
+  background: var(--muted-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  margin-bottom: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.notes-preview-pane code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  background: var(--muted-surface);
+  padding: 1px 4px;
+  border-radius: 3px;
+  border: 1px solid var(--border-color);
+}
+
+.notes-preview-pane pre code {
+  background: transparent;
+  padding: 0;
+  border: none;
+}
+
+.notes-preview-empty { display: flex; align-items: center; justify-content: center; color: var(--text-muted); }
+.notes-preview-pane table { border-collapse: collapse; display: block; overflow-x: auto; max-width: 100%; margin: 10px 0; }
+.notes-preview-pane th, .notes-preview-pane td { border: 1px solid var(--border-color); padding: 4px 8px; text-align: left; }
+.notes-preview-pane th { background: var(--muted-surface); }
+.notes-preview-pane input[type='checkbox'] { accent-color: var(--primary); }
+.notes-math-inline { font-style: italic; color: var(--primary); }
+.notes-code-block { position: relative; }
+.notes-code-language { position: absolute; right: 10px; top: 6px; font-size: 11px; color: var(--text-muted); text-transform: uppercase; }
+.notes-image-placeholder { color: var(--text-muted); overflow-wrap: anywhere; }
+.notes-ai-compare { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.notes-ai-compare pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 45vh; overflow: auto; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--canvas); color: var(--text-main); }
+.notes-ai-scope { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 24vh; overflow: auto; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--canvas); color: var(--text-main); }
+.notes-ai-compare h3 { margin: 0 0 6px; font-size: 13px; }
+
+.notes-preview-pane hr {
+  border: none;
+  border-top: 1px solid var(--border-color);
+  margin: 14px 0;
+}
+
+/* Zen Mode (Focus Mode) */
+.notes-master-detail.zen {
+  grid-template-columns: 1fr !important;
+}
+
+.notes-master-detail.zen .notes-master-pane {
+  display: none !important;
+}

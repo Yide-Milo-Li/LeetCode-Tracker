@@ -1,0 +1,471 @@
+/* Preferences, desktop breakpoints, feedback motion and shared utilities. */
+/* Preferences remain a calm list of real application settings. */
+.settings-view {
+  max-width: 1060px;
+}
+.preference-row {
+  display: grid;
+  grid-template-columns: 1fr minmax(320px, 1fr);
+  gap: 40px;
+  padding: 28px 0;
+  border-top: 1px solid var(--border-color);
+  align-items: start;
+}
+.preference-row h2 {
+  font-size: 17px;
+}
+.preference-row p {
+  font-size: 14px;
+  max-width: 340px;
+}
+.segmented-control,
+.nav-tabs {
+  display: inline-flex;
+  align-items: stretch;
+  background: var(--muted-surface);
+  padding: 4px;
+  border: 1px solid var(--border-color);
+  border-radius: 9px;
+  justify-self: start;
+}
+.segmented-control button,
+.nav-tab-btn {
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 14px;
+  transition:
+    background var(--fast) ease,
+    color var(--fast) ease,
+    transform var(--fast) var(--spring-tactile),
+    box-shadow var(--fast) ease;
+}
+.segmented-control button:hover:not(:disabled),
+.nav-tab-btn:hover:not(:disabled) {
+  color: var(--text-main);
+}
+.segmented-control button:active:not(:disabled),
+.nav-tab-btn:active:not(:disabled) {
+  transform: scale(0.96);
+}
+.segmented-control button[aria-pressed='true'],
+.nav-tab-btn.active {
+  background: var(--surface);
+  color: var(--primary);
+  box-shadow: var(--shadow-xs);
+}
+.timezone-form {
+  display: grid;
+  gap: 12px;
+}
+/* Desktop widths only. Table/heatmap scroll is local; the navigation never becomes a mobile menu. */
+@media (max-width: 1199px) {
+  .sidebar {
+    width: 64px;
+    padding-inline: 8px;
+  }
+  .sidebar.expanded {
+    width: 216px;
+    padding-inline: 12px;
+  }
+  .main-content {
+    margin-left: 64px;
+    padding: 32px 28px 48px;
+  }
+  .sidebar.expanded ~ .main-content {
+    margin-left: 216px;
+  }
+  .sidebar-tools {
+    gap: 8px;
+  }
+  .sidebar-tools small {
+    display: none;
+  }
+
+  .filter-toolbar {
+    gap: 8px;
+  }
+  .filter-toolbar .form-field {
+    font-size: 13px;
+  }
+  .today-problem {
+    gap: 12px;
+  }
+  .workflow-steps {
+    gap: 8px;
+  }
+  .workflow-steps li {
+    font-size: 12px;
+    align-items: flex-start;
+  }
+  .kpi-card {
+    padding-inline: 12px;
+  }
+  .kpi-header {
+    min-height: 56px;
+    align-items: flex-start;
+  }
+  .weekly-schedule-grid {
+    gap: 6px;
+  }
+  .day-schedule-card {
+    padding: 10px 7px;
+  }
+  .preference-row {
+    gap: 24px;
+    grid-template-columns: 1fr 1fr;
+  }
+  .problem-table td,
+  .problem-table th {
+    padding-inline: 10px;
+  }
+}
+@media (min-width: 1800px) {
+  .main-content {
+    margin-right: auto;
+    padding-inline: 64px;
+  }
+}
+/* Local feedback only. Reduced motion keeps every state transition functional and immediate. */
+.spin,
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes content-enter {
+  from {
+    opacity: 0.7;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+@keyframes dialog-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+@keyframes dialog-exit {
+  from {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.96) translateY(6px);
+  }
+}
+@keyframes drawer-enter {
+  from {
+    transform: translateX(100%);
+    opacity: 0.8;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+@keyframes drawer-exit {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Shared static utilities extracted from the maintained legacy workspaces. */
+.u-align-items-center {
+  align-items: center;
+}
+.u-background-bg-card-muted {
+  background: var(--bg-card-muted);
+}
+.u-background-color-bg-card {
+  background-color: var(--bg-card);
+}
+.u-background-transparent {
+  background: transparent;
+}
+.u-border-1px-solid-border-color {
+  border: 1px solid var(--border-color);
+}
+.u-border-none {
+  border: none;
+}
+.u-border-radius-radius {
+  border-radius: var(--radius);
+}
+.u-border-top-1px-solid-border-color {
+  border-top: 1px solid var(--border-color);
+}
+.u-box-shadow-shadow-md {
+  box-shadow: var(--shadow-md);
+}
+.u-color-danger {
+  color: var(--danger);
+}
+.u-color-easy {
+  color: var(--easy);
+}
+.u-color-hard {
+  color: var(--hard);
+}
+.u-color-primary {
+  color: var(--primary);
+}
+.u-color-success {
+  color: var(--success);
+}
+.u-color-text-main {
+  color: var(--text-main);
+}
+.u-color-text-muted {
+  color: var(--text-muted);
+}
+.u-color-warning {
+  color: var(--warning);
+}
+.u-cursor-pointer {
+  cursor: pointer;
+}
+.u-display-flex {
+  display: flex;
+}
+.u-display-none {
+  display: none;
+}
+.u-flex-direction-column {
+  flex-direction: column;
+}
+.u-flex-shrink-0 {
+  flex-shrink: 0;
+}
+.u-flex-wrap-wrap {
+  flex-wrap: wrap;
+}
+.u-font-family-monospace {
+  font-family: monospace;
+}
+.u-font-size-0-8125rem {
+  font-size: 0.8125rem;
+}
+.u-font-size-0-875rem {
+  font-size: 0.875rem;
+}
+.u-font-size-0-8rem {
+  font-size: 0.8rem;
+}
+.u-font-size-0-9375rem {
+  font-size: 0.9375rem;
+}
+.u-font-size-1-25rem {
+  font-size: 1.25rem;
+}
+.u-font-size-13px {
+  font-size: 13px;
+}
+.u-font-size-1rem {
+  font-size: 1rem;
+}
+.u-font-weight-500 {
+  font-weight: 500;
+}
+.u-font-weight-600 {
+  font-weight: 600;
+}
+.u-font-weight-700 {
+  font-weight: 700;
+}
+.u-gap-0-25rem {
+  gap: 0.25rem;
+}
+.u-gap-0-5rem {
+  gap: 0.5rem;
+}
+.u-gap-0-75rem {
+  gap: 0.75rem;
+}
+.u-gap-0-85rem {
+  gap: 0.85rem;
+}
+.u-gap-1rem {
+  gap: 1rem;
+}
+.u-grid-template-columns-repeat-auto-fit-minmax-130px-1fr {
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+}
+.u-height-100 {
+  height: 100%;
+}
+.u-justify-content-center {
+  justify-content: center;
+}
+.u-justify-content-space-between {
+  justify-content: space-between;
+}
+.u-margin-0 {
+  margin: 0;
+}
+.u-margin-0-auto-0-5rem-auto {
+  margin: 0 auto 0.5rem auto;
+}
+.u-margin-bottom-0-25rem {
+  margin-bottom: 0.25rem;
+}
+.u-margin-bottom-0-5rem {
+  margin-bottom: 0.5rem;
+}
+.u-margin-bottom-1-25rem {
+  margin-bottom: 1.25rem;
+}
+.u-margin-bottom-1-5rem {
+  margin-bottom: 1.5rem;
+}
+.u-margin-bottom-1rem {
+  margin-bottom: 1rem;
+}
+.u-margin-bottom-2rem {
+  margin-bottom: 2rem;
+}
+.u-margin-left-0-2rem {
+  margin-left: 0.2rem;
+}
+.u-margin-left-auto {
+  margin-left: auto;
+}
+.u-margin-top-0-25rem {
+  margin-top: 0.25rem;
+}
+.u-margin-top-0-2rem {
+  margin-top: 0.2rem;
+}
+.u-margin-top-0-5rem {
+  margin-top: 0.5rem;
+}
+.u-margin-top-0-75rem {
+  margin-top: 0.75rem;
+}
+.u-margin-top-1-25rem {
+  margin-top: 1.25rem;
+}
+.u-margin-top-1rem {
+  margin-top: 1rem;
+}
+.u-margin-top-2rem {
+  margin-top: 2rem;
+}
+.u-max-height-200px {
+  max-height: 200px;
+}
+.u-max-height-240px {
+  max-height: 240px;
+}
+.u-min-width-0 {
+  min-width: 0;
+}
+.u-overflow-hidden {
+  overflow: hidden;
+}
+.u-overflow-y-auto {
+  overflow-y: auto;
+}
+.u-padding-0-1rem-0-4rem {
+  padding: 0.1rem 0.4rem;
+}
+.u-padding-0-25rem {
+  padding: 0.25rem;
+}
+.u-padding-0-25rem-0-5rem {
+  padding: 0.25rem 0.5rem;
+}
+.u-padding-0-2rem-0-5rem {
+  padding: 0.2rem 0.5rem;
+}
+.u-padding-0-35rem-0-75rem {
+  padding: 0.35rem 0.75rem;
+}
+.u-padding-0-4rem-0 {
+  padding: 0.4rem 0;
+}
+.u-padding-0-5rem-0-75rem {
+  padding: 0.5rem 0.75rem;
+}
+.u-padding-0-625rem-1-25rem {
+  padding: 0.625rem 1.25rem;
+}
+.u-padding-0-75rem-1rem {
+  padding: 0.75rem 1rem;
+}
+.u-padding-1-5rem-0 {
+  padding: 1.5rem 0;
+}
+.u-padding-2rem {
+  padding: 2rem;
+}
+.u-padding-2rem-0 {
+  padding: 2rem 0;
+}
+.u-padding-left-1-25rem {
+  padding-left: 1.25rem;
+}
+.u-padding-top-1-5rem {
+  padding-top: 1.5rem;
+}
+.u-text-align-center {
+  text-align: center;
+}
+.u-text-overflow-ellipsis {
+  text-overflow: ellipsis;
+}
+.u-white-space-nowrap {
+  white-space: nowrap;
+}
+.u-width-100px {
+  width: 100px;
+}
+.u-width-70px {
+  width: 70px;
+}
+.u-width-90px {
+  width: 90px;
+}

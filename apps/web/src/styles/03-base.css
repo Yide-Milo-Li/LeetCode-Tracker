@@ -1,0 +1,198 @@
+/* Element defaults, theme transitions and native select styling. */
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  min-width: 0;
+  color: var(--text-main);
+  background: var(--canvas);
+  font-size: 15px;
+  line-height: 1.6;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+button,
+a,
+input,
+select,
+textarea,
+summary {
+  -webkit-tap-highlight-color: transparent;
+}
+button,
+summary {
+  cursor: pointer;
+}
+button {
+  border: 0;
+}
+a {
+  color: var(--primary);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+p {
+  margin: 8px 0;
+}
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  line-height: 1.4;
+  font-weight: 620;
+}
+h1 {
+  font-size: 28px;
+  letter-spacing: -0.5px;
+  font-weight: 650;
+}
+h2 {
+  font-size: 20px;
+}
+h3 {
+  font-size: 16px;
+}
+h4 {
+  font-size: 15px;
+}
+small {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+ul {
+  padding-left: 20px;
+  margin: 8px 0;
+}
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  max-height: 240px;
+  overflow: auto;
+}
+fieldset {
+  min-width: 0;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 16px;
+}
+[hidden] {
+  display: none !important;
+}
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+::selection {
+  background: var(--selected);
+}
+
+/* Smooth, elegant theme transitions across desktop UI surfaces */
+body,
+.sidebar,
+.page-header,
+.distribution-card,
+.kpi-card,
+.practice-card,
+.table-container,
+.data-table,
+.form-field input,
+.form-field select,
+.segmented-control,
+.overlay-panel,
+.card,
+.btn-icon {
+  transition:
+    background-color 160ms cubic-bezier(0.2, 0, 0, 1),
+    border-color 160ms cubic-bezier(0.2, 0, 0, 1),
+    color 160ms cubic-bezier(0.2, 0, 0, 1),
+    box-shadow 160ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+input:not([type='checkbox']):not([type='radio']),
+select,
+textarea {
+  background: var(--surface);
+  color: var(--text-main);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius);
+  min-height: 38px;
+  padding: 7px 10px;
+  min-width: 0;
+  max-width: 100%;
+  font-size: 14px;
+}
+input:hover:not(:disabled),
+select:hover:not(:disabled),
+textarea:hover:not(:disabled) {
+  border-color: var(--primary);
+}
+input:focus,
+input:focus-visible,
+select:focus,
+select:focus-visible,
+textarea:focus,
+textarea:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+  border-color: var(--focus);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+input:not([type='checkbox']):not([type='radio']),
+textarea {
+  width: 100%;
+}
+input[type='checkbox'],
+input[type='radio'] {
+  accent-color: var(--primary);
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+textarea {
+  resize: vertical;
+  line-height: 1.6;
+}
+
+/* Enhanced high-contrast select dropdowns with custom chevron indicator */
+select {
+  padding-right: 32px;
+  color-scheme: inherit;
+  background-color: var(--surface);
+  color: var(--text-main);
+  border: 1px solid var(--outline);
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: var(--select-chevron);
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 14px 14px;
+}
+select option,
+select optgroup {
+  background-color: var(--surface);
+  color: var(--text-main);
+  padding: 8px 10px;
+}
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-muted);
+  opacity: 0.85;
+}

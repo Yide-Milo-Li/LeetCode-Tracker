@@ -1,0 +1,118 @@
+/* Design tokens: default light palette and its dark counterpart. */
+/* Desktop design tokens. Light and dark palettes are independent, with no external fonts. */
+:root {
+  --canvas: #f7f6f2;
+  --muted-surface: #efeee8;
+  --surface: #fff;
+  --text-main: #292d28;
+  --text-muted: #656b60;
+  --primary: #42634b;
+  --primary-hover: #35543d;
+  --on-primary: #fff;
+  --selected: #e5ecdf;
+  --border-color: #dcddd3;
+  --outline: #7c8376;
+  --focus: #42634b;
+  --warning: #82561f;
+  --warning-bg: #f7edda;
+  --danger: #a43e35;
+  --danger-bg: #f8e8e3;
+  --success: var(--primary);
+  --success-bg: var(--selected);
+  --easy: var(--primary);
+  --easy-bg: var(--selected);
+  --medium: var(--warning);
+  --medium-bg: var(--warning-bg);
+  --hard: var(--danger);
+  --hard-bg: var(--danger-bg);
+  --review: #1d4ed8;
+  --review-bg: rgba(219, 234, 254, 0.85);
+  --review-border: rgba(147, 197, 253, 0.8);
+  --focus-ring: rgba(66, 99, 75, 0.22);
+  --bg-card: var(--surface);
+  --bg-card-muted: var(--muted-surface);
+  --bg-body: var(--canvas);
+  --radius: 8px;
+  --radius-lg: 12px;
+  --shadow-md: 0 8px 28px #252b2012;
+  --fast: 140ms;
+  --enter: 200ms;
+  --overlay: 240ms;
+  --btn-motion: 130ms cubic-bezier(0.2, 0, 0, 1);
+  --sidebar-motion: 180ms cubic-bezier(0.2, 0, 0, 1);
+  --overlay-enter: 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  --overlay-exit: 160ms cubic-bezier(0.4, 0, 1, 1);
+  --spring-tactile: cubic-bezier(0.16, 1, 0.3, 1);
+  --spring-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --spring-snappy: cubic-bezier(0.2, 0.9, 0.3, 1);
+  --shadow-glow: 0 0 0 3px rgba(66, 99, 75, 0.22);
+  /* Overlay scrim, inverted tooltip and the pressed-tab lift (values unchanged from the old rules). */
+  --scrim: #17201566;
+  --tooltip-bg: #1e221b;
+  --tooltip-fg: #fff;
+  --shadow-xs: 0 1px 3px #20282012;
+  /* Native select chevron. Dark modes and dark palettes switch to the lighter stroke. */
+  --select-chevron-light: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23888888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --select-chevron-dark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23a0aec0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --select-chevron: var(--select-chevron-light);
+  /* Heatmap intensity ramp: the empty-cell surface blended toward the palette primary.
+     Declared once on the root, so every palette and light/dark mode re-derives it from its own
+     --primary and --muted-surface. Mixed in oklab, the guidance default for tints. */
+  --heatmap-1: color-mix(in oklab, var(--primary) 40%, var(--muted-surface));
+  --heatmap-2: color-mix(in oklab, var(--primary) 70%, var(--muted-surface));
+  --heatmap-3: var(--primary);
+  font-family:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    'PingFang SC',
+    'Microsoft YaHei',
+    'Noto Sans CJK SC',
+    sans-serif;
+  --border: var(--border-color);
+  --text-primary: var(--text-main);
+  --text-secondary: var(--text-muted);
+  --surface-muted: var(--muted-surface);
+  color-scheme: light;
+}
+html.dark {
+  --canvas: #20231f;
+  --muted-surface: #252a24;
+  --surface: #2c312a;
+  --text-main: #f1f2e9;
+  --text-muted: #b6bcae;
+  --primary: #aac49b;
+  --primary-hover: #bed2b1;
+  --on-primary: #202b1c;
+  --selected: #374331;
+  --border-color: #424b3e;
+  --outline: #7c8973;
+  --focus: #bed2b1;
+  --focus-ring: rgba(170, 196, 155, 0.28);
+  --warning: #e9c180;
+  --warning-bg: #423523;
+  --danger: #f0a79d;
+  --danger-bg: #482f2b;
+  --success: var(--primary);
+  --success-bg: var(--selected);
+  --easy: var(--primary);
+  --easy-bg: var(--selected);
+  --medium: var(--warning);
+  --medium-bg: var(--warning-bg);
+  --hard: var(--danger);
+  --hard-bg: var(--danger-bg);
+  --review: #93c5fd;
+  --review-bg: rgba(59, 130, 246, 0.18);
+  --review-border: rgba(147, 197, 253, 0.35);
+  --shadow-md: 0 8px 28px #10140e40;
+  --shadow-glow: 0 0 0 3px rgba(170, 196, 155, 0.28);
+  --border: var(--border-color);
+  --text-primary: var(--text-main);
+  --text-secondary: var(--text-muted);
+  --surface-muted: var(--muted-surface);
+  --select-chevron: var(--select-chevron-dark);
+  --tooltip-bg: #2b3027;
+  --tooltip-fg: #f1f2e9;
+  color-scheme: dark;
+}

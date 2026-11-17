@@ -1,0 +1,375 @@
+/* Statistics: heatmap, charts and mastery. */
+/* Statistics use real Recharts/SVG and keyboard-accessible heatmap cells. */
+.dashboard-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+  gap: 20px;
+}
+.dashboard-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 19px;
+  letter-spacing: 0;
+}
+.dashboard-title svg {
+  width: 20px;
+}
+.dashboard-subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 24px;
+}
+.kpi-card {
+  padding: 16px 20px;
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  transition: transform var(--fast) var(--spring-tactile),
+              box-shadow var(--fast) var(--spring-tactile),
+              border-color var(--fast) ease;
+}
+.kpi-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px -2px rgba(0, 0, 0, 0.06);
+  border-color: var(--outline);
+}
+.kpi-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text-muted);
+  min-height: 28px;
+}
+.kpi-header svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.kpi-value {
+  font-size: clamp(24px, 2vw, 30px);
+  font-weight: 600;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.kpi-unit {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.kpi-value-secondary {
+  font-size: 0.6em;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.heatmap-card,
+.trend-card,
+.distribution-card,
+.topic-insights {
+  padding: 24px;
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  margin-bottom: 24px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  transition: box-shadow var(--enter) var(--spring-tactile), border-color var(--enter) ease;
+}
+.heatmap-card:hover,
+.trend-card:hover,
+.distribution-card:hover,
+.topic-insights:hover {
+  box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.06);
+}
+.heatmap-scroll-area {
+  max-width: 100%;
+  overflow: auto;
+  padding: 4px;
+}
+.heatmap-grid {
+  display: grid;
+  grid-template-columns: repeat(53, minmax(10px, 1fr));
+  gap: 4px;
+  min-width: 770px;
+}
+.heatmap-col {
+  display: grid;
+  grid-template-rows: repeat(7, 13px);
+  gap: 4px;
+}
+.heatmap-cell {
+  padding: 0;
+  width: 100%;
+  min-width: 10px;
+  height: 13px;
+  border-radius: 3px;
+  border: 1px solid color-mix(in srgb, var(--outline) 40%, transparent);
+  transition: transform var(--fast) var(--spring-bounce), outline 100ms ease;
+  cursor: pointer;
+}
+.heatmap-cell:hover,
+.heatmap-cell:focus-visible {
+  transform: scale(1.25);
+  z-index: 2;
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+.heatmap-cell-0 {
+  background: var(--muted-surface);
+}
+.heatmap-cell-1 {
+  background: var(--heatmap-1);
+}
+.heatmap-cell-2 {
+  background: var(--heatmap-2);
+}
+.heatmap-cell-3 {
+  background: var(--heatmap-3);
+}
+.heatmap-cell.out-of-year {
+  visibility: hidden;
+  pointer-events: none;
+}
+.heatmap-legend,
+.heatmap-legend-scale {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 12px;
+}
+.heatmap-legend-scale {
+  margin: 0;
+}
+.heatmap-legend-box {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+}
+.heatmap-tooltip {
+  position: fixed;
+  transform: translate(-50%, -100%);
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-md);
+  padding: 8px 12px;
+  font-size: 12px;
+  pointer-events: none;
+  border-radius: 6px;
+  z-index: 20;
+}
+.trend-chart-wrapper {
+  height: 270px;
+  width: 100%;
+}
+
+/* Difficulty mastery (+ 30-day trend when it has data) beside the topics worth attention. */
+.progress-insights-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  align-items: start;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+.progress-insights-main {
+  display: grid;
+  gap: 24px;
+  min-width: 0;
+}
+.progress-insights-main > .trend-card,
+.progress-insights-main > .distribution-card,
+.progress-insights-grid > .distribution-card {
+  margin-bottom: 0;
+}
+.progress-insights-main .trend-chart-wrapper {
+  height: 220px;
+}
+@media (max-width: 1180px) {
+  .progress-insights-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.insight-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin-bottom: 18px;
+}
+.insight-card-head h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+}
+.insight-card-head p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.insight-card-head .chart-legend {
+  margin: 2px 0 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.trend-tooltip {
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius, 8px);
+  box-shadow: var(--shadow-md);
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.trend-tooltip-date {
+  font-weight: 600;
+  color: var(--text-main);
+  margin-bottom: 4px;
+}
+.trend-tooltip strong {
+  color: var(--text-main);
+  font-weight: 600;
+}
+.trend-tooltip-row.is-solved strong {
+  color: var(--primary);
+}
+
+/* Mastery: label, bar, fraction. Bars grow once on mount, then follow data changes. */
+.mastery-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.mastery-row {
+  display: grid;
+  grid-template-columns: minmax(88px, 10rem) minmax(0, 1fr) 56px;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+}
+.mastery-row-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mastery-row-track {
+  height: 8px;
+  border-radius: 3px;
+  background: var(--muted-surface);
+  overflow: hidden;
+}
+.mastery-row-fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--primary) 62%, var(--muted-surface));
+  transform: scaleX(var(--fill, 0));
+  transform-origin: left;
+  transition: transform 420ms var(--spring-tactile);
+  animation: mastery-fill-grow 640ms var(--spring-tactile) both;
+}
+.mastery-row.is-easy .mastery-row-fill {
+  background: var(--easy);
+}
+.mastery-row.is-medium .mastery-row-fill {
+  background: var(--medium);
+}
+.mastery-row.is-hard .mastery-row-fill {
+  background: var(--hard);
+}
+.mastery-row-frac {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-align: right;
+}
+/* A fixed fraction column keeps the three tracks the same length. */
+.mastery-card .mastery-row {
+  grid-template-columns: 4.5rem minmax(0, 1fr) 7.5rem;
+}
+.mastery-card .mastery-row-frac {
+  color: var(--text-main);
+  white-space: nowrap;
+}
+.mastery-row-pct {
+  display: inline-block;
+  min-width: 2.75em;
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.mastery-row-fill.has-value {
+  transform: scaleX(max(var(--fill, 0), 0.012));
+}
+.mastery-empty {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+@keyframes mastery-fill-grow {
+  from {
+    transform: scaleX(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mastery-row-fill {
+    animation: none;
+    transition: none;
+  }
+}
+.recharts-text {
+  fill: var(--text-muted);
+  font-size: 12px;
+}
+.distributions-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+.diff-track {
+  height: 7px;
+  border-radius: 5px;
+  background: var(--muted-surface);
+  overflow: hidden;
+}
+.diff-fill {
+  height: 100%;
+  border-radius: 5px;
+}
+.top-tags-wrap {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.top-tag-chip {
+  padding: 7px 11px;
+  border-radius: 6px;
+  background: var(--muted-surface);
+  font-size: 13px;
+}
+.top-tag-count {
+  margin-left: 8px;
+  font-weight: 600;
+  color: var(--primary);
+}
+.dashboard-view-container svg {
+  flex-shrink: 0;
+}
+.flex {
+  display: flex;
+}
+.items-center {
+  align-items: center;
+}
+.gap-2 {
+  gap: 8px;
+}
