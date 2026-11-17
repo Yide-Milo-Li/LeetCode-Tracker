@@ -1,6 +1,2 @@
-/** Run deterministic note formatting outside the interactive React thread. */
-import { formatMarkdown } from '../../../packages/markdown/src/index.ts';
-
-globalThis.addEventListener('message', (event: MessageEvent<string>) => {
-  globalThis.postMessage(formatMarkdown(event.data));
-});
+/** Preserve the desktop worker entry while sharing its implementation. */
+import '../../../packages/workspace/src/markdown-format.worker.ts';

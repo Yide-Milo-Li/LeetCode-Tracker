@@ -5,6 +5,7 @@
 import { build } from 'esbuild';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { browserBuildAliases } from './browser-build-alias.ts';
 
 const repoRoot = resolve(import.meta.dirname, '..');
 const outDir = join(repoRoot, 'apps/chatgpt/dist');
@@ -19,6 +20,7 @@ const bundleResult = await build({
   target: 'es2023',
   write: false,
   minify: true,
+  alias: browserBuildAliases,
   define: {
     'process.env.NODE_ENV': '"production"',
   },

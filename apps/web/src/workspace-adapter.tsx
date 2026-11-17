@@ -8,7 +8,7 @@ import { WorkspaceProvider,createWorkspaceServices,useOptionalWorkspaceEnvironme
 
 const transient=memoryStorage();
 export const desktopHost=createWorkspaceHost({id:'desktop',
-  capabilities:{browserDownloads:!isTauri(),autoEnsure:true,practice:true,planEditing:true,append:true,exports:true,clipboard:true},
+  capabilities:{browserDownloads:!isTauri(),autoEnsure:true,practice:true,planEditing:true,append:true,exports:true,clipboard:true,noteFormatting:true},
   storage:kind=>{try{return kind==='persistent'?window.localStorage:window.sessionStorage;}catch{return transient;}},
   currentView:()=>typeof window==='undefined'?null:window.location.hash.slice(1),
   navigate:view=>{window.location.hash=view;},openExternal:openExternalUrl,

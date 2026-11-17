@@ -2,6 +2,7 @@
 import { ApiError, OperationStateError, type TrackerClient, type WorkspaceOperationState } from './client.ts';
 import type { CreatePracticeRecordInput, PracticeRecord } from '../../contracts/src/index.ts';
 import type { WorkspaceHost } from './host.ts';
+import type { Language } from './i18n.ts';
 
 /** Format an exact instant as editable wall-clock fields in the selected IANA timezone. */
 export function zonedInput(iso: string, zone: string): string {
@@ -20,10 +21,10 @@ export function zonedInput(iso: string, zone: string): string {
 }
 
 /** Resolve wall time only if unique; never guess a skipped or repeated DST time. */
-export function fromZonedInput(value: string, zone: string): string {
+export function fromZonedInput(value: string, zone: string, lang: Language = 'en'): string {
   const normalized = value.length === 16 ? value + ':00' : value;
   const naive = Date.parse(normalized + 'Z');
-  if (!Number.isFinite(naive)) throw new Error('Invalid date and time / 日期时间无效');
+  if (!Number.isFinite(naive)) throw new Error(lang === 'zh' ? '日期时间无效。' : 'Invalid date and time.');
   const offsets = new Set<number>();
   for (const hours of [-36, -12, 0, 12, 36]) {
     const instant = naive + hours * 3600000;
@@ -34,7 +35,9 @@ export function fromZonedInput(value: string, zone: string): string {
     .filter((iso) => zonedInput(iso, zone) === normalized);
   if (matches.length !== 1)
     throw new Error(
-      'This local time is missing or ambiguous because of a clock change. Choose another time or date-only precision. / 此时间因夏令时切换而不存在或有歧义，请调整时间或仅记录日期。',
+      lang === 'zh'
+        ? '此本地时间因夏令时切换而不存在或有歧义，请调整时间或改为仅记录日期。'
+        : 'This local time is missing or ambiguous because of a clock change. Choose another time or date-only precision.',
     );
   return matches[0];
 }

@@ -7,6 +7,7 @@ import {Client,StreamableHTTPClientTransport,type Transport,type JSONRPCMessage}
 import {createChatGPTWorkspace} from '../packages/workspace/src/hosts/chatgpt.ts';
 import {createExperimentMcp,RESOURCE_URI} from '../experiments/phase35/mcp.ts';
 import {openExperimentLab} from '../experiments/phase35/lab.ts';
+import {browserBuildAliases} from '../scripts/browser-build-alias.ts';
 /** Linked transport delivers SDK JSON-RPC unchanged; only the network is replaced. */
 function pair():[Transport,Transport] {
   const a:Transport={start:async()=>{},send:async message=>{queueMicrotask(()=>b.onmessage?.(message));},close:async()=>{a.onclose?.();}},b:Transport={start:async()=>{},send:async message=>{queueMicrotask(()=>a.onmessage?.(message));},close:async()=>{b.onclose?.();}};
@@ -173,6 +174,7 @@ test('DSH client bundle registers via window.__ModuleLoader__.load and exports a
     write:false,
     external:['react','react-dom','react/jsx-runtime'],
     loader:{'.css':'text'},
+    alias:browserBuildAliases,
     banner:{js:'window.__ModuleLoader__.load({\n  id: "@leetcode-tracker/dsh-phase35",\n  factory: (require) => {\n    var module = { exports: {} };\n    var exports = module.exports;\n'},
     footer:{js:'\n    return module.exports;\n  }\n});\n'}
   });

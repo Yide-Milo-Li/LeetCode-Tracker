@@ -9,8 +9,10 @@ import { type DailyPlan, type EnsureResult, type PlanItem, type PracticeRecord }
 import { evidenceAfter } from '../../../domain/src/index.ts';
 import type { RecommendationFeedbackReason } from '../../../contracts/src/recommendations.ts';
 import { OperationStateError, operationMessage } from '../client.ts';
-const mutationMessage=(error:unknown,fallback:string)=>error instanceof OperationStateError
-  ? `${operationMessage(error,'en')} / ${operationMessage(error,'zh')}` : error instanceof Error ? error.message : fallback;
+import { localizeApiError } from '../error-i18n.ts';
+import type { Language } from '../i18n.ts';
+
+interface PlanErrorEntry { err: unknown; fallback: Record<Language, string> }
 
 export interface UseDailyPlanReturn {
   /** Indicates initial load of today's plan is in progress. */
@@ -56,7 +58,7 @@ export type DailyPlanState = EnsureResult | { status: 'uncreated' | 'no-schedule
  * Prevents redundant generation calls on tab switches and synchronizes state between
  * retained workspaces and the Today execution view.
  */
-export function useDailyPlan(environmentOverride?:WorkspaceEnvironment): UseDailyPlanReturn {
+export function useDailyPlan(environmentOverride?:WorkspaceEnvironment, lang: Language = 'en'): UseDailyPlanReturn {
   const inherited = useOptionalWorkspaceEnvironment();
   const environment = environmentOverride ?? inherited;
   if(!environment)throw new Error('Shared hook requires a workspace environment');
@@ -64,8 +66,8 @@ export function useDailyPlan(environmentOverride?:WorkspaceEnvironment): UseDail
 
   const [loading, setLoading] = useState(true);
   const [ensureResult, setEnsureResult] = useState<DailyPlanState | null>(null);
-  const [refreshError, setRefreshError] = useState<string | null>(null);
-  const [mutationError, setMutationError] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<PlanErrorEntry | null>(null);
+  const [mutationError, setMutationError] = useState<PlanErrorEntry | null>(null);
   const [replacingItemId, setReplacingItemId] = useState<string | null>(null);
   const [replacingBatch, setReplacingBatch] = useState(false);
   const [appending, setAppending] = useState(false);
@@ -84,7 +86,7 @@ export function useDailyPlan(environmentOverride?:WorkspaceEnvironment): UseDail
       const value=event.operation.data as DailyPlan|{plan:DailyPlan}|undefined;
       const updated=value&&'plan' in value?value.plan:value;
       if(updated)setEnsureResult({status:'ready',plan:updated});
-    }else setMutationError(mutationMessage(new OperationStateError(event.operation),'Operation unavailable'));
+    }else setMutationError({ err: new OperationStateError(event.operation), fallback: { en: 'Operation unavailable', zh: '操作不可用' } });
   }),[environment.host]);
 
   const clearError = useCallback(() => {
@@ -122,7 +124,7 @@ export function useDailyPlan(environmentOverride?:WorkspaceEnvironment): UseDail
       }
     } catch (err: unknown) {
       if (revision === changeRevision.current)
-        setRefreshError(err instanceof Error ? err.message : 'Failed to load daily plan.');
+        setRefreshError({ err, fallback: { en: 'Failed to load daily plan.', zh: '加载今日计划失败。' } });
     } finally {
       refreshInFlight.current = false;
       setLoading(false);
@@ -184,7 +186,7 @@ export function useDailyPlan(environmentOverride?:WorkspaceEnvironment): UseDail
         }
       } catch (err: unknown) {
         if (currentRevision === changeRevision.current) {
-          setMutationError(mutationMessage(err,'Failed to replace problem.'));
+          setMutationError({ err, fallback: { en: 'Failed to replace problem.', zh: '更换题目失败。' } });
         }
       } finally {
         changeRevision.current++;
@@ -217,7 +219,7 @@ export function useDailyPlan(environmentOverride?:WorkspaceEnvironment): UseDail
       }
     } catch (err: unknown) {
       if (currentRevision === changeRevision.current) {
-        setMutationError(mutationMessage(err,'Failed to replace unfinished problems.'));
+        setMutationError({ err, fallback: { en: 'Failed to replace unfinished problems.', zh: '更换未完成题目失败。' } });
       }
     } finally {
       changeRevision.current++;
@@ -247,7 +249,7 @@ export function useDailyPlan(environmentOverride?:WorkspaceEnvironment): UseDail
       }
     } catch (err: unknown) {
       if (currentRevision === changeRevision.current) {
-        setMutationError(mutationMessage(err,'Failed to append problem.'));
+        setMutationError({ err, fallback: { en: 'Failed to append problem.', zh: '加题失败。' } });
       }
     } finally {
       changeRevision.current++;
@@ -280,7 +282,7 @@ export function useDailyPlan(environmentOverride?:WorkspaceEnvironment): UseDail
         }
       } catch (err: unknown) {
         if (currentRevision === changeRevision.current) {
-          setMutationError(mutationMessage(err,'Failed to remove problem.'));
+          setMutationError({ err, fallback: { en: 'Failed to remove problem.', zh: '移除题目失败。' } });
         }
       } finally {
         changeRevision.current++;
@@ -340,11 +342,14 @@ export function useDailyPlan(environmentOverride?:WorkspaceEnvironment): UseDail
     [refresh],
   );
 
+  const activeError = mutationError ?? refreshError;
   return {
     loading,
     ensureResult,
     plan: ensureResult?.plan ?? null,
-    error: mutationError || refreshError,
+    error: activeError ? activeError.err instanceof OperationStateError
+      ? operationMessage(activeError.err, lang)
+      : localizeApiError(activeError.err, lang, activeError.fallback[lang]) : null,
     replacingItemId,
     replacingBatch,
     appending,

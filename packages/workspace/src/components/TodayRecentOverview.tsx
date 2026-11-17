@@ -6,6 +6,7 @@ import { useWorkspaceEnvironment } from '../context.tsx';
 import React, { useEffect, useState } from 'react';
 import { Activity } from 'lucide-react';
 import { type DashboardResponse } from '../api.ts';
+import { localizeApiError } from '../error-i18n.ts';
 import type { Language } from '../i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
 import { Feedback, InfoPopover } from './ui.tsx';
@@ -26,7 +27,7 @@ export function TodayRecentOverview({ lang, embedded = false }: TodayRecentOverv
   const zh = lang === 'zh';
   const workspace = useWorkspace();
   const [data, setData] = useState<DashboardResponse | null>(null);
-  const [error, setError] = useState('');
+  const [errorCause, setErrorCause] = useState<unknown>(null);
   const [retry, setRetry] = useState(0);
 
   useEffect(() => {
@@ -36,16 +37,17 @@ export function TodayRecentOverview({ lang, embedded = false }: TodayRecentOverv
       .then((value) => {
         if (active) {
           setData(value);
-          setError('');
+          setErrorCause(null);
         }
       })
       .catch((err) => {
-        if (active) setError(String(err.message));
+        if (active) setErrorCause(err);
       });
     return () => {
       active = false;
     };
   }, [workspace.revision, retry]);
+  const error = errorCause ? localizeApiError(errorCause, lang) : '';
 
   const days = data?.dataStatus.userTimezone ? data.trend30Days.slice(-7) : [];
   const max = Math.max(1, ...days.map((day) => day.completedCount));

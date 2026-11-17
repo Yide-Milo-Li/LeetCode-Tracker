@@ -45,6 +45,8 @@ export interface WorkspaceCapabilities {
   clipboard:boolean;
   durableDrafts:boolean;
   noteEditing:boolean;
+  /** Host can reach the local formatting service and load its worker. */
+  noteFormatting:boolean;
 }
 export interface WorkspaceHost {
   id:string;
@@ -93,7 +95,7 @@ export function createWorkspaceHost(options:HostOptions):WorkspaceHost {
   let recovery:Record<string,unknown>={};
   let display:WorkspaceDisplayState={availability:options.expand?'unknown':'unsupported',pending:false};
   const host:WorkspaceHost={id:options.id,
-    capabilities:{browserDownloads:false,autoEnsure:false,practice:false,planEditing:false,append:true,exports:false,clipboard:false,durableDrafts:false,noteEditing:true,...options.capabilities},
+    capabilities:{browserDownloads:false,autoEnsure:false,practice:false,planEditing:false,append:true,exports:false,clipboard:false,durableDrafts:false,noteEditing:true,noteFormatting:false,...options.capabilities},
     currentView:options.currentView??(()=>currentView),
     emit:event=>{if(disposed)return;if(event.type==='navigate')currentView=event.view;if(event.type==='display')display=event.state;for(const listener of listeners)listener(event);},
     navigate:(view,targetId,targetKind)=>{options.navigate?.(view,targetId,targetKind);host.emit({type:'navigate',view,targetId,targetKind});},

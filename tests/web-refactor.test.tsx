@@ -908,10 +908,11 @@ for (const mode of ['pending', 'rejected'] as const) {
       total: 1,
     }));
     mock.method(api, 'getNote', async (id: string) => ({
-      note: { questionId: id, questionFrontendId: id, content: 'initial note', updatedAt: 1 },
+      libraryGeneration: 1,
+      note: { questionId: id, questionFrontendId: id, content: 'initial note', updatedAt: 1, revision: 1, libraryGeneration: 1 },
     }));
     const save = mock.method(api, 'upsertNote', async (id: string, content: string) => ({
-      note: { questionId: id, questionFrontendId: id, content, updatedAt: 2 },
+      note: { questionId: id, questionFrontendId: id, content, updatedAt: 2, revision: 2, libraryGeneration: 1 },
     }));
     let workers = 0;
     const previousWorker = globalThis.Worker;
@@ -923,7 +924,7 @@ for (const mode of ['pending', 'rejected'] as const) {
       await act(async () => { fireEvent.click(screen.getByRole('button', { name: /save note/i })); });
       assert.equal(workers, 0);
       assert.equal(save.mock.callCount(), 1);
-      assert.deepEqual(save.mock.calls[0].arguments, [problem.questionFrontendId, '* raw markdown']);
+      assert.deepEqual(save.mock.calls[0].arguments, [problem.questionFrontendId, '* raw markdown', 1, 1]);
       if (mode === 'pending') {
         await act(async () => { pendingSettings.resolve({ ...preferences, notesFormatOnSave: false }); });
         assert.equal(editor.value, '* raw markdown');

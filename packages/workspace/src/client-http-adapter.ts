@@ -24,6 +24,8 @@ import type {
   ProblemNote,
   ProblemNoteListQuery,
   ProblemNoteSummary,
+  NoteFormatRequest,
+  NoteFormatResponse,
   ProgressCandidateInput,
   ProgressImportPreview,
   ProgressImportSummary,
@@ -407,6 +409,12 @@ const dashboardApi = {
 };
 
 const notesApi = {
+  getNoteFormatStatus(): Promise<{ configured: boolean; provider?: LLMProvider; model?: string }> {
+    return request('/notes/format/status');
+  },
+  formatNote(input: NoteFormatRequest): Promise<NoteFormatResponse> {
+    return request('/notes/format', { method: 'POST', body: JSON.stringify(input) });
+  },
   listNotes(
     query: Partial<ProblemNoteListQuery> = {}
   ): Promise<{ items: ProblemNoteSummary[]; total: number }> {

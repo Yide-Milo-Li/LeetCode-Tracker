@@ -8,7 +8,8 @@ import { useWorkspaceEnvironment } from '../context.tsx';
 import React, { useState, useRef, useEffect } from 'react';
 import { Sparkles, AlertTriangle, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { type DailyPlan, type OverridePreview, type RulePatch } from '../api.ts';
-import { translations, type Language } from '../i18n.ts';
+import { localizeApiError, localizePlanningIssue } from '../error-i18n.ts';
+import { formatDifficulty, translations, type Language } from '../i18n.ts';
 import { Dialog } from './ui.tsx';
 import { RecommendationOptions, readRecommendationOptions } from './RecommendationOptions.tsx';
 import {
@@ -384,9 +385,15 @@ export const PromptOverrideModal: React.FC<PromptOverrideModalProps> = ({
       if (!manual) {
         setParsedPrompt(trimmed);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (version === requestVersion.current) {
-        setError(err.message || 'Failed to parse prompt with AI.');
+        setError(
+          localizeApiError(
+            err,
+            lang,
+            lang === 'zh' ? '解析临时调整失败，请稍后重试。' : 'Failed to parse prompt with AI.',
+          ),
+        );
       }
     } finally {
       if (version === requestVersion.current) {
@@ -412,8 +419,14 @@ export const PromptOverrideModal: React.FC<PromptOverrideModalProps> = ({
       const updated = await api.commitDailyPlanOverride(preview.id, preview.planVersion);
       onApplied(updated);
       onClose();
-    } catch (err: any) {
-      setError(err.message || 'Failed to apply prompt override.');
+    } catch (err: unknown) {
+      setError(
+        localizeApiError(
+          err,
+          lang,
+          lang === 'zh' ? '应用临时调整失败，请稍后重试。' : 'Failed to apply prompt override.',
+        ),
+      );
     } finally {
       setCommitting(false);
     }
@@ -458,7 +471,7 @@ export const PromptOverrideModal: React.FC<PromptOverrideModalProps> = ({
           ? difficultyCounts({ dailyCount: total, difficulty: value } as Rules)
           : null;
       return countsObj
-        ? `Easy: ${countsObj.Easy}, Medium: ${countsObj.Medium}, Hard: ${countsObj.Hard}`
+        ? `${formatDifficulty('Easy', lang)}: ${countsObj.Easy}, ${formatDifficulty('Medium', lang)}: ${countsObj.Medium}, ${formatDifficulty('Hard', lang)}: ${countsObj.Hard}`
         : JSON.stringify(value);
     }
     if (key === 'reviewMode') {
@@ -596,29 +609,32 @@ export const PromptOverrideModal: React.FC<PromptOverrideModalProps> = ({
                 />
               </label>
 
-              {(['Easy', 'Medium', 'Hard'] as const).map((d) => (
-                <label key={d}>
-                  {d} {lang === 'zh' ? '题数' : 'count'}
-                  <input
-                    aria-label={`${d} ${lang === 'zh' ? '题数' : 'count'}`}
-                    type="number"
-                    min="0"
-                    max="50"
-                    value={difficultyDraft.values[d]}
-                    placeholder={
-                      difficultyDraft.automatic === d ? (lang === 'zh' ? '自动' : 'Auto') : undefined
-                    }
-                    onChange={(e) =>
-                      handleDiffCountChange(d, e.target.value === '' ? '' : Number(e.target.value))
-                    }
-                    style={
-                      difficultyDraft.automatic === d
-                        ? { fontStyle: 'italic', opacity: 0.85 }
-                        : undefined
-                    }
-                  />
-                </label>
-              ))}
+              {(['Easy', 'Medium', 'Hard'] as const).map((d) => {
+                const label = `${formatDifficulty(d, lang)} ${lang === 'zh' ? '题数' : 'count'}`;
+                return (
+                  <label key={d}>
+                    {label}
+                    <input
+                      aria-label={label}
+                      type="number"
+                      min="0"
+                      max="50"
+                      value={difficultyDraft.values[d]}
+                      placeholder={
+                        difficultyDraft.automatic === d ? (lang === 'zh' ? '自动' : 'Auto') : undefined
+                      }
+                      onChange={(e) =>
+                        handleDiffCountChange(d, e.target.value === '' ? '' : Number(e.target.value))
+                      }
+                      style={
+                        difficultyDraft.automatic === d
+                          ? { fontStyle: 'italic', opacity: 0.85 }
+                          : undefined
+                      }
+                    />
+                  </label>
+                );
+              })}
 
               {manualValidationMessage && (
                 <div
@@ -766,7 +782,7 @@ export const PromptOverrideModal: React.FC<PromptOverrideModalProps> = ({
                     <strong>{t.quotaValidationIssues}:</strong>
                     <ul className="u-padding-left-1-25rem u-margin-top-0-25rem">
                       {preview.issues.map((issue, idx) => (
-                        <li key={idx}>{issue}</li>
+                        <li key={idx}>{localizePlanningIssue(issue, lang)}</li>
                       ))}
                     </ul>
                   </div>
@@ -781,7 +797,7 @@ export const PromptOverrideModal: React.FC<PromptOverrideModalProps> = ({
                     <strong>{t.unresolvedWarnings}:</strong>
                     <ul className="u-padding-left-1-25rem u-margin-top-0-25rem">
                       {preview.unresolved.map((unr, idx) => (
-                        <li key={idx}>{unr}</li>
+                        <li key={idx}>{localizePlanningIssue(unr, lang)}</li>
                       ))}
                     </ul>
                   </div>

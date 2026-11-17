@@ -411,7 +411,7 @@ it('ActivityRecords applies a filter request, then supports filtering, paginatio
   });
 
   await act(async () => {
-    render(<ActivityRecords lang="en" filterRequest={{ id: 1, date: '2026-03-30' }} />);
+    render(<DesktopWorkspaceProvider><ActivityRecords lang="en" filterRequest={{ id: 1, date: '2026-03-30' }} /></DesktopWorkspaceProvider>);
   });
 
   assert.equal(queryParams?.date, '2026-03-30');
@@ -438,7 +438,7 @@ it('ActivityRecords replaces every filter when a new request arrives', async () 
     return emptyActivities;
   });
 
-  const { rerender } = render(<ActivityRecords lang="en" filterRequest={{ id: 1, date: '2026-03-30' }} />);
+  const { rerender } = render(<DesktopWorkspaceProvider><ActivityRecords lang="en" filterRequest={{ id: 1, date: '2026-03-30' }} /></DesktopWorkspaceProvider>);
   await act(async () => {});
   assert.equal(queryParams?.date, '2026-03-30');
 
@@ -447,7 +447,7 @@ it('ActivityRecords replaces every filter when a new request arrives', async () 
   assert.equal(queryParams?.source, 'snapshot');
 
   await act(async () => {
-    rerender(<ActivityRecords lang="en" filterRequest={{ id: 2, pendingOnly: true }} />);
+    rerender(<DesktopWorkspaceProvider><ActivityRecords lang="en" filterRequest={{ id: 2, pendingOnly: true }} /></DesktopWorkspaceProvider>);
   });
   assert.equal(queryParams?.date, undefined, 'Date filter should be cleared by a request without a date');
   assert.equal(queryParams?.source, 'all');

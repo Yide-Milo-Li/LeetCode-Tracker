@@ -58,8 +58,6 @@ export function TodayProblemRow({
 
   const [isNoteMenuOpen, setIsNoteMenuOpen] = useState(false);
   const noteMenuRef = useRef<HTMLDivElement>(null);
-  const feedbackId = React.useId();
-  const [feedbackReason, setFeedbackReason] = useState<RecommendationFeedbackReason | ''>('');
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -183,20 +181,6 @@ export function TodayProblemRow({
             />
           )}
         </div>
-        <details className="text-muted">
-          <summary>{zh ? '可选换题/移除反馈' : 'Optional swap/removal feedback'}</summary>
-          <label htmlFor={feedbackId}>{zh ? '下次操作的原因：' : 'Reason for next action: '}{item.problem.title}</label>
-          <select id={feedbackId} className="form-input" value={feedbackReason} aria-describedby={feedbackId + '-help'}
-            onChange={event => setFeedbackReason(event.target.value as RecommendationFeedbackReason | '')}>
-            <option value="">{zh ? '不提供原因' : 'No reason'}</option>
-            <option value="time_unavailable">{zh ? '时间不足' : 'Time unavailable'}</option>
-            <option value="already_familiar">{zh ? '已经熟悉' : 'Already familiar'}</option>
-            <option value="topic_mismatch">{zh ? '专题不匹配' : 'Topic mismatch'}</option>
-            <option value="too_difficult">{zh ? '过于困难' : 'Too difficult'}</option>
-            <option value="other">{zh ? '其他' : 'Other'}</option>
-          </select>
-          <p id={feedbackId + '-help'}>{zh ? '仅在明确换题或移除时保存；不是练习失败，也不会改变掌握评估。' : 'Saved only when you swap or remove. This is not a failed attempt and does not change mastery evidence.'}</p>
-        </details>
         {rowError && (
           <Feedback retry={{ label: t.retry, run: () => onComplete(item) }}>
             {rowError}
@@ -279,7 +263,7 @@ export function TodayProblemRow({
             className="btn-icon"
             aria-label={t.replaceOne}
             disabled={!host.capabilities.planEditing || item.completed || isSaving || replacingBatch || Boolean(replacingItemId) || isAppending}
-            onClick={() => onReplaceOne(item, feedbackReason || undefined)}
+            onClick={() => onReplaceOne(item)}
           >
             <RefreshCw size={18} className={replacingItemId === item.id ? 'spin' : ''} />
           </button>
@@ -316,7 +300,7 @@ export function TodayProblemRow({
               isAppending ||
               isRemoving
             }
-            onClick={() => onRemove?.(item, feedbackReason || undefined)}
+            onClick={() => onRemove?.(item)}
           >
             {isRemoving ? (
               <RefreshCw size={18} className="spin" />

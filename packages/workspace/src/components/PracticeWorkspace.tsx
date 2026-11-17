@@ -6,6 +6,7 @@ import { useWorkspaceEnvironment } from '../context.tsx';
 import React, { useEffect, useState } from 'react';
 import { type PracticeRecord, type ProgressSnapshotHistory } from '../api.ts';
 import type { Language } from '../i18n.ts';
+import { localizeApiError } from '../error-i18n.ts';
 import { useWorkspace, type PracticeRequest } from '../workspace.tsx';
 import { Dialog, Feedback } from './ui.tsx';
 import { PracticeEditor } from './PracticeEditor.tsx';
@@ -70,7 +71,7 @@ export function PracticeWorkspace({
         }
       })
       .catch((err) => {
-        if (active) setError(String(err.message));
+        if (active) setError(localizeApiError(err, lang));
       })
       .finally(() => {
         if (active) setLoading(false);

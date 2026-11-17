@@ -285,7 +285,7 @@ describe('Notes formatting', () => {
 
       await act(async () => { workers[1].onmessage?.({ data: { content: '- new draft\n', status: 'formatted' } }); });
       assert.equal(save.mock.callCount(), 1);
-      assert.deepEqual(save.mock.calls[0].arguments, ['1', '- new draft\n']);
+      assert.deepEqual(save.mock.calls[0].arguments, ['1', '- new draft\n', 1, 1]);
       assert.equal(noteEditor().value, '- new draft\n');
       assert.equal((screen.getByRole('button', { name: /save note/i }) as HTMLButtonElement).disabled, true);
 
@@ -318,14 +318,14 @@ describe('Notes formatting', () => {
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: /save note/i })); });
     assert.equal(save.mock.callCount(), 1, 'Second write for the same problem must wait until first settles');
 
-    await act(async () => { first.resolve({ note: editorNote('1', 'first version') }); });
+    await act(async () => { first.resolve({ note: { ...editorNote('1', 'first version'), revision: 2 } }); });
     assert.equal(save.mock.callCount(), 2);
     assert.deepEqual(save.mock.calls.map((call) => call.arguments), [
-      ['1', 'first version'],
-      ['1', 'second version'],
+      ['1', 'first version', 1, 1],
+      ['1', 'second version', 2, 1],
     ]);
 
-    await act(async () => { second.resolve({ note: editorNote('1', 'second version') }); });
+    await act(async () => { second.resolve({ note: { ...editorNote('1', 'second version'), revision: 3 } }); });
     assert.equal(noteEditor().value, 'second version');
     assert.equal((screen.getByRole('button', { name: /save note/i }) as HTMLButtonElement).disabled, true);
   });

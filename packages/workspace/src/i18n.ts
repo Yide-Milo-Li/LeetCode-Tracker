@@ -483,9 +483,32 @@ export const translations = {
     viewModeSplit: 'Split',
     viewModePreview: 'Preview',
     wordCountChars: '{chars} chars ({words} words)',
-    markdownMathSupported: 'Markdown & LaTeX ($O(N)$) math supported',
+    markdownMathSupported: 'Markdown · Blank line starts a paragraph · Math shown as source',
+    notesFormatOnSave: 'Format on save',
+    notesFormatSkipped: 'Saved as written; formatting was skipped.',
+    notesFormatSettingFailed: 'Could not save the formatting preference.',
+    notesUndoFormat: 'Undo formatting',
+    notesAiFormat: 'AI format',
+    notesAiPreparing: 'Checking the selected content…',
+    notesAiScopeAll: 'Whole note',
+    notesAiScopeSelection: 'Selection expanded to complete Markdown blocks',
+    notesAiPrivacy: 'The selected text will be sent to your configured AI provider. Existing code blocks, formulas and links stay protected.',
+    notesAiGenerate: 'Generate suggestion',
+    notesAiGenerating: 'Preparing a suggestion…',
+    notesAiOriginal: 'Original',
+    notesAiCandidate: 'Suggested format',
+    notesAiApply: 'Apply to draft',
+    notesAiNotConfigured: 'Configure an AI provider in Settings to format notes.',
+    notesAiSettings: 'Open Settings',
+    notesAiFailed: 'Could not safely format this content. Try a smaller selection or edit it manually.',
+    notesAiTooLarge: 'Select a smaller portion of the note to use AI formatting.',
+    notesAiStale: 'The draft changed. Open AI format again to review a fresh suggestion.',
     previewEmptyNote: 'No note content yet. Write or insert a template to start.',
     noChangesToSave: 'No changes to save',
+    loadingNotes: 'Loading notes…',
+    loadingPracticeLogs: 'Loading practice logs…',
+    lastPracticeLogNote: 'Last Practice Log Note',
+    saving: 'Saving…',
   },
   zh: {
     retry: '重试',
@@ -963,8 +986,118 @@ export const translations = {
     viewModeSplit: '双栏分屏',
     viewModePreview: '实时预览',
     wordCountChars: '{chars} 字符 ({words} 词)',
-    markdownMathSupported: '支持 Markdown 与 LaTeX ($O(N)$) 公式',
+    markdownMathSupported: 'Markdown · 空行分段 · 公式显示源码',
+    notesFormatOnSave: '保存时格式化',
+    notesFormatSkipped: '已按原文保存；本次未能格式化。',
+    notesFormatSettingFailed: '无法保存格式化设置。',
+    notesUndoFormat: '撤销格式化',
+    notesAiFormat: 'AI 整理格式',
+    notesAiPreparing: '正在检查处理范围…',
+    notesAiScopeAll: '整篇笔记',
+    notesAiScopeSelection: '选区已扩展为完整 Markdown 片段',
+    notesAiPrivacy: '所选文本将发送给已配置的 AI 服务商；已有代码块、公式和链接会受到保护。',
+    notesAiGenerate: '生成建议',
+    notesAiGenerating: '正在整理格式…',
+    notesAiOriginal: '原文',
+    notesAiCandidate: '建议格式',
+    notesAiApply: '应用到草稿',
+    notesAiNotConfigured: '请先在设置中配置 AI 服务商。',
+    notesAiSettings: '打开设置',
+    notesAiFailed: '无法安全整理这段内容。请缩小选区或手动编辑。',
+    notesAiTooLarge: '请缩小选区后再使用 AI 整理。',
+    notesAiStale: '草稿已发生变化，请重新打开 AI 整理。',
     previewEmptyNote: '暂无笔记内容。开始撰写或插入标准模板。',
     noChangesToSave: '内容未修改',
+    loadingNotes: '正在加载笔记…',
+    loadingPracticeLogs: '正在加载练习记录…',
+    lastPracticeLogNote: '上次打卡备注',
+    saving: '保存中…',
   },
 };
+
+/** Localize canonical problem difficulty labels (`Easy`, `Medium`, `Hard`). */
+export function formatDifficulty(difficulty: string, lang: Language): string {
+  if (difficulty === 'Easy') return translations[lang].statEasy;
+  if (difficulty === 'Medium') return translations[lang].statMedium;
+  if (difficulty === 'Hard') return translations[lang].statHard;
+  return difficulty;
+}
+
+/** Localize daily plan generator source identifiers (`local`, `gemini`, `openai`, `deepseek`). */
+export function formatPlanSource(source: string, lang: Language): string {
+  if (source === 'local') return lang === 'zh' ? '本地规则' : 'Local';
+  if (source === 'gemini') return 'Gemini';
+  if (source === 'openai') return 'OpenAI';
+  if (source === 'deepseek') return 'DeepSeek';
+  return source;
+}
+
+/** Localize daily plan version action identifiers (`ensure`, `replace_one`, etc.). */
+export function formatPlanAction(action: string, lang: Language): string {
+  const zh = lang === 'zh';
+  switch (action) {
+    case 'ensure':
+      return zh ? '生成计划' : 'Generated';
+    case 'replace_one':
+      return zh ? '换一题' : 'Replaced one';
+    case 'replace_batch':
+      return zh ? '全部换新' : 'Replaced unfinished';
+    case 'append_one':
+      return zh ? '加一题' : 'Added one';
+    case 'remove_item':
+      return zh ? '移除题目' : 'Removed item';
+    case 'override':
+      return zh ? '临时调整' : 'Adjusted';
+    default:
+      return action;
+  }
+}
+
+/** Localize progress snapshot / practice record status (`active`, `revoked`). */
+export function formatSnapshotStatus(status: string, lang: Language): string {
+  if (status === 'active') return lang === 'zh' ? '有效' : 'Active';
+  if (status === 'revoked') return lang === 'zh' ? '已撤销' : 'Revoked';
+  return status;
+}
+
+/** Localize activity feed / snapshot result labels (`Accepted`, `Completed Practice`, etc.). */
+export function formatActivityAction(action: string, lang: Language): string {
+  const zh = lang === 'zh';
+  switch (action) {
+    case 'Accepted':
+      return zh ? '已通过' : 'Accepted';
+    case 'Accepted Submission':
+      return zh ? '已通过提交' : 'Accepted Submission';
+    case 'Completed Practice':
+      return zh ? '已完成练习' : 'Completed Practice';
+    case 'Attempted Practice':
+      return zh ? '已尝试练习' : 'Attempted Practice';
+    case 'Submission':
+      return zh ? '已提交' : 'Submission';
+    default:
+      return action;
+  }
+}
+
+/** Localize catalog import diff field names (`title`, `difficulty`, `tags`, etc.). */
+export function formatCatalogChangeField(field: string, lang: Language): string {
+  const zh = lang === 'zh';
+  switch (field) {
+    case 'title':
+      return zh ? '标题' : 'title';
+    case 'difficulty':
+      return zh ? '难度' : 'difficulty';
+    case 'titleSlug':
+      return zh ? '路径标识' : 'titleSlug';
+    case 'url':
+      return zh ? '链接' : 'url';
+    case 'isPaidOnly':
+      return zh ? '会员状态' : 'isPaidOnly';
+    case 'source':
+      return zh ? '来源' : 'source';
+    case 'tags':
+      return zh ? '标签' : 'tags';
+    default:
+      return field;
+  }
+}

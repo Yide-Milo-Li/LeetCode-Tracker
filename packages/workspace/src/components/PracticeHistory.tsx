@@ -6,6 +6,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useBusinessRefresh } from '../hooks/useBusinessRefresh.ts';
 import { type CatalogProblem, type PracticeRecord } from '../api.ts';
 import type { Language } from '../i18n.ts';
+import { localizeApiError } from '../error-i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
 import { Feedback, Pagination } from './ui.tsx';
 import { practiceTime } from './PracticeRecordCard.tsx';
@@ -44,7 +45,7 @@ export function PracticeHistory({ problem, lang }: PracticeHistoryProps) {
         }
       })
       .catch((err) => {
-        if (active) setError(String(err.message));
+        if (active) setError(localizeApiError(err, lang));
       })
       .finally(() => {
         if (active) setLoading(false);

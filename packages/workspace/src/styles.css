@@ -1980,6 +1980,95 @@
   background: var(--muted-surface);
   color: var(--primary);
 }
+.tracker-workspace .plan-notice-strip {
+  margin: 12px 0 16px;
+  padding: 9px 14px;
+  border-radius: var(--radius);
+  background: var(--muted-surface);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.tracker-workspace .plan-notice-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.tracker-workspace .plan-notice-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.tracker-workspace .plan-notice-icon {
+  flex-shrink: 0;
+  color: var(--warning);
+}
+.tracker-workspace .plan-notice-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.tracker-workspace .plan-notice-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-weight: 500;
+  transition:
+    background var(--fast) ease,
+    color var(--fast) ease;
+}
+.tracker-workspace .plan-notice-toggle:hover {
+  background: var(--surface);
+  color: var(--text-main);
+}
+.tracker-workspace .plan-notice-toggle svg {
+  transition: transform var(--fast) ease;
+}
+.tracker-workspace .plan-notice-toggle[aria-expanded='true'] svg {
+  transform: rotate(180deg);
+}
+.tracker-workspace .plan-notice-details {
+  margin: 8px 0 2px 23px;
+  padding-left: 16px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.tracker-workspace .plan-notice-details li + li {
+  margin-top: 3px;
+}
+.tracker-workspace .action-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.tracker-workspace .action-dialog-message {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+}
+.tracker-workspace .action-dialog-problem {
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: var(--muted-surface);
+  border: 1px solid var(--border-color);
+  font-size: 14px;
+  color: var(--text-main);
+  overflow-wrap: anywhere;
+}
+.tracker-workspace .action-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
 .tracker-workspace .today-problems {
   display: flex;
   flex-direction: column;
@@ -2883,9 +2972,9 @@
 }
 .tracker-workspace .kpi-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
-  margin-bottom: 32px;
+  margin-bottom: 24px;
 }
 .tracker-workspace .kpi-card {
   padding: 16px 20px;
@@ -2925,9 +3014,15 @@
   color: var(--text-muted);
   font-size: 12px;
 }
+.tracker-workspace .kpi-value-secondary {
+  font-size: 0.6em;
+  font-weight: 600;
+  color: var(--text-muted);
+}
 .tracker-workspace .heatmap-card,
 .tracker-workspace .trend-card,
 .tracker-workspace .distribution-card,
+.tracker-workspace .topic-insights,
 .tracker-workspace .recent-activity-card {
   padding: 24px;
   background: var(--surface);
@@ -2940,6 +3035,7 @@
 .tracker-workspace .heatmap-card:hover,
 .tracker-workspace .trend-card:hover,
 .tracker-workspace .distribution-card:hover,
+.tracker-workspace .topic-insights:hover,
 .tracker-workspace .recent-activity-card:hover {
   box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.06);
 }
@@ -3036,16 +3132,27 @@
   width: 100%;
 }
 
-/* Trend and mastery share one row; each card keeps the page's card container. */
+/* Difficulty mastery (+ 30-day trend when it has data) beside the topics worth attention. */
 .tracker-workspace .progress-insights-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  align-items: start;
   gap: 24px;
   margin-bottom: 24px;
 }
-.tracker-workspace .progress-insights-grid > .trend-card,
-.tracker-workspace .progress-insights-grid > .distribution-card {
+.tracker-workspace .progress-insights-main {
+  display: grid;
+  gap: 24px;
+  min-width: 0;
+}
+.tracker-workspace .progress-insights-main > .trend-card,
+.tracker-workspace .progress-insights-main > .distribution-card,
+.tracker-workspace .progress-insights-grid > .distribution-card,
+.tracker-workspace .progress-insights-grid > .trend-card {
   margin-bottom: 0;
+}
+.tracker-workspace .progress-insights-main .trend-chart-wrapper {
+  height: 220px;
 }
 @media (max-width: 1180px) {
   .tracker-workspace .progress-insights-grid {
@@ -3150,6 +3257,24 @@
   height: 1px;
   background: var(--border-color);
   margin: 4px 0;
+}
+/* A fixed fraction column keeps the three tracks the same length. */
+.tracker-workspace .mastery-card .mastery-row {
+  grid-template-columns: 4.5rem minmax(0, 1fr) 7.5rem;
+}
+.tracker-workspace .mastery-card .mastery-row-frac {
+  color: var(--text-main);
+  white-space: nowrap;
+}
+.tracker-workspace .mastery-row-pct {
+  display: inline-block;
+  min-width: 2.75em;
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.tracker-workspace .mastery-row-fill.has-value {
+  transform: scaleX(max(var(--fill, 0), 0.012));
 }
 .tracker-workspace .mastery-empty {
   margin: 0;
@@ -4225,7 +4350,6 @@
 }
 
 /* Evidence lists adapt to desktop windows and zoom without fixed column widths. */
-.tracker-workspace .topic-insights { margin-top: 1.5rem; }
 .tracker-workspace .topic-insights-title-group { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
 .tracker-workspace .topic-insights-meta-pill {
   font-size: 0.75rem;
@@ -4652,8 +4776,8 @@
 .tracker-workspace .review-sub-options {
   padding: 12px 14px;
   background: color-mix(in srgb, var(--primary) 5%, var(--surface));
-  border-left: 3px solid var(--primary);
-  border-radius: 0 var(--radius) var(--radius) 0;
+  border: 1px solid color-mix(in srgb, var(--primary) 18%, var(--border-color));
+  border-radius: var(--radius);
 }
 .tracker-workspace .strategy-advanced-details {
   border: 1px solid var(--border-color);
@@ -5217,6 +5341,20 @@
   border: none;
 }
 
+.tracker-workspace .notes-preview-empty { display: flex; align-items: center; justify-content: center; color: var(--text-muted); }
+.tracker-workspace .notes-preview-pane table { border-collapse: collapse; display: block; overflow-x: auto; max-width: 100%; margin: 10px 0; }
+.tracker-workspace .notes-preview-pane th, .tracker-workspace .notes-preview-pane td { border: 1px solid var(--border-color); padding: 4px 8px; text-align: left; }
+.tracker-workspace .notes-preview-pane th { background: var(--muted-surface); }
+.tracker-workspace .notes-preview-pane input[type='checkbox'] { accent-color: var(--primary); }
+.tracker-workspace .notes-math-inline { font-style: italic; color: var(--primary); }
+.tracker-workspace .notes-code-block { position: relative; }
+.tracker-workspace .notes-code-language { position: absolute; right: 10px; top: 6px; font-size: 11px; color: var(--text-muted); text-transform: uppercase; }
+.tracker-workspace .notes-image-placeholder { color: var(--text-muted); overflow-wrap: anywhere; }
+.tracker-workspace .notes-ai-compare { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.tracker-workspace .notes-ai-compare pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 45vh; overflow: auto; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--canvas); color: var(--text-main); }
+.tracker-workspace .notes-ai-scope { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 24vh; overflow: auto; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--canvas); color: var(--text-main); }
+.tracker-workspace .notes-ai-compare h3 { margin: 0 0 6px; font-size: 13px; }
+
 .tracker-workspace .notes-preview-pane hr {
   border: none;
   border-top: 1px solid var(--border-color);
@@ -5663,6 +5801,482 @@
   width: 28px;
   height: 28px;
   flex: none;
+}
+
+/*
+ * Progress → Statistics: pending-date notice, heatmap footer, topics worth attention and the topic
+ * table. Motion stays small: the notice settles in once, bars grow on mount (shared keyframe),
+ * expanded rows open with a height/opacity ease, and carets rotate. Reduced motion removes all of it.
+ */
+.tracker-workspace .progress-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 10px 12px 10px 14px;
+  border-radius: var(--radius);
+  background: var(--warning-bg);
+  color: var(--warning);
+  font-size: 13px;
+  animation: tracker-progress-settle var(--enter) var(--spring-tactile) both;
+}
+.tracker-workspace .progress-notice-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.tracker-workspace .progress-notice-text {
+  flex: 1;
+  min-width: 0;
+}
+.tracker-workspace .progress-notice-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color var(--fast) ease;
+}
+.tracker-workspace .progress-notice-action svg {
+  width: 14px;
+  height: 14px;
+  transition: transform var(--fast) var(--spring-tactile);
+}
+.tracker-workspace .progress-notice-action:hover {
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+.tracker-workspace .progress-notice-action:hover svg {
+  transform: translateX(2px);
+}
+.tracker-workspace .progress-notice-action:focus-visible {
+  outline: 2px solid var(--warning);
+  outline-offset: 1px;
+}
+@keyframes tracker-progress-settle {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+/* Heatmap header and footer */
+.tracker-workspace .heatmap-card-head {
+  align-items: center;
+}
+.tracker-workspace .heatmap-year-select {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--muted-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+}
+.tracker-workspace .heatmap-year-select .topic-filter-tab {
+  padding: 3px 10px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.tracker-workspace .heatmap-summary {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 4px;
+}
+.tracker-workspace .heatmap-quiet {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.tracker-workspace .heatmap-quiet-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--outline);
+}
+
+/* Topics worth attention */
+.tracker-workspace .focus-topics-note {
+  margin: 0 0 6px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--muted-surface);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.tracker-workspace .focus-topics-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.tracker-workspace .focus-topics-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(80px, 9rem) 5.5rem;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 14px;
+}
+.tracker-workspace .focus-topics-row:last-child {
+  border-bottom: 0;
+}
+.tracker-workspace .focus-topics-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.tracker-workspace .focus-topics-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--muted-surface);
+  overflow: hidden;
+}
+.tracker-workspace .focus-topics-fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--primary);
+  transform: scaleX(var(--fill, 0));
+  transform-origin: left;
+  transition: transform 420ms var(--spring-tactile);
+  animation: mastery-fill-grow 640ms var(--spring-tactile) both;
+}
+.tracker-workspace .focus-topics-row:nth-child(2) .focus-topics-fill { animation-delay: 40ms; }
+.tracker-workspace .focus-topics-row:nth-child(3) .focus-topics-fill { animation-delay: 80ms; }
+.tracker-workspace .focus-topics-row:nth-child(4) .focus-topics-fill { animation-delay: 120ms; }
+.tracker-workspace .focus-topics-row:nth-child(5) .focus-topics-fill { animation-delay: 160ms; }
+.tracker-workspace .focus-topics-frac {
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: right;
+}
+.tracker-workspace .focus-topics-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+/* Level chips share the semantic tones used by the difficulty pills. */
+.tracker-workspace .tag-chip.level-needs_practice {
+  color: var(--warning);
+  background: var(--warning-bg);
+}
+.tracker-workspace .tag-chip.level-developing {
+  color: var(--primary);
+  background: var(--selected);
+}
+.tracker-workspace .tag-chip.level-recently_stable {
+  color: var(--easy);
+  background: var(--easy-bg);
+}
+
+/* Topic table */
+.tracker-workspace .topic-insights .section-heading {
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.tracker-workspace .topic-insights .section-heading h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+}
+/* Topic search sits above the table; the field reuses the global input look. The attribute
+   selector matches the specificity of the global input rule so these paddings win. */
+.tracker-workspace .topic-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.tracker-workspace .topic-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: min(100%, 22rem);
+}
+.tracker-workspace .topic-search-icon {
+  position: absolute;
+  left: 10px;
+  width: 15px;
+  height: 15px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+.tracker-workspace .topic-search input[type='search'] {
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 32px 6px 32px;
+  font-size: 13px;
+  border-color: var(--border-color);
+  transition: border-color var(--fast) ease, box-shadow var(--fast) ease;
+}
+.tracker-workspace .topic-search input[type='search']:hover {
+  border-color: var(--outline);
+}
+.tracker-workspace .topic-search input[type='search']:focus-visible {
+  border-color: var(--primary);
+  box-shadow: var(--shadow-glow);
+  outline: none;
+}
+/* The clear button replaces the native search cancel control for a consistent look. */
+.tracker-workspace .topic-search input[type='search']::-webkit-search-cancel-button {
+  appearance: none;
+}
+.tracker-workspace .topic-search-clear {
+  position: absolute;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  animation: tracker-progress-settle var(--fast) var(--spring-tactile) both;
+  transition: background-color var(--fast) ease, color var(--fast) ease;
+}
+.tracker-workspace .topic-search-clear:hover {
+  color: var(--text-main);
+  background: var(--muted-surface);
+}
+.tracker-workspace .topic-search-clear:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+.tracker-workspace .topic-search-clear svg {
+  width: 14px;
+  height: 14px;
+}
+.tracker-workspace .topic-toolbar-hint {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.tracker-workspace .topic-empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 0 4px;
+}
+.tracker-workspace .topic-empty p {
+  margin: 0;
+}
+.tracker-workspace .topic-table-scroll {
+  overflow-x: auto;
+}
+.tracker-workspace .topic-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.tracker-workspace .topic-table thead th {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+.tracker-workspace .topic-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tracker-workspace .topic-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: -2px -4px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: color var(--fast) ease, background-color var(--fast) ease;
+}
+.tracker-workspace .topic-sort:hover {
+  color: var(--text-main);
+  background: var(--muted-surface);
+}
+.tracker-workspace .topic-sort:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+.tracker-workspace .topic-sort-arrow {
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity var(--fast) ease, transform var(--fast) var(--spring-tactile);
+}
+.tracker-workspace .topic-sort:hover .topic-sort-arrow {
+  opacity: 0.45;
+}
+.tracker-workspace .topic-sort.is-active {
+  color: var(--primary);
+}
+.tracker-workspace .topic-sort.is-active .topic-sort-arrow {
+  opacity: 1;
+  transform: none;
+}
+.tracker-workspace .topic-insight-row > th,
+.tracker-workspace .topic-insight-row > td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--border-color);
+  vertical-align: middle;
+  transition: background-color var(--fast) ease, border-color var(--fast) ease;
+}
+.tracker-workspace .topic-insight-row > th {
+  font-weight: inherit;
+  text-align: left;
+}
+.tracker-workspace .topic-group:hover .topic-insight-row > *,
+.tracker-workspace .topic-group.is-open .topic-insight-row > * {
+  background: color-mix(in srgb, var(--muted-surface) 55%, transparent);
+}
+.tracker-workspace .topic-group.is-open .topic-insight-row > * {
+  border-bottom-color: transparent;
+}
+.tracker-workspace .topic-row-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px 2px 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-main);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.tracker-workspace .topic-row-toggle strong {
+  font-weight: 600;
+}
+.tracker-workspace .topic-row-toggle:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+.tracker-workspace .topic-row-caret {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: transform var(--enter) var(--spring-tactile);
+}
+.tracker-workspace .topic-group.is-open .topic-row-caret {
+  transform: rotate(90deg);
+}
+.tracker-workspace .topic-table td.is-overdue {
+  color: var(--warning);
+}
+.tracker-workspace .topic-table .topic-difficulty-pills {
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.tracker-workspace .topic-table .topic-micro-pill {
+  padding: 2px 5px;
+}
+.tracker-workspace .topic-table .topic-pill-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.tracker-workspace .topic-detail-row > td {
+  padding: 0;
+  border: 0;
+}
+.tracker-workspace .topic-detail-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows var(--enter) var(--spring-tactile), opacity var(--fast) ease;
+}
+.tracker-workspace .topic-group.is-open .topic-detail-collapse {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.tracker-workspace .topic-detail-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+.tracker-workspace .topic-detail-body {
+  padding: 4px 16px 16px 30px;
+  border-bottom: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--muted-surface) 55%, transparent);
+}
+.tracker-workspace .topic-detail-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 24px;
+  margin: 0 0 10px;
+  font-size: 12px;
+}
+.tracker-workspace .topic-detail-facts div {
+  display: flex;
+  gap: 6px;
+}
+.tracker-workspace .topic-detail-facts dt {
+  color: var(--text-muted);
+}
+.tracker-workspace .topic-detail-facts dd {
+  margin: 0;
+  font-weight: 600;
+}
+.tracker-workspace .topic-detail-note {
+  margin: 0 0 10px;
+  font-size: 12px;
+}
+.tracker-workspace .topic-table-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  font-size: 13px;
+}
+.tracker-workspace .progress-source-details .detail-grid {
+  margin-bottom: 12px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tracker-workspace .progress-notice,
+  .tracker-workspace .focus-topics-fill,
+  .tracker-workspace .topic-search-clear {
+    animation: none;
+  }
+  .tracker-workspace .focus-topics-fill,
+  .tracker-workspace .progress-notice-action svg,
+  .tracker-workspace .topic-sort,
+  .tracker-workspace .topic-sort-arrow,
+  .tracker-workspace .topic-insight-row > th,
+  .tracker-workspace .topic-insight-row > td,
+  .tracker-workspace .topic-row-caret,
+  .tracker-workspace .topic-detail-collapse {
+    transition: none;
+  }
 }
 /* Chat-host shell reuses the desktop sidebar/main layout, contained in the host frame. */
 .tracker-workspace .embedded-shell { display:flex; align-items:flex-start; min-height:100vh; background:var(--canvas); color:var(--text-main); }

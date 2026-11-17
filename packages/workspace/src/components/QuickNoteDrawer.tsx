@@ -5,7 +5,7 @@ import { useWorkspaceEnvironment } from '../context.tsx';
 import React, { useEffect, useState } from 'react';
 import { X, ExternalLink, BookOpen, Clock, AlertCircle } from 'lucide-react';
 import { type ProblemNote, hasMeaningfulNoteContent } from '../api.ts';
-import { translations, type Language } from '../i18n.ts';
+import { formatDifficulty, translations, type Language } from '../i18n.ts';
 import { QuickCopyButtons } from './QuickCopyButtons.tsx';
 
 export interface QuickNoteDrawerProps {
@@ -124,7 +124,7 @@ export function QuickNoteDrawer({
             </h3>
             <div style={{ display: 'flex', gap: '8px', marginTop: '8px', alignItems: 'center' }}>
               <span className={`badge badge-${problem.difficulty.toLowerCase()}`}>
-                {problem.difficulty}
+                {formatDifficulty(problem.difficulty, lang)}
               </span>
               <a
                 href={problem.url}
@@ -183,7 +183,7 @@ export function QuickNoteDrawer({
                 }}
               >
                 <Clock size={14} />
-                <span>上次打卡备注 (Last Practice Log Note)</span>
+                <span>{t.lastPracticeLogNote}</span>
               </div>
               <p style={{ margin: 0, fontSize: '0.9375rem', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
                 {latestPracticeNotes}
@@ -209,7 +209,7 @@ export function QuickNoteDrawer({
             </div>
 
             {loading ? (
-              <div style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>Loading notes...</div>
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>{t.loadingNotes}</div>
             ) : note && note.content.trim().length > 0 ? (
               <div
                 style={{

@@ -47,6 +47,7 @@ test('formal rendered note preserves dirty input after recovery persistence fail
   try {
     await waitFor(()=>assert.equal(view.container.querySelector('textarea')?.disabled,false),{timeout:10000});
     fail=true;fireEvent.change(view.container.querySelector('textarea')!,{target:{value:'retain failed save'}});
+    assert.equal((within(view.container).getByRole('button',{name:/AI format/i}) as HTMLButtonElement).disabled,true);
     fireEvent.click(within(view.container).getByRole('button',{name:/Save note/i}));
     await waitFor(()=>assert.match(view.container.textContent!,/Synthetic disk failure/));
     assert.equal(view.container.querySelector('textarea')!.value,'retain failed save');assert.equal(dirty,true);assert.equal(writes,0);
