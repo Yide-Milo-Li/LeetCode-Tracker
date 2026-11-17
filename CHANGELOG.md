@@ -1,11 +1,12 @@
 # Changelog
 
-## [1.3.1] - 2026-11-16
+## [1.3.1] - 2026-11-17
 
 - Name the configured AI provider in the Progress import hint instead of always naming Gemini, and show review spacing strategies by plain name with a one-line description instead of internal version ids.
 - Make the yearly heatmap, select chevrons, tooltips, scrims, and Notes difficulty badges follow the active palette, and define two previously undefined CSS tokens.
 - Open the Today Note menu and quick-copy dropdowns as native popovers (with a fallback where the Popover API is missing), and render the quick-note drawer through the shared dialog for focus containment and focus return.
 - Restructure the web client into smaller Settings and Notes modules, ordered stylesheet partials, and shared async-loading, preference, and date-formatting hooks with no data or API changes.
+- Keep the palette-tinted app icon after quitting: Windows repoints Start menu, Desktop and pinned shortcuts to a generated multi-size `.ico`, and macOS sets the `.app` bundle's custom icon; the default light palette restores the shipped icon.
 - See [release notes](docs/releases/1.3.1.md) for download, upgrade, and verification details.
 
 ## [1.3.0] - 2026-11-16
