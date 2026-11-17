@@ -12,7 +12,7 @@ See [desktop limitations](docs/desktop.md) and [provider behavior](docs/llm-prov
 
 Release 1.0.0 pins `@fastify/static` to 10.1.3 in both root and server manifests, replacing the vulnerable 8.x dependency. The release audit reported zero known npm vulnerabilities at verification time. A regression reproduces the old encoded-path route-guard bypass and passes with the upgraded dependency; static SPA/API behavior and native static-disabled behavior are also tested. This is a dated dependency check, not a guarantee against future advisories.
 
-Release 1.3.0 distributes an unsigned Windows x64 installer and an ad-hoc signed, unnotarized Apple Silicon macOS `.dmg` package. Do not publish credentials, personal records or database contents in issues. Use GitHub private vulnerability reporting if available; otherwise request a private channel without disclosing sensitive details.
+Release 1.3.1 distributes an unsigned Windows x64 installer and an ad-hoc signed, unnotarized Apple Silicon macOS `.dmg` package. Do not publish credentials, personal records or database contents in issues. Use GitHub private vulnerability reporting if available; otherwise request a private channel without disclosing sensitive details.
 
 Users must have rights to use supplied data. Keep databases, exports, backups, logs and keys out of Git. Use synthetic public examples. Validate imported records and preserve prior data on failure. The MIT license covers code and does not grant rights to third-party content.
 

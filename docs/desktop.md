@@ -1,12 +1,12 @@
 # Desktop Application & Distribution Guide
 
-LeetCode Tracker provides native desktop packages for **Windows 11 x64** (`LeetCode-Tracker_1.3.0_x64-setup.exe`, NSIS installer) and **Apple Silicon macOS 14+** (`LeetCode-Tracker_1.3.0_aarch64.dmg`, ad-hoc signed `.app`/`.dmg`). Both platforms run the exact same local-first React UI, Fastify `/api/v1` service, SQLite v12 storage engine, and bundled private **Node.js 26.13.0** runtime. End users have **zero requirement** to install Node.js, npm, Git, or Rust.
+LeetCode Tracker provides native desktop packages for **Windows 11 x64** (`LeetCode-Tracker_1.3.1_x64-setup.exe`, NSIS installer) and **Apple Silicon macOS 14+** (`LeetCode-Tracker_1.3.1_aarch64.dmg`, ad-hoc signed `.app`/`.dmg`). Both platforms run the exact same local-first React UI, Fastify `/api/v1` service, SQLite v12 storage engine, and bundled private **Node.js 26.13.0** runtime. End users have **zero requirement** to install Node.js, npm, Git, or Rust.
 
-Download installers and `SHA256SUMS.txt` from [Release 1.3.0](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.3.0). Automated boundary tests and local/CI packaging do not establish clean-VM Windows installation, populated-profile upgrade/downgrade compatibility, Windows 10 compatibility, Apple notarization, or the full WebView2/Gatekeeper acceptance matrix; see the [1.3.0 release notes](releases/1.3.0.md).
+Download installers and `SHA256SUMS.txt` from [Release 1.3.1](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.3.1). Automated boundary tests and local/CI packaging do not establish clean-VM Windows installation, populated-profile upgrade/downgrade compatibility, Windows 10 compatibility, Apple notarization, or the full WebView2/Gatekeeper acceptance matrix; see the [1.3.1 release notes](releases/1.3.1.md).
 
 ### Known 1.0.0 startup failure
 
-The historical published 1.0.0 Windows host can fail before readiness because Tauri returns a canonical Windows `\\?\` resource path that the bundled Node runtime cannot use as a script entrypoint. Releases 1.0.1 through 1.3.0 simplify those paths safely before spawning Node without resetting the database or deleting lock/WAL files.
+The historical published 1.0.0 Windows host can fail before readiness because Tauri returns a canonical Windows `\\?\` resource path that the bundled Node runtime cannot use as a script entrypoint. Releases 1.0.1 through 1.3.1 simplify those paths safely before spawning Node without resetting the database or deleting lock/WAL files.
 
 ---
 
@@ -21,7 +21,7 @@ The historical published 1.0.0 Windows host can fail before readiness because Ta
 - **Administrator Rights**: **Not required**. The installer uses a per-user installation scope.
 
 #### Installation Steps
-1. Download `LeetCode-Tracker_1.3.0_x64-setup.exe` and `SHA256SUMS.txt` from [Release 1.3.0](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.3.0).
+1. Download `LeetCode-Tracker_1.3.1_x64-setup.exe` and `SHA256SUMS.txt` from [Release 1.3.1](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.3.1).
 2. Run the installer (if Windows SmartScreen shows an unknown-publisher warning because the installer is unsigned, click **More info → Run anyway**). You can select the destination directory (defaults to `%LOCALAPPDATA%\Programs\LeetCode Tracker`).
 3. Launch **LeetCode Tracker** from the desktop shortcut or Start Menu.
 4. On first launch, follow the three-step setup guide on **Today** (Timezone → JSONL Problems → Study rhythm), or import a Snapshot Bundle v5 migration file under **Settings → Data → Import migration file**.
@@ -30,10 +30,10 @@ The historical published 1.0.0 Windows host can fail before readiness because Ta
 
 #### Scope & Requirements
 - **Target hardware & OS**: Apple Silicon (`arm64` / `aarch64-apple-darwin`), **macOS 14 (Sonoma) or newer**, using the built-in system `WKWebView` (no separate WebView runtime download required). Intel Macs, Universal binaries, Apple notarization, and App Store distribution are outside the current scope.
-- **Package**: Produces an ad-hoc signed (`signingIdentity: "-"`) `LeetCode Tracker.app` and `LeetCode-Tracker_1.3.0_aarch64.dmg` (`LeetCode Tracker_1.3.0_aarch64.dmg` from local Tauri output).
+- **Package**: Produces an ad-hoc signed (`signingIdentity: "-"`) `LeetCode Tracker.app` and `LeetCode-Tracker_1.3.1_aarch64.dmg` (`LeetCode Tracker_1.3.1_aarch64.dmg` from local Tauri output).
 
 #### Installation & First Launch (DMG / `.app`)
-1. Download `LeetCode-Tracker_1.3.0_aarch64.dmg` (and `SHA256SUMS.txt`) from [Release 1.3.0](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.3.0), double-click the `.dmg`, and drag **LeetCode Tracker.app** into **Applications** (do not run directly from inside the read-only DMG if you want standard Dock pinning and upgrades; user data is always stored outside the `.app` under `~/Library/Application Support/com.leetcodetracker.desktop/`).
+1. Download `LeetCode-Tracker_1.3.1_aarch64.dmg` (and `SHA256SUMS.txt`) from [Release 1.3.1](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.3.1), double-click the `.dmg`, and drag **LeetCode Tracker.app** into **Applications** (do not run directly from inside the read-only DMG if you want standard Dock pinning and upgrades; user data is always stored outside the `.app` under `~/Library/Application Support/com.leetcodetracker.desktop/`).
 2. **First-launch Gatekeeper approval (unnotarized ad-hoc package)**:
    - Because `APPLE_ID` / `APPLE_API_KEY` notarization is not configured on this package, macOS Gatekeeper may block the first open with *"Apple could not verify LeetCode Tracker"* or *"unidentified developer"*.
    - Open **System Settings → Privacy & Security**, scroll to the **Security** section, and click **Open Anyway** for **LeetCode Tracker** (or Control-click **LeetCode Tracker.app** in Finder and choose **Open**).
@@ -52,7 +52,7 @@ The historical published 1.0.0 Windows host can fail before readiness because Ta
 
 | Area | Windows 11 x64 | macOS 14+ (Apple Silicon) |
 | --- | --- | --- |
-| **Installer / Package** | Per-user NSIS `.exe` (`LeetCode-Tracker_1.3.0_x64-setup.exe`) | Ad-hoc signed `.dmg` / `.app` (`LeetCode-Tracker_1.3.0_aarch64.dmg`) |
+| **Installer / Package** | Per-user NSIS `.exe` (`LeetCode-Tracker_1.3.1_x64-setup.exe`) | Ad-hoc signed `.dmg` / `.app` (`LeetCode-Tracker_1.3.1_aarch64.dmg`) |
 | **WebView Runtime** | Evergreen WebView2 (`downloadBootstrapper`) | Built-in system `WKWebView` |
 | **Bundled Sidecar** | Private `Node.js 26.13.0` (`node.exe`) + `desktop-server.mjs` | Private `Node.js 26.13.0` (`node`) + `desktop-server.mjs` |
 | **Window Close vs Quit** | Closing main window initiates graceful sidecar shutdown (10s deadline) | Red close button hides window; Dock click reopens; `Cmd+Q` initiates graceful shutdown (10s deadline) |
@@ -127,13 +127,13 @@ To prevent orphan background processes:
 - **Full Database Backups**: Automatic transactional SQLite snapshots are saved to the `backups/` directory before schema migrations and bulk data imports.
 - **Portable Snapshot Bundles**: The application supports exporting and importing portable JSON Snapshot Bundles (`.json`). **Settings → Data** provides **Export migration file** / **Import migration file** for moving a profile between Windows and macOS.
   - **Complete v5 migration**: Bundle v5 includes the local problem catalog, tags, practice records and operation history, imported progress history, notes, strategies and versions, weekly assignments, daily plans and versions, review state, statistics inputs, and non-sensitive settings. It replaces the target business profile after a preview and confirmation; it does not merge two profiles.
-  - **Cross-platform workflow**: Export v5 on the source device, copy the JSON file to the new device, choose **Import migration file**, review the source/count summary (`Complete migration · v1.3.0 · ...`), and confirm replacement. The same file format works Windows → macOS and macOS → Windows.
+  - **Cross-platform workflow**: Export v5 on the source device, copy the JSON file to the new device, choose **Import migration file**, review the source/count summary (`Complete migration · v1.3.1 · ...`), and confirm replacement. The same file format works Windows → macOS and macOS → Windows.
   - **Secret Exclusion**: Provider API keys (Gemini, OpenAI, DeepSeek) are **automatically omitted** from exported bundles to avoid accidental credential leakage.
   - **Local Secret Preservation**: Importing a snapshot bundle updates settings and records without overwriting or clearing existing local API keys.
   - **Untrusted Imports**: Incoming key fields are ignored even when nonempty; an unset local key stays unset.
 - **Safety and limits**: The target database is backed up before replacement; malformed, unknown-version, broken-reference, oversized (>64 MiB), backup, or write failures leave the original profile in place. Restore blocks concurrent profile writes and clears stale planning/preview state after success.
 - API keys remain in the local SQLite settings store without operating-system credential encryption. Raw SQLite backups can contain them. Portable bundles exclude keys by design.
-- v1 snapshot imports remain available for backward compatibility but are labelled partial restore. v2/v3 remain readable; v5 is the Release 1.3.0 migration format and preserves schema-12 recommendation policy, explanation and feedback semantics (prior 1.2.0 used v3/schema 10). Legacy export that loses newer semantics fails explicitly. API keys must be configured again on the target device when they were not already present.
+- v1 snapshot imports remain available for backward compatibility but are labelled partial restore. v2/v3 remain readable; v5 is the migration format introduced in Release 1.3.0 (unchanged in 1.3.1) and preserves schema-12 recommendation policy, explanation and feedback semantics (prior 1.2.0 used v3/schema 10). Legacy export that loses newer semantics fails explicitly. API keys must be configured again on the target device when they were not already present.
 
 ---
 
@@ -201,10 +201,10 @@ cargo clippy --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --all-ta
 `npm test` includes a freshly bundled sidecar test (`tests/desktop-spike.test.ts`) copied to a temporary directory without repository dependencies. Set `DESKTOP_TEST_NODE` to the prepared private Node `26.13.0` binary to test that runtime explicitly.
 
 The completed Windows installer is generated at:
-`apps/desktop/src-tauri/target/release/bundle/nsis/LeetCode Tracker_1.3.0_x64-setup.exe`
+`apps/desktop/src-tauri/target/release/bundle/nsis/LeetCode Tracker_1.3.1_x64-setup.exe`
 
 The Apple Silicon artifacts are generated at:
-- `.dmg`: `apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/LeetCode Tracker_1.3.0_aarch64.dmg`
+- `.dmg`: `apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/LeetCode Tracker_1.3.1_aarch64.dmg`
 - `.app`: `apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/LeetCode Tracker.app`
 
 The native WebdriverIO runner is deliberately isolated under `tests/desktop/` and is used only with the test-only Tauri configuration (`tauri.e2e.conf.json` + `--features desktop-e2e`); it is not included in the distributable `.dmg`. Running the E2E build overwrites `bundle/macos/LeetCode Tracker.app` with the `--features desktop-e2e` test bundle while the `.dmg` retains the production `desktop:build:mac` bundle; restore the production web build afterward with `npm run build` (and re-run `npm run desktop:build:mac` if you need a fresh production `.app` outside the `.dmg`).

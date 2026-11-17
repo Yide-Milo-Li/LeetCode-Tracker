@@ -1,6 +1,12 @@
 # Implementation status
 
-## Release 1.3.0 — current delivery baseline
+## Release 1.3.1 — current delivery baseline
+
+Release `v1.3.1` is a frontend patch on 1.3.0: the progress import hint names the configured AI provider, review spacing options use plain names, the heatmap and several controls follow the active palette, the Today Note menu and quick-copy dropdowns use native popovers, the quick-note drawer reuses the shared dialog for focus handling, and the web client is split into smaller Settings, Notes, style, and hook modules. SQLite schema v12, Snapshot Bundle v5, the `/api/v1` surface, and the native hosts are unchanged. See [1.3.1 release notes](releases/1.3.1.md).
+
+**Windows local verification for Release 1.3.1**: `npm run check` (`tsc --noEmit`) passed; `npm test` passed **524 tests (333 backend/domain/storage across 46 suites + 190 Web DOM across 12 suites + 1 isolated sidecar, 0 failures)**; `npm run build`, `npm run docs:check`, and `git diff --check` passed. Rust checks, native packaging, packaged WebView2/WKWebView interaction checks, and screenshots were not re-run locally for this patch; remote CI runs are tracked independently in [GitHub Actions](https://github.com/Yide-Milo-Li/LeetCode-Tracker/actions). The remaining open boundaries listed for 1.3.0 below still apply.
+
+### Release 1.3.0 — prior baseline
 
 Release `v1.3.0` adds the guided three-step first-run setup, four-tab Settings (`General`, `Appearance`, `AI assistant`, `Data`), local recommendation selection and token usage diagnostics (`phase39-v1`, SQLite v12, Snapshot Bundle v5), opt-in `outcome-v2` review ladder and duration calibration, reorganized Progress Statistics with searchable/recency-ordered Topic Insights, local and guarded AI note formatting, palette-tinted native app icons (`HICON` on Windows, Dock icon on macOS), expanded Gemini/OpenAI/DeepSeek model and reasoning effort support, and Windows ↔ macOS behavioral alignment across migration confirmation, native icon validation, keyboard shortcuts, and source-mode launchers. See [1.3.0 release notes](releases/1.3.0.md) and [desktop guide](desktop.md).
 

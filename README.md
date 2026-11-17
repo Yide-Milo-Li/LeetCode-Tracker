@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.3.0"><img src="https://img.shields.io/badge/release-1.3.0-blue?style=flat-square" alt="Release 1.3.0"></a>
+  <a href="https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.3.1"><img src="https://img.shields.io/badge/release-1.3.1-blue?style=flat-square" alt="Release 1.3.1"></a>
   <a href="docs/desktop.md"><img src="https://img.shields.io/badge/desktop-Windows%20x64%20%2B%20macOS%20ARM64-455a64?style=flat-square" alt="Windows x64 and macOS ARM64"></a>
   <a href="tests/README.md"><img src="https://img.shields.io/badge/tests-519%20JS%20%2B%2011%20Rust-brightgreen?style=flat-square" alt="519 JavaScript and 11 Rust tests"></a>
   <a href="docs/architecture.md"><img src="https://img.shields.io/badge/sqlite-schema%20v12-003b57?style=flat-square" alt="SQLite schema v12"></a>
@@ -14,16 +14,16 @@
 
 A local-first desktop workbench for algorithm practice: bring your own JSONL catalog, plan a weekly routine, record practice, review progress, and keep problem notes together. The interface supports English and Simplified Chinese, desktop windows at 1024px and above, ten theme palettes with matching native app icons, and keyboard navigation.
 
-Release 1.3.0 packages the React interface, Fastify API, SQLite engine (schema v12), and a private Node.js 26.13.0 runtime into native Tauri desktop apps for **Windows 11 x64** and **Apple Silicon macOS 14+** (`aarch64-apple-darwin`) with aligned behavior and a single-file cross-device migration bundle. **End users do not need to install Node.js, npm, Git, or Rust.**
+Release 1.3.1 packages the React interface, Fastify API, SQLite engine (schema v12), and a private Node.js 26.13.0 runtime into native Tauri desktop apps for **Windows 11 x64** and **Apple Silicon macOS 14+** (`aarch64-apple-darwin`) with aligned behavior and a single-file cross-device migration bundle. **End users do not need to install Node.js, npm, Git, or Rust.**
 
 ## Download and start
 
-Download the installer for your OS from [Release 1.3.0](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.3.0) (both packages include `SHA256SUMS.txt` for verification):
+Download the installer for your OS from [Release 1.3.1](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.3.1) (both packages include `SHA256SUMS.txt` for verification):
 
 | Platform | Download | How to install & open |
 | --- | --- | --- |
-| **Windows 11 x64** | `LeetCode-Tracker_1.3.0_x64-setup.exe` | 1. Run the per-user installer (no administrator rights needed).<br>2. If Windows SmartScreen warns that the installer is unsigned, click **More info → Run anyway**.<br>3. Launch **LeetCode Tracker** from the Start Menu or Desktop shortcut. |
-| **macOS 14+ (Apple Silicon)** | `LeetCode-Tracker_1.3.0_aarch64.dmg` | 1. Open the `.dmg` and drag **LeetCode Tracker.app** into **Applications**.<br>2. Because the bundle is ad-hoc signed and unnotarized, if Gatekeeper warns on first open, go to **System Settings → Privacy & Security → Open Anyway** (or right-click **LeetCode Tracker.app → Open**). If needed, verify checksum and run `xattr -cr "/Applications/LeetCode Tracker.app"`.<br>3. Closing the red window button hides the window while keeping the sidecar ready in the Dock; click the Dock icon to reopen or press `Cmd+Q` to quit cleanly. |
+| **Windows 11 x64** | `LeetCode-Tracker_1.3.1_x64-setup.exe` | 1. Run the per-user installer (no administrator rights needed).<br>2. If Windows SmartScreen warns that the installer is unsigned, click **More info → Run anyway**.<br>3. Launch **LeetCode Tracker** from the Start Menu or Desktop shortcut. |
+| **macOS 14+ (Apple Silicon)** | `LeetCode-Tracker_1.3.1_aarch64.dmg` | 1. Open the `.dmg` and drag **LeetCode Tracker.app** into **Applications**.<br>2. Because the bundle is ad-hoc signed and unnotarized, if Gatekeeper warns on first open, go to **System Settings → Privacy & Security → Open Anyway** (or right-click **LeetCode Tracker.app → Open**). If needed, verify checksum and run `xattr -cr "/Applications/LeetCode Tracker.app"`.<br>3. Closing the red window button hides the window while keeping the sidecar ready in the Dock; click the Dock icon to reopen or press `Cmd+Q` to quit cleanly. |
 
 > [!TIP]
 > **Running from a source checkout instead?** Run `npm run desktop` (works on both Windows and macOS), `start.bat` on Windows, or `npm run desktop:mac` / `./scripts/start-desktop.sh` on macOS (pass `--port 3001` or `PORT=3001` to customize the port). Source mode requires **Node.js >=26.13.0 <27**.
@@ -38,7 +38,7 @@ Download the installer for your OS from [Release 1.3.0](https://github.com/Yide-
 3. **Review progress & Topic Insights (`Progress`)**: View outcome KPIs, the 365-day activity heatmap, difficulty mastery, topics worth attention, and the searchable, recency-ordered **Topic Insights** table (expand any topic row for 30-day evidence).
 4. **Write notes, export, or switch computers (`Notes` & `Settings`)**: Edit Markdown notes with Split/Edit/Preview modes, local format-on-save (with undo), optional AI formatting, and quick Obsidian/Notion copy or ZIP/CSV export. Moving between Windows and macOS? Export one **Snapshot Bundle v5** under **Settings → Data → Export migration file** and import it on the other computer (**Settings → Data → Import migration file**).
 
-The Windows installer is **unsigned** and uses the Evergreen WebView2 runtime (downloading its bootstrapper if missing, which requires internet access). Windows 11 x64 is the primary Windows target; clean-machine installation, Windows 10 compatibility, Apple Developer ID notarization, and non-developer Mac Gatekeeper UX remain outside automated checks. See [installation, data paths, and troubleshooting](docs/desktop.md) and [1.3.0 release notes](docs/releases/1.3.0.md).
+The Windows installer is **unsigned** and uses the Evergreen WebView2 runtime (downloading its bootstrapper if missing, which requires internet access). Windows 11 x64 is the primary Windows target; clean-machine installation, Windows 10 compatibility, Apple Developer ID notarization, and non-developer Mac Gatekeeper UX remain outside automated checks. See [installation, data paths, and troubleshooting](docs/desktop.md) and [1.3.1 release notes](docs/releases/1.3.1.md).
 
 ### Bring your own catalog
 
@@ -124,7 +124,7 @@ npm start
 
 Open [the local workbench](http://127.0.0.1:3000), or use the source-mode launcher (`npm run desktop` on Windows/macOS, `start.bat` on Windows, or `npm run desktop:mac` / `./scripts/start-desktop.sh` on macOS) to check ports, build if needed, start Fastify, and open your browser automatically. Source mode supports optional `.env` configuration; the packaged host supplies its own database path, port, and private session credentials. Configure installed-app providers in Settings.
 
-For a native Windows build, install the Rust/MSVC toolchain and run `npm run desktop:build` to produce `LeetCode-Tracker_1.3.0_x64-setup.exe`. On Apple Silicon macOS 14+, install Xcode Command Line Tools and the Rust toolchain (`aarch64-apple-darwin`) and run `npm run desktop:build:mac` to produce `LeetCode Tracker.app` and `LeetCode Tracker_1.3.0_aarch64.dmg`. See the [desktop guide](docs/desktop.md) for prerequisites, outputs, migration steps, and checks.
+For a native Windows build, install the Rust/MSVC toolchain and run `npm run desktop:build` to produce `LeetCode-Tracker_1.3.1_x64-setup.exe`. On Apple Silicon macOS 14+, install Xcode Command Line Tools and the Rust toolchain (`aarch64-apple-darwin`) and run `npm run desktop:build:mac` to produce `LeetCode Tracker.app` and `LeetCode Tracker_1.3.1_aarch64.dmg`. See the [desktop guide](docs/desktop.md) for prerequisites, outputs, migration steps, and checks.
 
 ## Architecture and verification
 
@@ -139,11 +139,11 @@ flowchart LR
 
 The host validates the startup handshake, owns the sidecar process (with a Windows Job Object on Windows and bounded graceful stdin shutdown plus `Drop` termination on macOS), and waits for graceful shutdown before enforcing its deadline. Browser source mode uses HTTP directly. See [architecture](docs/architecture.md).
 
-Release 1.3.0 automated verification passed **519 JavaScript/Web/sidecar tests (333 backend/domain/storage + 185 Web DOM + 1 isolated sidecar), 11 Rust tests, and 2/2 WKWebView E2E specs**, TypeScript checking, production build, 8 regenerated showcase screenshots, documentation links, Rust formatting/clippy, Windows NSIS packaging, and macOS `.app`/`.dmg` packaging. These are automated/local/CI results using synthetic data; they do not establish clean-VM installation, notarized Gatekeeper UX, live-provider availability, or performance guarantees. [Status](docs/status.md) separates current evidence from historical phase results; [CI](https://github.com/Yide-Milo-Li/LeetCode-Tracker/actions) reports remote runs independently.
+Release 1.3.1 local verification passed TypeScript checking, **524 JavaScript/Web/sidecar tests (333 backend/domain/storage + 190 Web DOM + 1 isolated sidecar)**, production build, and documentation links; its changes are frontend-only. Release 1.3.0 automated verification passed **519 JavaScript/Web/sidecar tests (333 backend/domain/storage + 185 Web DOM + 1 isolated sidecar), 11 Rust tests, and 2/2 WKWebView E2E specs**, TypeScript checking, production build, 8 regenerated showcase screenshots, documentation links, Rust formatting/clippy, Windows NSIS packaging, and macOS `.app`/`.dmg` packaging. These are automated/local/CI results using synthetic data; they do not establish clean-VM installation, notarized Gatekeeper UX, live-provider availability, or performance guarantees. [Status](docs/status.md) separates current evidence from historical phase results; [CI](https://github.com/Yide-Milo-Li/LeetCode-Tracker/actions) reports remote runs independently.
 
 ## Documentation
 
-- [Documentation index](docs/README.md) · [Desktop installation](docs/desktop.md) · [Release 1.3.0 notes](docs/releases/1.3.0.md)
+- [Documentation index](docs/README.md) · [Desktop installation](docs/desktop.md) · [Release 1.3.1 notes](docs/releases/1.3.1.md)
 - [Data format](docs/data-format.md) · [AI providers](docs/llm-providers.md) · [Topic insights](docs/topic-practice-insights.md)
 - [Architecture](docs/architecture.md) · [Applications](apps/README.md) · [Shared packages](packages/README.md)
 - [Tests](tests/README.md) · [Scripts](scripts/README.md) · [Roadmap](docs/roadmap.md)

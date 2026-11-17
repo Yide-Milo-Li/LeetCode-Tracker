@@ -459,7 +459,7 @@ it('renders Complete migration summary instead of Legacy v1 warning when importi
   const bundleV5 = {
     format: 'leetcode-tracker-snapshot',
     version: 5,
-    appVersion: '1.3.0',
+    appVersion: '1.3.1',
     schemaVersion: 12,
     exportedAt: 1700000000000,
     tables: {
@@ -497,6 +497,6 @@ it('renders Complete migration summary instead of Legacy v1 warning when importi
   });
 
   const dialog = screen.getByRole('alertdialog');
-  assert.match(dialog.textContent ?? '', /Complete migration · v1\.3\.0 · 0 problems/);
+  assert.match(dialog.textContent ?? '', /Complete migration · v1\.3\.1 · 0 problems/);
   assert.equal((dialog.textContent ?? '').includes('Legacy v1'), false);
 });

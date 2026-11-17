@@ -72,7 +72,7 @@ describe('macOS native profile migration',()=>{
     assert.deepEqual(state.tables.practice_records,fixture.tables.practice_records);
   });
 
-  it('verifies v1.3.0 knowledge profile API and Today, Problems, Statistics, and Notes views', async () => {
+  it('verifies v1.3.1 knowledge profile API and Today, Problems, Statistics, and Notes views', async () => {
     const profile = await api('GET', '/knowledge-profile');
     assert.equal(profile.analysisVersion, 'profile-v1');
     assert.equal(profile.windowDays, 30);
