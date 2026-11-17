@@ -3,9 +3,10 @@
  * Bundles the React application and workspace stylesheet into apps/chatgpt/dist/workspace.html.
  */
 import { build } from 'esbuild';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { browserBuildAliases } from './browser-build-alias.ts';
+import { readWorkspaceStyles } from './workspace-styles.ts';
 
 const repoRoot = resolve(import.meta.dirname, '..');
 const outDir = join(repoRoot, 'apps/chatgpt/dist');
@@ -26,7 +27,7 @@ const bundleResult = await build({
   },
 });
 
-const css = readFileSync(join(repoRoot, 'packages/workspace/src/styles.css'), 'utf8');
+const css = readWorkspaceStyles();
 const jsCode = bundleResult.outputFiles[0].text.replaceAll('</script', '<\\/script');
 
 const html = `<!doctype html>

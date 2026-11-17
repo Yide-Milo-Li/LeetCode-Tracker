@@ -1,6 +1,7 @@
 /** Selected problem header: title, metadata chips, quick copy, Markdown export and the zen toggle. */
 import { ExternalLink, Download, Maximize2, Minimize2 } from 'lucide-react';
-import { api, type ProblemNoteSummary } from '../../api.ts';
+import type { ProblemNoteSummary } from '../../api.ts';
+import { useWorkspaceEnvironment } from '../../context.tsx';
 import { translations, type Language } from '../../i18n.ts';
 import { ExportLink } from '../ExportLink.tsx';
 import { QuickCopyButtons } from '../QuickCopyButtons.tsx';
@@ -18,6 +19,7 @@ interface NoteProblemHeaderProps {
 
 /** Render the problem header and its copy/export bar. Purely presentational. */
 export function NoteProblemHeader({ lang, summary, noteContent, zenMode, onToggleZen, zenModeTitle }: NoteProblemHeaderProps) {
+  const api = useWorkspaceEnvironment().client;
   const t = translations[lang];
   const zh = lang === 'zh';
 

@@ -1,4 +1,5 @@
 /** "General" Settings tab: language, timezone and behavior preferences. */
+import type { ReactNode } from 'react';
 import { translations, type Language } from '../../i18n.ts';
 import { useWorkspace } from '../../workspace.tsx';
 import { TimezoneField } from '../TimezoneField.tsx';
@@ -11,6 +12,8 @@ interface GeneralSectionProps {
   onPromptSwapFeedbackChange: (enabled: boolean) => void;
   notesFormatOnSave: boolean;
   onNotesFormatOnSaveChange: (enabled: boolean) => void;
+  /** Extra rows rendered at the end of the panel (background runtime and agent access). */
+  children?: ReactNode;
 }
 
 /** Render the General tab panel; preference values and their persistence stay with the parent. */
@@ -22,6 +25,7 @@ export function GeneralSection({
   onPromptSwapFeedbackChange,
   notesFormatOnSave,
   onNotesFormatOnSaveChange,
+  children,
 }: GeneralSectionProps) {
   const t = translations[lang];
   const workspace = useWorkspace();
@@ -111,6 +115,7 @@ export function GeneralSection({
           </button>
         </div>
       </section>
+      {children}
     </div>
   );
 }

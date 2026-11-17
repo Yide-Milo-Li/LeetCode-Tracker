@@ -1,6 +1,6 @@
 /* Design tokens: default light palette and its dark counterpart. */
 /* Desktop design tokens. Light and dark palettes are independent, with no external fonts. */
-:root {
+.tracker-workspace {
   --canvas: #f7f6f2;
   --muted-surface: #efeee8;
   --surface: #fff;
@@ -76,7 +76,7 @@
   --surface-muted: var(--muted-surface);
   color-scheme: light;
 }
-html.dark {
+.tracker-workspace.dark {
   --canvas: #20231f;
   --muted-surface: #252a24;
   --surface: #2c312a;

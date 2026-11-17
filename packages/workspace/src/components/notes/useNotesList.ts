@@ -3,7 +3,8 @@
  * summaries and the summary of the selected problem.
  */
 import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from 'react';
-import { api, type ProblemNoteSummary } from '../../api.ts';
+import type { ProblemNoteSummary } from '../../api.ts';
+import { useWorkspaceEnvironment } from '../../context.tsx';
 
 export type NotesScope = 'practiced' | 'all';
 export type NotesDifficultyFilter = 'all' | 'Easy' | 'Medium' | 'Hard';
@@ -27,6 +28,7 @@ interface UseNotesListOptions {
  * Superseded responses are ignored through per-request `active` flags; failures empty the list.
  */
 export function useNotesList({ selectedId, setSelectedId }: UseNotesListOptions) {
+  const api = useWorkspaceEnvironment().client;
   // Filters state
   const [scope, setScope] = useState<NotesScope>('practiced');
   const [search, setSearch] = useState('');
@@ -53,7 +55,7 @@ export function useNotesList({ selectedId, setSelectedId }: UseNotesListOptions)
       } else {
         // If not in current items page (e.g. jumped from external view), fetch summary asynchronously
         api
-          .listNotes({ search: selectedId, limit: 1 })
+          .listNotes({ frontendId: selectedId, scope: 'all', limit: 1 })
           .then((res) => {
             if (!active) return;
             const found = res.items.find((it) => it.questionFrontendId === selectedId);

@@ -15,6 +15,7 @@ import {
 import { type DailyPlan, type PlanItem, type Strategy } from '../api.ts';
 import { localizeApiError } from '../error-i18n.ts';
 import { formatPlanAction, formatPlanSource, translations, type Language } from '../i18n.ts';
+import { formatInstant } from '../date-format.ts';
 import { PromptOverrideModal } from './PromptOverrideModal.tsx';
 import { useDailyPlan, type UseDailyPlanReturn } from '../hooks/useDailyPlan.ts';
 import { useEncouragement } from '../hooks/useEncouragement.ts';
@@ -718,9 +719,7 @@ function TodayPlanViewInner({
                 v{version.version} · {formatPlanAction(version.action, lang)}
               </h3>
               <p className="muted">
-                {new Date(version.updatedAt).toLocaleString(zh ? 'zh-CN' : 'en-US', {
-                  timeZone: version.timezone,
-                })}
+                {formatInstant(version.updatedAt, lang, { timeZone: version.timezone })}
               </p>
               <ul>
                 {version.items.map((item) => (

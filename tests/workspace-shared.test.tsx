@@ -251,8 +251,8 @@ function client(label:string,save?:(content:string)=>Promise<unknown>) {
   }}).api;
 }
 test('rendered external-change notice has readable contrast in both palettes and languages',async()=>{
-  const {readFile}=await import('node:fs/promises');
-  const css=await readFile(new URL('../packages/workspace/src/styles.css',import.meta.url),'utf8');
+  const {readWorkspaceStyles}=await import('../scripts/workspace-styles.ts');
+  const css=readWorkspaceStyles();
   const declarations=(selector:string)=>Object.fromEntries([...css.match(new RegExp(selector+'\\s*\\{([^}]+)'))![1].matchAll(/(--[\w-]+):\s*([^;]+);/g)].map(m=>[m[1],m[2].trim()]));
   const light=declarations('\\.tracker-workspace'),dark={...light,...declarations('\\.tracker-workspace\\.dark')};
   const resolve=(value:string,tokens:Record<string,string>):string=>value.startsWith('var(')?resolve(tokens[value.slice(4).split(/[,)\s]/)[0]]??value.slice(value.indexOf(',')+1,-1).trim(),tokens):value;

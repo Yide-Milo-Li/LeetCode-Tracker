@@ -2,7 +2,7 @@
 /* ==========================================================================
    Today 7-Day Rhythm & Streak Card (Phase 32)
    ========================================================================== */
-.recent-overview {
+.tracker-workspace .recent-overview {
   background: var(--surface);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg, 12px);
@@ -19,16 +19,16 @@
     box-shadow var(--fast, 140ms) ease;
 }
 
-.recent-overview:hover {
+.tracker-workspace .recent-overview:hover {
   border-color: var(--outline);
   box-shadow: var(--shadow-md);
 }
 
-.recent-overview .feedback {
+.tracker-workspace .recent-overview .feedback {
   margin-top: 12px;
 }
 
-.bento-card-header {
+.tracker-workspace .bento-card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -36,7 +36,7 @@
   gap: 12px;
 }
 
-.bento-card-title {
+.tracker-workspace .bento-card-title {
   font-size: 13px;
   font-weight: 650;
   letter-spacing: 0.02em;
@@ -46,14 +46,14 @@
   gap: 6px;
 }
 
-.bento-card-title .info-trigger {
+.tracker-workspace .bento-card-title .info-trigger {
   width: 24px;
   height: 24px;
   min-width: 24px;
   min-height: 24px;
 }
 
-.streak-badge {
+.tracker-workspace .streak-badge {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -68,21 +68,21 @@
   user-select: none;
 }
 
-.streak-badge strong {
+.tracker-workspace .streak-badge strong {
   font-size: 13.5px;
   font-weight: 700;
   color: var(--primary);
   margin-right: 2px;
 }
 
-.streak-icon {
+.tracker-workspace .streak-icon {
   color: var(--primary);
   display: flex;
   flex-shrink: 0;
 }
 
 /* 7-Pillar Micro Rhythm Chart */
-.rhythm-chart-wrap {
+.tracker-workspace .rhythm-chart-wrap {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
@@ -91,7 +91,7 @@
   margin-bottom: 14px;
 }
 
-.rhythm-day-col {
+.tracker-workspace .rhythm-day-col {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -103,13 +103,13 @@
   user-select: none;
 }
 
-.rhythm-day-col:hover .rhythm-tooltip {
+.tracker-workspace .rhythm-day-col:hover .rhythm-tooltip {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
   pointer-events: auto;
 }
 
-.rhythm-count-label {
+.tracker-workspace .rhythm-count-label {
   font-size: 12px;
   font-weight: 500;
   color: var(--text-muted);
@@ -117,17 +117,17 @@
   height: 13px;
 }
 
-.rhythm-day-col.is-zero .rhythm-count-label {
+.tracker-workspace .rhythm-day-col.is-zero .rhythm-count-label {
   opacity: 0.6;
 }
 
-.rhythm-day-col.is-today .rhythm-count-label {
+.tracker-workspace .rhythm-day-col.is-today .rhythm-count-label {
   color: var(--text-main);
   font-weight: 650;
 }
 
 /* Bars stand on their own: no track box, the column height is the scale. */
-.rhythm-bar-track {
+.tracker-workspace .rhythm-bar-track {
   width: 100%;
   height: 52px;
   display: flex;
@@ -135,55 +135,55 @@
   justify-content: center;
 }
 
-.rhythm-bar-fill {
+.tracker-workspace .rhythm-bar-fill {
   width: 12px;
   min-height: 2px;
   border-radius: 3px;
   background: color-mix(in srgb, var(--primary) 45%, var(--muted-surface));
   transform-origin: bottom;
-  animation: rhythm-bar-grow 520ms var(--spring-tactile) both;
+  animation: tracker-rhythm-bar-grow 520ms var(--spring-tactile) both;
   animation-delay: var(--bar-delay, 0ms);
   transition: height 420ms var(--spring-tactile), background-color var(--fast, 140ms) ease;
 }
 
-.rhythm-day-col.is-zero .rhythm-bar-fill {
+.tracker-workspace .rhythm-day-col.is-zero .rhythm-bar-fill {
   height: 2px;
   background: var(--border-color);
 }
 
-.rhythm-day-col:hover .rhythm-bar-fill {
+.tracker-workspace .rhythm-day-col:hover .rhythm-bar-fill {
   background: color-mix(in srgb, var(--primary) 70%, var(--muted-surface));
 }
 
-.rhythm-day-col.is-today .rhythm-bar-fill {
+.tracker-workspace .rhythm-day-col.is-today .rhythm-bar-fill {
   background: var(--primary);
 }
 
-@keyframes rhythm-bar-grow {
+@keyframes tracker-rhythm-bar-grow {
   from {
     transform: scaleY(0);
   }
 }
 
-.rhythm-date-label {
+.tracker-workspace .rhythm-date-label {
   font-size: 12px;
   color: var(--text-muted);
   white-space: nowrap;
 }
 
-.rhythm-day-col.is-today .rhythm-date-label {
+.tracker-workspace .rhythm-day-col.is-today .rhythm-date-label {
   color: var(--text-main);
   font-weight: 650;
 }
 
-.rhythm-summary {
+.tracker-workspace .rhythm-summary {
   font-size: 13px;
   color: var(--text-muted);
   white-space: nowrap;
 }
 
 /* Floating Tooltip */
-.rhythm-tooltip {
+.tracker-workspace .rhythm-tooltip {
   position: absolute;
   bottom: calc(100% + 8px);
   left: 50%;
@@ -202,7 +202,7 @@
   z-index: 20;
 }
 
-.rhythm-tooltip::after {
+.tracker-workspace .rhythm-tooltip::after {
   content: '';
   position: absolute;
   top: 100%;
@@ -213,7 +213,7 @@
 }
 
 /* Card Footer */
-.rhythm-footer-row {
+.tracker-workspace .rhythm-footer-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -222,12 +222,12 @@
   font-size: 12px;
 }
 
-.rhythm-note-text {
+.tracker-workspace .rhythm-note-text {
   color: var(--text-muted);
   font-size: 12px;
 }
 
-.rhythm-link-btn {
+.tracker-workspace .rhythm-link-btn {
   color: var(--primary);
   text-decoration: none;
   font-weight: 550;
@@ -243,14 +243,14 @@
   transition: transform var(--fast, 140ms) ease;
 }
 
-.rhythm-link-btn:hover {
+.tracker-workspace .rhythm-link-btn:hover {
   text-decoration: underline;
   transform: translateX(2px);
 }
 
 /* Unified Hub / Embedded variant support */
 /* A recessed band: one tone step below the page, no outline or shadow. */
-.today-unified-hub {
+.tracker-workspace .today-unified-hub {
   background: var(--muted-surface);
   border-radius: var(--radius-lg, 12px);
   padding: 20px 24px;
@@ -261,28 +261,31 @@
   align-items: stretch;
 }
 
-.hub-divider {
+.tracker-workspace .hub-divider {
   width: 1px;
   background: var(--border-color);
   height: 100%;
 }
+.tracker-workspace .today-unified-hub.is-target-only {
+  grid-template-columns: minmax(0, 1fr);
+}
 
-.hub-left {
+.tracker-workspace .hub-left {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   min-width: 0;
 }
 
-.hub-right {
+.tracker-workspace .hub-right {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   min-width: 0;
 }
 
-.today-unified-hub .recent-overview,
-.hub-right.recent-overview {
+.tracker-workspace .today-unified-hub .recent-overview,
+.tracker-workspace .hub-right.recent-overview {
   background: transparent;
   border: none;
   border-radius: 0;
@@ -291,7 +294,7 @@
   margin-bottom: 0;
 }
 
-.strategy-capsule {
+.tracker-workspace .strategy-capsule {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -304,14 +307,14 @@
   color: var(--text-muted);
 }
 
-.strategy-capsule .strategy-capsule-name {
+.tracker-workspace .strategy-capsule .strategy-capsule-name {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 220px;
 }
 
-.strategy-capsule .info-trigger {
+.tracker-workspace .strategy-capsule .info-trigger {
   width: 18px;
   height: 18px;
   min-width: 18px;
@@ -322,7 +325,7 @@
   justify-content: center;
 }
 
-.progress-hero-row {
+.tracker-workspace .progress-hero-row {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -330,36 +333,36 @@
   margin: 6px 0 14px;
 }
 
-.progress-count-group {
+.tracker-workspace .progress-count-group {
   display: flex;
   align-items: baseline;
   gap: 8px;
 }
 
-.progress-big-num {
+.tracker-workspace .progress-big-num {
   display: inline-block;
   font-size: 28px;
   font-weight: 650;
   color: var(--text-main);
   line-height: 1;
   letter-spacing: -0.02em;
-  animation: progress-num-tick 360ms var(--spring-tactile);
+  animation: tracker-progress-num-tick 360ms var(--spring-tactile);
 }
 
-@keyframes progress-num-tick {
+@keyframes tracker-progress-num-tick {
   from {
     opacity: 0.35;
     transform: translateY(6px);
   }
 }
 
-.progress-total-num {
+.tracker-workspace .progress-total-num {
   font-size: 15px;
   font-weight: 500;
   color: var(--text-muted);
 }
 
-.progress-percent-text {
+.tracker-workspace .progress-percent-text {
   font-size: 13px;
   font-weight: 500;
   color: var(--text-muted);
@@ -367,12 +370,12 @@
 }
 
 /* One segment per planned problem; the fill grows from the left of each segment. */
-.target-meter {
+.tracker-workspace .target-meter {
   display: flex;
   gap: 5px;
 }
 
-.target-meter-seg {
+.tracker-workspace .target-meter-seg {
   flex: 1;
   height: 8px;
   border-radius: 3px;
@@ -381,7 +384,7 @@
   overflow: hidden;
 }
 
-.target-meter-seg::after {
+.tracker-workspace .target-meter-seg::after {
   content: '';
   position: absolute;
   inset: 0;
@@ -391,38 +394,38 @@
   transition: transform 420ms var(--spring-tactile);
 }
 
-.target-meter-seg.is-filled::after {
+.tracker-workspace .target-meter-seg.is-filled::after {
   transform: scaleX(1);
-  animation: target-seg-fill 520ms var(--spring-tactile) both;
+  animation: tracker-target-seg-fill 520ms var(--spring-tactile) both;
   animation-delay: var(--seg-delay, 0ms);
 }
 
-.target-meter.is-continuous .target-meter-seg::after {
+.tracker-workspace .target-meter.is-continuous .target-meter-seg::after {
   transform: scaleX(var(--seg-fill, 0));
 }
 
-@keyframes target-seg-fill {
+@keyframes tracker-target-seg-fill {
   from {
     transform: scaleX(0);
   }
 }
 
-.progress-meter-note {
+.tracker-workspace .progress-meter-note {
   margin: 10px 0 14px;
   font-size: 13px;
   color: var(--text-muted);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .progress-big-num,
-  .target-meter-seg::after,
-  .rhythm-bar-fill {
+  .tracker-workspace .progress-big-num,
+.tracker-workspace .target-meter-seg::after,
+.tracker-workspace .rhythm-bar-fill {
     animation: none;
     transition: none;
   }
 }
 
-.plan-actions-toolbar {
+.tracker-workspace .plan-actions-toolbar {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -430,39 +433,39 @@
   border-top: 1px solid var(--border-color);
 }
 
-.num-tabular {
+.tracker-workspace .num-tabular {
   font-variant-numeric: tabular-nums;
 }
 
-.today-plan-summary {
+.tracker-workspace .today-plan-summary {
   margin-bottom: 16px;
 }
-.today-plan-summary h2 {
+.tracker-workspace .today-plan-summary h2 {
   margin: 7px 0 3px;
 }
-.today-plan-summary .muted {
+.tracker-workspace .today-plan-summary .muted {
   font-size: 13px;
 }
-.plan-completion {
+.tracker-workspace .plan-completion {
   text-align: right;
   flex-shrink: 0;
 }
-.plan-completion strong {
+.tracker-workspace .plan-completion strong {
   display: block;
   font-size: 30px;
   font-weight: 600;
   line-height: 1.4;
   color: var(--primary);
 }
-.plan-completion strong span {
+.tracker-workspace .plan-completion strong span {
   font-size: 20px;
   font-weight: 450;
   color: var(--text-muted);
 }
-.plan-completion small {
+.tracker-workspace .plan-completion small {
   font-size: 12px;
 }
-progress {
+.tracker-workspace progress {
   appearance: none;
   border: 0;
   width: 100%;
@@ -473,21 +476,21 @@ progress {
   background: var(--border-color);
   margin-bottom: 16px;
 }
-progress::-webkit-progress-bar {
+.tracker-workspace progress::-webkit-progress-bar {
   background: var(--border-color);
   border-radius: 4px;
 }
-progress::-webkit-progress-value {
+.tracker-workspace progress::-webkit-progress-value {
   background: var(--primary);
   border-radius: 4px;
 }
-progress::-moz-progress-bar {
+.tracker-workspace progress::-moz-progress-bar {
   background: var(--primary);
 }
-.action-menu {
+.tracker-workspace .action-menu {
   position: relative;
 }
-.action-menu summary {
+.tracker-workspace .action-menu summary {
   display: grid;
   place-items: center;
   list-style: none;
@@ -501,14 +504,14 @@ progress::-moz-progress-bar {
     border-color var(--fast) ease,
     background-color var(--fast) ease;
 }
-.action-menu summary:hover {
+.tracker-workspace .action-menu summary:hover {
   border-color: var(--primary);
   transform: translateY(-1px);
 }
-.action-menu summary:active {
+.tracker-workspace .action-menu summary:active {
   transform: scale(0.92);
 }
-.action-menu[open] > div {
+.tracker-workspace .action-menu[open] > div {
   position: absolute;
   right: 0;
   top: 38px;
@@ -521,7 +524,7 @@ progress::-moz-progress-bar {
   border-radius: 8px;
   box-shadow: var(--shadow-md);
 }
-.action-menu button {
+.tracker-workspace .action-menu button {
   padding: 9px 12px;
   background: none;
   text-align: left;
@@ -531,11 +534,11 @@ progress::-moz-progress-bar {
     background var(--fast) ease,
     color var(--fast) ease;
 }
-.action-menu button:hover {
+.tracker-workspace .action-menu button:hover {
   background: var(--muted-surface);
   color: var(--primary);
 }
-.plan-notice-strip {
+.tracker-workspace .plan-notice-strip {
   margin: 12px 0 16px;
   padding: 9px 14px;
   border-radius: var(--radius);
@@ -545,27 +548,27 @@ progress::-moz-progress-bar {
   font-size: 13px;
   line-height: 1.5;
 }
-.plan-notice-row {
+.tracker-workspace .plan-notice-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
-.plan-notice-summary {
+.tracker-workspace .plan-notice-summary {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
 }
-.plan-notice-icon {
+.tracker-workspace .plan-notice-icon {
   flex-shrink: 0;
   color: var(--warning);
 }
-.plan-notice-text {
+.tracker-workspace .plan-notice-text {
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.plan-notice-toggle {
+.tracker-workspace .plan-notice-toggle {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -580,37 +583,37 @@ progress::-moz-progress-bar {
     background var(--fast) ease,
     color var(--fast) ease;
 }
-.plan-notice-toggle:hover {
+.tracker-workspace .plan-notice-toggle:hover {
   background: var(--surface);
   color: var(--text-main);
 }
-.plan-notice-toggle svg {
+.tracker-workspace .plan-notice-toggle svg {
   transition: transform var(--fast) ease;
 }
-.plan-notice-toggle[aria-expanded='true'] svg {
+.tracker-workspace .plan-notice-toggle[aria-expanded='true'] svg {
   transform: rotate(180deg);
 }
-.plan-notice-details {
+.tracker-workspace .plan-notice-details {
   margin: 8px 0 2px 23px;
   padding-left: 16px;
   color: var(--text-muted);
   font-size: 12.5px;
   line-height: 1.55;
 }
-.plan-notice-details li + li {
+.tracker-workspace .plan-notice-details li + li {
   margin-top: 3px;
 }
-.action-dialog-body {
+.tracker-workspace .action-dialog-body {
   display: flex;
   flex-direction: column;
   gap: 14px;
 }
-.action-dialog-message {
+.tracker-workspace .action-dialog-message {
   margin: 0;
   font-size: 14px;
   line-height: 1.55;
 }
-.action-dialog-problem {
+.tracker-workspace .action-dialog-problem {
   padding: 10px 14px;
   border-radius: var(--radius);
   background: var(--muted-surface);
@@ -619,18 +622,18 @@ progress::-moz-progress-bar {
   color: var(--text-main);
   overflow-wrap: anywhere;
 }
-.action-dialog-footer {
+.tracker-workspace .action-dialog-footer {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
 }
-.today-problems {
+.tracker-workspace .today-problems {
   display: flex;
   flex-direction: column;
   gap: 12px;
   border-top: none;
 }
-.today-problem {
+.tracker-workspace .today-problem {
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr) auto;
   align-items: center;
@@ -646,24 +649,24 @@ progress::-moz-progress-bar {
     box-shadow 200ms ease,
     background-color 200ms ease;
 }
-.today-problem:hover {
+.tracker-workspace .today-problem:hover {
   border-color: var(--outline);
   transform: translateY(-2px);
   box-shadow: var(--shadow-md);
 }
-.today-problem.completed {
+.tracker-workspace .today-problem.completed {
   background: var(--canvas);
   border-color: var(--border-color);
 }
-.today-problem.just-completed {
-  animation: completePulse 600ms var(--spring-bounce);
+.tracker-workspace .today-problem.just-completed {
+  animation: tracker-completePulse 600ms var(--spring-bounce);
 }
-@keyframes completePulse {
+@keyframes tracker-completePulse {
   0% { transform: scale(0.98); }
   50% { transform: scale(1.015); box-shadow: var(--shadow-glow); }
   100% { transform: scale(1); }
 }
-.completion-circle {
+.tracker-workspace .completion-circle {
   display: grid;
   place-items: center;
   width: 44px;
@@ -680,71 +683,71 @@ progress::-moz-progress-bar {
     background var(--fast) ease,
     box-shadow 200ms ease;
 }
-.completion-circle:hover:not(:disabled) {
+.tracker-workspace .completion-circle:hover:not(:disabled) {
   transform: scale(1.04);
   color: var(--primary);
   box-shadow: 0 0 0 3px var(--selected);
 }
-.completion-circle:active:not(:disabled) {
+.tracker-workspace .completion-circle:active:not(:disabled) {
   transform: scale(0.94);
   transition: transform 80ms ease-out;
 }
-.completion-circle[aria-pressed='true'] {
+.tracker-workspace .completion-circle[aria-pressed='true'] {
   color: var(--on-primary);
 }
-.completion-circle[aria-pressed='true'] svg {
+.tracker-workspace .completion-circle[aria-pressed='true'] svg {
   background: var(--primary);
   border-radius: 50%;
   padding: 3px;
   box-sizing: content-box;
 }
-.problem-content {
+.tracker-workspace .problem-content {
   min-width: 0;
 }
-.problem-content h3 {
+.tracker-workspace .problem-content h3 {
   font-size: 17px;
   font-weight: 620;
   overflow-wrap: anywhere;
 }
-.problem-number {
+.tracker-workspace .problem-number {
   font-weight: 450;
   color: var(--text-muted);
 }
-.problem-title-link {
+.tracker-workspace .problem-title-link {
   color: inherit;
   text-decoration: none;
 }
-.problem-title-link:hover {
+.tracker-workspace .problem-title-link:hover {
   color: var(--primary);
   text-decoration: underline;
 }
-.problem-title-link .problem-link-mark {
+.tracker-workspace .problem-title-link .problem-link-mark {
   font-size: 0.85em;
   color: var(--text-muted);
   white-space: nowrap;
 }
-.problem-title-link:hover .problem-link-mark {
+.tracker-workspace .problem-title-link:hover .problem-link-mark {
   color: var(--primary);
 }
-.problem-meta,
-.tag-list,
-.tags-preview-list,
-.item-tags-row {
+.tracker-workspace .problem-meta,
+.tracker-workspace .tag-list,
+.tracker-workspace .tags-preview-list,
+.tracker-workspace .item-tags-row {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 7px;
 }
-.problem-meta {
+.tracker-workspace .problem-meta {
   margin-top: 8px;
 }
-.recommendation-reason {
+.tracker-workspace .recommendation-reason {
   font-size: 14px;
   color: var(--text-muted);
   line-height: 1.65;
   margin: 10px 0 0;
 }
-.problem-actions {
+.tracker-workspace .problem-actions {
   display: grid;
   grid-template-columns: repeat(3, 38px);
   justify-items: end;
@@ -754,34 +757,34 @@ progress::-moz-progress-bar {
   opacity: 0.88;
   transition: opacity var(--fast) ease;
 }
-.today-problem:hover .problem-actions {
+.tracker-workspace .today-problem:hover .problem-actions {
   opacity: 1;
 }
-.problem-actions > a {
+.tracker-workspace .problem-actions > a {
   grid-column: 1 / -1;
 }
-.tag-overflow {
+.tracker-workspace .tag-overflow {
   font-size: 13px;
   color: var(--primary);
 }
-.tag-overflow > div {
+.tracker-workspace .tag-overflow > div {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   padding: 8px 0;
 }
-.chart-legend { display: flex; gap: 20px; font-size: 13px; color: var(--text-muted); margin-bottom: 8px; }
-.chart-legend span { display: inline-flex; align-items: center; gap: 8px; }
-.chart-legend i { width: 20px; border-top: 2px solid var(--primary); }
-.chart-legend .legend-active { border-top: 1.5px dashed var(--text-muted); }
-.today-problem.completed .problem-content h3 {
+.tracker-workspace .chart-legend { display: flex; gap: 20px; font-size: 13px; color: var(--text-muted); margin-bottom: 8px; }
+.tracker-workspace .chart-legend span { display: inline-flex; align-items: center; gap: 8px; }
+.tracker-workspace .chart-legend i { width: 20px; border-top: 2px solid var(--primary); }
+.tracker-workspace .chart-legend .legend-active { border-top: 1.5px dashed var(--text-muted); }
+.tracker-workspace .today-problem.completed .problem-content h3 {
   color: var(--primary);
 }
-.plan-skeleton {
+.tracker-workspace .plan-skeleton {
   min-height: 380px;
   color: var(--text-muted);
 }
-.plan-skeleton > div {
+.tracker-workspace .plan-skeleton > div {
   background: var(--muted-surface);
   border-radius: 8px;
   height: 80px;

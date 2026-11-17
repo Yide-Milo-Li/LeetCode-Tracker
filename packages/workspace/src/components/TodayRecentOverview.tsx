@@ -3,12 +3,14 @@ import { useWorkspaceEnvironment } from '../context.tsx';
  * Recent 7-day activity overview mini-chart and streak statistics for Today's view.
  * Missing activity data is never inferred; reads deduplicated activity series.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Activity } from 'lucide-react';
 import { type DashboardResponse } from '../api.ts';
 import { localizeApiError } from '../error-i18n.ts';
 import type { Language } from '../i18n.ts';
+import { formatCalendarDate } from '../date-format.ts';
 import { useWorkspace } from '../workspace.tsx';
+import { useAsyncResource } from '../hooks/useAsyncResource.ts';
 import { Feedback, InfoPopover } from './ui.tsx';
 
 export interface TodayRecentOverviewProps {
@@ -26,35 +28,17 @@ export function TodayRecentOverview({ lang, embedded = false }: TodayRecentOverv
 
   const zh = lang === 'zh';
   const workspace = useWorkspace();
-  const [data, setData] = useState<DashboardResponse | null>(null);
-  const [errorCause, setErrorCause] = useState<unknown>(null);
   const [retry, setRetry] = useState(0);
-
-  useEffect(() => {
-    let active = true;
-    api
-      .getDashboard()
-      .then((value) => {
-        if (active) {
-          setData(value);
-          setErrorCause(null);
-        }
-      })
-      .catch((err) => {
-        if (active) setErrorCause(err);
-      });
-    return () => {
-      active = false;
-    };
-  }, [workspace.revision, retry]);
-  const error = errorCause ? localizeApiError(errorCause, lang) : '';
+  const dashboard = useAsyncResource((signal) => api.getDashboard(undefined, { signal }), [workspace.revision, retry]);
+  const data: DashboardResponse | null = dashboard.data ?? null;
+  const error = dashboard.error ? localizeApiError(dashboard.error, lang) : '';
 
   const days = data?.dataStatus.userTimezone ? data.trend30Days.slice(-7) : [];
   const max = Math.max(1, ...days.map((day) => day.completedCount));
   const activeDays = days.filter((day) => day.completedCount > 0).length;
   // Series dates are already local calendar days, so format them in UTC to avoid shifting a day.
   const weekday = (date: string) =>
-    new Date(`${date}T00:00:00Z`).toLocaleDateString(zh ? 'zh-CN' : 'en-US', { weekday: 'short', timeZone: 'UTC' });
+    formatCalendarDate(date, lang, { weekday: 'short' });
 
   const content = (
     <>

@@ -2,10 +2,11 @@ import { useWorkspaceEnvironment } from '../context.tsx';
 /**
  * Quick Copy dropdown button for generating Obsidian Callout or Notion Rich Card snippets.
  */
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Copy, Check, FileText, ChevronDown } from 'lucide-react';
 import { formatObsidianCallout, formatNotionCard } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
+import { useActionPopover } from './ui.tsx';
 
 export interface QuickCopyButtonsProps {
   lang: Language;
@@ -39,30 +40,15 @@ export function QuickCopyButtons({
 }: QuickCopyButtonsProps) {
   const {host} = useWorkspaceEnvironment();
   const t = translations[lang];
-  const [isOpen, setIsOpen] = useState(false);
   const [copiedType, setCopiedType] = useState<'obsidian' | 'notion' | null>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  // Close dropdown on outside click
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setIsOpen(false);
-      }
-    }
-    if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [isOpen]);
+  // Native popover handles outside clicks, Escape and the top layer; see useActionPopover.
+  const menu = useActionPopover({ align: align === 'right' ? 'end' : 'start' });
 
   async function copyToClipboard(text: string, type: 'obsidian' | 'notion') {
     try {
       await host.copyText(text);
       setCopiedType(type);
-      setIsOpen(false);
+      menu.close();
       setTimeout(() => setCopiedType(null), 2000);
     } catch {
       // ignore clipboard error
@@ -99,14 +85,12 @@ export function QuickCopyButtons({
   }
 
   return (
-    <div className="notes-dropdown" ref={dropdownRef} style={{ position: 'relative', display: 'inline-block' }}>
+    <div className="notes-dropdown">
       <button
         type="button"
         className="btn btn-secondary btn-sm notes-dropdown-trigger"
-        onClick={() => setIsOpen((open) => !open)}
+        {...menu.triggerProps}
         title={copiedType ? t.cardCopied : (lang === 'zh' ? '复制题目卡片' : 'Copy Problem Card')}
-        aria-expanded={isOpen}
-        aria-haspopup="true"
         style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}
       >
         {copiedType ? (
@@ -123,11 +107,11 @@ export function QuickCopyButtons({
         )}
       </button>
 
-      {isOpen && (
+      {menu.rendered && (
         <div
+          {...menu.panelProps}
           className={`notes-dropdown-menu${align === 'right' ? ' notes-dropdown-menu-right' : ''}`}
-          role="menu"
-          style={{ minWidth: '210px', whiteSpace: 'nowrap' }}
+          style={{ minWidth: '210px' }}
         >
           <button
             type="button"
@@ -136,11 +120,11 @@ export function QuickCopyButtons({
             title={t.copyObsidianCard}
             aria-label={t.copyObsidianCard}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Copy size={13} style={{ color: 'var(--primary)' }} />
+            <span className="notes-dropdown-label">
+              <Copy size={13} className="notes-dropdown-icon" aria-hidden="true" />
               <span>{t.copyObsidianCard}</span>
-            </div>
-            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>.md</span>
+            </span>
+            <span className="notes-dropdown-hint" aria-hidden="true">.md</span>
           </button>
 
           <button
@@ -150,11 +134,11 @@ export function QuickCopyButtons({
             title={t.copyNotionCard}
             aria-label={t.copyNotionCard}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <FileText size={13} style={{ color: 'var(--accent, #6366f1)' }} />
+            <span className="notes-dropdown-label">
+              <FileText size={13} className="notes-dropdown-icon is-secondary" aria-hidden="true" />
               <span>{t.copyNotionCard}</span>
-            </div>
-            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Rich</span>
+            </span>
+            <span className="notes-dropdown-hint" aria-hidden="true">Rich</span>
           </button>
         </div>
       )}

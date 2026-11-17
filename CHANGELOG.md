@@ -5,6 +5,14 @@
 - Standardize source development, CI and pinned desktop sidecars on Node.js 26.13.0, with verified official Windows and Apple Silicon runtime hashes and Node 26 build/type targets.
 - Verify the actual sidecar runtime version during isolated bundled-server and MCP-proxy tests.
 
+## [1.3.1] - 2026-11-16
+
+- Name the configured AI provider in the Progress import hint instead of always naming Gemini, and show review spacing strategies by plain name with a one-line description instead of internal version ids.
+- Make the yearly heatmap, select chevrons, tooltips, scrims, and Notes difficulty badges follow the active palette, and define two previously undefined CSS tokens.
+- Open the Today Note menu and quick-copy dropdowns as native popovers (with a fallback where the Popover API is missing), and render the quick-note drawer through the shared dialog for focus containment and focus return.
+- Restructure the web client into smaller Settings and Notes modules, ordered stylesheet partials, and shared async-loading, preference, and date-formatting hooks with no data or API changes.
+- See [release notes](docs/releases/1.3.1.md) for download, upgrade, and verification details.
+
 ## [1.3.0] - 2026-11-16
 
 - Add guided three-step first-run setup (`Timezone` → `Problems` → `Study rhythm`) with weekday preset and quick language/theme selection, and reorganize Settings into four tabs (`General`, `Appearance`, `AI assistant`, `Data`).

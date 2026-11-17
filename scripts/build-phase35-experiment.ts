@@ -1,11 +1,12 @@
 /** Explicit build keeps experimental SDKs outside the desktop startup and sidecar graph. */
 import {build} from 'esbuild';
-import {cpSync,mkdirSync,readFileSync,writeFileSync} from 'node:fs';
+import {cpSync,mkdirSync,writeFileSync} from 'node:fs';
 import {join,resolve} from 'node:path';
 import {browserBuildAliases} from './browser-build-alias.ts';
+import {readWorkspaceStyles} from './workspace-styles.ts';
 const out=resolve('experiments/phase35/dist');mkdirSync(out,{recursive:true});
 const result=await build({entryPoints:['experiments/phase35/chatgpt-entry.tsx'],bundle:true,platform:'browser',format:'esm',target:'es2023',write:false,minify:true,alias:browserBuildAliases});
-const css=readFileSync('packages/workspace/src/styles.css','utf8');
+const css=readWorkspaceStyles();
 const html=`<!doctype html><html><head><meta charset="utf-8"><style>${css}</style></head><body><div id="tracker-root"></div><script type="module">${result.outputFiles[0].text.replaceAll('</script','<\\/script')}</script></body></html>`;
 writeFileSync(join(out,'workspace.html'),html);
 await build({entryPoints:['experiments/phase35/dsh-client.tsx'],bundle:true,platform:'browser',format:'cjs',target:'es2023',outfile:join(out,'dsh/client.js'),external:['react','react-dom','react/jsx-runtime'],loader:{'.css':'text'},alias:browserBuildAliases,banner:{js:'window.__ModuleLoader__.load({\n  id: "@leetcode-tracker/dsh-phase35",\n  factory: (require) => {\n    var module = { exports: {} };\n    var exports = module.exports;\n'},footer:{js:'\n    return module.exports;\n  }\n});\n'}});

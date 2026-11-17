@@ -6,6 +6,7 @@ import type { ActionPopover } from '../ui.tsx';
 import { NotesMarkdownPreview } from '../NotesMarkdownPreview.tsx';
 import { NoteEditorToolbar, type NotesViewMode } from './NoteEditorToolbar.tsx';
 import type { NoteEditorState } from './useNoteEditor.ts';
+import { useWorkspaceEnvironment } from '../../context.tsx';
 
 interface NoteEditorPanelProps {
   lang: Language;
@@ -19,6 +20,7 @@ interface NoteEditorPanelProps {
 
 /** Render the editor for the selected note; all state and actions come from `useNoteEditor`. */
 export function NoteEditorPanel({ lang, editor, isMac, codeMenu, viewMode, onViewModeChange }: NoteEditorPanelProps) {
+  const { capabilities } = useWorkspaceEnvironment().host;
   const t = translations[lang];
   const {
     noteContent, setNoteContent, textareaRef, wrapTextareaSelection,
@@ -42,7 +44,7 @@ export function NoteEditorPanel({ lang, editor, isMac, codeMenu, viewMode, onVie
         </div>
 
         <div className="nw-editor-actions">
-          {saveSuccess && (
+          {saveSuccess && !isModified && (
             <span className="nw-save-success">
               <Check size={13} />
               <span>{noteContent.trim().length === 0 ? t.noteClearedSuccess : t.noteSaved}</span>
@@ -60,7 +62,7 @@ export function NoteEditorPanel({ lang, editor, isMac, codeMenu, viewMode, onVie
             type="button"
             className="btn btn-secondary btn-sm"
             onClick={() => void openAiReview()}
-            disabled={!noteContent.trim() || loadingNote || noteLoadError || savingNote}
+            disabled={!capabilities.noteFormatting || !noteContent.trim() || loadingNote || noteLoadError || savingNote}
           >
             {t.notesAiFormat}
           </button>
@@ -121,6 +123,7 @@ export function NoteEditorPanel({ lang, editor, isMac, codeMenu, viewMode, onVie
             ref={textareaRef}
             rows={16}
             className="nw-editor-textarea"
+            readOnly={!capabilities.noteEditing}
             disabled={loadingNote || noteLoadError}
             value={noteContent}
             onChange={(e) => setNoteContent(e.target.value)}

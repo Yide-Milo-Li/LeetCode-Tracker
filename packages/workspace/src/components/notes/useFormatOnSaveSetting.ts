@@ -5,7 +5,7 @@
  * or omit it, in which case the settings API is consulted once per change of the prop.
  */
 import { useEffect, useRef, type MutableRefObject } from 'react';
-import { api } from '../../api.ts';
+import { useWorkspaceEnvironment } from '../../context.tsx';
 
 /** Refs read synchronously by the save chain; they never trigger re-renders. */
 export interface FormatOnSaveSetting {
@@ -24,6 +24,7 @@ export interface FormatOnSaveSetting {
  *   preference unresolved so the draft is saved as typed rather than guessing an opt-in.
  */
 export function useFormatOnSaveSetting(controlledFormatOnSave: boolean | null | undefined): FormatOnSaveSetting {
+  const api = useWorkspaceEnvironment().client;
   const settingReady = useRef(typeof controlledFormatOnSave === 'boolean');
   const settingValue = useRef(controlledFormatOnSave === true);
 

@@ -7,9 +7,11 @@
  * they deliberately live together: every async result is checked against the visit and draft
  * revision that started it before it may touch state.
  */
-import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
+import type { BusinessVersions } from '../../../../contracts/src/agent-operations.ts';
+import { problemNoteSchema } from '../../../../contracts/src/notes.ts';
 import {
-  api,
+  type ProblemNote,
   type ProblemNoteSummary,
   type PracticeRecord,
   type NoteFormatResponse,
@@ -17,6 +19,9 @@ import {
 } from '../../api.ts';
 import { translations, type Language } from '../../i18n.ts';
 import { localizeApiError } from '../../error-i18n.ts';
+import { OperationStateError, operationMessage } from '../../client.ts';
+import { useWorkspaceEnvironment } from '../../context.tsx';
+import { createDraftSession } from '../../draft-session.ts';
 import { formatNoteInWorker } from '../../markdown-format-client.ts';
 import type { FormatOnSaveSetting } from './useFormatOnSaveSetting.ts';
 
@@ -47,6 +52,10 @@ interface UseNoteEditorOptions {
   setSelectedSummary: Dispatch<SetStateAction<ProblemNoteSummary | null>>;
   setItems: Dispatch<SetStateAction<ProblemNoteSummary[]>>;
   setListRevision: Dispatch<SetStateAction<number>>;
+  /** Workspace root; polling pauses while a retained view is hidden. */
+  rootRef: RefObject<HTMLDivElement | null>;
+  /** Reported after each save with whether newer unsaved edits remain. */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 /**
@@ -56,6 +65,10 @@ interface UseNoteEditorOptions {
  * records for the selection (cancellable, retryable); registers a `beforeunload` guard while
  * unsaved edits exist; saves through a per-problem promise chain and refreshes the list after
  * a successful save. Save failures surface as a localized `saveError`.
+ *
+ * Host integration: reads and writes go through the host client; drafts are retained through
+ * the host draft store when available; host operation receipts, refresh events and a business
+ * version poll keep the saved baseline current without discarding unsaved edits.
  */
 export function useNoteEditor({
   lang,
@@ -65,7 +78,12 @@ export function useNoteEditor({
   setSelectedSummary,
   setItems,
   setListRevision,
+  rootRef,
+  onDirtyChange,
 }: UseNoteEditorOptions) {
+  const environment = useWorkspaceEnvironment();
+  const api = environment.client;
+  const zh = lang === 'zh';
   const t = translations[lang];
   const { settingReady, settingValue } = formatSetting;
 
@@ -81,6 +99,9 @@ export function useNoteEditor({
     setNoteContentState(value);
   }, []);
   const [savedContent, setSavedContent] = useState('');
+  const [savedRevision, setSavedRevision] = useState(0);
+  const [savedGeneration, setSavedGeneration] = useState(0);
+  const [remoteNote, setRemoteNote] = useState<{ content: string; revision: number; libraryGeneration: number } | null>(null);
   const [loadingNote, setLoadingNote] = useState(false);
   const [noteLoadError, setNoteLoadError] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
@@ -90,10 +111,14 @@ export function useNoteEditor({
   const [aiReview, setAiReview] = useState<AiReview | null>(null);
   const aiSerial = useRef(0);
   const [retryRevision, setRetryRevision] = useState(0);
+  const recovery = useRef<ReturnType<typeof createDraftSession> | null>(null);
+  const [draftStatus, setDraftStatus] = useState('');
+  const [externalChange, setExternalChange] = useState(false);
+  const draftActivity = useRef({ dirty: false, saving: false });
   const editorSession = useRef({ active: false, saving: false, saveVersion: 0 });
   const savingRevision = useRef<number | null>(null);
   const problemSaveVersion = useRef<Map<string, number>>(new Map());
-  const problemSaveChain = useRef<Map<string, Promise<void>>>(new Map());
+  const problemSaveChain = useRef<Map<string, Promise<{ note: ProblemNote; baseRevision: number; baseGeneration: number } | null>>>(new Map());
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -135,7 +160,7 @@ export function useNoteEditor({
     setAiReview(review);
     try {
       const [markdown, status] = await Promise.all([
-        import('../../../../../packages/markdown/src/index.ts'), api.getNoteFormatStatus(),
+        import('../../../../markdown/src/index.ts'), api.getNoteFormatStatus(),
       ]);
       const prepared = markdown.prepareAiFormat(source, selection);
       if (aiSerial.current !== serial || !session.active) return;
@@ -214,12 +239,107 @@ export function useNoteEditor({
     []
   );
 
+  draftActivity.current = { dirty: noteContent !== savedContent, saving: savingNote };
+
+  useEffect(() => {
+    if (!api.drafts || !selectedId || loadingNote || noteLoadError || !recovery.current) return;
+    let active = true;
+    const session = recovery.current;
+    setDraftStatus(zh ? '草稿尚未保留' : 'Draft not yet retained');
+    const timer = setTimeout(() => {
+      void session
+        .write(noteContent === savedContent ? null : noteContent, savedRevision, savedGeneration)
+        .then(() => { if (active) setDraftStatus(noteContent === savedContent ? '' : zh ? '草稿已保留' : 'Draft retained'); })
+        .catch((e) => { if (active) setDraftStatus(String(e.message)); });
+    }, 250);
+    return () => { active = false; clearTimeout(timer); };
+  }, [api, selectedId, noteContent, savedContent, savedRevision, savedGeneration, loadingNote, noteLoadError, zh, environment.connected]);
+
+  useEffect(() => environment.host.subscribe((event) => {
+    if (event.type !== 'operation' || event.operation.target !== `note:${selectedId}`) return;
+    if (event.operation.status === 'applied') {
+      const result = event.operation.data as { note?: unknown } | undefined;
+      const parsed = problemNoteSchema.safeParse(result?.note);
+      if (!parsed.success) return;
+      const note = parsed.data;
+      setSavedContent(note.content); setSavedRevision(note.revision); setSavedGeneration(note.libraryGeneration);
+      setSaveError(''); setSaveSuccess(true); setRemoteNote(null); setExternalChange(false);
+      setListRevision((value) => value + 1);
+    } else {
+      setSaveSuccess(false); setSaveError(operationMessage(new OperationStateError(event.operation), lang));
+      if (event.operation.status === 'external_change') setExternalChange(true);
+    }
+  }), [environment.host, selectedId, lang]);
+
+  useEffect(() => environment.host.subscribe((event) => {
+    if (event.type !== 'refresh' && !(event.type === 'connection' && event.connected)) return;
+    setListRevision((value) => value + 1);
+    if (draftActivity.current.dirty || draftActivity.current.saving) setExternalChange(true);
+    else setRetryRevision((value) => value + 1);
+  }), [environment.host]);
+
+  // A changed generation invalidates drafts even when restored notes reuse or lower their revision.
+  useEffect(() => {
+    let active = true;
+    let checking = false;
+    let previous: BusinessVersions | null = null;
+    const check = async () => {
+      if (!active || checking || loadingNote || document.visibilityState === 'hidden' || rootRef.current?.closest('[hidden]')) return;
+      checking = true;
+      try {
+        const versions = await api.getBusinessVersions();
+        if (!active) return;
+        const libraryChanged = previous?.libraryGeneration !== versions.libraryGeneration;
+        const notesChanged = libraryChanged || previous?.notes !== versions.notes;
+        const practiceChanged = libraryChanged || previous?.practice !== versions.practice;
+        if (notesChanged || practiceChanged || previous?.catalog !== versions.catalog) setListRevision((v) => v + 1);
+        previous = versions;
+        if (!selectedId) return;
+        if (practiceChanged) {
+          const history = await api.getPracticeRecords({ questionFrontendId: selectedId, page: 1, limit: 100 });
+          if (active) setPractices(history.items);
+        }
+        if (!notesChanged) return;
+        const res = await api.getNote(selectedId);
+        if (!active) return;
+        const revision = res.note?.revision ?? 0;
+        const generation = res.libraryGeneration;
+        if (revision !== savedRevision || generation !== savedGeneration) {
+          if (draftActivity.current.dirty || draftActivity.current.saving) {
+            setRemoteNote({ content: res.note?.content ?? '', revision, libraryGeneration: generation });
+            setExternalChange(true);
+          } else {
+            const content = res.note?.content ?? '';
+            setNoteContent(content); setSavedContent(content); setSavedRevision(revision);
+            setSavedGeneration(generation); setRemoteNote(null); setExternalChange(false);
+          }
+        }
+      } catch { /* A failed poll cannot replace or discard the current editor session. */ }
+      finally { checking = false; }
+    };
+    const focus = () => { void check(); };
+    const interval = setInterval(focus, 2000);
+    window.addEventListener('focus', focus);
+    window.addEventListener('hashchange', focus);
+    document.addEventListener('visibilitychange', focus);
+    return () => {
+      active = false;
+      clearInterval(interval);
+      window.removeEventListener('focus', focus);
+      window.removeEventListener('hashchange', focus);
+      document.removeEventListener('visibilitychange', focus);
+    };
+  }, [api, selectedId, savedRevision, savedGeneration, loadingNote]);
+
   // Initial loads and retries share cancellation, independently of list and language changes.
   useEffect(() => {
     if (!selectedId) {
       setSelectedSummary(null);
       setNoteContent('');
       setSavedContent('');
+      setSavedRevision(0);
+      setSavedGeneration(0);
+      setRemoteNote(null);
       setPractices([]);
       setNoteLoadError(false);
       return;
@@ -230,15 +350,28 @@ export function useNoteEditor({
     setSaveSuccess(false);
     setSaveError('');
     setNoteLoadError(false);
+    recovery.current = null;
+    setDraftStatus('');
 
-    // Fetch note content
+    // Fetch note content, then restore a retained draft for the same problem when one exists.
     api
       .getNote(selectedId)
-      .then((res) => {
+      .then(async (res) => {
         if (!active) return;
         const content = res.note?.content ?? '';
-        setNoteContent(content);
+        const session = api.drafts ? createDraftSession(api.drafts, 'note', selectedId) : null;
+        const restored = session ? await session.read() : null;
+        if (!active) return;
+        recovery.current = session;
+        setNoteContent(restored?.draft?.content ?? content);
         setSavedContent(content);
+        setSavedRevision(res.note?.revision ?? 0);
+        const conflict = Boolean(restored?.draft && (
+          restored.draft.baseRevision !== (res.note?.revision ?? 0) || restored.draft.libraryGeneration !== res.libraryGeneration
+        ));
+        setSavedGeneration(res.libraryGeneration);
+        setRemoteNote(conflict ? { content, revision: res.note?.revision ?? 0, libraryGeneration: res.libraryGeneration } : null);
+        setExternalChange(conflict);
       })
       .catch(() => {
         if (active) {
@@ -279,9 +412,12 @@ export function useNoteEditor({
   const isBlank = noteContent.trim().length === 0;
   const hasMeaningful = hasMeaningfulNoteContent(noteContent);
   const canSave =
+    environment.host.capabilities.noteEditing &&
     !loadingNote &&
     !savingNote &&
     !noteLoadError &&
+    !remoteNote &&
+    savedGeneration > 0 &&
     isModified &&
     (isBlank ? savedContent.trim().length > 0 : hasMeaningful);
 
@@ -309,10 +445,10 @@ export function useNoteEditor({
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [hasUnsavedChanges]);
 
-  /** Persist one snapshot, serializing per-problem writes and ignoring responses from obsolete visits or superseded saves. */
-  async function handleSaveNote() {
+  /** Persist one snapshot, serializing writes and retaining newer edits from the same visit. Resolves true when the editor is clean. */
+  async function handleSaveNote(): Promise<boolean> {
     const session = editorSession.current;
-    if (!selectedId || !canSave || !session.active || session.saving) return;
+    if (!selectedId || !canSave || !session.active || session.saving) return false;
     // Synchronous guard also blocks repeated shortcuts before React commits savingNote.
     session.saving = true;
     const saveVersion = ++session.saveVersion;
@@ -331,7 +467,7 @@ export function useNoteEditor({
         : controlledFormatOnSave === null
           ? false
           : settingReady.current && settingValue.current;
-    const shouldFormat = !bypass && formatEnabled;
+    const shouldFormat = environment.host.capabilities.noteFormatting && !bypass && formatEnabled;
     setSavingNote(true);
     setSaveSuccess(false);
     setSaveError('');
@@ -341,30 +477,33 @@ export function useNoteEditor({
       let formatted = { content: targetContent, status: 'unchanged' as 'unchanged' | 'formatted' | 'skipped' };
       if (shouldFormat && targetContent.trim()) {
         formatted = await formatNoteInWorker(targetContent);
-        if (!isLatestProblemSave()) return;
+        if (!isLatestProblemSave()) return false;
         if (hasMeaningfulNoteContent(targetContent) !== hasMeaningfulNoteContent(formatted.content)) {
           formatted = { content: targetContent, status: 'skipped' };
         }
       }
-      const previousWrite = problemSaveChain.current.get(targetId) ?? Promise.resolve();
+      const previousWrite = problemSaveChain.current.get(targetId) ?? Promise.resolve(null);
       const currentWrite = previousWrite
-        .catch(() => {})
-        .then(async () => {
+        .catch(() => null)
+        .then(async (previous) => {
           if (!isLatestProblemSave()) return null;
-          return api.upsertNote(targetId, formatted.content);
+          // Advance only from our own acknowledged write of the same captured baseline.
+          const expectedRevision = previous && previous.baseRevision === savedRevision &&
+            previous.baseGeneration === savedGeneration && previous.note.libraryGeneration === savedGeneration
+            ? previous.note.revision : savedRevision;
+          const result = await api.upsertNote(targetId, formatted.content, expectedRevision, savedGeneration);
+          return { note: result.note, baseRevision: savedRevision, baseGeneration: savedGeneration };
         });
-      problemSaveChain.current.set(
-        targetId,
-        currentWrite.then(
-          () => {},
-          () => {},
-        ),
-      );
+      problemSaveChain.current.set(targetId, currentWrite);
       const result = await currentWrite;
-      if (!result || !isLatestProblemSave()) return;
+      if (!result || !isLatestProblemSave()) return false;
       const { note } = result;
       if (session.active) {
         setSavedContent(note.content);
+        setSavedRevision(note.revision);
+        setSavedGeneration(note.libraryGeneration);
+        setRemoteNote(null);
+        setExternalChange(false);
         setSaveSuccess(true);
         if (formatted.status === 'skipped') setFormatNotice(t.notesFormatSkipped);
         if (formatted.status === 'formatted' && note.content === formatted.content && draft.current.revision === targetRevision) {
@@ -402,10 +541,14 @@ export function useNoteEditor({
       // A saved note can change list membership even after switching problems. Refresh
       // the latest filters while mounted, without reloading the current editor draft.
       if (editorSession.current.active) setListRevision((current) => current + 1);
+      const clean = session.active && editorSession.current === session && draft.current.value === note.content;
+      if (session.active && editorSession.current === session) onDirtyChange?.(!clean);
+      return clean;
     } catch (err) {
       if (session.active && isLatestProblemSave()) {
-        setSaveError(localizeApiError(err, lang));
+        setSaveError(err instanceof OperationStateError ? operationMessage(err, lang) : localizeApiError(err, lang));
       }
+      return false;
     } finally {
       session.saving = false;
       if (session.active) {
@@ -413,6 +556,27 @@ export function useNoteEditor({
         setSavingNote(false);
       }
     }
+  }
+
+  /** Delete the retained draft before discarding edits; false (with `saveError`) keeps the visit. */
+  async function discardDraft(): Promise<boolean> {
+    try {
+      await recovery.current?.closeAndDelete();
+      return true;
+    } catch (e) {
+      setSaveError(String(e));
+      return false;
+    }
+  }
+
+  /** Accept the compared library version as the new baseline while keeping the preserved draft. */
+  function adoptRemoteBaseline() {
+    if (!remoteNote) return;
+    setSavedContent(remoteNote.content);
+    setSavedRevision(remoteNote.revision);
+    setSavedGeneration(remoteNote.libraryGeneration);
+    setRemoteNote(null);
+    setExternalChange(false);
   }
 
   return {
@@ -441,6 +605,11 @@ export function useNoteEditor({
     closeAiReview,
     generateAiSuggestion,
     applyAiSuggestion,
+    draftStatus,
+    externalChange,
+    remoteNote,
+    adoptRemoteBaseline,
+    discardDraft,
   };
 }
 

@@ -144,6 +144,42 @@ export function Pagination({
 }
 
 type FloatingSide = 'top' | 'right' | 'bottom' | 'left';
+/** Cross-axis alignment for top/bottom placement; side placements always center vertically. */
+type FloatingAlign = 'center' | 'start' | 'end';
+
+/**
+ * Compute viewport coordinates for floating content next to an anchor.
+ * Flips to the opposite side when the preferred side overflows, then clamps inside the viewport.
+ * Pure apart from reading the current viewport size.
+ */
+function placeFloating(
+  a: DOMRect,
+  f: DOMRect,
+  side: FloatingSide,
+  align: FloatingAlign = 'center',
+  gap = 8,
+): { left: number; top: number } {
+  const width = document.documentElement.clientWidth || window.innerWidth;
+  const height = document.documentElement.clientHeight || window.innerHeight;
+  // The viewport margin stays 8px even when the anchor gap is tighter.
+  const edge = 8;
+  let left = align === 'start' ? a.left : align === 'end' ? a.right - f.width : a.left + (a.width - f.width) / 2;
+  let top = a.bottom + gap;
+  if (side === 'right' || side === 'left') {
+    left = side === 'right' ? a.right + gap : a.left - f.width - gap;
+    if (left + f.width > width - edge) left = a.left - f.width - gap;
+    if (left < edge) left = a.right + gap;
+    top = a.top + (a.height - f.height) / 2;
+  } else {
+    top = side === 'top' ? a.top - f.height - gap : a.bottom + gap;
+    if (top < edge) top = a.bottom + gap;
+    if (top + f.height > height - edge) top = a.top - f.height - gap;
+  }
+  return {
+    left: Math.max(edge, Math.min(left, width - f.width - edge)),
+    top: Math.max(edge, Math.min(top, height - f.height - edge)),
+  };
+}
 
 /** Measure only open floating content; flip and clamp it within desktop viewport edges. */
 function useFloatingPosition(
@@ -157,27 +193,9 @@ function useFloatingPosition(
     if (!open) return;
     const update = () => {
       if (!anchor.current || !floating.current) return;
-      const a = anchor.current.getBoundingClientRect();
-      const f = floating.current.getBoundingClientRect();
-      const width = document.documentElement.clientWidth || window.innerWidth;
-      const height = document.documentElement.clientHeight || window.innerHeight;
-      const gap = 8;
-      let left = a.left + (a.width - f.width) / 2;
-      let top = a.bottom + gap;
-      if (side === 'right' || side === 'left') {
-        left = side === 'right' ? a.right + gap : a.left - f.width - gap;
-        if (left + f.width > width - gap) left = a.left - f.width - gap;
-        if (left < gap) left = a.right + gap;
-        top = a.top + (a.height - f.height) / 2;
-      } else {
-        top = side === 'top' ? a.top - f.height - gap : a.bottom + gap;
-        if (top < gap) top = a.bottom + gap;
-        if (top + f.height > height - gap) top = a.top - f.height - gap;
-      }
-      setPosition({
-        left: Math.max(gap, Math.min(left, width - f.width - gap)),
-        top: Math.max(gap, Math.min(top, height - f.height - gap)),
-      });
+      setPosition(
+        placeFloating(anchor.current.getBoundingClientRect(), floating.current.getBoundingClientRect(), side),
+      );
     };
     update();
     window.addEventListener('resize', update);
@@ -188,6 +206,157 @@ function useFloatingPosition(
     };
   }, [open, side, anchor, floating]);
   return position;
+}
+
+/**
+ * True when the runtime implements the native Popover API.
+ * Feature-detects on the prototype, as the popover guidance requires; jsdom and very old
+ * WebViews take the manual fallback in `useActionPopover`.
+ */
+function supportsPopover(): boolean {
+  return typeof HTMLElement !== 'undefined' && Object.hasOwn(HTMLElement.prototype, 'popover');
+}
+
+/** Whether `root` contains a native popover that is currently showing. */
+function hasOpenPopover(root: Element | null): boolean {
+  return supportsPopover() && !!root?.querySelector(':popover-open');
+}
+
+/** Whether `node` sits inside a native popover that is currently hidden. */
+function isInsideClosedPopover(node: Element): boolean {
+  return supportsPopover() && !!node.closest('[popover]:not(:popover-open)');
+}
+
+export interface ActionPopover {
+  /** Whether the panel is showing; mirrors the native `toggle` event when popovers are supported. */
+  open: boolean;
+  /** Hide the panel. Native popovers return focus to the trigger if focus was inside the panel. */
+  close: () => void;
+  /** Render the panel's children only while this is true (always true for native popovers). */
+  rendered: boolean;
+  triggerProps: {
+    ref: React.RefObject<HTMLButtonElement | null>;
+    'aria-expanded': boolean;
+    'aria-controls'?: string;
+    popoverTarget?: string;
+    onClick?: () => void;
+  };
+  panelProps: {
+    ref: (node: HTMLDivElement | null) => void;
+    id: string;
+    popover?: 'auto';
+  };
+}
+
+/**
+ * Button-revealed action panel (a disclosure, not an ARIA menu: no arrow-key contract).
+ *
+ * Native path: `popover="auto"` + `popovertarget` give top-layer rendering, light dismiss,
+ * Escape and focus return from the browser. The panel is placed from script because CSS anchor
+ * positioning is not available in every target WebView (macOS 14 ships Safari 17).
+ * Fallback path (no Popover API): the panel mounts only while open, and outside clicks / Escape
+ * are handled manually.
+ */
+export function useActionPopover({ align = 'start' }: { align?: 'start' | 'end' } = {}): ActionPopover {
+  const id = useId();
+  const [native] = useState(supportsPopover);
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  // Track the element in state too: panels can mount after the hook (e.g. a toolbar that only
+  // renders once a problem is selected), and the native listeners must bind to that element.
+  const [panelNode, setPanelNode] = useState<HTMLDivElement | null>(null);
+  const attachPanel = useCallback((node: HTMLDivElement | null) => {
+    panelRef.current = node;
+    setPanelNode(node);
+  }, []);
+
+  const close = useCallback(() => {
+    const panel = panelRef.current;
+    if (native) {
+      if (panel?.matches(':popover-open')) panel.hidePopover();
+    } else {
+      setOpen(false);
+    }
+  }, [native]);
+
+  // Native: follow the browser's open state and keep the top-layer panel attached to its trigger.
+  useEffect(() => {
+    const panel = panelNode;
+    if (!native) return;
+    if (!panel) {
+      // An unmounted panel cannot be open; keep aria-expanded truthful.
+      setOpen(false);
+      return;
+    }
+    let frame = 0;
+    const place = () => {
+      const trigger = triggerRef.current;
+      if (!trigger || !panel.matches(':popover-open')) return;
+      const { left, top } = placeFloating(
+        trigger.getBoundingClientRect(),
+        panel.getBoundingClientRect(),
+        'bottom',
+        align,
+        4,
+      );
+      panel.style.left = `${left}px`;
+      panel.style.top = `${top}px`;
+    };
+    // The panel is shown synchronously after `beforetoggle`; the frame callback runs before the
+    // first paint, so the panel never flashes at the default centered popover position.
+    const beforeToggle = (event: Event) => {
+      if ((event as ToggleEvent).newState === 'open') frame = requestAnimationFrame(place);
+    };
+    const toggle = (event: Event) => setOpen((event as ToggleEvent).newState === 'open');
+    panel.addEventListener('beforetoggle', beforeToggle);
+    panel.addEventListener('toggle', toggle);
+    window.addEventListener('resize', place);
+    document.addEventListener('scroll', place, true);
+    return () => {
+      cancelAnimationFrame(frame);
+      panel.removeEventListener('beforetoggle', beforeToggle);
+      panel.removeEventListener('toggle', toggle);
+      window.removeEventListener('resize', place);
+      document.removeEventListener('scroll', place, true);
+    };
+  }, [native, align, panelNode]);
+
+  // Fallback: emulate light dismiss and Escape while the panel is mounted.
+  useEffect(() => {
+    if (native || !open) return;
+    const handleDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (!panelRef.current?.contains(target) && !triggerRef.current?.contains(target)) setOpen(false);
+    };
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      // Capture phase + stopPropagation keeps an enclosing Dialog open, matching native popovers.
+      event.stopPropagation();
+      setOpen(false);
+      triggerRef.current?.focus();
+    };
+    document.addEventListener('mousedown', handleDown);
+    window.addEventListener('keydown', handleKey, true);
+    return () => {
+      document.removeEventListener('mousedown', handleDown);
+      window.removeEventListener('keydown', handleKey, true);
+    };
+  }, [native, open]);
+
+  return {
+    open,
+    close,
+    rendered: native || open,
+    triggerProps: {
+      ref: triggerRef,
+      'aria-expanded': open,
+      // Only reference the panel while it exists in the DOM.
+      'aria-controls': native || open ? id : undefined,
+      ...(native ? { popoverTarget: id } : { onClick: () => setOpen((value) => !value) }),
+    },
+    panelProps: { ref: attachPanel, id, ...(native ? { popover: 'auto' as const } : {}) },
+  };
 }
 
 /**
@@ -492,7 +661,9 @@ export function Dialog({
           !n.closest('[hidden]') &&
           !n.matches(':disabled') &&
           // Closed rule editors must not trap focus in an invisible input.
-          (!n.closest('details:not([open])') || n.tagName === 'SUMMARY'),
+          (!n.closest('details:not([open])') || n.tagName === 'SUMMARY') &&
+          // Hidden action panels stay mounted as native popovers; skip their items too.
+          !isInsideClosedPopover(n),
       );
 
     const focusTimer = setTimeout(() => (targets()[0] ?? panel.current)?.focus(), 0);
@@ -506,6 +677,9 @@ export function Dialog({
       )
         return;
       if (event.key === 'Escape') {
+        // Let the browser close an open action panel first; cancelling this keydown would
+        // suppress the popover's close request and dismiss the whole dialog instead.
+        if (hasOpenPopover(panel.current)) return;
         event.preventDefault();
         event.stopPropagation();
         requestClose();

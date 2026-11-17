@@ -4,7 +4,7 @@
  * table. Motion stays small: the notice settles in once, bars grow on mount (shared keyframe),
  * expanded rows open with a height/opacity ease, and carets rotate. Reduced motion removes all of it.
  */
-.progress-notice {
+.tracker-workspace .progress-notice {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -14,18 +14,18 @@
   background: var(--warning-bg);
   color: var(--warning);
   font-size: 13px;
-  animation: progress-settle var(--enter) var(--spring-tactile) both;
+  animation: tracker-progress-settle var(--enter) var(--spring-tactile) both;
 }
-.progress-notice-icon {
+.tracker-workspace .progress-notice-icon {
   width: 16px;
   height: 16px;
   flex-shrink: 0;
 }
-.progress-notice-text {
+.tracker-workspace .progress-notice-text {
   flex: 1;
   min-width: 0;
 }
-.progress-notice-action {
+.tracker-workspace .progress-notice-action {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -40,22 +40,22 @@
   cursor: pointer;
   transition: background-color var(--fast) ease;
 }
-.progress-notice-action svg {
+.tracker-workspace .progress-notice-action svg {
   width: 14px;
   height: 14px;
   transition: transform var(--fast) var(--spring-tactile);
 }
-.progress-notice-action:hover {
+.tracker-workspace .progress-notice-action:hover {
   background: color-mix(in srgb, var(--warning) 10%, transparent);
 }
-.progress-notice-action:hover svg {
+.tracker-workspace .progress-notice-action:hover svg {
   transform: translateX(2px);
 }
-.progress-notice-action:focus-visible {
+.tracker-workspace .progress-notice-action:focus-visible {
   outline: 2px solid var(--warning);
   outline-offset: 1px;
 }
-@keyframes progress-settle {
+@keyframes tracker-progress-settle {
   from {
     opacity: 0;
     transform: translateY(-4px);
@@ -63,10 +63,10 @@
 }
 
 /* Heatmap header and footer */
-.heatmap-card-head {
+.tracker-workspace .heatmap-card-head {
   align-items: center;
 }
-.heatmap-year-select {
+.tracker-workspace .heatmap-year-select {
   display: inline-flex;
   gap: 2px;
   padding: 2px;
@@ -74,23 +74,23 @@
   border: 1px solid var(--border-color);
   border-radius: var(--radius);
 }
-.heatmap-year-select .topic-filter-tab {
+.tracker-workspace .heatmap-year-select .topic-filter-tab {
   padding: 3px 10px;
   font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
-.heatmap-summary {
+.tracker-workspace .heatmap-summary {
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0 4px;
 }
-.heatmap-quiet {
+.tracker-workspace .heatmap-quiet {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
-.heatmap-quiet-dot {
+.tracker-workspace .heatmap-quiet-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -98,7 +98,7 @@
 }
 
 /* Topics worth attention */
-.focus-topics-note {
+.tracker-workspace .focus-topics-note {
   margin: 0 0 6px;
   padding: 8px 10px;
   border-radius: 6px;
@@ -107,12 +107,12 @@
   font-size: 12px;
   line-height: 1.5;
 }
-.focus-topics-list {
+.tracker-workspace .focus-topics-list {
   margin: 0;
   padding: 0;
   list-style: none;
 }
-.focus-topics-row {
+.tracker-workspace .focus-topics-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(80px, 9rem) 5.5rem;
   align-items: center;
@@ -121,10 +121,10 @@
   border-bottom: 1px solid var(--border-color);
   font-size: 14px;
 }
-.focus-topics-row:last-child {
+.tracker-workspace .focus-topics-row:last-child {
   border-bottom: 0;
 }
-.focus-topics-name {
+.tracker-workspace .focus-topics-name {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -133,13 +133,13 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.focus-topics-track {
+.tracker-workspace .focus-topics-track {
   height: 6px;
   border-radius: 3px;
   background: var(--muted-surface);
   overflow: hidden;
 }
-.focus-topics-fill {
+.tracker-workspace .focus-topics-fill {
   display: block;
   height: 100%;
   border-radius: 3px;
@@ -160,71 +160,71 @@
   initial-value: 1;
 }
 @supports (animation-delay: calc(sibling-index() * 0.1s)) {
-  .focus-topics-row {
+  .tracker-workspace .focus-topics-row {
     --focus-row-index: sibling-index();
   }
-  .focus-topics-fill {
+  .tracker-workspace .focus-topics-fill {
     animation-delay: calc((var(--focus-row-index) - 1) * 40ms);
   }
 }
 /* Safari 17 (macOS 14 WKWebView) lacks sibling-index(); the list never exceeds five rows. */
 @supports not (animation-delay: calc(sibling-index() * 0.1s)) {
-  .focus-topics-row:nth-child(2) .focus-topics-fill { animation-delay: 40ms; }
-  .focus-topics-row:nth-child(3) .focus-topics-fill { animation-delay: 80ms; }
-  .focus-topics-row:nth-child(4) .focus-topics-fill { animation-delay: 120ms; }
-  .focus-topics-row:nth-child(5) .focus-topics-fill { animation-delay: 160ms; }
+  .tracker-workspace .focus-topics-row:nth-child(2) .focus-topics-fill { animation-delay: 40ms; }
+  .tracker-workspace .focus-topics-row:nth-child(3) .focus-topics-fill { animation-delay: 80ms; }
+  .tracker-workspace .focus-topics-row:nth-child(4) .focus-topics-fill { animation-delay: 120ms; }
+  .tracker-workspace .focus-topics-row:nth-child(5) .focus-topics-fill { animation-delay: 160ms; }
 }
-.focus-topics-frac {
+.tracker-workspace .focus-topics-frac {
   font-size: 13px;
   color: var(--text-muted);
   text-align: right;
 }
-.focus-topics-actions {
+.tracker-workspace .focus-topics-actions {
   display: flex;
   justify-content: flex-end;
   margin-top: 16px;
 }
 
 /* Level chips share the semantic tones used by the difficulty pills. */
-.tag-chip.level-needs_practice {
+.tracker-workspace .tag-chip.level-needs_practice {
   color: var(--warning);
   background: var(--warning-bg);
 }
-.tag-chip.level-developing {
+.tracker-workspace .tag-chip.level-developing {
   color: var(--primary);
   background: var(--selected);
 }
-.tag-chip.level-recently_stable {
+.tracker-workspace .tag-chip.level-recently_stable {
   color: var(--easy);
   background: var(--easy-bg);
 }
 
 /* Topic table */
-.topic-insights .section-heading {
+.tracker-workspace .topic-insights .section-heading {
   flex-wrap: wrap;
   margin-bottom: 4px;
 }
-.topic-insights .section-heading h2 {
+.tracker-workspace .topic-insights .section-heading h2 {
   margin: 0;
   font-size: 16px;
   font-weight: 650;
 }
 /* Topic search sits above the table; the field reuses the global input look. The attribute
    selector matches the specificity of the global input rule so these paddings win. */
-.topic-toolbar {
+.tracker-workspace .topic-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 10px;
 }
-.topic-search {
+.tracker-workspace .topic-search {
   position: relative;
   display: flex;
   align-items: center;
   width: min(100%, 22rem);
 }
-.topic-search-icon {
+.tracker-workspace .topic-search-icon {
   position: absolute;
   left: 10px;
   width: 15px;
@@ -232,7 +232,7 @@
   color: var(--text-muted);
   pointer-events: none;
 }
-.topic-search input[type='search'] {
+.tracker-workspace .topic-search input[type='search'] {
   width: 100%;
   min-height: 34px;
   padding: 6px 32px 6px 32px;
@@ -240,19 +240,19 @@
   border-color: var(--border-color);
   transition: border-color var(--fast) ease, box-shadow var(--fast) ease;
 }
-.topic-search input[type='search']:hover {
+.tracker-workspace .topic-search input[type='search']:hover {
   border-color: var(--outline);
 }
-.topic-search input[type='search']:focus-visible {
+.tracker-workspace .topic-search input[type='search']:focus-visible {
   border-color: var(--primary);
   box-shadow: var(--shadow-glow);
   outline: none;
 }
 /* The clear button replaces the native search cancel control for a consistent look. */
-.topic-search input[type='search']::-webkit-search-cancel-button {
+.tracker-workspace .topic-search input[type='search']::-webkit-search-cancel-button {
   appearance: none;
 }
-.topic-search-clear {
+.tracker-workspace .topic-search-clear {
   position: absolute;
   right: 6px;
   display: grid;
@@ -265,44 +265,44 @@
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  animation: progress-settle var(--fast) var(--spring-tactile) both;
+  animation: tracker-progress-settle var(--fast) var(--spring-tactile) both;
   transition: background-color var(--fast) ease, color var(--fast) ease;
 }
-.topic-search-clear:hover {
+.tracker-workspace .topic-search-clear:hover {
   color: var(--text-main);
   background: var(--muted-surface);
 }
-.topic-search-clear:focus-visible {
+.tracker-workspace .topic-search-clear:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 1px;
 }
-.topic-search-clear svg {
+.tracker-workspace .topic-search-clear svg {
   width: 14px;
   height: 14px;
 }
-.topic-toolbar-hint {
+.tracker-workspace .topic-toolbar-hint {
   font-size: 12px;
   white-space: nowrap;
 }
-.topic-empty {
+.tracker-workspace .topic-empty {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   padding: 16px 0 4px;
 }
-.topic-empty p {
+.tracker-workspace .topic-empty p {
   margin: 0;
 }
-.topic-table-scroll {
+.tracker-workspace .topic-table-scroll {
   overflow-x: auto;
 }
-.topic-table {
+.tracker-workspace .topic-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
 }
-.topic-table thead th {
+.tracker-workspace .topic-table thead th {
   padding: 8px 10px;
   border-bottom: 1px solid var(--border-color);
   color: var(--text-muted);
@@ -311,12 +311,12 @@
   text-align: left;
   white-space: nowrap;
 }
-.topic-table .num {
+.tracker-workspace .topic-table .num {
   text-align: right;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.topic-sort {
+.tracker-workspace .topic-sort {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -330,48 +330,48 @@
   cursor: pointer;
   transition: color var(--fast) ease, background-color var(--fast) ease;
 }
-.topic-sort:hover {
+.tracker-workspace .topic-sort:hover {
   color: var(--text-main);
   background: var(--muted-surface);
 }
-.topic-sort:focus-visible {
+.tracker-workspace .topic-sort:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 1px;
 }
-.topic-sort-arrow {
+.tracker-workspace .topic-sort-arrow {
   opacity: 0;
   transform: translateY(-2px);
   transition: opacity var(--fast) ease, transform var(--fast) var(--spring-tactile);
 }
-.topic-sort:hover .topic-sort-arrow {
+.tracker-workspace .topic-sort:hover .topic-sort-arrow {
   opacity: 0.45;
 }
-.topic-sort.is-active {
+.tracker-workspace .topic-sort.is-active {
   color: var(--primary);
 }
-.topic-sort.is-active .topic-sort-arrow {
+.tracker-workspace .topic-sort.is-active .topic-sort-arrow {
   opacity: 1;
   transform: none;
 }
-.topic-insight-row > th,
-.topic-insight-row > td {
+.tracker-workspace .topic-insight-row > th,
+.tracker-workspace .topic-insight-row > td {
   padding: 9px 10px;
   border-bottom: 1px solid var(--border-color);
   vertical-align: middle;
   transition: background-color var(--fast) ease, border-color var(--fast) ease;
 }
-.topic-insight-row > th {
+.tracker-workspace .topic-insight-row > th {
   font-weight: inherit;
   text-align: left;
 }
-.topic-group:hover .topic-insight-row > *,
-.topic-group.is-open .topic-insight-row > * {
+.tracker-workspace .topic-group:hover .topic-insight-row > *,
+.tracker-workspace .topic-group.is-open .topic-insight-row > * {
   background: color-mix(in srgb, var(--muted-surface) 55%, transparent);
 }
-.topic-group.is-open .topic-insight-row > * {
+.tracker-workspace .topic-group.is-open .topic-insight-row > * {
   border-bottom-color: transparent;
 }
-.topic-row-toggle {
+.tracker-workspace .topic-row-toggle {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -384,36 +384,36 @@
   text-align: left;
   cursor: pointer;
 }
-.topic-row-toggle strong {
+.tracker-workspace .topic-row-toggle strong {
   font-weight: 600;
 }
-.topic-row-toggle:focus-visible {
+.tracker-workspace .topic-row-toggle:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
 }
-.topic-row-caret {
+.tracker-workspace .topic-row-caret {
   width: 14px;
   height: 14px;
   flex-shrink: 0;
   color: var(--text-muted);
   transition: transform var(--enter) var(--spring-tactile);
 }
-.topic-group.is-open .topic-row-caret {
+.tracker-workspace .topic-group.is-open .topic-row-caret {
   transform: rotate(90deg);
 }
-.topic-table td.is-overdue {
+.tracker-workspace .topic-table td.is-overdue {
   color: var(--warning);
 }
-.topic-table .topic-difficulty-pills {
+.tracker-workspace .topic-table .topic-difficulty-pills {
   gap: 4px;
   padding: 0;
   border: 0;
   background: transparent;
 }
-.topic-table .topic-micro-pill {
+.tracker-workspace .topic-table .topic-micro-pill {
   padding: 2px 5px;
 }
-.topic-table .topic-pill-label {
+.tracker-workspace .topic-table .topic-pill-label {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -421,52 +421,52 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
-.topic-detail-row > td {
+.tracker-workspace .topic-detail-row > td {
   padding: 0;
   border: 0;
 }
-.topic-detail-collapse {
+.tracker-workspace .topic-detail-collapse {
   display: grid;
   grid-template-rows: 0fr;
   opacity: 0;
   transition: grid-template-rows var(--enter) var(--spring-tactile), opacity var(--fast) ease;
 }
-.topic-group.is-open .topic-detail-collapse {
+.tracker-workspace .topic-group.is-open .topic-detail-collapse {
   grid-template-rows: 1fr;
   opacity: 1;
 }
-.topic-detail-inner {
+.tracker-workspace .topic-detail-inner {
   min-height: 0;
   overflow: hidden;
 }
-.topic-detail-body {
+.tracker-workspace .topic-detail-body {
   padding: 4px 16px 16px 30px;
   border-bottom: 1px solid var(--border-color);
   background: color-mix(in srgb, var(--muted-surface) 55%, transparent);
 }
-.topic-detail-facts {
+.tracker-workspace .topic-detail-facts {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 24px;
   margin: 0 0 10px;
   font-size: 12px;
 }
-.topic-detail-facts div {
+.tracker-workspace .topic-detail-facts div {
   display: flex;
   gap: 6px;
 }
-.topic-detail-facts dt {
+.tracker-workspace .topic-detail-facts dt {
   color: var(--text-muted);
 }
-.topic-detail-facts dd {
+.tracker-workspace .topic-detail-facts dd {
   margin: 0;
   font-weight: 600;
 }
-.topic-detail-note {
+.tracker-workspace .topic-detail-note {
   margin: 0 0 10px;
   font-size: 12px;
 }
-.topic-table-foot {
+.tracker-workspace .topic-table-foot {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -474,24 +474,24 @@
   margin-top: 14px;
   font-size: 13px;
 }
-.progress-source-details .detail-grid {
+.tracker-workspace .progress-source-details .detail-grid {
   margin-bottom: 12px;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .progress-notice,
-  .focus-topics-fill,
-  .topic-search-clear {
+  .tracker-workspace .progress-notice,
+  .tracker-workspace .focus-topics-fill,
+  .tracker-workspace .topic-search-clear {
     animation: none;
   }
-  .focus-topics-fill,
-  .progress-notice-action svg,
-  .topic-sort,
-  .topic-sort-arrow,
-  .topic-insight-row > th,
-  .topic-insight-row > td,
-  .topic-row-caret,
-  .topic-detail-collapse {
+  .tracker-workspace .focus-topics-fill,
+  .tracker-workspace .progress-notice-action svg,
+  .tracker-workspace .topic-sort,
+  .tracker-workspace .topic-sort-arrow,
+  .tracker-workspace .topic-insight-row > th,
+  .tracker-workspace .topic-insight-row > td,
+  .tracker-workspace .topic-row-caret,
+  .tracker-workspace .topic-detail-collapse {
     transition: none;
   }
 }

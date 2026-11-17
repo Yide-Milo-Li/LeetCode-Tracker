@@ -8,25 +8,25 @@
  */
 
 /* Page shell and header actions */
-.notes-workspace-view {
+.tracker-workspace .notes-workspace-view {
   display: flex;
   flex-direction: column;
   height: 100%;
 }
 
-.nw-header-actions {
+.tracker-workspace .nw-header-actions {
   display: flex;
   gap: 8px;
 }
 
-.notes-workspace-view .nw-export-link {
+.tracker-workspace .notes-workspace-view .nw-export-link {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
 
 /* Master-detail grid (zen mode collapses it via `.notes-master-detail.zen` in 12-notes.css) */
-.nw-master-detail {
+.tracker-workspace .nw-master-detail {
   display: grid;
   grid-template-columns: 340px 1fr;
   gap: 16px;
@@ -35,12 +35,12 @@
   align-items: start;
 }
 
-.nw-master-detail.zen {
+.tracker-workspace .nw-master-detail.zen {
   grid-template-columns: 1fr;
 }
 
 /* Master pane: scope tabs, search, filters, problem list */
-.nw-master-pane {
+.tracker-workspace .nw-master-pane {
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -53,7 +53,7 @@
   overflow: hidden;
 }
 
-.nw-scope-tabs {
+.tracker-workspace .nw-scope-tabs {
   display: flex;
   padding: 3px;
   background-color: var(--muted-surface);
@@ -61,7 +61,7 @@
   gap: 2px;
 }
 
-.notes-workspace-view .nw-scope-tab {
+.tracker-workspace .notes-workspace-view .nw-scope-tab {
   flex: 1;
   padding: 5px 10px;
   border-radius: 6px;
@@ -75,18 +75,18 @@
   transition: all 0.15s ease;
 }
 
-.notes-workspace-view .nw-scope-tab[aria-selected='true'] {
+.tracker-workspace .notes-workspace-view .nw-scope-tab[aria-selected='true'] {
   font-weight: 600;
   background-color: var(--surface);
   color: var(--text-main);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 }
 
-.nw-search {
+.tracker-workspace .nw-search {
   position: relative;
 }
 
-.notes-workspace-view .nw-search-icon {
+.tracker-workspace .notes-workspace-view .nw-search-icon {
   position: absolute;
   left: 9px;
   top: 50%;
@@ -96,7 +96,7 @@
 }
 
 /* Element-qualified to outrank `input:not(...):not(...)` and its :hover/:focus border colors. */
-.notes-workspace-view input.nw-search-input {
+.tracker-workspace .notes-workspace-view input.nw-search-input {
   width: 100%;
   padding: 6px 10px 6px 28px;
   border-radius: 6px;
@@ -109,13 +109,13 @@
 }
 
 /* Filter row: high contrast in both light and dark mode */
-.nw-filters {
+.tracker-workspace .nw-filters {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 6px;
 }
 
-.notes-workspace-view select.nw-filter-select {
+.tracker-workspace .notes-workspace-view select.nw-filter-select {
   padding: 5px 8px;
   border-radius: 6px;
   border: 1px solid var(--border-color);
@@ -126,12 +126,12 @@
   cursor: pointer;
 }
 
-.notes-workspace-view select.nw-filter-select option {
+.tracker-workspace .notes-workspace-view select.nw-filter-select option {
   background-color: var(--surface);
   color: var(--text-main);
 }
 
-.nw-list-items {
+.tracker-workspace .nw-list-items {
   flex: 1;
   overflow-y: auto;
   display: flex;
@@ -140,14 +140,14 @@
   padding-right: 2px;
 }
 
-.nw-list-loading {
+.tracker-workspace .nw-list-loading {
   padding: 24px;
   text-align: center;
   color: var(--text-muted);
   font-size: 0.8125rem;
 }
 
-.nw-list-empty {
+.tracker-workspace .nw-list-empty {
   padding: 32px 16px;
   text-align: center;
   color: var(--text-muted);
@@ -155,7 +155,7 @@
 }
 
 /* Problem row: left accent bar; overrides the bordered card look from 12-notes.css. */
-.notes-problem-card.nw-problem-card {
+.tracker-workspace .notes-problem-card.nw-problem-card {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -174,16 +174,16 @@
   width: 100%;
 }
 
-.notes-problem-card.nw-problem-card.active {
+.tracker-workspace .notes-problem-card.nw-problem-card.active {
   border-left-color: var(--primary);
   background-color: var(--selected);
 }
 
-.notes-problem-card.nw-problem-card:not(.active):hover {
+.tracker-workspace .notes-problem-card.nw-problem-card:not(.active):hover {
   background-color: var(--muted-surface);
 }
 
-.nw-problem-main {
+.tracker-workspace .nw-problem-main {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -191,7 +191,7 @@
   flex: 1;
 }
 
-.nw-problem-id {
+.tracker-workspace .nw-problem-id {
   font-size: 0.75rem;
   font-weight: 600;
   color: var(--text-muted);
@@ -199,7 +199,7 @@
   flex-shrink: 0;
 }
 
-.nw-problem-title {
+.tracker-workspace .nw-problem-title {
   font-size: 0.8125rem;
   font-weight: 450;
   color: var(--text-main);
@@ -209,36 +209,36 @@
   flex: 1;
 }
 
-.nw-problem-card.active .nw-problem-title {
+.tracker-workspace .nw-problem-card.active .nw-problem-title {
   font-weight: 600;
 }
 
-.nw-problem-badges {
+.tracker-workspace .nw-problem-badges {
   display: flex;
   align-items: center;
   gap: 5px;
   flex-shrink: 0;
 }
 
-.nw-solved-mark {
+.tracker-workspace .nw-solved-mark {
   color: var(--primary);
   font-size: 0.8125rem;
   font-weight: 700;
   line-height: 1;
 }
 
-.nw-note-mark {
+.tracker-workspace .nw-note-mark {
   color: var(--text-muted);
   display: inline-flex;
 }
 
-.nw-pagination {
+.tracker-workspace .nw-pagination {
   padding-top: 6px;
   border-top: 1px solid var(--border-color);
 }
 
 /* Detail pane */
-.nw-detail-pane {
+.tracker-workspace .nw-detail-pane {
   background-color: var(--surface);
   border: 1px solid var(--border-color);
   border-radius: 10px;
@@ -250,7 +250,7 @@
   overflow-y: auto;
 }
 
-.nw-detail-empty {
+.tracker-workspace .nw-detail-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -261,12 +261,12 @@
   min-height: 400px;
 }
 
-.nw-detail-empty-icon {
+.tracker-workspace .nw-detail-empty-icon {
   opacity: 0.5;
 }
 
 /* Problem header & copy/export bar */
-.nw-problem-header {
+.tracker-workspace .nw-problem-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -275,12 +275,12 @@
   gap: 12px;
 }
 
-.nw-problem-heading {
+.tracker-workspace .nw-problem-heading {
   flex: 1;
   min-width: 0;
 }
 
-.nw-title-row {
+.tracker-workspace .nw-title-row {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -288,7 +288,7 @@
   margin-bottom: 6px;
 }
 
-.notes-workspace-view .nw-title {
+.tracker-workspace .notes-workspace-view .nw-title {
   margin: 0;
   font-size: 1.25rem;
   font-weight: 620;
@@ -299,13 +299,13 @@
 }
 
 /* Three classes to outrank `.btn-icon:hover:not(:disabled)` color. */
-.notes-workspace-view .btn-icon.nw-external-link {
+.tracker-workspace .notes-workspace-view .btn-icon.nw-external-link {
   color: var(--text-muted);
   display: inline-flex;
   align-items: center;
 }
 
-.nw-meta-row {
+.tracker-workspace .nw-meta-row {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -313,13 +313,13 @@
   font-size: 0.75rem;
 }
 
-.nw-solved-label {
+.tracker-workspace .nw-solved-label {
   font-size: 0.75rem;
   color: var(--primary);
   font-weight: 600;
 }
 
-.nw-review-stage {
+.tracker-workspace .nw-review-stage {
   font-size: 0.6875rem;
   padding: 1px 6px;
   border-radius: 4px;
@@ -328,13 +328,13 @@
   font-weight: 500;
 }
 
-.nw-tags {
+.tracker-workspace .nw-tags {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
 }
 
-.notes-tag-chip.nw-tag-chip {
+.tracker-workspace .notes-tag-chip.nw-tag-chip {
   font-size: 0.6875rem;
   background-color: var(--muted-surface);
   padding: 1px 6px;
@@ -342,42 +342,42 @@
   color: var(--text-muted);
 }
 
-.nw-header-tools {
+.tracker-workspace .nw-header-tools {
   display: flex;
   gap: 6px;
   align-items: center;
   flex-shrink: 0;
 }
 
-.notes-workspace-view .nw-md-export {
+.tracker-workspace .notes-workspace-view .nw-md-export {
   display: inline-flex;
   align-items: center;
   gap: 4px;
 }
 
-.notes-workspace-view .nw-zen-btn {
+.tracker-workspace .notes-workspace-view .nw-zen-btn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
 }
 
 /* Four classes to outrank `.btn-secondary:hover:not(:disabled)` border color. */
-.notes-workspace-view .btn.nw-zen-btn.active {
+.tracker-workspace .notes-workspace-view .btn.nw-zen-btn.active {
   border-color: var(--primary);
   color: var(--primary);
 }
 
 /* Practice timeline accordion */
-.nw-timeline {
+.tracker-workspace .nw-timeline {
   border-bottom: 1px solid var(--border-color);
   padding-bottom: 0;
 }
 
-.nw-timeline.is-open {
+.tracker-workspace .nw-timeline.is-open {
   padding-bottom: 12px;
 }
 
-.notes-workspace-view .nw-timeline-toggle {
+.tracker-workspace .notes-workspace-view .nw-timeline-toggle {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -391,11 +391,11 @@
   transition: background-color 0.12s ease;
 }
 
-.notes-workspace-view .nw-timeline-toggle:hover {
+.tracker-workspace .notes-workspace-view .nw-timeline-toggle:hover {
   background-color: var(--muted-surface);
 }
 
-.nw-timeline-label {
+.tracker-workspace .nw-timeline-label {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -404,22 +404,22 @@
   color: var(--text-secondary);
 }
 
-.nw-timeline-hint {
+.tracker-workspace .nw-timeline-hint {
   font-size: 0.75rem;
   color: var(--text-muted);
 }
 
-.nw-timeline-body {
+.tracker-workspace .nw-timeline-body {
   margin-top: 8px;
 }
 
-.nw-timeline-status {
+.tracker-workspace .nw-timeline-status {
   color: var(--text-muted);
   font-size: 0.8125rem;
   padding: 4px 8px;
 }
 
-.nw-timeline-list {
+.tracker-workspace .nw-timeline-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -428,7 +428,7 @@
   padding-right: 4px;
 }
 
-.nw-timeline-item {
+.tracker-workspace .nw-timeline-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -438,21 +438,21 @@
   font-size: 0.75rem;
 }
 
-.nw-timeline-meta {
+.tracker-workspace .nw-timeline-meta {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.nw-timeline-date {
+.tracker-workspace .nw-timeline-date {
   font-weight: 500;
 }
 
-.nw-timeline-duration {
+.tracker-workspace .nw-timeline-duration {
   color: var(--text-muted);
 }
 
-.nw-timeline-note {
+.tracker-workspace .nw-timeline-note {
   color: var(--text-secondary);
   font-style: italic;
   max-width: 280px;
@@ -462,14 +462,14 @@
 }
 
 /* Note editor section */
-.nw-editor {
+.tracker-workspace .nw-editor {
   display: flex;
   flex-direction: column;
   gap: 10px;
   flex: 1;
 }
 
-.nw-editor-header {
+.tracker-workspace .nw-editor-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -477,7 +477,7 @@
   gap: 8px;
 }
 
-.nw-editor-title {
+.tracker-workspace .nw-editor-title {
   font-size: 0.875rem;
   font-weight: 600;
   color: var(--text-secondary);
@@ -486,7 +486,7 @@
   gap: 8px;
 }
 
-.nw-template-warning {
+.tracker-workspace .nw-template-warning {
   font-size: 0.6875rem;
   background-color: var(--warning-bg, rgba(234, 179, 8, 0.15));
   color: var(--warning, #eab308);
@@ -499,14 +499,14 @@
   border: 1px solid var(--warning, #eab308);
 }
 
-.nw-editor-actions {
+.tracker-workspace .nw-editor-actions {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.nw-save-success {
+.tracker-workspace .nw-save-success {
   color: var(--primary);
   font-size: 0.75rem;
   display: flex;
@@ -514,28 +514,28 @@
   gap: 4px;
 }
 
-.nw-save-error {
+.tracker-workspace .nw-save-error {
   color: var(--danger);
   font-size: 0.75rem;
 }
 
-.nw-format-notice {
+.tracker-workspace .nw-format-notice {
   color: var(--text-secondary);
   font-size: 0.75rem;
 }
 
-.notes-workspace-view .nw-save-btn {
+.tracker-workspace .notes-workspace-view .nw-save-btn {
   display: inline-flex;
   align-items: center;
   gap: 5px;
 }
 
-.nw-shortcut-hint {
+.tracker-workspace .nw-shortcut-hint {
   font-size: 0.6875rem;
   opacity: 0.75;
 }
 
-.nw-load-error {
+.tracker-workspace .nw-load-error {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -547,23 +547,23 @@
   border: 1px solid var(--danger, #ef4444);
 }
 
-.notes-workspace-view .nw-retry-btn {
+.tracker-workspace .notes-workspace-view .nw-retry-btn {
   font-size: 0.75rem;
   padding: 2px 8px;
 }
 
-.notes-tool-btn.nw-tool-math {
+.tracker-workspace .notes-tool-btn.nw-tool-math {
   font-weight: 600;
 }
 
 /* View mode segmented control */
-.nw-view-mode {
+.tracker-workspace .nw-view-mode {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.nw-view-toggle {
+.tracker-workspace .nw-view-toggle {
   display: inline-flex;
   background-color: var(--surface);
   border-radius: 5px;
@@ -572,7 +572,7 @@
   gap: 2px;
 }
 
-.notes-workspace-view .nw-view-btn {
+.tracker-workspace .notes-workspace-view .nw-view-btn {
   border: none;
   background: transparent;
   color: var(--text-muted);
@@ -583,14 +583,14 @@
   cursor: pointer;
 }
 
-.notes-workspace-view .nw-view-btn.is-active {
+.tracker-workspace .notes-workspace-view .nw-view-btn.is-active {
   background: var(--selected);
   color: var(--primary);
   font-weight: 600;
 }
 
 /* Element-qualified to outrank base textarea :hover/:focus outline and border rules. */
-.notes-workspace-view textarea.nw-editor-textarea {
+.tracker-workspace .notes-workspace-view textarea.nw-editor-textarea {
   width: 100%;
   padding: 12px 14px;
   border-radius: 8px;
@@ -606,11 +606,11 @@
   box-sizing: border-box;
 }
 
-.notes-workspace-view textarea.nw-editor-textarea:focus {
+.tracker-workspace .notes-workspace-view textarea.nw-editor-textarea:focus {
   border-color: var(--focus);
 }
 
-.nw-editor-footer {
+.tracker-workspace .nw-editor-footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -619,32 +619,32 @@
 }
 
 /* Unsaved-changes dialog (portaled; class chains instead of the view scope) */
-.nw-unsaved-actions {
+.tracker-workspace .nw-unsaved-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
   width: 100%;
 }
 
-.btn.btn-secondary.nw-discard-btn {
+.tracker-workspace .btn.btn-secondary.nw-discard-btn {
   color: var(--danger, #ef4444);
   border-color: var(--danger, #ef4444);
 }
 
-.nw-unsaved-body {
+.tracker-workspace .nw-unsaved-body {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.nw-unsaved-body .nw-unsaved-desc {
+.tracker-workspace .nw-unsaved-body .nw-unsaved-desc {
   margin: 0;
   color: var(--text-secondary);
   font-size: 0.875rem;
   line-height: 1.5;
 }
 
-.nw-unsaved-target {
+.tracker-workspace .nw-unsaved-target {
   padding: 10px 12px;
   background-color: var(--muted-surface);
   border-radius: 6px;
@@ -655,10 +655,10 @@
   gap: 8px;
 }
 
-.nw-unsaved-target-label {
+.tracker-workspace .nw-unsaved-target-label {
   color: var(--text-muted);
 }
 
-.nw-unsaved-target-name {
+.tracker-workspace .nw-unsaved-target-name {
   font-weight: 600;
 }

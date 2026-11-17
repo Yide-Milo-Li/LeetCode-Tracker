@@ -1,44 +1,44 @@
 /* Forms, dialogs, drawers, tooltips and popovers. */
 /* Forms and overlays share the same labels, spacing, dismissal and focus rules. */
-.form-field {
+.tracker-workspace .form-field {
   display: flex;
   flex-direction: column;
   gap: 7px;
   min-width: 0;
   font-size: 14px;
 }
-.form-field > span {
+.tracker-workspace .form-field > span {
   font-weight: 550;
 }
-.form-field > small {
+.tracker-workspace .form-field > small {
   line-height: 1.5;
 }
-.form-grid {
+.tracker-workspace .form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
 }
-.practice-form {
+.tracker-workspace .practice-form {
   display: grid;
   gap: 18px;
 }
-.selected-problem {
+.tracker-workspace .selected-problem {
   display: flex;
   justify-content: space-between;
   gap: 12px;
   border-bottom: 1px solid var(--border-color);
   padding: 8px 0 16px;
 }
-.selected-problem > strong {
+.tracker-workspace .selected-problem > strong {
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.selected-problem > button {
+.tracker-workspace .selected-problem > button {
   flex-shrink: 0;
   align-self: flex-start;
   white-space: nowrap;
 }
-.picker-option {
+.tracker-workspace .picker-option {
   display: flex;
   gap: 16px;
   align-items: center;
@@ -49,10 +49,10 @@
   margin-top: 6px;
   border-radius: 6px;
 }
-.picker-option .difficulty {
+.tracker-workspace .picker-option .difficulty {
   margin-left: auto;
 }
-.overlay-backdrop {
+.tracker-workspace .overlay-backdrop {
   position: fixed;
   inset: 0;
   z-index: 100;
@@ -61,102 +61,107 @@
   align-items: center;
   padding: 32px;
   background: var(--scrim);
-  animation: fade-in var(--overlay-enter);
+  animation: tracker-fade-in var(--overlay-enter);
 }
-.overlay-backdrop.is-closing {
-  animation: fade-out var(--overlay-exit) forwards;
+.tracker-workspace .overlay-backdrop.is-closing {
+  animation: tracker-fade-out var(--overlay-exit) forwards;
 }
-.overlay-panel {
+.tracker-workspace .overlay-panel {
   display: flex;
   flex-direction: column;
   width: 560px;
   max-width: calc(100vw - 64px);
   max-height: calc(100vh - 64px);
+  overflow: hidden;
   background: var(--surface);
   box-shadow: var(--shadow-md);
   border: 1px solid var(--border-color);
   border-radius: 16px;
-  animation: dialog-enter var(--overlay-enter);
+  animation: tracker-dialog-enter var(--overlay-enter);
 }
-.overlay-panel.is-closing {
-  animation: dialog-exit var(--overlay-exit) forwards;
+.tracker-workspace .overlay-panel.is-closing {
+  animation: tracker-dialog-exit var(--overlay-exit) forwards;
 }
-.overlay-panel.wide-panel {
+.tracker-workspace .overlay-panel.wide-panel {
   width: 760px;
 }
-.overlay-header {
+.tracker-workspace .overlay-header {
   display: flex;
+  flex-shrink: 0;
   align-items: flex-start;
   justify-content: space-between;
   gap: 20px;
   padding: 22px 24px;
   border-bottom: 1px solid var(--border-color);
 }
-.overlay-header h2 {
+.tracker-workspace .overlay-header h2 {
   font-size: 19px;
   padding-top: 2px;
 }
-.overlay-body {
+.tracker-workspace .overlay-body {
   padding: 24px;
   overflow: auto;
   min-height: 0;
+  min-width: 0;
   overscroll-behavior: contain;
 }
-.overlay-footer {
+.tracker-workspace .overlay-footer {
+  flex-shrink: 0;
   border-top: 1px solid var(--border-color);
   padding: 16px 24px;
 }
-.is-drawer {
+.tracker-workspace .is-drawer {
   justify-content: flex-end;
   padding: 0;
 }
-.is-drawer .overlay-panel {
+.tracker-workspace .is-drawer .overlay-panel {
   width: 640px;
   height: 100vh;
   max-height: 100vh;
   border-radius: 0;
-  animation: drawer-enter var(--overlay-enter);
+  animation: tracker-drawer-enter var(--overlay-enter);
 }
-.is-drawer .overlay-panel.is-closing {
-  animation: drawer-exit var(--overlay-exit) forwards;
+.tracker-workspace .is-drawer .overlay-panel.is-closing {
+  animation: tracker-drawer-exit var(--overlay-exit) forwards;
 }
-.is-drawer .wide-panel {
+.tracker-workspace .is-drawer .wide-panel {
   width: 860px;
 }
-.is-drawer .overlay-body {
+.tracker-workspace .is-drawer .overlay-body {
+  /* Let the body shrink and scroll while the header and actions stay visible. */
   flex: 1;
 }
 
 /* Quick note drawer content (hosted by the shared Dialog drawer). */
-.quick-note-meta {
+.tracker-workspace .quick-note-meta {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-bottom: 16px;
 }
-.quick-note-eyebrow {
+.tracker-workspace .quick-note-eyebrow {
   font-size: 13px;
   color: var(--text-muted);
   margin-right: auto;
 }
-.quick-note-external {
+.tracker-workspace .quick-note-external {
   color: var(--text-muted);
 }
-.quick-note-copy {
+.tracker-workspace .quick-note-copy {
   margin-bottom: 16px;
 }
-.quick-note-content {
+.tracker-workspace .quick-note-content {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
-.quick-note-panel {
+.tracker-workspace .quick-note-panel {
   background: var(--surface-muted);
   border: 1px solid var(--border-color);
   border-radius: var(--radius);
   padding: 12px 16px;
 }
-.quick-note-heading {
+.tracker-workspace .quick-note-heading {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -165,21 +170,21 @@
   font-weight: 600;
   color: var(--text-muted);
 }
-.quick-note-text,
-.quick-note-body {
+.tracker-workspace .quick-note-text,
+.tracker-workspace .quick-note-body {
   margin: 0;
   font-size: 15px;
   line-height: 1.6;
   white-space: pre-wrap;
 }
-.quick-note-body {
+.tracker-workspace .quick-note-body {
   padding: 16px;
 }
-.quick-note-loading {
+.tracker-workspace .quick-note-loading {
   font-size: 14px;
   color: var(--text-muted);
 }
-.quick-note-template-notice {
+.tracker-workspace .quick-note-template-notice {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -191,7 +196,7 @@
   border: 1px solid var(--warning);
   border-radius: 4px;
 }
-.quick-note-empty {
+.tracker-workspace .quick-note-empty {
   display: grid;
   justify-items: center;
   gap: 8px;
@@ -202,17 +207,17 @@
   border: 1px dashed var(--border-color);
   border-radius: var(--radius);
 }
-.quick-note-footer {
+.tracker-workspace .quick-note-footer {
   display: flex;
   justify-content: flex-end;
 }
 
 /* Tooltip Primitives */
-.tooltip-wrapper {
+.tracker-workspace .tooltip-wrapper {
   position: relative;
   display: inline-flex;
 }
-.tooltip-bubble {
+.tracker-workspace .tooltip-bubble {
   position: fixed;
   z-index: 1000;
   padding: 5px 9px;
@@ -227,12 +232,12 @@
   max-width: min(320px, calc(100vw - 16px));
   overflow-wrap: anywhere;
   pointer-events: none;
-  animation: fade-in 100ms ease-out;
+  animation: tracker-fade-in 100ms ease-out;
 }
-html.dark .tooltip-bubble {
+.tracker-workspace.dark .tooltip-bubble {
   border: 1px solid var(--border-color);
 }
-.tooltip-shortcut {
+.tracker-workspace .tooltip-shortcut {
   margin-left: 6px;
   padding: 1px 4px;
   font-size: 10px;
@@ -242,12 +247,12 @@ html.dark .tooltip-bubble {
 }
 
 /* InfoPopover Primitives */
-.info-popover-anchor {
+.tracker-workspace .info-popover-anchor {
   position: relative;
   display: inline-flex;
   vertical-align: middle;
 }
-.info-trigger {
+.tracker-workspace .info-trigger {
   width: 38px;
   height: 38px;
   min-width: 38px;
@@ -255,11 +260,11 @@ html.dark .tooltip-bubble {
   border-radius: 50%;
   color: var(--text-muted);
 }
-.info-trigger:hover {
+.tracker-workspace .info-trigger:hover {
   color: var(--primary);
   background: var(--selected);
 }
-.info-popover-card {
+.tracker-workspace .info-popover-card {
   position: fixed;
   z-index: 500;
   width: 280px;
@@ -274,13 +279,13 @@ html.dark .tooltip-bubble {
   font-size: 13px;
   line-height: 1.5;
   color: var(--text-main);
-  animation: fade-in 120ms ease-out;
+  animation: tracker-fade-in 120ms ease-out;
   outline: none;
 }
-.info-popover-content p {
+.tracker-workspace .info-popover-content p {
   margin: 0;
 }
-.recommendation-popover-text {
+.tracker-workspace .recommendation-popover-text {
   font-size: 12.5px;
   color: var(--text-main);
   line-height: 1.45;
@@ -288,7 +293,7 @@ html.dark .tooltip-bubble {
 }
 
 /* Goal Completion Compact Badge */
-.goal-completion-badge {
+.tracker-workspace .goal-completion-badge {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -300,39 +305,39 @@ html.dark .tooltip-bubble {
   color: var(--primary);
   font-size: 13px;
   font-weight: 600;
-  animation: fade-in var(--enter) ease-out;
+  animation: tracker-fade-in var(--enter) ease-out;
 }
-.goal-badge-icon {
+.tracker-workspace .goal-badge-icon {
   flex-shrink: 0;
 }
-.detail-grid {
+.tracker-workspace .detail-grid {
   display: grid;
   grid-template-columns: minmax(100px, 0.7fr) minmax(0, 2fr);
   gap: 10px 16px;
   font-size: 14px;
   margin: 20px 0;
 }
-.detail-grid dt {
+.tracker-workspace .detail-grid dt {
   color: var(--text-muted);
 }
-.detail-grid dd {
+.tracker-workspace .detail-grid dd {
   margin: 0;
   overflow-wrap: anywhere;
 }
-.record-detail {
+.tracker-workspace .record-detail {
   padding: 22px 0;
   border-bottom: 1px solid var(--border-color);
 }
-.record-detail:first-child {
+.tracker-workspace .record-detail:first-child {
   padding-top: 0;
 }
-.confirmation {
+.tracker-workspace .confirmation {
   margin-top: 16px;
   padding: 16px;
   background: var(--danger-bg);
   border-radius: 8px;
 }
-.history-row {
+.tracker-workspace .history-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -344,10 +349,10 @@ html.dark .tooltip-bubble {
   border-bottom: 1px solid var(--border-color);
   font-size: 14px;
 }
-.history-row:hover {
+.tracker-workspace .history-row:hover {
   color: var(--primary);
 }
-.checkbox-label {
+.tracker-workspace .checkbox-label {
   display: flex;
   align-items: center;
   gap: 10px;

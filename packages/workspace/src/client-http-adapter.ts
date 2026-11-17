@@ -48,6 +48,12 @@ import type {
 // Re-export all contract types for full backward compatibility across web components
 export * from '../../contracts/src/index.ts';
 
+/** Optional per-call settings for read endpoints that a view may abandon (e.g. on unmount). */
+export interface ReadOptions {
+  /** Aborting rejects the call with an `AbortError`; the response is never applied. */
+  signal?: AbortSignal;
+}
+
 // For web client calls, query parameters are optional inputs before server schema defaults apply
 export type CatalogQuery = CatalogQueryInput;
 export type PracticeQuery = PracticeQueryInput;
@@ -191,7 +197,7 @@ const practiceApi = {
     });
   },
 
-  getPracticeRecords(query: PracticeQuery = {}): Promise<{ total: number; page: number; limit: number; items: PracticeRecord[] }> {
+  getPracticeRecords(query: PracticeQuery = {}, { signal }: ReadOptions = {}): Promise<{ total: number; page: number; limit: number; items: PracticeRecord[] }> {
     const params = new URLSearchParams();
     if (query.page) params.set('page', String(query.page));
     if (query.limit) params.set('limit', String(query.limit));
@@ -200,7 +206,7 @@ const practiceApi = {
     if (query.status) params.set('status', query.status);
 
     const qs = params.toString();
-    return request(`/practice-records${qs ? `?${qs}` : ''}`);
+    return request(`/practice-records${qs ? `?${qs}` : ''}`, { signal });
   },
 
   updatePracticeRecord(id: string, input: UpdatePracticeRecordInput, expectedLibraryGeneration?: number): Promise<PracticeRecord> {
@@ -287,8 +293,8 @@ const progressApi = {
     });
   },
 
-  getProgressImportHistory(page = 1, limit = 20): Promise<{ total: number; items: Omit<ProgressImportSummary, 'errors'>[] }> {
-    return request(`/progress-imports?page=${page}&limit=${limit}`);
+  getProgressImportHistory(page = 1, limit = 20, { signal }: ReadOptions = {}): Promise<{ total: number; items: Omit<ProgressImportSummary, 'errors'>[] }> {
+    return request(`/progress-imports?page=${page}&limit=${limit}`, { signal });
   },
 
   getProgressImportResult(id: string): Promise<ProgressImportSummary> {
@@ -377,9 +383,9 @@ const planningApi = {
 // Dashboard & Activity API
 // ==========================================
 const dashboardApi = {
-  getDashboard(year?: number): Promise<DashboardResponse> {
+  getDashboard(year?: number, { signal }: ReadOptions = {}): Promise<DashboardResponse> {
     const query = year ? `?year=${encodeURIComponent(year)}` : '';
-    return request<DashboardResponse>(`/dashboard${query}`);
+    return request<DashboardResponse>(`/dashboard${query}`, { signal });
   },
 
   getDashboardActivities(query: {
@@ -431,8 +437,8 @@ const notesApi = {
     return request<{ items: ProblemNoteSummary[]; total: number }>(`/notes${qs ? `?${qs}` : ''}`);
   },
 
-  getNote(frontendId: string): Promise<{ note: ProblemNote | null; libraryGeneration: number }> {
-    return request<{ note: ProblemNote | null; libraryGeneration: number }>(`/notes/${encodeURIComponent(frontendId)}`);
+  getNote(frontendId: string, { signal }: ReadOptions = {}): Promise<{ note: ProblemNote | null; libraryGeneration: number }> {
+    return request<{ note: ProblemNote | null; libraryGeneration: number }>(`/notes/${encodeURIComponent(frontendId)}`, { signal });
   },
 
   upsertNote(frontendId: string, content: string, expectedRevision?: number, expectedLibraryGeneration?: number): Promise<{ note: ProblemNote }> {
