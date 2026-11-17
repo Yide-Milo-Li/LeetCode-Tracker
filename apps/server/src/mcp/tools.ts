@@ -11,6 +11,7 @@ import type { OperationReviewService } from './review.ts';
 import type { ReviewCeilings, ReviewOperationInput } from '../../../../packages/application/src/types.ts';
 import { WORKSPACE_RESOURCE_URI, getWorkspaceHtml } from './workspace-html.ts';
 import { rulePatchSchema } from '../../../../packages/contracts/src/recommendations.ts';
+import { TRACKER_RUNTIME_VERSION } from '../version.ts';
 
 export { WORKSPACE_RESOURCE_URI };
 const planPreconditions = {
@@ -158,7 +159,7 @@ export function registerTrackerTools(
       const tools = isReadOnly ? readTools : [...readTools, ...writeTools];
 
       const data = {
-        runtimeVersion: '1.2.0',
+        runtimeVersion: TRACKER_RUNTIME_VERSION,
         readOnly: isReadOnly,
         mode: auth?.mode ?? 'read_only',
         database: {

@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { request as httpRequest } from 'node:http';
@@ -46,6 +46,22 @@ async function fixture(seeded = true) {
   return { dir, db, store, application, controller, client, mcp, endpoint, headers, rpc, call, note, practice, snapshot, getModelCalls: () => modelCalls,
     close: async () => { await mcp.close(); db.close(); rmSync(dir, { recursive: true, force: true }); } };
 }
+
+test('health and MCP identify the same runtime version as the application package', async () => {
+  const env = await fixture();
+  const app = await buildApp({ application: env.application, disableStatic: true });
+  try {
+    const expected = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+    const health = (await app.inject('/api/v1/health')).json();
+    const initialized = await env.rpc('initialize', {
+      protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'synthetic', version: '1' },
+    });
+    const status = await env.call('tracker_status');
+    assert.equal(health.version, expected);
+    assert.equal(initialized.json.result.serverInfo.version, expected);
+    assert.equal(status.structuredContent.runtimeVersion, expected);
+  } finally { await app.close(); await env.close(); }
+});
 
 test('management requires an injected owner and desktop session authentication', async () => {
   const env = await fixture();

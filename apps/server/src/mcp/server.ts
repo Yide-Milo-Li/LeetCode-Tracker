@@ -6,6 +6,7 @@ import type { TrackerApplication } from '@leetcode-tracker/application';
 import { McpController, McpConfigError, type McpAuthorization } from './config.ts';
 import { registerTrackerTools } from './tools.ts';
 import { OperationReviewService } from './review.ts';
+import { TRACKER_RUNTIME_VERSION } from '../version.ts';
 export interface McpServerHandle { server: http.Server; port: number; close: () => Promise<void> }
 export interface StartMcpServerOptions {
   application: TrackerApplication; controller: McpController;
@@ -26,7 +27,7 @@ export async function startMcpServer(options: StartMcpServerOptions): Promise<Mc
   };
   const handler = createMcpHandler(ctx => {
     const auth = ctx.authInfo?.extra?.authorization as McpAuthorization;
-    const server = new McpServer({ name: 'leetcode-tracker', version: '1.2.0' });
+    const server = new McpServer({ name: 'leetcode-tracker', version: TRACKER_RUNTIME_VERSION });
     registerTrackerTools(server, options.application, {
       assert: () => controller.assertAuthorized(auth),
       getAuth: () => auth,

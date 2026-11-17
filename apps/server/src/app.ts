@@ -12,6 +12,7 @@ import type { TrackerApplication } from '../../../packages/application/src/appli
 import { registerMigrationGate } from './migration-gate.ts';
 import { registerAllRoutes } from './routes/index.ts';
 import type { McpController } from './mcp/config.ts';
+import { TRACKER_RUNTIME_VERSION } from './version.ts';
 
 /** Options for building Fastify app. */
 export interface AppOptions {
@@ -86,7 +87,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   app.get('/api/v1/health', async () => {
     return {
       status: 'ok',
-      version: '1.3.1',
+      version: TRACKER_RUNTIME_VERSION,
       timestamp: new Date().toISOString(),
     };
   });

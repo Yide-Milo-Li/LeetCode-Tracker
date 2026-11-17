@@ -497,6 +497,6 @@ it('renders Complete migration summary instead of Legacy v1 warning when importi
   });
 
   const dialog = screen.getByRole('alertdialog');
-  assert.match(dialog.textContent ?? '', /Complete migration · v1\.3\.1 · 0 problems/);
+  assert.match(dialog.textContent ?? '', /Complete migration · Bundle v5 · App v1\.3\.1 · 0 problems/);
   assert.equal((dialog.textContent ?? '').includes('Legacy v1'), false);
 });
