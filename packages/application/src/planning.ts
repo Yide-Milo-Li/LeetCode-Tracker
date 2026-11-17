@@ -1087,6 +1087,33 @@ export class PlanningService {
   }
 
   /**
+   * Apply structured rules in one call. The request, not an ephemeral preview,
+   * identifies a retry; replay precedes date resolution and current-state checks.
+   */
+  public async applyDailyPlanRules(options: {
+    rules: RulePatch;
+    date?: string;
+    expectedVersion: number | null;
+    operationId: string;
+  }): Promise<{ plan: DailyPlan; changed: string[] }> {
+    const rules = rulePatchSchema.parse(options.rules);
+    const fingerprint = `rules:${JSON.stringify([options.date ?? null, options.expectedVersion, rules])}`;
+    const replay = this.planning.replayResult(options.operationId, fingerprint);
+    if (replay) return { plan: replay.plan, changed: replay.changed ?? [] };
+
+    if (!options.date && !isTimeZone(this.store.getSettings().timezone ?? '')) {
+      throw new PlanningError('TIMEZONE_REQUIRED', 'Configure a timezone before applying rules for today.', 400);
+    }
+    const preview = await this.previewDailyPlanOverride({ rules, date: options.date });
+    if (preview.issues.length || preview.unresolved.length) {
+      this.activeOverridePreviews.delete(preview.id);
+      throw new PlanningError('RULES_NOT_APPLICABLE', [...preview.issues, ...preview.unresolved].join('; '), 400);
+    }
+    const plan = await this.commitOverride(preview.id, options, fingerprint, { changed: preview.changed });
+    return { plan, changed: preview.changed };
+  }
+
+  /**
    * Commit a confirmed daily plan override.
    * Replaces unfinished items with new candidates matching the override rules while preserving completed items.
    */
@@ -1098,6 +1125,15 @@ export class PlanningService {
     }
   ): Promise<DailyPlan> {
     const fingerprint = `override:${previewId}:${options.expectedVersion ?? 'null'}`;
+    return this.commitOverride(previewId, options, fingerprint);
+  }
+
+  private async commitOverride(
+    previewId: string,
+    options: { operationId: string; expectedVersion: number | null },
+    fingerprint: string,
+    metadata?: { changed: string[] },
+  ): Promise<DailyPlan> {
     const replayed = this.planning.replay(options.operationId, fingerprint);
     if (replayed) {
       return replayed;
@@ -1141,7 +1177,8 @@ export class PlanningService {
           if (epoch !== this.transientEpoch) throw new PlanningError('STALE_DATA', 'Profile changed during override; retry', 409);
           if (preview.analysisDate && preview.analysisDate !== localDate(Date.now(), userTimezone))
             throw new PlanningError('PREVIEW_EXPIRED', 'Calendar date changed; preview again', 400);
-        }
+        },
+        metadata,
       );
       this.activeOverridePreviews.delete(previewId);
       return committed;
@@ -1244,12 +1281,13 @@ export class PlanningService {
       preview.revision,
       options.expectedVersion,
       options.operationId,
-      `override:${preview.id}:${options.expectedVersion ?? 'null'}`,
+      fingerprint,
       true,
       () => {
         if (epoch !== this.transientEpoch) throw new PlanningError('STALE_DATA', 'Profile changed during override; retry', 409);
         if (localDate(Date.now(), userTimezone) !== localDate(now, userTimezone)) throw new PlanningError('PREVIEW_EXPIRED', 'Calendar date changed; preview again', 400);
-      }
+      },
+      metadata,
     );
 
     this.activeOverridePreviews.delete(previewId);

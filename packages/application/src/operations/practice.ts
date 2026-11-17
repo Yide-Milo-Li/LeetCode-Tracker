@@ -119,12 +119,18 @@ export function createPracticeOperations(context: ApplicationContext) {
     const stats = store.getPracticeStats();
     return stats;
   };
-  /** Record created by an earlier call with this operation ID, so callers can rebuild an identical replay. */
+  /** Immutable creation input, rather than the current editable record, supplies retry defaults. */
   const byOperation = async (operationId: string) => {
     const row = store.db
-      .prepare('SELECT record_id FROM practice_operations WHERE id=?')
-      .get(operationId) as { record_id: string } | undefined;
-    return row ? store.getPracticeRecord(row.record_id) : null;
+      .prepare('SELECT fingerprint FROM practice_operations WHERE id=?')
+      .get(operationId) as { fingerprint: string } | undefined;
+    if (!row) return null;
+    // The persisted v8+ fingerprint is the normalized creation payload in this order.
+    const [questionFrontendId, completed, practicedAt, timePrecision, notes, durationMinutes, sourceTimezone, outcome] = JSON.parse(row.fingerprint);
+    return createPracticeRecordSchema.parse({
+      questionFrontendId, completed, practicedAt, timePrecision, notes: notes ?? undefined,
+      durationMinutes, sourceTimezone, outcome, operationId,
+    });
   };
 
   return { create, query, read, update, revoke, stats, byOperation };

@@ -1,10 +1,12 @@
 # Application boundaries
 
-`packages/application` holds the business operations as transport-neutral methods over an opened `CatalogStore`. On this branch the standalone MCP server (`apps/mcp`) is its only production caller. The HTTP server (`apps/server`) still serves the same behavior through its own routes and `planning-service.ts`; the two planning implementations differ only in import paths and an optional model service, and should converge when the HTTP routes are moved onto the application layer.
+`packages/application` holds the business operations as transport-neutral methods over an opened `CatalogStore`. On this branch the standalone MCP server (`apps/mcp`) is its only production caller. The HTTP server (`apps/server`) still serves the same behavior through its own routes and `planning-service.ts`. The application planning service additionally supports one-call structured rule application with a stable request receipt; the implementations should converge when the HTTP routes are moved onto the application layer.
 
 `openTrackerRuntime` acquires the database lease before opening backed storage. The application owns operation admission, the write lock, planning and previews. Ordinary operations may overlap. Restore requires an idle application and rejects new work until replacement ends. Close drains admitted work before releasing SQLite and its lease.
 
 The standalone MCP server adds one rule on top: reads construct an application over a fresh read-only connection per call and never take the lease, so they run while the desktop app owns the profile. Only writes go through `openTrackerRuntime`. See the [MCP server guide](../apps/mcp/README.md).
+
+MCP practice creation requires a client-generated operation ID and recovers timestamp, precision and timezone defaults from its immutable creation fingerprint. Removed or replaced targets resolve against their original plan version before entering the existing replay path. `planning.applyRules` replays before generating a new preview and atomically saves the plan plus response metadata in the existing `planning_operations.result_json`; old plan-only receipts remain readable, and saved plan/history payloads and schema v12 are unchanged.
 
 ## Capability map
 

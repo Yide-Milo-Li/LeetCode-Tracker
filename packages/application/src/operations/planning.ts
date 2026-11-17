@@ -6,6 +6,7 @@ import {
   ensureDailyPlanSchema,
   overrideCommitSchema,
   overrideRequestSchema,
+  rulePatchSchema,
   PlanningError,
   removePlanItemSchema,
   replaceSchema,
@@ -187,5 +188,20 @@ export function createPlanningOperations(context: ApplicationContext) {
       return fail(500, { error: 'INTERNAL_ERROR', message: err instanceof Error ? err.message : String(err) });
     }
   };
-  return { strategies, createStrategy, updateStrategy, deleteStrategy, schedule, plans, ensure, replace, append, remove, versions, previewOverride, commitOverride };
+  /** A single structured-rule request retains a stable receipt across fresh previews. */
+  const applyRules = async (input: unknown = {}) => {
+    const parsed = overrideRequestSchema.pick({ date: true }).extend({
+      rules: rulePatchSchema,
+      expectedVersion: overrideCommitSchema.shape.expectedVersion,
+      operationId: overrideCommitSchema.shape.operationId,
+    }).safeParse(input);
+    if (!parsed.success) return fail(400, { error: 'INVALID_INPUT', issues: parsed.error.issues });
+    try {
+      return await writeLock.run(() => planningService.applyDailyPlanRules(parsed.data));
+    } catch (err) {
+      if (err instanceof PlanningError) return fail(err.status, { error: err.code, message: err.message });
+      return fail(500, { error: 'INTERNAL_ERROR', message: err instanceof Error ? err.message : String(err) });
+    }
+  };
+  return { strategies, createStrategy, updateStrategy, deleteStrategy, schedule, plans, ensure, replace, append, remove, versions, previewOverride, commitOverride, applyRules };
 }

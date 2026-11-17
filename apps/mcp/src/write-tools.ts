@@ -24,7 +24,9 @@ import { json, refuse, type Registrar } from './registrar.ts';
 import { contentHash, summarizePlan } from './views.ts';
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-const operationIdSchema = z.string().uuid().optional()
+const requiredOperationIdSchema = z.string().uuid()
+  .describe('Generate a UUID before the first call and reuse it for every retry, including when a response is lost.');
+const operationIdSchema = requiredOperationIdSchema.optional()
   .describe('UUID that makes retries safe: repeating a call with the same operationId returns the first result instead of applying twice. Generated when omitted; reuse the returned value to retry.');
 const outcomeSchema = z.enum(['independent', 'assisted', 'unsolved']);
 
@@ -55,6 +57,15 @@ function findItem(plan: Awaited<ReturnType<typeof requirePlan>>, ref: { itemId?:
     throw new ProfileError('PLAN_ITEM_NOT_FOUND', `Problem ${ref.frontendId ?? ref.itemId} is not in the plan for ${plan.date}.`);
   }
   return item;
+}
+
+/** Resolve the original target even when a successful first call has already removed it. */
+async function planAtVersion(application: TrackerApplication, plan: Awaited<ReturnType<typeof requirePlan>>, version: number) {
+  if (plan.version === version) return plan;
+  const { items } = await application.planning.versions({}, { id: plan.id });
+  const original = items.find(candidate => candidate.version === version);
+  if (!original) throw new ProfileError('STALE_PLAN', 'Plan has been modified; please reload.');
+  return original;
 }
 
 /**
@@ -98,7 +109,7 @@ export function registerWriteTools({ register }: Registrar): void {
     {
       description: 'Record a practice attempt for a catalog problem. Safe to retry with the same operationId.',
       inputSchema: z.object({
-        operationId: operationIdSchema,
+        operationId: requiredOperationIdSchema,
         questionFrontendId: z.string().min(1).describe('Problem frontend ID, e.g. "1"'),
         completed: z.boolean().describe('Whether the problem was solved in this attempt'),
         practicedAt: z.string().min(1).optional()
@@ -111,18 +122,18 @@ export function registerWriteTools({ register }: Registrar): void {
       }),
     },
     async (application, args) => {
-      const operationId = args.operationId ?? randomUUID();
+      const operationId = args.operationId;
       const zone = await configuredZone(application);
       // Default to an exact timestamp, as the desktop does: plan completion only
       // counts date-only evidence from days after the item was added.
       // A retry without practicedAt reuses the first call's timestamp so the replay matches.
-      const earlier = args.practicedAt ? null : await application.practice.byOperation(operationId);
+      const earlier = await application.practice.byOperation(operationId);
       const practicedAt = args.practicedAt?.trim() || earlier?.practicedAt || new Date().toISOString();
       const record = await application.practice.create({
         questionFrontendId: args.questionFrontendId.trim(),
         completed: args.completed,
         practicedAt,
-        timePrecision: args.timePrecision ?? (practicedAt.includes('T') ? 'datetime' : 'date'),
+        timePrecision: args.timePrecision ?? (args.practicedAt ? (practicedAt.includes('T') ? 'datetime' : 'date') : earlier?.timePrecision ?? 'datetime'),
         durationMinutes: args.durationMinutes,
         outcome: args.outcome,
         notes: args.notes,
@@ -372,7 +383,7 @@ export function registerWriteTools({ register }: Registrar): void {
     async (application, { date, expectedVersion, frontendId, itemId, feedbackReason, operationId = randomUUID() }) => {
       if (!frontendId && !itemId) return refuse('INVALID_INPUT', 'Provide frontendId or itemId.');
       const plan = await requirePlan(application, await resolveDate(application, date));
-      const item = findItem(plan, { frontendId, itemId });
+      const item = findItem(await planAtVersion(application, plan, expectedVersion), { frontendId, itemId });
       const updated = await application.planning.remove({ operationId, expectedVersion, itemId: item.id, feedbackReason }, { id: plan.id });
       return json({ status: 'applied', operationId, removed: item.problem.questionFrontendId, plan: summarizePlan(updated) });
     },
@@ -396,7 +407,7 @@ export function registerWriteTools({ register }: Registrar): void {
     async (application, { date, expectedVersion, mode = 'one', frontendId, feedbackReason, operationId = randomUUID() }) => {
       if (mode === 'one' && !frontendId) return refuse('INVALID_INPUT', 'frontendId is required when mode is "one".');
       const plan = await requirePlan(application, await resolveDate(application, date));
-      const itemId = mode === 'one' ? findItem(plan, { frontendId }).id : undefined;
+      const itemId = mode === 'one' ? findItem(await planAtVersion(application, plan, expectedVersion), { frontendId }).id : undefined;
       const updated = await application.planning.replace({ operationId, expectedVersion, mode, itemId, feedbackReason }, { id: plan.id });
       return json({ status: 'applied', operationId, plan: summarizePlan(updated) });
     },
@@ -441,13 +452,8 @@ export function registerWriteTools({ register }: Registrar): void {
       }),
     },
     async (application, { date, rules, expectedVersion, operationId = randomUUID() }) => {
-      // Previews live in memory, and each call gets a fresh application, so preview and commit run together.
-      const preview = await application.planning.previewOverride({ rules, date: await resolveDate(application, date) });
-      if (preview.issues.length > 0) {
-        return refuse('RULES_NOT_APPLICABLE', preview.issues.join('; '));
-      }
-      const plan = await application.planning.commitOverride({ previewId: preview.id, expectedVersion, operationId });
-      return json({ status: 'applied', operationId, changed: preview.changed, plan: summarizePlan(plan) });
+      const { plan, changed } = await application.planning.applyRules({ rules, date, expectedVersion, operationId });
+      return json({ status: 'applied', operationId, changed, plan: summarizePlan(plan) });
     },
     'write',
     { destructive: true, idempotent: true },

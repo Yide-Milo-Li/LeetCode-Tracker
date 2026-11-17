@@ -8,6 +8,7 @@ import { join, resolve } from 'node:path';
 import { acquireDatabaseLease } from '../packages/database/src/lease.ts';
 import { resolveProfileLocation } from '../apps/mcp/src/profile.ts';
 import { StdioClient } from './fixtures/mcp-stdio-client.ts';
+import { verifyWriteClosure } from './fixtures/mcp-write-closure.ts';
 import { READ_TOOL_NAMES, TOOL_NAMES } from '../apps/mcp/src/registrar.ts';
 
 const repoRoot = resolve(import.meta.dirname, '..');
@@ -147,16 +148,25 @@ test('missing profile is a coded error, and the import tool creates it', async (
   }
 });
 
-test('bundled executable starts, negotiates the current protocol and serves reads', async () => {
+test('bundled executable negotiates the current protocol and closes writes, readback and retries across restarts', async () => {
   const build = spawnSync(process.execPath, ['--import', 'tsx', join(repoRoot, 'scripts/build-mcp.ts')], { encoding: 'utf8', cwd: repoRoot });
   assert.equal(build.status, 0, build.stderr);
   const w = workspace();
   try {
+    writeFileSync(w.catalogPath, Array.from({ length: 30 }, (_, index) => JSON.stringify({
+      id: String(index + 1), title: `Bundle synthetic ${index + 1}`,
+      difficulty: index < 10 ? 'Easy' : index < 20 ? 'Medium' : 'Hard', tags: ['Array'],
+    })).join('\n'));
     assert.equal(cli(bundleEntry, ['import', w.catalogPath, '--db', w.dbPath]).status, 0);
-    const { client, init } = await StdioClient.start(bundleEntry, w.dbPath, '2025-11-25');
+    let { client, init } = await StdioClient.start(bundleEntry, w.dbPath, '2025-11-25');
     try {
       assert.equal(init.result.protocolVersion, '2025-11-25');
-      assert.equal((await client.call('tracker_status')).structuredContent.database.totalProblems, 3);
+      assert.equal((await client.call('tracker_status')).structuredContent.database.totalProblems, 30);
+      await verifyWriteClosure(client, async () => {
+        await client.close();
+        client = (await StdioClient.start(bundleEntry, w.dbPath, '2025-11-25')).client;
+        return client;
+      });
     } finally { await client.close(); }
   } finally { w.cleanup(); }
 });

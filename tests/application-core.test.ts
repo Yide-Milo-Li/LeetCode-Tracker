@@ -5,6 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { CatalogStore } from '../packages/database/src/store.ts';
 import { createTrackerApplication } from '../packages/application/src/application.ts';
 import { ApplicationError } from '../packages/application/src/errors.ts';
@@ -53,6 +54,35 @@ test('direct methods preserve validation details and practice replay', async () 
     assert.equal((await f.application.practice.create(payload)).id,record.id);
     await assert.rejects(f.application.practice.create({...payload,completed:false}), error=>error instanceof ApplicationError&&error.status===409);
   } finally {await f.application.close(); f.db.close();}
+});
+
+test('rule receipts retain response metadata through Bundle v5 without changing saved plan shapes', async () => {
+  const f = fixture();
+  try {
+    const preview = await f.application.catalog.preview({ content });
+    await f.application.catalog.commit({ previewId: preview.previewId });
+    const request = {
+      rules: { dailyCount: 2, difficulty: { Easy: 100, Medium: 0, Hard: 0 }, reviewEnabled: false, reviewPercent: null },
+      expectedVersion: null, operationId: randomUUID(),
+    };
+    await assert.rejects(f.application.planning.applyRules(request), error => error instanceof ApplicationError && error.code === 'TIMEZONE_REQUIRED');
+    await f.application.settings.update({ timezone: 'UTC' });
+    const applied = await f.application.planning.applyRules(request);
+    assert.equal(applied.plan.items.length, 2);
+    assert.ok(applied.changed.length);
+    const { items: versions } = await f.application.planning.versions({}, { id: applied.plan.id });
+    assert.equal('plan' in versions[0], false, 'receipt envelopes must not leak into plan history');
+    const saved = await f.application.bundle.exportBundle({ version: '5' });
+    await f.application.planning.append({ expectedVersion: applied.plan.version, operationId: randomUUID() }, { id: applied.plan.id });
+    await f.application.bundle.restore(saved.content);
+    assert.deepEqual(await f.application.planning.applyRules(request), applied);
+    await assert.rejects(f.application.planning.applyRules({ ...request, rules: { dailyCount: 3 } }), error => error instanceof ApplicationError && error.code === 'OPERATION_REUSED');
+    // Legacy plan-only receipts and the enriched rule receipt coexist in the same v12 table.
+    const appendRequest = { expectedVersion: applied.plan.version, operationId: randomUUID() };
+    const appended = await f.application.planning.append(appendRequest, { id: applied.plan.id });
+    assert.deepEqual(await f.application.planning.append(appendRequest, { id: applied.plan.id }), appended);
+    assert.deepEqual(await f.application.planning.applyRules(request), applied);
+  } finally { await f.application.close(); f.db.close(); }
 });
 
 test('provider work blocks restore but allows ordinary reads; errors release admission', async () => {

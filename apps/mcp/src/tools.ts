@@ -421,16 +421,18 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
         hasNote: z.enum(['all', 'true', 'false']).optional().default('all').describe('Filter by whether custom note content exists'),
         search: z.string().optional().describe('Search keyword in problem title or ID'),
         difficulty: z.enum(['all', 'Easy', 'Medium', 'Hard']).optional().default('all').describe('Difficulty filter'),
+        scope: z.enum(['all', 'practiced']).optional().default('all').describe('all includes saved notes on unpracticed problems; practiced limits to active practice or progress evidence'),
         page: z.number().int().min(1).optional().default(1).describe('Page number, 1-indexed (default 1)'),
         limit: z.number().int().min(1).max(100).optional().default(20).describe('Items per page, max 100 (default 20)'),
       }),
     },
-    async (application, { hasNote = 'all', search, difficulty = 'all', page = 1, limit = 20 }) => {
+    async (application, { hasNote = 'all', search, difficulty = 'all', scope = 'all', page = 1, limit = 20 }) => {
 
       const result = await application.notes.list({
         hasNote,
         search,
         difficulty,
+        scope,
         page,
         limit,
       });
@@ -473,7 +475,7 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
             text: JSON.stringify({
               frontendId: trimmedId,
               hasNote: false,
-              contentHash: contentHash(''),
+              contentHash: contentHash(result.note?.content ?? ''),
               message: `No custom note found for problem "${trimmedId}".`,
             }, null, 2),
           }],

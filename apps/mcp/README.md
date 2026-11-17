@@ -75,14 +75,14 @@ Add `"--db", "/path/to/tracker.sqlite"` to the arguments to use a different prof
 | `tracker_get_today` | read | The stored plan for today or a given date, with its `version` (never generates one) |
 | `tracker_list_practices` | read | Paginated practice records with `revision`, optionally for one problem |
 | `tracker_get_practice` | read | One practice record |
-| `tracker_list_notes` | read | Note summaries with filters |
+| `tracker_list_notes` | read | Note summaries across the catalog; optional `scope: "practiced"` limits to practiced problems |
 | `tracker_get_note` | read | A problem's Markdown note in chunks, with `contentHash` |
 | `tracker_get_progress` | read | Streaks, difficulty distribution, top tags, trends |
 | `tracker_get_strategies` | read | Strategies and the weekday schedule |
 | `tracker_preview_note` | read | Compare a proposed note with the current one |
 | `tracker_preview_today_rules` | read | Check a one-day rule change without applying it |
 | `tracker_import_catalog` | write | Import a local `.jsonl` catalog file; `dryRun` validates only |
-| `tracker_create_practice` | write | Record a practice attempt |
+| `tracker_create_practice` | write | Record a practice attempt (requires a client-generated `operationId`) |
 | `tracker_update_practice` | write, overwrites | Change a practice record (needs `expectedRevision`) |
 | `tracker_revoke_practice` | write, removes | Revoke a practice record (needs `expectedRevision`) |
 | `tracker_save_note` | write, overwrites | Replace a problem's note (needs `expectedContentHash`) |
@@ -103,6 +103,8 @@ The server does not ask for confirmation itself. Every write tool is annotated `
 On top of that, every write states what it expects to change:
 
 - Practice edits carry the record's `expectedRevision`, plan and strategy changes carry the `expectedVersion`, and note saves carry the `expectedContentHash` from the last read. If someone changed the data in between, the write is refused and nothing is saved.
-- Practice creation and plan changes accept an `operationId` (a UUID, generated when omitted and returned in the result). Retrying with the same `operationId` returns the first result instead of applying the change twice.
+- Practice creation requires an `operationId`: generate a UUID before the first call and keep it for every retry, including when the first response is lost. Plan changes also accept an `operationId`; it is generated when omitted, so supply one beforehand when you need to recover from a lost response. Reusing an ID with different content is refused.
+- Plan retries return the saved result even after the target item was removed or replaced, rules were applied, or the MCP process restarted. Rule application preserves both the plan and its `changed` fields in the receipt. Practice retries recover their original timestamp, precision and timezone from the immutable creation request, so later edits do not duplicate or revert a record; the returned record reflects its current state.
+- Note reads return the hash of the exact stored content, including whitespace-only notes. Note lists default to `scope: "all"`, so notes on unpracticed problems remain discoverable.
 
 Free-text plan preferences and AI note formatting need an AI provider and are not available here. The profile schema is unchanged, so the desktop app keeps working with data written by this server.
