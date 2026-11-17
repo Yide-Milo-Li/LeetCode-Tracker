@@ -5829,6 +5829,91 @@ html.dark .notes-diff-badge.Hard {
   font-size: 16px;
   font-weight: 650;
 }
+/* Topic search sits above the table; the field reuses the global input look. The attribute
+   selector matches the specificity of the global input rule so these paddings win. */
+.topic-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.topic-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: min(100%, 22rem);
+}
+.topic-search-icon {
+  position: absolute;
+  left: 10px;
+  width: 15px;
+  height: 15px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+.topic-search input[type='search'] {
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 32px 6px 32px;
+  font-size: 13px;
+  border-color: var(--border-color);
+  transition: border-color var(--fast) ease, box-shadow var(--fast) ease;
+}
+.topic-search input[type='search']:hover {
+  border-color: var(--outline);
+}
+.topic-search input[type='search']:focus-visible {
+  border-color: var(--primary);
+  box-shadow: var(--shadow-glow);
+  outline: none;
+}
+/* The clear button replaces the native search cancel control for a consistent look. */
+.topic-search input[type='search']::-webkit-search-cancel-button {
+  appearance: none;
+}
+.topic-search-clear {
+  position: absolute;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  animation: progress-settle var(--fast) var(--spring-tactile) both;
+  transition: background-color var(--fast) ease, color var(--fast) ease;
+}
+.topic-search-clear:hover {
+  color: var(--text-main);
+  background: var(--muted-surface);
+}
+.topic-search-clear:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+.topic-search-clear svg {
+  width: 14px;
+  height: 14px;
+}
+.topic-toolbar-hint {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.topic-empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 0 4px;
+}
+.topic-empty p {
+  margin: 0;
+}
 .topic-table-scroll {
   overflow-x: auto;
 }
@@ -6015,7 +6100,8 @@ html.dark .notes-diff-badge.Hard {
 
 @media (prefers-reduced-motion: reduce) {
   .progress-notice,
-  .focus-topics-fill {
+  .focus-topics-fill,
+  .topic-search-clear {
     animation: none;
   }
   .focus-topics-fill,

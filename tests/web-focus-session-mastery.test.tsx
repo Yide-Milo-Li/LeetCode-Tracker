@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { problem, record, now, rules } from './phase16-fixtures.ts';
 import { calculateTagMastery } from '../packages/domain/src/mastery.ts';
+import { calculateKnowledgeProfile } from '../packages/domain/src/knowledge-profile.ts';
 import type { PlanItem, OverridePreview } from '../packages/contracts/src/recommendations.ts';
 import type { KnowledgeProfileReport } from '../packages/contracts/src/knowledge-profile.ts';
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost' });
@@ -389,4 +390,47 @@ it('renders developing micro-pill and unrecorded segment for imported progress e
     const enBars = document.querySelectorAll('.diff-feedback-bar');
     const enEasySegs = enBars[0].querySelectorAll('.feedback-seg');
     assert.equal(enEasySegs[0].getAttribute('data-tooltip'), 'Unrecorded: 3 (100%)');
+});
+
+/** Four topics: practiced today, yesterday, long ago, and never. */
+function recencyFixture() {
+    const input = {
+        problems: [problem('1', 'Medium', ['arrays']), problem('2', 'Medium', ['graphs']), problem('3', 'Medium', ['dp']), problem('4', 'Medium', ['heap'])],
+        manualRecords: [record('a', '1', '2026-08-01'), record('b', '2', '2026-09-15'), record('c', '3', '2026-09-16')],
+        snapshots: [],
+        now,
+        userZone: 'UTC',
+    };
+    return { report: calculateTagMastery(input), profile: calculateKnowledgeProfile(input) };
+}
+const visibleTopics = () => [...document.querySelectorAll('.topic-row-toggle strong')].map(node => node.textContent);
+
+it('orders topics by most recent practice by default and shows relative recency', async () => {
+    const { report, profile } = recencyFixture();
+    await act(async () => render(<TopicInsights report={report} profileReport={profile} lang="en" />));
+    assert.deepEqual(visibleTopics(), ['dp', 'graphs', 'arrays']);
+    const recency = [...document.querySelectorAll('.topic-insight-row')].map(row => row.querySelectorAll('td.num')[0].textContent);
+    assert.deepEqual(recency, ['Today', 'Yesterday', '46d ago']);
+    // Another column sorts on demand; clicking it again restores the recency order.
+    const solvedHeader = screen.getByRole('button', { name: /Solved \/ catalog/ });
+    fireEvent.click(solvedHeader);
+    assert.equal(screen.getByText('Last practiced').closest('th')?.getAttribute('aria-sort'), 'none');
+    fireEvent.click(solvedHeader);
+    assert.deepEqual(visibleTopics(), ['dp', 'graphs', 'arrays']);
+});
+
+it('searches topics, offers matches outside the current filter and clears on Escape', async () => {
+    const { report, profile } = recencyFixture();
+    await act(async () => render(<TopicInsights report={report} profileReport={profile} lang="en" />));
+    const search = screen.getByRole('searchbox', { name: 'Search topics' });
+    fireEvent.change(search, { target: { value: '  GRA ' } });
+    assert.deepEqual(visibleTopics(), ['graphs']);
+    // "heap" was never practiced, so the default Practiced filter hides it but points to All.
+    fireEvent.change(search, { target: { value: 'heap' } });
+    assert.deepEqual(visibleTopics(), []);
+    fireEvent.click(screen.getByRole('button', { name: 'Show 1 match in All' }));
+    assert.deepEqual(visibleTopics(), ['heap']);
+    fireEvent.keyDown(search, { key: 'Escape' });
+    assert.equal((search as HTMLInputElement).value, '');
+    assert.deepEqual(visibleTopics(), ['dp', 'graphs', 'arrays', 'heap']);
 });

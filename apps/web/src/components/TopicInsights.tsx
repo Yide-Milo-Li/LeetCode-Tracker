@@ -1,32 +1,39 @@
 import React, { useId, useState } from 'react';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, Search, X } from 'lucide-react';
 import type { TagMastery, TagMasteryReport, KnowledgeProfileReport } from '../api.ts';
 import { formatDifficulty, translations, type Language } from '../i18n.ts';
 
 type TopicFilter = 'practiced' | 'needs_practice' | 'developing' | 'recently_stable' | 'all';
-type SortKey = 'attention' | 'solved' | 'recent' | 'due';
+type SortKey = 'lastPracticed' | 'solved' | 'recent' | 'due';
 type Difficulty = 'Easy' | 'Medium' | 'Hard';
 type DifficultyEvidence = KnowledgeProfileReport['topics'][number]['difficulties'][Difficulty];
 
 /** Rows shown before "show all"; keeps the table scannable on large catalogs. */
 const PAGE_SIZE = 10;
-const LEVEL_ORDER: Record<TagMastery['level'], number> = {
-    needs_practice: 0,
-    developing: 1,
-    recently_stable: 2,
-    insufficient_data: 3,
-};
 
 /** A topic counts as practiced once it has a solve or any dated recent sample. */
 const isPracticed = (tag: TagMastery) => tag.solvedCount > 0 || tag.recentProblemCount > 0;
 
-/** Deterministic comparators; every key falls back to the topic name so ties never reshuffle. */
-const COMPARATORS: Record<SortKey, (a: TagMastery, b: TagMastery) => number> = {
-    attention: (a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level] || b.solvedCount - a.solvedCount || a.tagName.localeCompare(b.tagName),
+/** Deterministic column comparators; every key falls back to the topic name so ties never reshuffle. */
+const COLUMN_COMPARATORS: Record<Exclude<SortKey, 'lastPracticed'>, (a: TagMastery, b: TagMastery) => number> = {
     solved: (a, b) => b.solvedCount - a.solvedCount || b.coverageRate - a.coverageRate || a.tagName.localeCompare(b.tagName),
     recent: (a, b) => b.recentProblemCount - a.recentProblemCount || b.recentDayCount - a.recentDayCount || a.tagName.localeCompare(b.tagName),
     due: (a, b) => b.overdueCount - a.overdueCount || b.dueTodayCount - a.dueTodayCount || a.tagName.localeCompare(b.tagName),
 };
+
+/** Case-insensitive match on the display name or slug ("two pointers" also finds "two-pointers"). */
+function matchesQuery(tag: TagMastery, query: string): boolean {
+    if (!query) return true;
+    return tag.tagName.toLowerCase().includes(query) || tag.tagSlug.includes(query.replace(/\s+/g, '-'));
+}
+
+/** Relative label for the last practice day; `null` means no dated practice is known. */
+function lastPracticedLabel(days: number | null, zh: boolean): string {
+    if (days === null) return '—';
+    if (days === 0) return zh ? '今天' : 'Today';
+    if (days === 1) return zh ? '昨天' : 'Yesterday';
+    return zh ? `${days} 天前` : `${days}d ago`;
+}
 
 /** Per-difficulty status used by the compact E/M/H pills and the evidence cards. */
 function difficultyStatus(evaluation: DifficultyEvidence['evaluation'], zh: boolean) {
@@ -162,7 +169,9 @@ function DifficultyEvidenceGrid({ topic, lang }: { topic: KnowledgeProfileReport
 }
 
 /**
- * Factual topic metrics as a compact, sortable table. Each row expands in place to show its 30-day
+ * Factual topic metrics as a compact, searchable, sortable table. The default order puts the most
+ * recently practiced topics first (knowledge-profile recency, all history, user time zone); topics
+ * with no dated practice follow. Each row expands in place to show its 30-day
  * evidence by difficulty. Expanded content stays mounted (collapsed, inert) so the open/close
  * transition can animate and the evidence remains queryable without layout cost.
  * No synthetic ability scores are derived.
@@ -176,7 +185,9 @@ export function TopicInsights({ report, profileReport, lang }: {
     const zh = lang === 'zh';
     const baseId = useId();
     const [filter, setFilter] = useState<TopicFilter>(() => (report.tags.some(isPracticed) ? 'practiced' : 'all'));
-    const [sortKey, setSortKey] = useState<SortKey>('attention');
+    const [sortKey, setSortKey] = useState<SortKey>('lastPracticed');
+    const [rawQuery, setRawQuery] = useState('');
+    const query = rawQuery.trim().toLowerCase();
     const [expanded, setExpanded] = useState(false);
     const [openSlugs, setOpenSlugs] = useState<ReadonlySet<string>>(() => new Set());
 
@@ -195,10 +206,26 @@ export function TopicInsights({ report, profileReport, lang }: {
         { key: 'recently_stable', label: t.masteredLevel },
         { key: 'all', label: zh ? '全部' : 'All' },
     ];
-    const filteredTags = report.tags.filter(tag => matches(tag, filter)).sort(COMPARATORS[sortKey]);
-    const tagsToRender = expanded ? filteredTags : filteredTags.slice(0, PAGE_SIZE);
-    const hiddenUnpracticed = filter === 'practiced' ? report.tags.length - filteredTags.length : 0;
     const profileMap = new Map(profileReport?.topics.map(tp => [tp.tagSlug, tp]) ?? []);
+    const daysSince = (tag: TagMastery) => profileMap.get(tag.tagSlug)?.daysSinceLastPractice ?? null;
+    /** Most recent first; unknown recency sorts last, then recent volume, solves and name break ties. */
+    const byLastPracticed = (a: TagMastery, b: TagMastery) => {
+        const da = daysSince(a);
+        const db = daysSince(b);
+        if (da !== db) {
+            if (da === null) return 1;
+            if (db === null) return -1;
+            return da - db;
+        }
+        return b.recentProblemCount - a.recentProblemCount || b.solvedCount - a.solvedCount || a.tagName.localeCompare(b.tagName);
+    };
+    const comparator = sortKey === 'lastPracticed' ? byLastPracticed : COLUMN_COMPARATORS[sortKey];
+    const searched = report.tags.filter(tag => matchesQuery(tag, query));
+    const filteredTags = searched.filter(tag => matches(tag, filter)).sort(comparator);
+    // A search shows every match; otherwise the first page keeps the table short.
+    const tagsToRender = expanded || query ? filteredTags : filteredTags.slice(0, PAGE_SIZE);
+    const hiddenUnpracticed = filter === 'practiced' && !query ? report.tags.length - filteredTags.length : 0;
+    const matchesElsewhere = query && filter !== 'all' ? searched.length - filteredTags.length : 0;
 
     const toggleRow = (slug: string) =>
         setOpenSlugs(prior => {
@@ -207,10 +234,10 @@ export function TopicInsights({ report, profileReport, lang }: {
             else next.add(slug);
             return next;
         });
-    /** Clicking the active column returns to the default attention order. */
-    const sortBy = (key: Exclude<SortKey, 'attention'>) => setSortKey(current => (current === key ? 'attention' : key));
-    const sortHeader = (key: Exclude<SortKey, 'attention'>, label: string) => (
-        <th scope="col" className="num" aria-sort={sortKey === key ? 'descending' : 'none'}>
+    /** Clicking an active column returns to the default recency order. */
+    const sortBy = (key: SortKey) => setSortKey(current => (current === key ? 'lastPracticed' : key));
+    const sortHeader = (key: SortKey, label: string) => (
+        <th scope="col" className="num" aria-sort={sortKey === key ? (key === 'lastPracticed' ? 'ascending' : 'descending') : 'none'}>
             <button type="button" className={'topic-sort' + (sortKey === key ? ' is-active' : '')} onClick={() => sortBy(key)}>
                 {label}
                 <span className="topic-sort-arrow" aria-hidden="true">↓</span>
@@ -239,7 +266,7 @@ export function TopicInsights({ report, profileReport, lang }: {
                                 setExpanded(false);
                             }}
                         >
-                            {f.label} <span className="num-tabular">({report.tags.filter(tag => matches(tag, f.key)).length})</span>
+                            {f.label} <span className="num-tabular">({searched.filter(tag => matches(tag, f.key)).length})</span>
                         </button>
                     ))}
                 </div>
@@ -256,8 +283,50 @@ export function TopicInsights({ report, profileReport, lang }: {
                 </details>
             </div>
 
+            <div className="topic-toolbar">
+                <label className="topic-search">
+                    <Search className="topic-search-icon" aria-hidden="true" />
+                    <input
+                        type="search"
+                        value={rawQuery}
+                        placeholder={zh ? '搜索专题，例如 Dynamic Programming' : 'Search topics, e.g. Dynamic Programming'}
+                        aria-label={zh ? '搜索专题' : 'Search topics'}
+                        onChange={e => {
+                            setRawQuery(e.target.value);
+                            setExpanded(false);
+                        }}
+                        onKeyDown={e => {
+                            if (e.key === 'Escape' && rawQuery) {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setRawQuery('');
+                            }
+                        }}
+                    />
+                    {rawQuery && (
+                        <button type="button" className="topic-search-clear" aria-label={zh ? '清除搜索' : 'Clear search'} onClick={() => setRawQuery('')}>
+                            <X aria-hidden="true" />
+                        </button>
+                    )}
+                </label>
+                <span className="topic-toolbar-hint text-muted" aria-live="polite">
+                    {query
+                        ? zh ? `找到 ${filteredTags.length} 个专题` : `${filteredTags.length} matching topic${filteredTags.length === 1 ? '' : 's'}`
+                        : sortKey === 'lastPracticed' ? (zh ? '按最近练习排序' : 'Sorted by most recent practice') : ''}
+                </span>
+            </div>
+
             {tagsToRender.length === 0 ? (
-                <p className="text-muted">{t.noWeakTopics}</p>
+                <div className="topic-empty">
+                    <p className="text-muted">
+                        {query ? (zh ? `当前筛选中没有匹配「${rawQuery.trim()}」的专题。` : `No topics in this filter match "${rawQuery.trim()}".`) : t.noWeakTopics}
+                    </p>
+                    {matchesElsewhere > 0 && (
+                        <button type="button" className="btn btn-secondary" onClick={() => setFilter('all')}>
+                            {zh ? `在全部专题中查看 ${matchesElsewhere} 个匹配` : `Show ${matchesElsewhere} match${matchesElsewhere === 1 ? '' : 'es'} in All`}
+                        </button>
+                    )}
+                </div>
             ) : (
                 <div className="table-scroll topic-table-scroll">
                     <table className="topic-table">
@@ -265,6 +334,7 @@ export function TopicInsights({ report, profileReport, lang }: {
                             <tr>
                                 <th scope="col">{zh ? '专题' : 'Topic'}</th>
                                 <th scope="col">{zh ? '状态' : 'Status'}</th>
+                                {sortHeader('lastPracticed', zh ? '最近练习' : 'Last practiced')}
                                 {sortHeader('solved', t.insightCoverage)}
                                 {sortHeader('recent', t.insightSamples)}
                                 <th scope="col" className="num">{t.avgSolveTime}</th>
@@ -293,6 +363,7 @@ export function TopicInsights({ report, profileReport, lang }: {
                                             </button>
                                         </th>
                                         <td><span className={`tag-chip level-${tag.level}`}>{levels[tag.level]}</span></td>
+                                        <td className="num" title={topic?.lastPracticedAt ?? undefined}>{lastPracticedLabel(daysSince(tag), zh)}</td>
                                         <td className="num">{tag.solvedCount}/{tag.totalCatalogProblems}</td>
                                         <td className="num">{tag.recentProblemCount} / {tag.recentDayCount}</td>
                                         <td
@@ -325,7 +396,7 @@ export function TopicInsights({ report, profileReport, lang }: {
                                         </td>
                                     </tr>
                                     <tr className="topic-detail-row">
-                                        <td colSpan={8}>
+                                        <td colSpan={9}>
                                             <div className="topic-detail-collapse" id={detailId} inert={!open} aria-hidden={!open}>
                                                 <div className="topic-detail-inner">
                                                     <div className="topic-detail-body">
