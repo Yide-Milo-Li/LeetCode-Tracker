@@ -26,6 +26,7 @@ import {
 } from '../api.ts';
 import type { UseDailyPlanReturn } from '../hooks/useDailyPlan.ts';
 import { translations, type Language } from '../i18n.ts';
+import { formatInstant } from '../date-format.ts';
 import { localizeApiError } from '../error-i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
 import { Feedback } from './ui.tsx';
@@ -613,17 +614,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ lang, active = tru
               <dt>{t.catalogLastUpdated}</dt>
               <dd>
                 {data.dataStatus.catalogUpdatedAt
-                  ? new Date(data.dataStatus.catalogUpdatedAt).toLocaleString(zh ? 'zh-CN' : 'en-US', {
-                      ...(data.dataStatus.userTimezone ? { timeZone: data.dataStatus.userTimezone } : {}),
-                    })
+                  ? formatInstant(data.dataStatus.catalogUpdatedAt, lang, { timeZone: data.dataStatus.userTimezone || undefined })
                   : t.never}
               </dd>
               <dt>{t.practiceLastUpdated}</dt>
               <dd>
                 {data.dataStatus.practiceUpdatedAt
-                  ? new Date(data.dataStatus.practiceUpdatedAt).toLocaleString(zh ? 'zh-CN' : 'en-US', {
-                      ...(data.dataStatus.userTimezone ? { timeZone: data.dataStatus.userTimezone } : {}),
-                    })
+                  ? formatInstant(data.dataStatus.practiceUpdatedAt, lang, { timeZone: data.dataStatus.userTimezone || undefined })
                   : t.never}
               </dd>
               <dt>{t.userTimezoneLabel}</dt>

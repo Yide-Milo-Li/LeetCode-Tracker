@@ -52,9 +52,11 @@ export * from '../../../packages/contracts/src/index.ts';
 export type CatalogQuery = CatalogQueryInput;
 export type PracticeQuery = PracticeQueryInput;
 
-/** Status reported by Gemini assistant configuration endpoint. */
+/** Status of the active AI provider reported by the progress import endpoint. */
 export interface GeminiStatus {
   configured: boolean;
+  /** The provider selected in Settings; any of the supported providers, not only Gemini. */
+  provider?: LLMProvider;
   model: string;
 }
 
@@ -74,6 +76,12 @@ import { isTauri, invokeTauriApi, ApiError, exportDataFile } from './platform/in
 export { ApiError } from './platform/index.ts';
 
 /** Request typed local API data without discarding server validation/conflict codes. */
+/** Optional per-call settings for read endpoints that a view may abandon (e.g. on unmount). */
+export interface ReadOptions {
+  /** Aborting rejects the call with an `AbortError`; the response is never applied. */
+  signal?: AbortSignal;
+}
+
 export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (isTauri()) {
     return invokeTauriApi<T>(path, options);
@@ -223,7 +231,7 @@ const practiceApi = {
     });
   },
 
-  getPracticeRecords(query: PracticeQuery = {}): Promise<{ total: number; page: number; limit: number; items: PracticeRecord[] }> {
+  getPracticeRecords(query: PracticeQuery = {}, { signal }: ReadOptions = {}): Promise<{ total: number; page: number; limit: number; items: PracticeRecord[] }> {
     const params = new URLSearchParams();
     if (query.page) params.set('page', String(query.page));
     if (query.limit) params.set('limit', String(query.limit));
@@ -232,7 +240,7 @@ const practiceApi = {
     if (query.status) params.set('status', query.status);
 
     const qs = params.toString();
-    return request(`/practice-records${qs ? `?${qs}` : ''}`);
+    return request(`/practice-records${qs ? `?${qs}` : ''}`, { signal });
   },
 
   updatePracticeRecord(id: string, input: UpdatePracticeRecordInput): Promise<PracticeRecord> {
@@ -316,8 +324,8 @@ const progressApi = {
     });
   },
 
-  getProgressImportHistory(page = 1, limit = 20): Promise<{ total: number; items: Omit<ProgressImportSummary, 'errors'>[] }> {
-    return request(`/progress-imports?page=${page}&limit=${limit}`);
+  getProgressImportHistory(page = 1, limit = 20, { signal }: ReadOptions = {}): Promise<{ total: number; items: Omit<ProgressImportSummary, 'errors'>[] }> {
+    return request(`/progress-imports?page=${page}&limit=${limit}`, { signal });
   },
 
   getProgressImportResult(id: string): Promise<ProgressImportSummary> {
@@ -406,9 +414,9 @@ const planningApi = {
 // Dashboard & Activity API
 // ==========================================
 const dashboardApi = {
-  getDashboard(year?: number): Promise<DashboardResponse> {
+  getDashboard(year?: number, { signal }: ReadOptions = {}): Promise<DashboardResponse> {
     const query = year ? `?year=${encodeURIComponent(year)}` : '';
-    return request<DashboardResponse>(`/dashboard${query}`);
+    return request<DashboardResponse>(`/dashboard${query}`, { signal });
   },
 
   getDashboardActivities(query: {
@@ -459,8 +467,8 @@ export const notesApi = {
     return request<{ items: ProblemNoteSummary[]; total: number }>(`/notes${qs ? `?${qs}` : ''}`);
   },
 
-  getNote(frontendId: string): Promise<{ note: ProblemNote | null }> {
-    return request<{ note: ProblemNote | null }>(`/notes/${encodeURIComponent(frontendId)}`);
+  getNote(frontendId: string, { signal }: ReadOptions = {}): Promise<{ note: ProblemNote | null }> {
+    return request<{ note: ProblemNote | null }>(`/notes/${encodeURIComponent(frontendId)}`, { signal });
   },
 
   upsertNote(frontendId: string, content: string): Promise<{ note: ProblemNote }> {

@@ -10,6 +10,7 @@ import {
   type PracticeStats,
 } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
+import { formatInstant } from '../date-format.ts';
 import { localizeApiError } from '../error-i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
 import { Dialog, Feedback, Field, PageHeader, Pagination, IconButton, Tooltip } from './ui.tsx';
@@ -198,9 +199,7 @@ export function CatalogView({
                 <dt>{t.statLastImport}</dt>
                 <dd>
                   {stats.lastImportedAt
-                    ? new Date(stats.lastImportedAt).toLocaleString(zh ? 'zh-CN' : 'en-US', {
-                        timeZone: workspace.timezone ?? 'UTC',
-                      })
+                    ? formatInstant(stats.lastImportedAt, lang, { timeZone: workspace.timezone ?? 'UTC' })
                     : t.never}
                 </dd>
                 <dt>{zh ? '完成覆盖' : 'Solved coverage'}</dt>

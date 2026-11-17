@@ -4,6 +4,7 @@
 import React from 'react';
 import type { ProgressImportPreview } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
+import { formatInstant } from '../date-format.ts';
 
 interface ProgressPreviewSectionProps {
   step: number;
@@ -153,7 +154,7 @@ export const ProgressPreviewSection: React.FC<ProgressPreviewSectionProps> = ({
       <p>
         {zh ? '本次选中可处理行数：' : 'Selected processable rows: '}
         {eligible} · {zh ? '预览有效至 ' : 'Preview valid until '}
-        {new Date(preview.expiresAt).toLocaleTimeString(zh ? 'zh-CN' : 'en-US')}
+        {formatInstant(preview.expiresAt, lang, { preset: 'time' })}
       </p>
       <div className="form-actions">
         <button className="btn btn-secondary" disabled={frozen} onClick={onBack}>

@@ -1,11 +1,12 @@
 /**
  * Historical practice logs list with pagination for catalog problem detail view.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { api, type CatalogProblem, type PracticeRecord } from '../api.ts';
 import type { Language } from '../i18n.ts';
 import { localizeApiError } from '../error-i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
+import { useAsyncResource } from '../hooks/useAsyncResource.ts';
 import { Feedback, Pagination } from './ui.tsx';
 import { practiceTime } from './PracticeRecordCard.tsx';
 
@@ -20,33 +21,15 @@ export interface PracticeHistoryProps {
 export function PracticeHistory({ problem, lang }: PracticeHistoryProps) {
   const workspace = useWorkspace();
   const [page, setPage] = useState(1);
-  const [records, setRecords] = useState<PracticeRecord[]>([]);
-  const [total, setTotal] = useState(0);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let active = true;
-    setLoading(true);
-    api
-      .getPracticeRecords({ questionFrontendId: problem.questionFrontendId, status: 'all', page, limit: 20 })
-      .then((result) => {
-        if (active) {
-          setRecords(result.items);
-          setTotal(result.total);
-          setError('');
-        }
-      })
-      .catch((err) => {
-        if (active) setError(localizeApiError(err, lang));
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [problem.questionFrontendId, page, workspace.revision]);
+  const history = useAsyncResource(
+    (signal) =>
+      api.getPracticeRecords({ questionFrontendId: problem.questionFrontendId, status: 'all', page, limit: 20 }, { signal }),
+    [problem.questionFrontendId, page, workspace.revision],
+  );
+  const records: PracticeRecord[] = history.data?.items ?? [];
+  const total = history.data?.total ?? 0;
+  const loading = history.loading;
+  const error = history.error ? localizeApiError(history.error, lang) : '';
 
   return (
     <section>

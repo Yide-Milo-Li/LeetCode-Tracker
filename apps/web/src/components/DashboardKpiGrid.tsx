@@ -6,6 +6,7 @@ import React from 'react';
 import { Calendar, CalendarClock, Flame, Trophy } from 'lucide-react';
 import type { DashboardResponse, ReviewSummary } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
+import { formatCalendarDate } from '../date-format.ts';
 
 interface DashboardKpiGridProps {
   data: DashboardResponse | null;
@@ -18,11 +19,7 @@ interface DashboardKpiGridProps {
 
 /** Format a calendar date as a short local label without shifting it across time zones. */
 export function shortDate(date: string, lang: Language): string {
-  return new Date(`${date}T00:00:00Z`).toLocaleDateString(lang === 'zh' ? 'zh-CN' : 'en-US', {
-    month: 'short',
-    day: 'numeric',
-    timeZone: 'UTC',
-  });
+  return formatCalendarDate(date, lang, { month: 'short', day: 'numeric' });
 }
 
 /** Render the four outcome metrics; missing data shows an em dash instead of a misleading zero. */

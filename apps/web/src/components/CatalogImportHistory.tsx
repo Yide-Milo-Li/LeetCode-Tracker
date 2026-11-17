@@ -4,6 +4,7 @@
 import React from 'react';
 import type { ImportHistoryItem, ImportSummary } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
+import { formatInstant } from '../date-format.ts';
 import { Dialog, Feedback, Pagination } from './ui.tsx';
 
 interface CatalogImportHistoryProps {
@@ -65,9 +66,7 @@ export const CatalogImportHistory: React.FC<CatalogImportHistoryProps> = ({
                 <tr key={h.id}>
                   <td className="u-font-size-0-8125rem">
                     <button className="text-link" onClick={() => onViewResult(h.id)}>
-                      {new Date(h.importedAt).toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US', {
-                        timeZone: timezone ?? 'UTC',
-                      })}
+                      {formatInstant(h.importedAt, lang, { timeZone: timezone ?? 'UTC' })}
                     </button>
                   </td>
                   <td>{h.totalLines}</td>

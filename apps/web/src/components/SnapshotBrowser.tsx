@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { api, type ProgressSnapshot, type ProgressSnapshotHistory, type RecentActivityItem } from '../api.ts';
 import { formatActivityAction, formatSnapshotStatus, type Language } from '../i18n.ts';
+import { formatInstant } from '../date-format.ts';
 import { localizeApiError } from '../error-i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
 import { Dialog, Feedback, Field, Pagination } from './ui.tsx';
@@ -212,9 +213,7 @@ export function SnapshotDetails({
               </p>
               <small>
                 {item.reason} ·{' '}
-                {new Date(item.recordedAt).toLocaleString(zh ? 'zh-CN' : 'en-US', {
-                  timeZone: workspace.timezone ?? 'UTC',
-                })}
+                {formatInstant(item.recordedAt, lang, { timeZone: workspace.timezone ?? 'UTC' })}
               </small>
             </article>
           ))}

@@ -4,6 +4,7 @@
 import React, { useEffect, useState } from 'react';
 import { api, type ProgressImportSummary } from '../api.ts';
 import type { Language } from '../i18n.ts';
+import { formatInstant } from '../date-format.ts';
 import { localizeApiError } from '../error-i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
 import { Dialog, Feedback, Pagination } from './ui.tsx';
@@ -15,7 +16,7 @@ export function ImportResult({ result, lang }: { result: ProgressImportSummary; 
     <div>
       <Feedback tone="success">
         {zh ? '进度已导入' : 'Progress imported'} ·{' '}
-        {new Date(result.importedAt).toLocaleString(zh ? 'zh-CN' : 'en-US')}
+        {formatInstant(result.importedAt, lang)}
       </Feedback>
       <div className="summary-counts">
         <span>
@@ -99,9 +100,7 @@ export function ImportHistory({ lang }: { lang: Language }) {
           <article className="history-card" key={item.id}>
             <div>
               <h3>
-                {new Date(item.importedAt).toLocaleString(zh ? 'zh-CN' : 'en-US', {
-                  timeZone: workspace.timezone ?? 'UTC',
-                })}
+                {formatInstant(item.importedAt, lang, { timeZone: workspace.timezone ?? 'UTC' })}
               </h3>
               <p className="muted">
                 {zh
