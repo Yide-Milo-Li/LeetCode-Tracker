@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- Let MCP clients write while the desktop app is running: turn on **Allow AI client writes** under Settings → General → Connect an AI client, and the bundled `leetcode-tracker-mcp` forwards writes to the app through an authenticated loopback bridge. The app refreshes open views after AI client writes, keeps unsaved note drafts, lists recent AI client activity and generates client configuration for the bundled MCP runtime.
 - Add an optional `lct` Skill for Claude Code, Codex and Antigravity. Install it from the bundled MCP CLI or copy the install command in desktop settings, which now also generates Antigravity MCP configuration.
 - Compact MCP tool definitions and responses (25 tools): merge `tracker_create_strategy` and `tracker_update_strategy` into `tracker_save_strategy`; flatten `tracker_edit_today` step schema and return version/count/delta instead of the full plan; emit compact single-line JSON, single-language plan reasons, and non-zero active trend days; default `tracker_list_notes` to `scope: "practiced"`; and remove redundant schema boilerplate, tool lists from `tracker_status`, and extra `tracker_status` / `tracker_get_problems` round-trip guidance.
 - Close MCP write/retry gaps: require a client operation ID for practice creation, recover immutable creation defaults, replay removed/replaced items and rule changes across restarts, support listing notes on unpracticed problems with `scope: "all"`, and preserve whitespace-note hashes.
