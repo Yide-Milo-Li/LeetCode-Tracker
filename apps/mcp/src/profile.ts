@@ -70,6 +70,7 @@ export const localModelService: ModelService = {
 export class TrackerProfile {
   readonly location: ProfileLocation;
   private readonly modelService: ModelService;
+  private pendingWrite: Promise<void> = Promise.resolve();
 
   constructor(location: ProfileLocation, modelService: ModelService = localModelService) {
     this.location = location;
@@ -134,8 +135,14 @@ export class TrackerProfile {
     }
   }
 
-  /** Run one write while holding the exclusive lease; creates and migrates the profile when needed. */
-  async write<T>(operation: (application: TrackerApplication) => Promise<T>): Promise<T> {
+  /** Concurrent tool calls in this server share a queue. The lease still arbitrates between processes. */
+  write<T>(operation: (application: TrackerApplication) => Promise<T>): Promise<T> {
+    const result = this.pendingWrite.then(() => this.writeWithLease(operation));
+    this.pendingWrite = result.then(() => {}, () => {});
+    return result;
+  }
+
+  private async writeWithLease<T>(operation: (application: TrackerApplication) => Promise<T>): Promise<T> {
     let runtime;
     try {
       runtime = await openTrackerRuntime({

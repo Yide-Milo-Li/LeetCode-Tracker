@@ -140,7 +140,7 @@ export function registerWriteTools({ register }: Registrar): void {
         todayWeekday: activeDate ? new Date(`${activeDate}T12:00:00Z`).getUTCDay() : null,
       });
     },
-    'read',
+    'preview', // First-time setup can inspect the empty schedule before creating the profile.
   );
 
   register(

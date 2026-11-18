@@ -31,6 +31,26 @@ function emptyDir() {
   return { dbPath: join(dir, 'tracker.sqlite'), cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
+test('initial setup reads an empty schedule and serializes overlapping writes from one client', async () => {
+  const w = emptyDir();
+  const { client } = await StdioClient.start(entry, w.dbPath);
+  try {
+    const empty = await client.call('tracker_get_strategies');
+    assert.deepEqual(empty.structuredContent.strategies, []);
+    assert.equal(existsSync(w.dbPath), false);
+    const [imported, invalid, zone] = await Promise.all([
+      client.call('tracker_import_problems', { problems: [{ id: '1', title: 'Fixture', difficulty: 'Easy' }] }),
+      client.call('tracker_set_timezone', { timezone: 'Invalid/Zone' }),
+      client.call('tracker_set_timezone', { timezone: 'Asia/Tokyo' }),
+    ]);
+    assert.equal(imported.structuredContent.insertCount, 1);
+    assert.equal(errorCode(invalid), 'INVALID_TIMEZONE');
+    assert.equal(zone.structuredContent.timezone, 'Asia/Tokyo');
+    assert.equal((await client.call('tracker_catalog_coverage')).structuredContent.totalProblems, 1);
+    assert.equal((await client.call('tracker_get_strategies')).structuredContent.timezone, 'Asia/Tokyo');
+  } finally { await client.close(); w.cleanup(); }
+});
+
 test('a client can build a catalog from nothing in batches and see what is missing', async () => {
   const w = emptyDir();
   const { client, init } = await StdioClient.start(entry, w.dbPath);
