@@ -1,6 +1,6 @@
 # leetcode-tracker-mcp
 
-A [Model Context Protocol](https://modelcontextprotocol.io) server for LeetCode Tracker. It lets an MCP client such as Claude Code, Claude Desktop or Codex read and update your local problem catalog, study plans, practice history, notes and progress. It runs over stdio and works independently or through the desktop app's loopback service.
+A [Model Context Protocol](https://modelcontextprotocol.io) server for LeetCode Tracker. It lets Claude Code, Claude Desktop, Codex, Antigravity and other MCP clients read and update your local problem catalog, study plans, practice history, notes and progress. It runs over stdio and works independently or through the desktop app's loopback service.
 
 Status: unreleased 0.1.0.
 
@@ -22,7 +22,7 @@ Override it with `--db <path>` or the `LEETCODE_TRACKER_DB` environment variable
 
 Reads and previews open a short-lived read-only connection per call. Writes acquire the profile lease when the desktop app is closed. To write while it is running, open **Settings → General → Connect an AI client** and enable **Allow AI client writes**. The setting is off by default and applies to this device. While the app owns the profile, a disabled or unavailable bridge returns `PROFILE_IN_USE`.
 
-Choose Claude Code, Claude Desktop, or Codex in the same panel and copy the configuration entry. The generated entry points to the bundled Node executable, MCP script, and current profile. Merge it into the client's configuration file and restart the client. Recent activity is available for the current desktop session.
+Choose Claude Code, Claude Desktop, Codex or Antigravity in the same panel and copy the configuration entry. The generated entry points to the bundled Node executable, MCP script, and current profile. Merge it into the client's configuration file and restart the client. Recent activity is available for the current desktop session.
 
 If a tool reports `AGENT_WRITE_UNCERTAIN`, read the affected data to check whether the change was applied before retrying. Reuse the original operation ID when the tool accepts one.
 
@@ -54,7 +54,7 @@ Claude Code:
 claude mcp add leetcode-tracker -- node /absolute/path/to/apps/mcp/dist/leetcode-tracker-mcp.mjs
 ```
 
-Claude Desktop (`claude_desktop_config.json`) or any client with the same shape:
+Claude Desktop (`claude_desktop_config.json`) and Antigravity (`~/.gemini/config/mcp_config.json` or `.agents/mcp_config.json` in your workspace):
 
 ```json
 {
@@ -76,6 +76,29 @@ args = ["/absolute/path/to/apps/mcp/dist/leetcode-tracker-mcp.mjs"]
 ```
 
 Add `"--db", "/path/to/tracker.sqlite"` to the arguments to use a different profile.
+
+## Optional LCT shortcuts
+
+Once MCP is connected, you can use LCT in natural language. To add shortcuts, choose your client in the desktop app's **Connect an AI client** panel, copy the command under **Install LCT shortcuts**, and run it in Windows PowerShell or macOS Terminal. Then start a new client session.
+
+From a standalone install, use `leetcode-tracker-mcp install-skill --client <client>`. From a source checkout, run `npm run mcp:build` and use `node apps/mcp/dist/leetcode-tracker-mcp.mjs install-skill --client <client>`.
+
+| Client | `<client>` | Skill directory | Example |
+| --- | --- | --- | --- |
+| [Claude Code](https://code.claude.com/docs/en/skills) | `claude-code` | `~/.claude/skills/lct` | `/lct note 42` |
+| [Codex CLI and IDE extension](https://developers.openai.com/codex/skills) | `codex` | `~/.agents/skills/lct` | Select `$lct`, then type `note 42` |
+| [Antigravity](https://antigravity.google/docs/skills) | `antigravity` | `~/.gemini/config/skills/lct` | `/lct note 42` in App or CLI. In the IDE, say “Use LCT to write a note for problem 42.” |
+
+The installer copies `SKILL.md` into that directory. For Claude Code, it uses the configured `CLAUDE_CONFIG_DIR` when set. Re-running is safe. If the installed file differs, review it before using `--force` to replace it. Configure MCP separately and keep the client's tool approvals enabled. Claude Desktop can use the MCP tools and prompts.
+
+| Shortcut | Action |
+| --- | --- |
+| `lct` | Read today's saved plan and show the command menu |
+| `today` | Get or generate today's plan, or request an edit |
+| `log 1 15 42` | Record completed attempts with unknown outcome. Add results and durations when known |
+| `note 42` | Write a note from practice history. Preview and confirm additions to an existing note |
+| `review` | Review weak topics and get practice recommendations |
+| `setup` | Import a scoped catalog and set up the first study strategy |
 
 ## Tools
 

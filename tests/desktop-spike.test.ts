@@ -20,7 +20,7 @@ import { randomUUID } from 'node:crypto';
 import type { DailyPlan } from '../packages/contracts/src/recommendations.ts';
 import { StdioClient } from './fixtures/mcp-stdio-client.ts';
 import { DESKTOP_AGENT_HEADER, DESKTOP_AGENT_PATH } from '../packages/contracts/src/desktop-agent.ts';
-import { clientConfig } from '../apps/web/src/desktop-agent-copy.ts';
+import { clientConfig, skillInstallCommand } from '../apps/web/src/desktop-agent-copy.ts';
 import { acquireDatabaseLease } from '../packages/database/src/lease.ts';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
@@ -39,6 +39,10 @@ test('A stdio client follows the desktop lease and can use only the opted-in wri
   const fixture = path.join(dir, 'catalog.jsonl');
   fs.copyFileSync(bundledServerPath, path.join(dir, 'desktop-server.mjs'));
   fs.cpSync(path.join(path.dirname(bundledServerPath), 'mcp'), path.join(dir, 'mcp'), { recursive: true });
+  assert.deepEqual(
+    fs.readFileSync(path.join(dir, 'mcp/skills/lct/SKILL.md')),
+    fs.readFileSync(path.join(repoRoot, 'skills/lct/SKILL.md')),
+  );
   fs.writeFileSync(fixture, JSON.stringify({ id: '1', title: 'Two Sum', difficulty: 'Easy' }));
   let server: ServerHandle | undefined;
   let client: StdioClient | undefined;
@@ -52,6 +56,9 @@ test('A stdio client follows the desktop lease and can use only the opted-in wri
     const cc = JSON.parse(clientConfig('Claude Code', launch)).mcpServers['leetcode-tracker'];
     assert.deepEqual(cc, { type: 'stdio', command: mcpLaunch.command, args: [mcpLaunch.entry, '--db', dbPath] });
     assert.deepEqual(JSON.parse(clientConfig('Claude Desktop', launch)).mcpServers['leetcode-tracker'], {
+      command: cc.command, args: cc.args,
+    });
+    assert.deepEqual(JSON.parse(clientConfig('Antigravity', launch)).mcpServers['leetcode-tracker'], {
       command: cc.command, args: cc.args,
     });
     assert.equal(clientConfig('Codex', launch), `[mcp_servers.leetcode-tracker]\ncommand = ${JSON.stringify(cc.command)}\nargs = ${JSON.stringify(cc.args)}\n`);
@@ -172,6 +179,17 @@ test('A stdio client follows the desktop lease and can use only the opted-in wri
     if (server) await stopTestServer(server);
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('desktop skill commands use the bundled runtime and quote paths for the target shell', () => {
+  const windows = { command: "C:\\LCT's Runtime\\node.exe", entry: 'C:\\LCT Data\\mcp.mjs', dbPath: 'unused' };
+  assert.equal(skillInstallCommand('Claude Desktop', windows), null);
+  assert.equal(skillInstallCommand('Claude Code', windows),
+    "& 'C:\\LCT''s Runtime\\node.exe' 'C:\\LCT Data\\mcp.mjs' install-skill --client claude-code");
+
+  const mac = { command: '/Applications/LeetCode Tracker.app/Contents/MacOS/node', entry: "/Users/o'neal/mcp.mjs", dbPath: 'unused' };
+  assert.equal(skillInstallCommand('Antigravity', mac),
+    "'/Applications/LeetCode Tracker.app/Contents/MacOS/node' '/Users/o'\\''neal/mcp.mjs' install-skill --client antigravity");
 });
 
 test('An interrupted desktop reply does not run the operation again after the lease is released', async () => {

@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- Add an optional `lct` Skill for Claude Code, Codex and Antigravity. Install it from the bundled MCP CLI or copy the install command in desktop settings, which now also generates Antigravity MCP configuration.
 - Compact MCP tool definitions and responses (25 tools): merge `tracker_create_strategy` and `tracker_update_strategy` into `tracker_save_strategy`; flatten `tracker_edit_today` step schema and return version/count/delta instead of the full plan; emit compact single-line JSON, single-language plan reasons, and non-zero active trend days; default `tracker_list_notes` to `scope: "practiced"`; and remove redundant schema boilerplate, tool lists from `tracker_status`, and extra `tracker_status` / `tracker_get_problems` round-trip guidance.
 - Close MCP write/retry gaps: require a client operation ID for practice creation, recover immutable creation defaults, replay removed/replaced items and rule changes across restarts, support listing notes on unpracticed problems with `scope: "all"`, and preserve whitespace-note hashes.
 - Add `leetcode-tracker-mcp`, a standalone stdio MCP server for the local profile without the desktop app: read the catalog, today's plan, practice, notes and progress; import JSON Lines catalogs; record and edit practice, save notes, manage strategies and change today's plan. Writes rely on the MCP client's tool approval and are guarded by record revisions, plan versions, note content hashes and operation IDs. See [the MCP server guide](apps/mcp/README.md).

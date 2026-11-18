@@ -1,8 +1,31 @@
 import type { DesktopAgentActivity, DesktopMcpLaunch } from '../../../packages/contracts/src/desktop-agent.ts';
 import type { Language } from './i18n.ts';
 
-export const AI_CLIENTS = ['Claude Code', 'Claude Desktop', 'Codex'] as const;
+export const AI_CLIENTS = ['Claude Code', 'Claude Desktop', 'Codex', 'Antigravity'] as const;
 export type AiClient = (typeof AI_CLIENTS)[number];
+
+export const AI_CLIENT_CONFIG_FILES: Record<AiClient, string> = {
+  'Claude Code': '.mcp.json',
+  'Claude Desktop': 'claude_desktop_config.json',
+  Codex: '~/.codex/config.toml',
+  Antigravity: '~/.gemini/config/mcp_config.json',
+};
+
+const SKILL_CLIENTS = {
+  'Claude Code': 'claude-code',
+  Codex: 'codex',
+  Antigravity: 'antigravity',
+} as const;
+
+/** The command runs in PowerShell on Windows and a POSIX shell on macOS. */
+export function skillInstallCommand(client: AiClient, { command, entry }: DesktopMcpLaunch): string | null {
+  if (client === 'Claude Desktop') return null;
+  const windows = /^(?:[A-Za-z]:[\\/]|\\\\)/.test(command);
+  const quote = windows
+    ? (value: string) => `'${value.replaceAll("'", "''")}'`
+    : (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+  return `${windows ? '& ' : ''}${quote(command)} ${quote(entry)} install-skill --client ${SKILL_CLIENTS[client]}`;
+}
 
 export function clientConfig(client: AiClient, { command, entry, dbPath }: DesktopMcpLaunch): string {
   const args = [entry, '--db', dbPath];
