@@ -146,7 +146,7 @@ export function registerWriteTools({ register }: Registrar): void {
   register(
     'tracker_save_strategy',
     {
-      description: 'Create or update a study strategy and its weekdays (0=Sun..6=Sat). Omit strategyId to create (requires name, weekdays, dailyCount, difficultyCounts, review). Pass strategyId and expectedVersion from tracker_get_strategies to update (give dailyCount, difficultyCounts and review together when changing counts).',
+      description: 'Create or update a study strategy and its weekdays (0=Sun..6=Sat). Omit strategyId to create (requires name, weekdays, dailyCount, difficultyCounts, review). Pass strategyId and expectedVersion to update (give dailyCount, difficultyCounts and review together when changing counts). If a creation reply is lost, check tracker_get_strategies before retrying.',
       inputSchema: strategyCountsSchema.partial().extend({
         strategyId: z.string().min(1).optional().describe('Strategy ID to update; omit to create'),
         expectedVersion: z.number().int().positive().optional().describe('Required when updating'),
@@ -187,7 +187,7 @@ export function registerWriteTools({ register }: Registrar): void {
       return json({ status: 'applied', strategy });
     },
     'write',
-    { destructive: true, idempotent: true },
+    { destructive: true, idempotent: false },
   );
 
   register(

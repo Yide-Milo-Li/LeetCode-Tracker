@@ -11,11 +11,13 @@
  * the same operationId replays what already ran instead of repeating it.
  */
 import { z } from 'zod';
+import { createHash } from 'node:crypto';
 import type { TrackerApplication } from '../../../packages/application/src/application.ts';
 import { ApplicationError } from '../../../packages/application/src/errors.ts';
 import { createPracticeRecordSchema, MAX_PRACTICE_BATCH } from '../../../packages/contracts/src/practice.ts';
 import { recommendationFeedbackReasonSchema, type DailyPlan } from '../../../packages/contracts/src/recommendations.ts';
 import { isTimeZone, localDate } from '../../../packages/contracts/src/time.ts';
+import { readBatchFingerprint } from '../../../packages/database/src/operation-fingerprint.ts';
 import { TIMEZONE_HINT } from './operations.ts';
 import { ProfileError } from './profile.ts';
 import { json, refuse, type Registrar } from './registrar.ts';
@@ -25,7 +27,30 @@ const MAX_PROBLEM_BATCH = 50;
 const MAX_PLAN_STEPS = 10;
 
 const batchOperationIdSchema = z.string().uuid()
-  .describe('Client UUID for the batch; reuse on retry so finished steps replay instead of repeating.');
+  .describe('Client UUID for the complete request. Reuse it with the same inputs and order on retry.');
+
+/** The first member commits the complete batch fingerprint together with its own operation. */
+async function bindBatch(
+  operationId: string,
+  request: unknown,
+  count: number,
+  readMember: (id: string) => Promise<string | null>,
+  errorCode: 'OPERATION_CONFLICT' | 'OPERATION_REUSED',
+): Promise<string | undefined> {
+  const fingerprint = createHash('sha256').update(JSON.stringify(request)).digest('hex');
+  const existing = await readMember(stepOperationId(operationId, 0));
+  if (existing === null) return fingerprint;
+  const { batch } = readBatchFingerprint(existing);
+  if (batch === fingerprint) return fingerprint;
+  if (batch !== undefined) throw new ProfileError(errorCode, 'This operation ID was already used for a different batch.');
+
+  // Legacy receipts only identify completed members. Replay the recorded batch as-is.
+  const last = count === 1 ? existing : await readMember(stepOperationId(operationId, count - 1));
+  const next = await readMember(stepOperationId(operationId, count));
+  if (last === null || next !== null) {
+    throw new ProfileError(errorCode, 'This older batch can only replay its recorded members. Read back the result and use a new operation ID for additional changes.');
+  }
+}
 
 async function configuredZone(application: TrackerApplication): Promise<string> {
   const { timezone } = await application.settings.get();
@@ -128,6 +153,9 @@ export function registerBatchTools({ register }: Registrar): void {
       }),
     },
     async (application, { operationId, records, dryRun = false }) => {
+      const batchFingerprint = dryRun ? undefined : await bindBatch(
+        operationId, records, records.length, application.practice.fingerprintForOperation, 'OPERATION_CONFLICT',
+      );
       const zone = await configuredZone(application);
       const now = new Date().toISOString();
       const inputs = [];
@@ -173,7 +201,7 @@ export function registerBatchTools({ register }: Registrar): void {
         return json({ dryRun: true, valid: issues.length === 0, issues, operationId, records: preview });
       }
 
-      const { items } = await application.practice.createMany({ records: inputs });
+      const { items } = await application.practice.createMany({ records: inputs }, batchFingerprint);
       return json({
         status: 'applied',
         operationId,
@@ -213,6 +241,16 @@ export function registerBatchTools({ register }: Registrar): void {
       }),
     },
     async (application, { date, expectedVersion, steps, operationId, dryRun }) => {
+      const batchFingerprint = dryRun ? undefined : await bindBatch(
+        operationId,
+        [date ?? null, expectedVersion, steps.map(step => ({
+          ...step,
+          ...(step.action === 'remove' ? { confirmRevokePracticeIds: [...(step.confirmRevokePracticeIds ?? [])].sort() } : {}),
+        }))],
+        steps.length,
+        application.planning.fingerprintForOperation,
+        'OPERATION_REUSED',
+      );
       const targetDate = date ?? localDate(Date.now(), await configuredZone(application));
       const plan = (await application.planning.plans({ date: targetDate })).items[0];
       if (!plan) return refuse('PLAN_NOT_FOUND', `No study plan exists for ${targetDate}. Create it with tracker_create_today first.`);
@@ -268,15 +306,16 @@ export function registerBatchTools({ register }: Registrar): void {
       const applied: string[] = [];
       for (const [index, { step, itemId, label }] of resolved.entries()) {
         const stepId = stepOperationId(operationId, index);
+        const fingerprint = index === 0 ? batchFingerprint : undefined;
         try {
           if (step.action === 'append') {
-            current = await application.planning.append({ operationId: stepId, expectedVersion: version }, { id: plan.id });
+            current = await application.planning.append({ operationId: stepId, expectedVersion: version }, { id: plan.id }, fingerprint);
           } else if (step.action === 'replace_unfinished') {
-            current = await application.planning.replace({ operationId: stepId, expectedVersion: version, mode: 'all_unfinished', feedbackReason: step.feedbackReason }, { id: plan.id });
+            current = await application.planning.replace({ operationId: stepId, expectedVersion: version, mode: 'all_unfinished', feedbackReason: step.feedbackReason }, { id: plan.id }, fingerprint);
           } else if (step.action === 'remove') {
-            current = await application.planning.remove({ operationId: stepId, expectedVersion: version, itemId, feedbackReason: step.feedbackReason }, { id: plan.id });
+            current = await application.planning.remove({ operationId: stepId, expectedVersion: version, itemId, feedbackReason: step.feedbackReason }, { id: plan.id }, fingerprint);
           } else {
-            current = await application.planning.replace({ operationId: stepId, expectedVersion: version, mode: 'one', itemId, feedbackReason: step.feedbackReason }, { id: plan.id });
+            current = await application.planning.replace({ operationId: stepId, expectedVersion: version, mode: 'one', itemId, feedbackReason: step.feedbackReason }, { id: plan.id }, fingerprint);
           }
         } catch (error) {
           // Nothing changed yet: report the step's own error unchanged.

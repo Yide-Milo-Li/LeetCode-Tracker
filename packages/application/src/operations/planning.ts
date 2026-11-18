@@ -13,11 +13,12 @@ import {
   strategyInputSchema,
   updateStrategySchema,
 } from '../../../contracts/src/recommendations.ts';
+import { operationFingerprint } from '../../../database/src/operation-fingerprint.ts';
 import type { ApplicationContext } from '../context.ts';
 import { fail, artifact } from '../errors.ts';
 /** Create operations over the owning application's shared context. */
 export function createPlanningOperations(context: ApplicationContext) {
-  const { planningService, writeLock } = context;
+  const { store, planningService, writeLock } = context;
   /** strategies: validates input and preserves existing business rules. */
   const strategies = async (input: unknown = {}) => {
     const strategies = planningService.getStrategies();
@@ -102,14 +103,13 @@ export function createPlanningOperations(context: ApplicationContext) {
   };
 
   /** replace: validates input and preserves existing business rules. */
-  const replace = async (input: unknown = {}, params: { id: string }) => {
-    const { id } = params as { id: string };
+  const replace = async (input: unknown = {}, { id }: { id: string }, batchFingerprint?: string) => {
     const parsed = replaceSchema.safeParse(input);
     if (!parsed.success) {
       return fail(400, { error: 'INVALID_INPUT', issues: parsed.error.issues });
     }
     try {
-      const updated = await writeLock.runGroup(() => planningService.replacePlanItems(id, parsed.data));
+      const updated = await writeLock.runGroup(() => planningService.replacePlanItems(id, parsed.data, batchFingerprint));
       return updated;
     } catch (err) {
       if (err instanceof PlanningError) return fail(err.status, { error: err.code, message: err.message });
@@ -118,14 +118,13 @@ export function createPlanningOperations(context: ApplicationContext) {
   };
 
   /** append: validates input and preserves existing business rules. */
-  const append = async (input: unknown = {}, params: { id: string }) => {
-    const { id } = params as { id: string };
+  const append = async (input: unknown = {}, { id }: { id: string }, batchFingerprint?: string) => {
     const parsed = appendPlanItemSchema.safeParse(input);
     if (!parsed.success) {
       return fail(400, { error: 'INVALID_INPUT', issues: parsed.error.issues });
     }
     try {
-      const updated = await writeLock.runGroup(() => planningService.appendPlanItem(id, parsed.data));
+      const updated = await writeLock.runGroup(() => planningService.appendPlanItem(id, parsed.data, batchFingerprint));
       return updated;
     } catch (err) {
       if (err instanceof PlanningError) return fail(err.status, { error: err.code, message: err.message });
@@ -134,14 +133,13 @@ export function createPlanningOperations(context: ApplicationContext) {
   };
 
   /** remove: validates input and preserves existing business rules. */
-  const remove = async (input: unknown = {}, params: { id: string }) => {
-    const { id } = params as { id: string };
+  const remove = async (input: unknown = {}, { id }: { id: string }, batchFingerprint?: string) => {
     const parsed = removePlanItemSchema.safeParse(input);
     if (!parsed.success) {
       return fail(400, { error: 'INVALID_INPUT', issues: parsed.error.issues });
     }
     try {
-      const updated = await writeLock.runGroup(() => planningService.removePlanItem(id, parsed.data));
+      const updated = await writeLock.runGroup(() => planningService.removePlanItem(id, parsed.data, batchFingerprint));
       return updated;
     } catch (err) {
       if (err instanceof PlanningError) return fail(err.status, { error: err.code, message: err.message });
@@ -203,5 +201,6 @@ export function createPlanningOperations(context: ApplicationContext) {
       return fail(500, { error: 'INTERNAL_ERROR', message: err instanceof Error ? err.message : String(err) });
     }
   };
-  return { strategies, createStrategy, updateStrategy, deleteStrategy, schedule, plans, ensure, replace, append, remove, versions, previewOverride, commitOverride, applyRules };
+  const fingerprintForOperation = async (id: string) => operationFingerprint(store.db, 'planning_operations', id);
+  return { strategies, createStrategy, updateStrategy, deleteStrategy, schedule, plans, ensure, replace, append, remove, versions, previewOverride, commitOverride, applyRules, fingerprintForOperation };
 }

@@ -8,6 +8,7 @@ import {
   updatePracticeRecordSchema,
 } from '../../../contracts/src/practice.ts';
 import { PracticeConflictError } from '../../../database/src/store.ts';
+import { operationFingerprint, readBatchFingerprint } from '../../../database/src/operation-fingerprint.ts';
 import type { ApplicationContext } from '../context.ts';
 import { fail, artifact } from '../errors.ts';
 /** Create operations over the owning application's shared context. */
@@ -39,7 +40,7 @@ export function createPracticeOperations(context: ApplicationContext) {
   };
 
   /** createMany: creates every record in one transaction, or none when any fails. */
-  const createMany = async (input: unknown = {}) => {
+  const createMany = async (input: unknown = {}, batchFingerprint?: string) => {
     const parseRes = createPracticeRecordsSchema.safeParse(input);
     if (!parseRes.success) {
       return fail(400, {
@@ -51,7 +52,7 @@ export function createPracticeOperations(context: ApplicationContext) {
     }
 
     try {
-      const items = await writeLock.run(() => store.createPracticeRecords(parseRes.data.records));
+      const items = await writeLock.run(() => store.createPracticeRecords(parseRes.data.records, batchFingerprint));
       return { items };
     } catch (err) {
       if (err instanceof PracticeConflictError) {
@@ -147,19 +148,20 @@ export function createPracticeOperations(context: ApplicationContext) {
     const stats = store.getPracticeStats();
     return stats;
   };
+  const fingerprintForOperation = async (id: string) => operationFingerprint(store.db, 'practice_operations', id);
+
   /** Immutable creation input, rather than the current editable record, supplies retry defaults. */
   const byOperation = async (operationId: string) => {
-    const row = store.db
-      .prepare('SELECT fingerprint FROM practice_operations WHERE id=?')
-      .get(operationId) as { fingerprint: string } | undefined;
-    if (!row) return null;
+    const fingerprint = await fingerprintForOperation(operationId);
+    if (fingerprint === null) return null;
     // The persisted v8+ fingerprint is the normalized creation payload in this order.
-    const [questionFrontendId, completed, practicedAt, timePrecision, notes, durationMinutes, sourceTimezone, outcome] = JSON.parse(row.fingerprint);
+    const [questionFrontendId, completed, practicedAt, timePrecision, notes, durationMinutes, sourceTimezone, outcome] =
+      JSON.parse(readBatchFingerprint(fingerprint).request);
     return createPracticeRecordSchema.parse({
       questionFrontendId, completed, practicedAt, timePrecision, notes: notes ?? undefined,
       durationMinutes, sourceTimezone, outcome, operationId,
     });
   };
 
-  return { create, createMany, query, read, update, revoke, stats, byOperation };
+  return { create, createMany, query, read, update, revoke, stats, byOperation, fingerprintForOperation };
 }

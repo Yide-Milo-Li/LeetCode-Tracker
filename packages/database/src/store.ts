@@ -5,6 +5,7 @@
  * Coordinates modular query, migration, import, and planning delegates.
  */
 import { contentHash, NoteContentConflictError } from './note-hash.ts';
+import { withBatchFingerprint } from './operation-fingerprint.ts';
 import { DatabaseSync } from 'node:sqlite';
 import type {
   CatalogProblem,
@@ -365,9 +366,10 @@ export class CatalogStore {
    * nothing is written. Problems are resolved before any write.
    */
   public async createPracticeRecords(
-    inputs: CreatePracticeRecordInput[]
+    inputs: CreatePracticeRecordInput[],
+    batchFingerprint?: string,
   ): Promise<Array<{ record: PracticeRecord; replayed: boolean }>> {
-    const prepared: PreparedPracticeInsert[] = inputs.map((input) => {
+    const prepared: PreparedPracticeInsert[] = inputs.map((input, index) => {
       const validated = createPracticeRecordSchema.parse(input);
       const precision: TimePrecision =
         validated.timePrecision ?? (validated.practicedAt.includes('T') ? 'datetime' : 'date');
@@ -375,7 +377,8 @@ export class CatalogStore {
       if (!problem) {
         throw new Error(`Problem '${validated.questionFrontendId}' not found in catalog.`);
       }
-      return { problem, validated, precision, fingerprint: practiceFingerprint(validated, precision) };
+      const fingerprint = withBatchFingerprint(practiceFingerprint(validated, precision), index === 0 ? batchFingerprint : undefined);
+      return { problem, validated, precision, fingerprint };
     });
 
     const run = this.writeQueue.then(async () => {

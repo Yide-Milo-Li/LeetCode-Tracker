@@ -211,6 +211,32 @@ test('practice batches are all or nothing and replay by operationId', async () =
 
     const changed = await client.call('tracker_create_practices', { operationId, records: [{ ...records[0], durationMinutes: 99 }] });
     assert.equal(errorCode(changed), 'OPERATION_CONFLICT');
+    for (const different of [records.slice(0, 2), [...records, records[0]], [...records].reverse()]) {
+      assert.equal(errorCode(await client.call('tracker_create_practices', { operationId, records: different })), 'OPERATION_CONFLICT');
+    }
+    assert.equal((await client.call('tracker_list_practices')).structuredContent.total, 3);
+  } finally { await client.close(); p.cleanup(); }
+});
+
+test('legacy practice batches replay their stored members without appending new ones', async () => {
+  const p = profile();
+  const operationId = randomUUID();
+  const records = ['1', '2'].map(questionFrontendId => ({ questionFrontendId, completed: true, practicedAt: '2026-11-16' }));
+  const db = new DatabaseSync(p.dbPath);
+  try {
+    const store = new CatalogStore(db, { skipBackup: true });
+    await store.createPracticeRecords(records.map((record, index) => ({
+      ...record, sourceTimezone: 'UTC', operationId: stepOperationId(operationId, index),
+    })));
+  } finally { db.close(); }
+  const { client } = await StdioClient.start(entry, p.dbPath);
+  try {
+    const replay = (await client.call('tracker_create_practices', { operationId, records })).structuredContent;
+    assert.equal(replay.replayed, 2);
+    for (const different of [records.slice(0, 1), [...records, { ...records[0], questionFrontendId: '3' }]]) {
+      assert.equal(errorCode(await client.call('tracker_create_practices', { operationId, records: different })), 'OPERATION_CONFLICT');
+    }
+    assert.equal((await client.call('tracker_list_practices')).structuredContent.total, 2);
   } finally { await client.close(); p.cleanup(); }
 });
 
@@ -270,6 +296,10 @@ test('plan edits validate every step first, apply in order and replay on retry',
     const replay = (await client.call('tracker_edit_today', { expectedVersion: plan.version, steps, operationId })).structuredContent;
     assert.equal(replay.version, edited.version, 'retrying the batch replays instead of editing again');
     assert.deepEqual(replay, edited);
+    for (const different of [steps.slice(0, 2), [...steps, { action: 'append' }], [...steps].reverse()]) {
+      assert.equal(errorCode(await client.call('tracker_edit_today', { expectedVersion: plan.version, operationId, steps: different })), 'OPERATION_REUSED');
+    }
+    assert.equal((await client.call('tracker_get_today')).structuredContent.version, edited.version);
     assert.equal(errorCode(await client.call('tracker_edit_today', { expectedVersion: plan.version, operationId: randomUUID(), steps: [{ action: 'append' }] })), 'STALE_PLAN');
   } finally { await client.close(); p.cleanup(); }
 });
@@ -284,9 +314,12 @@ test('a plan edit that fails part way reports the steps that were applied', asyn
     });
     const plan = (await client.call('tracker_create_today')).structuredContent.plan;
     assert.equal(plan.totalCount, 3);
-    const partial = await client.call('tracker_edit_today', { expectedVersion: plan.version, operationId: randomUUID(), steps: [{ action: 'append' }, { action: 'append' }] });
+    const request = { expectedVersion: plan.version, operationId: randomUUID(), steps: [{ action: 'append' }, { action: 'append' }] };
+    const partial = await client.call('tracker_edit_today', request);
     assert.equal(errorCode(partial), 'EDIT_PARTIALLY_APPLIED');
     assert.match(partial.structuredContent.message, /Steps 1-1 of 2 were applied \(append\)/);
+    assert.equal(errorCode(await client.call('tracker_edit_today', { ...request, steps: request.steps.slice(0, 1) })), 'OPERATION_REUSED');
+    assert.equal(errorCode(await client.call('tracker_edit_today', request)), 'EDIT_PARTIALLY_APPLIED');
     assert.equal((await client.call('tracker_get_today')).structuredContent.totalCount, 4);
   } finally { await client.close(); p.cleanup(); }
 });

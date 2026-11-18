@@ -59,6 +59,7 @@ test('write tools are annotated so hosts ask before running them', async () => {
       assert.deepEqual(byName.get(name), { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false }, name);
     }
     assert.equal((byName.get('tracker_create_practices') as any).destructiveHint, false);
+    assert.equal((byName.get('tracker_save_strategy') as any).idempotentHint, false);
     assert.equal((byName.get('tracker_get_notes') as any).readOnlyHint, true);
   } finally { await client.close(); p.cleanup(); }
 });

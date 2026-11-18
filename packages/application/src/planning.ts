@@ -54,6 +54,7 @@ import {
 } from './fallbacks.ts';
 import type { ModelService } from './types.ts';
 import { AsyncLock } from './locks.ts';
+import { withBatchFingerprint } from '../../database/src/operation-fingerprint.ts';
 
 const ZH_DIFFICULTY: Record<Difficulty, string> = { Easy: '简单', Medium: '中等', Hard: '困难' };
 
@@ -447,9 +448,11 @@ export class PlanningService {
       itemId?: string;
       expectedVersion: number;
       operationId: string;
-    }
+    },
+    batchFingerprint?: string,
   ): Promise<DailyPlan> {
-    const fingerprint = `replace:${planId}:${options.expectedVersion}:${options.mode}:${options.itemId ?? 'all'}${options.feedbackReason ? ':' + options.feedbackReason : ''}`;
+    const request = `replace:${planId}:${options.expectedVersion}:${options.mode}:${options.itemId ?? 'all'}${options.feedbackReason ? ':' + options.feedbackReason : ''}`;
+    const fingerprint = withBatchFingerprint(request, batchFingerprint);
     const replayed = this.planning.replay(options.operationId, fingerprint);
     if (replayed) {
       return replayed;
@@ -601,9 +604,10 @@ export class PlanningService {
     options: {
       expectedVersion: number;
       operationId: string;
-    }
+    },
+    batchFingerprint?: string,
   ): Promise<DailyPlan> {
-    const fingerprint = `append:${planId}:${options.expectedVersion}`;
+    const fingerprint = withBatchFingerprint(`append:${planId}:${options.expectedVersion}`, batchFingerprint);
     const replayed = this.planning.replay(options.operationId, fingerprint);
     if (replayed) {
       return replayed;
@@ -752,9 +756,11 @@ export class PlanningService {
       feedbackReason?: RecommendationFeedbackReason;
       expectedVersion: number;
       operationId: string;
-    }
+    },
+    batchFingerprint?: string,
   ): Promise<DailyPlan> {
-    const fingerprint = `remove:${planId}:${options.expectedVersion}:${options.itemId}${options.feedbackReason ? ':' + options.feedbackReason : ''}`;
+    const request = `remove:${planId}:${options.expectedVersion}:${options.itemId}${options.feedbackReason ? ':' + options.feedbackReason : ''}`;
+    const fingerprint = withBatchFingerprint(request, batchFingerprint);
     const replayed = this.planning.replay(options.operationId, fingerprint);
     if (replayed) {
       return replayed;
