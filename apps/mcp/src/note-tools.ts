@@ -34,11 +34,11 @@ async function profileLang(application: TrackerApplication, requested: Lang | un
   return language === 'zh' ? 'zh' : 'en';
 }
 
-/** Every active practice record, newest first (the store's order); optionally for one problem. */
-async function activePractices(application: TrackerApplication, frontendId?: string): Promise<PracticeRecord[]> {
+/** Every active practice record in time order, optionally for one problem. */
+async function activePractices(application: TrackerApplication, frontendId?: string, order: 'asc' | 'desc' = 'desc'): Promise<PracticeRecord[]> {
   const records: PracticeRecord[] = [];
   for (let page = 1; ; page++) {
-    const result = await application.practice.query({ questionFrontendId: frontendId, page, limit: 100 });
+    const result = await application.practice.query({ questionFrontendId: frontendId, page, limit: 100, order });
     records.push(...result.items);
     if (records.length >= result.total || result.items.length === 0) return records;
   }
@@ -166,7 +166,7 @@ export function registerNoteTools({ register }: Registrar): void {
       const id = problem.questionFrontendId;
       const language = await profileLang(application, lang);
       const note = await currentNote(application, id);
-      const practices = (await activePractices(application, id)).reverse();
+      const practices = await activePractices(application, id, 'asc');
       const solved = practices.filter(record => record.completed);
       return json({
         problem: {

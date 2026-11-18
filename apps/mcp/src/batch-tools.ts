@@ -10,7 +10,6 @@
  * operation ID derived from the batch operationId, so retrying the batch with
  * the same operationId replays what already ran instead of repeating it.
  */
-import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { TrackerApplication } from '../../../packages/application/src/application.ts';
 import { ApplicationError } from '../../../packages/application/src/errors.ts';
@@ -25,10 +24,8 @@ import { noteState, stepOperationId, summarizePlan } from './views.ts';
 const MAX_PROBLEM_BATCH = 50;
 const MAX_PLAN_STEPS = 10;
 
-const batchOperationIdSchema = z.string().uuid().optional()
-  .describe('UUID for the whole batch. Retrying with the same operationId replays the steps that already ran instead of repeating them. Generated when omitted; reuse the returned value to retry.');
-const requiredBatchOperationIdSchema = z.string().uuid()
-  .describe('UUID for the whole batch. Generate it before the first call and reuse it for every retry, including when a response is lost; finished records are replayed instead of created twice.');
+const batchOperationIdSchema = z.string().uuid()
+  .describe('UUID for the whole batch. Generate it before the first call and reuse it for every retry, including when a response is lost; finished steps are replayed instead of applied twice.');
 
 async function configuredZone(application: TrackerApplication): Promise<string> {
   const { timezone } = await application.settings.get();
@@ -134,7 +131,7 @@ export function registerBatchTools({ register }: Registrar): void {
     {
       description: `Record up to ${MAX_PRACTICE_BATCH} practice attempts in one transaction: either all are saved or none is. Use it when the user reports several problems at once. Set dryRun to validate and show what would be recorded. Requires a client-generated operationId; retrying with it is safe.`,
       inputSchema: z.object({
-        operationId: requiredBatchOperationIdSchema,
+        operationId: batchOperationIdSchema,
         records: z.array(practiceInputSchema).min(1).max(MAX_PRACTICE_BATCH),
         dryRun: z.boolean().optional().default(false),
       }),
@@ -214,7 +211,7 @@ export function registerBatchTools({ register }: Registrar): void {
   register(
     'tracker_edit_today',
     {
-      description: `Change a day's plan: up to ${MAX_PLAN_STEPS} steps applied in order with one expectedVersion. Steps: {"action":"remove","frontendId":"12"}, {"action":"replace","frontendId":"12"} (new pick for that problem), {"action":"append"} (one more problem chosen by the plan's rules), {"action":"replace_unfinished"} (new picks for every unfinished problem; must be the last step). remove and replace take an optional feedbackReason that helps future plans avoid similar picks. Every step is checked against the plan before anything changes. The steps are not one transaction: if a later step fails (for example no replacement candidate is left), the earlier ones stay applied and the error says which ran and the plan's new version. Retrying with the same operationId replays the finished steps.`,
+      description: `Change a day's plan: up to ${MAX_PLAN_STEPS} steps applied in order with one expectedVersion. Steps: {"action":"remove","frontendId":"12"}, {"action":"replace","frontendId":"12"} (new pick for that problem), {"action":"append"} (one more problem chosen by the plan's rules), {"action":"replace_unfinished"} (new picks for every unfinished problem; must be the last step). remove and replace take an optional feedbackReason that helps future plans avoid similar picks. Every step is checked against the plan before anything changes. The steps are not one transaction: if a later step fails (for example no replacement candidate is left), the earlier ones stay applied and the error says which ran and the plan's new version. Requires a client-generated operationId; retrying with it replays the finished steps.`,
       inputSchema: z.object({
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('YYYY-MM-DD; defaults to today in the configured timezone'),
         expectedVersion: z.number().int().positive().describe('Plan version from tracker_get_today'),
@@ -222,7 +219,7 @@ export function registerBatchTools({ register }: Registrar): void {
         operationId: batchOperationIdSchema,
       }),
     },
-    async (application, { date, expectedVersion, steps, operationId = randomUUID() }) => {
+    async (application, { date, expectedVersion, steps, operationId }) => {
       const targetDate = date ?? localDate(Date.now(), await configuredZone(application));
       const plan = (await application.planning.plans({ date: targetDate })).items[0];
       if (!plan) return refuse('PLAN_NOT_FOUND', `No study plan exists for ${targetDate}. Create it with tracker_create_today first.`);

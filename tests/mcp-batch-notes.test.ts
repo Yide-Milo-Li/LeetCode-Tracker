@@ -250,9 +250,9 @@ test('plan edits validate every step first, apply in order and replay on retry',
     const plan = (await client.call('tracker_create_today')).structuredContent.plan;
     const [a, b] = plan.items.map((item: any) => item.frontendId);
 
-    const unknown = await client.call('tracker_edit_today', { expectedVersion: plan.version, steps: [{ action: 'remove', frontendId: a }, { action: 'replace', frontendId: '999' }] });
+    const unknown = await client.call('tracker_edit_today', { expectedVersion: plan.version, operationId: randomUUID(), steps: [{ action: 'remove', frontendId: a }, { action: 'replace', frontendId: '999' }] });
     assert.equal(errorCode(unknown), 'PLAN_ITEM_NOT_FOUND');
-    const twice = await client.call('tracker_edit_today', { expectedVersion: plan.version, steps: [{ action: 'remove', frontendId: a }, { action: 'replace', frontendId: a }] });
+    const twice = await client.call('tracker_edit_today', { expectedVersion: plan.version, operationId: randomUUID(), steps: [{ action: 'remove', frontendId: a }, { action: 'replace', frontendId: a }] });
     assert.equal(errorCode(twice), 'INVALID_INPUT');
     assert.equal((await client.call('tracker_get_today')).structuredContent.version, plan.version, 'refused edits change nothing');
 
@@ -267,7 +267,7 @@ test('plan edits validate every step first, apply in order and replay on retry',
     const replay = (await client.call('tracker_edit_today', { expectedVersion: plan.version, steps, operationId })).structuredContent;
     assert.equal(replay.plan.version, edited.plan.version, 'retrying the batch replays instead of editing again');
     assert.deepEqual(replay.plan.items.map((item: any) => item.frontendId), ids);
-    assert.equal(errorCode(await client.call('tracker_edit_today', { expectedVersion: plan.version, steps: [{ action: 'append' }] })), 'STALE_PLAN');
+    assert.equal(errorCode(await client.call('tracker_edit_today', { expectedVersion: plan.version, operationId: randomUUID(), steps: [{ action: 'append' }] })), 'STALE_PLAN');
   } finally { await client.close(); p.cleanup(); }
 });
 
@@ -281,7 +281,7 @@ test('a plan edit that fails part way reports the steps that were applied', asyn
     });
     const plan = (await client.call('tracker_create_today')).structuredContent.plan;
     assert.equal(plan.totalCount, 3);
-    const partial = await client.call('tracker_edit_today', { expectedVersion: plan.version, steps: [{ action: 'append' }, { action: 'append' }] });
+    const partial = await client.call('tracker_edit_today', { expectedVersion: plan.version, operationId: randomUUID(), steps: [{ action: 'append' }, { action: 'append' }] });
     assert.equal(errorCode(partial), 'EDIT_PARTIALLY_APPLIED');
     assert.match(partial.structuredContent.message, /Steps 1-1 of 2 were applied \(append\)/);
     assert.equal((await client.call('tracker_get_today')).structuredContent.totalCount, 4);

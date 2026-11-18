@@ -111,6 +111,8 @@ export const practiceQuerySchema = z.object({
   questionFrontendId: z.string().max(100).optional(),
   completed: z.enum(['true', 'false', 'all']).default('all'),
   status: z.enum(['active', 'revoked', 'all']).default('active'),
+  /** By practice time; desc (newest first) is the default. */
+  order: z.enum(['asc', 'desc']).default('desc'),
 });
 
 export type PracticeQuery = z.infer<typeof practiceQuerySchema>;

@@ -428,3 +428,38 @@ test('empty and whitespace note hashes round-trip and permit the next save witho
     }
   } finally { await client.close(); p.cleanup(); }
 });
+
+test('practice lists honor order, oldest first with asc', async () => {
+  const p = profileWithCatalog();
+  const { client } = await StdioClient.start(entry, p.dbPath);
+  try {
+    await client.call('tracker_create_practices', { operationId: randomUUID(), records: [
+      { questionFrontendId: '1', completed: true, practicedAt: '2026-10-02' },
+      { questionFrontendId: '2', completed: true, practicedAt: '2026-10-01' },
+      { questionFrontendId: '3', completed: true, practicedAt: '2026-10-03' },
+    ] });
+    const ids = async (order?: string) => (await client.call('tracker_list_practices', order ? { order } : {})).structuredContent.records
+      .map((record: any) => record.questionFrontendId);
+    assert.deepEqual(await ids(), ['3', '1', '2'], 'newest first by default');
+    assert.deepEqual(await ids('asc'), ['2', '1', '3']);
+    const secondPage = (await client.call('tracker_list_practices', { order: 'asc', limit: 2, page: 2 })).structuredContent.records;
+    assert.deepEqual(secondPage.map((record: any) => record.questionFrontendId), ['3'], 'paging follows the order');
+  } finally { await client.close(); p.cleanup(); }
+});
+
+test('plan edits and rule changes require a client operationId', async () => {
+  const p = profileWithCatalog();
+  const { client } = await StdioClient.start(entry, p.dbPath);
+  try {
+    const { tools } = (await client.request('tools/list')).result;
+    for (const name of ['tracker_create_practices', 'tracker_edit_today', 'tracker_apply_today_rules']) {
+      assert.ok(tools.find((tool: any) => tool.name === name).inputSchema.required.includes('operationId'), name);
+    }
+    const plan = await createDailyPlan(client);
+    const edit = await client.request('tools/call', { name: 'tracker_edit_today', arguments: { expectedVersion: plan.version, steps: [{ action: 'append' }] } });
+    assert.ok(edit.error || edit.result?.isError);
+    const rules = await client.request('tools/call', { name: 'tracker_apply_today_rules', arguments: { expectedVersion: plan.version, rules: { dailyCount: 4 } } });
+    assert.ok(rules.error || rules.result?.isError);
+    assert.equal((await client.call('tracker_get_today')).structuredContent.version, plan.version, 'nothing changed');
+  } finally { await client.close(); p.cleanup(); }
+});

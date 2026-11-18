@@ -82,7 +82,7 @@ Tools that work on several items take one item too; there are no separate single
 | `tracker_get_problems` | read | 1 to 50 problems with note state, practice count and recent attempts (with `revision`) |
 | `tracker_catalog_coverage` | read | Catalog size, counts by difficulty and missing frontend ID ranges; works before a profile exists |
 | `tracker_get_today` | read | The stored plan for today or a given date, with its `version` (never generates one) |
-| `tracker_list_practices` | read | Paginated practice records with `revision`, optionally for one problem, or specific records by `ids` |
+| `tracker_list_practices` | read | Paginated practice records with `revision`, newest or oldest first, optionally for one problem, or specific records by `ids` |
 | `tracker_list_notes` | read | Note summaries across the catalog, filtered by `tag`, `noteState` or `scope` |
 | `tracker_get_notes` | read | 1 to 20 notes with state and `contentHash`; long notes are read in parts with `offset` |
 | `tracker_get_note_context` | read | Everything for writing one note: problem, all attempts, review stage, current note and headings, template, related written notes |
@@ -125,7 +125,7 @@ The server has no AI provider; the model in your MCP client writes the notes. A 
 - `tracker_create_practices` is all or nothing: every record is created in one SQLite transaction after one backup, or none is.
 - `tracker_save_notes` checks every `expectedContentHash` first; if any note changed, nothing is saved and the error lists each conflict.
 - `tracker_edit_today` checks every step against the plan at `expectedVersion` (the items exist, no item is changed twice, completed items are not replaced) before changing anything. The steps then run in order and are **not** one transaction, because each plan change runs the problem picker in its own transaction and a removal can also revoke practice records. If a later step fails, for example when no replacement candidate is left, the error `EDIT_PARTIALLY_APPLIED` names the steps that ran and the plan's new version.
-- Each step gets an operation ID derived from the batch `operationId`, so retrying a batch with the same `operationId` replays the steps that already ran instead of repeating them. `tracker_create_practices` requires the `operationId`: generate it before the first call so a lost response can still be retried.
+- Each step gets an operation ID derived from the batch `operationId`, so retrying a batch with the same `operationId` replays the steps that already ran instead of repeating them. Both batch writes require the `operationId`: generate it before the first call so a lost response can still be retried.
 
 Failures come back as tool errors with a code and a message, for example `PROFILE_NOT_FOUND`, `PROFILE_IN_USE`, `PROFILE_SCHEMA_MISMATCH`, `TIMEZONE_REQUIRED`, `PLAN_NOT_FOUND`, `NOTE_CHANGED`, `EDIT_PARTIALLY_APPLIED` or `FILES_EXIST`.
 
@@ -136,7 +136,7 @@ The server does not ask for confirmation itself. Every write tool is annotated `
 On top of that, every write states what it expects to change:
 
 - Practice edits carry the record's `expectedRevision`, plan and strategy changes carry the `expectedVersion`, and note saves carry the `expectedContentHash` from the last read. If someone changed the data in between, the write is refused and nothing is saved.
-- Practice creation requires an `operationId`: generate a UUID before the first call and keep it for every retry, including when the first response is lost. Plan changes also accept an `operationId`; it is generated when omitted, so supply one beforehand when you need to recover from a lost response. Reusing an ID with different content is refused.
+- Practice creation, plan edits and rule changes require an `operationId`: generate a UUID before the first call and keep it for every retry, including when the first response is lost. `tracker_create_today` alone accepts calls without one, because a retry returns the day's existing plan. Reusing an ID with different content is refused.
 - Plan retries return the saved result even after the target item was removed or replaced, rules were applied, or the MCP process restarted. Rule application preserves both the plan and its `changed` fields in the receipt. Practice retries recover their original timestamp, precision and timezone from the immutable creation request, so later edits do not duplicate or revert a record; the returned record reflects its current state.
 - Note reads return the hash of the exact stored content, including whitespace-only notes. Note lists default to `scope: "all"`, so notes on unpracticed problems remain discoverable.
 

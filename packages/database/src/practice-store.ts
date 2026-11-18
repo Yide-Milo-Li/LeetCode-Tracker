@@ -174,6 +174,8 @@ export function queryPracticeRecords(
     .get(...params) as { count: number };
 
   const offset = (q.page - 1) * q.limit;
+  // Only the two literals from the schema reach the SQL, never caller text.
+  const direction = q.order === 'asc' ? 'ASC' : 'DESC';
   const rows = db
     .prepare(
       `
@@ -184,7 +186,7 @@ export function queryPracticeRecords(
     FROM practice_records pr
     JOIN problems p ON pr.question_id = p.question_id
     ${whereClause}
-    ORDER BY pr.practiced_at DESC, pr.created_at DESC
+    ORDER BY pr.practiced_at ${direction}, pr.created_at ${direction}
     LIMIT ? OFFSET ?
   `
     )

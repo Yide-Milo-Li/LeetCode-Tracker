@@ -26,6 +26,10 @@ import { summarizePlan } from './views.ts';
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const requiredOperationIdSchema = z.string().uuid()
   .describe('Generate a UUID before the first call and reuse it for every retry, including when a response is lost.');
+/**
+ * Only plan creation leaves the ID optional: retrying it without one returns the
+ * day's existing plan, so a lost response cannot create a second plan.
+ */
 const operationIdSchema = requiredOperationIdSchema.optional()
   .describe('UUID that makes retries safe: repeating a call with the same operationId returns the first result instead of applying twice. Generated when omitted; reuse the returned value to retry.');
 const outcomeSchema = z.enum(['independent', 'assisted', 'unsolved']);
@@ -227,11 +231,11 @@ export function registerWriteTools({ register }: Registrar): void {
         date: dateSchema.optional(),
         rules: rulesInput,
         expectedVersion: z.number().int().positive().nullable(),
-        operationId: operationIdSchema,
+        operationId: requiredOperationIdSchema,
         dryRun: z.boolean().optional().default(false).describe('Check the rule change without applying it (default false)'),
       }),
     },
-    async (application, { date, rules, expectedVersion, operationId = randomUUID(), dryRun = false }) => {
+    async (application, { date, rules, expectedVersion, operationId, dryRun = false }) => {
       if (dryRun) {
         const preview = await application.planning.previewOverride({ rules, date: await resolveDate(application, date) });
         return json({
