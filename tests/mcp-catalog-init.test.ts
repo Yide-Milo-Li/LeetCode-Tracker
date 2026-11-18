@@ -113,6 +113,7 @@ test('note and weak-topic prompts name the tools and guard existing text', async
     assert.match(review, /weakTopics: true/);
     assert.match(review, /Do not change anything yet/);
     assert.match(skill, /tracker_get_progress` with `weakTopics: true`/);
+    assert.match(review, /weakTopics\.topics is empty/);
     assert.match((await get('review_weak_topics', { focus: 'Dynamic Programming' })).messages[0].content.text, /Focus on: Dynamic Programming\./);
   } finally { await client.close(); w.cleanup(); }
 });

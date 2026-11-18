@@ -59,7 +59,7 @@ export function reviewWeakTopicsText(focus?: string): string {
     '3. For each topic, tell me what the evidence says is going wrong, two or three problems from my history worth redoing, and one new problem type to try.',
     '4. Do not change anything yet. If I agree, you can focus a day on these topics with tracker_apply_today_rules (run it with dryRun first) or adjust a strategy with tracker_save_strategy.',
     '',
-    'If no topic needs reinforcement, say so and name the topics that are still developing.',
+    'If weakTopics.topics is empty, say the report flagged no topics for reinforcement and name the developing topics without treating them as weak.',
   ].join('\n');
 }
 
