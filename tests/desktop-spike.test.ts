@@ -16,6 +16,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import * as readline from 'node:readline';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
+import { randomUUID } from 'node:crypto';
 import type { DailyPlan } from '../packages/contracts/src/recommendations.ts';
 import { StdioClient } from './fixtures/mcp-stdio-client.ts';
 import { DESKTOP_AGENT_HEADER, DESKTOP_AGENT_PATH } from '../packages/contracts/src/desktop-agent.ts';
@@ -122,6 +123,36 @@ test('A stdio client follows the desktop lease and can use only the opted-in wri
     assert.equal(plans.status, 200);
     const { items } = await plans.json() as { items: DailyPlan[] };
     assert.equal(items[0].id, prepared.structuredContent.plan.planId);
+
+    const frontendId = items[0].items[0].problem.questionFrontendId;
+    const addPractice = async () => (await client!.call('tracker_create_practices', {
+      operationId: randomUUID(), records: [{ questionFrontendId: frontendId, completed: true }],
+    })).structuredContent.records[0].id as string;
+    const firstPractice = await addPractice();
+    const edit = {
+      operationId: randomUUID(), expectedVersion: items[0].version,
+      steps: [{ action: 'remove', frontendId }],
+    };
+    async function previewRemoval() {
+      return (await client!.call('tracker_edit_today', { ...edit, dryRun: true })).structuredContent.removals[0];
+    }
+    assert.deepEqual((await previewRemoval()).practiceIds, [firstPractice]);
+    const blocked = await client.call('tracker_edit_today', edit);
+    assert.equal(blocked.structuredContent.error, 'PRACTICE_REVOCATION_CONFIRMATION_REQUIRED');
+    const secondPractice = await addPractice();
+    const confirm = (ids: string[]) => client!.call('tracker_edit_today', {
+      ...edit, steps: [{ ...edit.steps[0], confirmRevokePracticeIds: ids }],
+    });
+    assert.equal((await confirm([firstPractice])).structuredContent.error, 'PRACTICE_REVOCATION_CONFIRMATION_REQUIRED');
+    const impact = await previewRemoval();
+    assert.equal(impact.count, 2);
+    assert.deepEqual(impact.practiceIds, [firstPractice, secondPractice].sort());
+    assert.equal((await confirm(impact.practiceIds)).structuredContent.totalCount, 0);
+    for (const id of impact.practiceIds) {
+      const practice = await fetch(url(`/api/v1/practice-records/${id}`), { headers: desktopHeaders });
+      assert.equal((await practice.json() as { status: string }).status, 'revoked');
+    }
+    assert.equal((await confirm(impact.practiceIds)).structuredContent.totalCount, 0);
 
     assert.equal(await stopTestServer(server), 0);
     server = undefined;

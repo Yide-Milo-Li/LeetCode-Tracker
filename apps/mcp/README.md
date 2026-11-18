@@ -105,7 +105,7 @@ Tools that work on several items take one item too; there are no separate single
 | `tracker_delete_strategy` | write, removes | Delete a strategy; its weekdays become rest days and generated plans stay (needs `expectedVersion`) |
 | `tracker_set_timezone` | write | Set the IANA timezone that decides "today"; creates the profile when missing |
 | `tracker_create_today` | write | Generate the day's plan, or return the existing one |
-| `tracker_edit_today` | write, removes | Remove, replace or append plan items, or replace every unfinished one, in up to 10 ordered steps (needs `expectedVersion`); returns the new version, counts and added/removed items |
+| `tracker_edit_today` | write, removes | Edit up to 10 plan items in order using `expectedVersion`. Use `dryRun` to see the manual practice records that removals would revoke. |
 | `tracker_apply_today_rules` | write, overwrites | Rebuild the day's plan with one-day rule changes (needs `expectedVersion`); `dryRun` |
 | `tracker_export_notes` | writes files | Write the notes knowledge base and a mistake log to a local directory |
 
@@ -138,6 +138,7 @@ The server has no AI provider; the model in your MCP client writes the notes. A 
 - `tracker_create_practices` is all or nothing: every record is created in one SQLite transaction after one backup, or none is.
 - `tracker_save_notes` checks every `expectedContentHash` first; if any note changed, nothing is saved and the error lists each conflict.
 - `tracker_edit_today` checks every step against the plan at `expectedVersion` (the items exist, no item is changed twice, completed items are not replaced) before changing anything. The steps then run in order and are **not** one transaction, because each plan change runs the problem picker in its own transaction and a removal can also revoke practice records. If a later step fails, for example when no replacement candidate is left, the error `EDIT_PARTIALLY_APPLIED` names the steps that ran and the plan's new version.
+- If a removal revokes manual practice records, show the user the affected problem and record count from `dryRun`. After confirmation, copy its `practiceIds` to that step's `confirmRevokePracticeIds`. The whole request is refused before edits start if the affected records have changed.
 - Each step gets an operation ID derived from the batch `operationId`, so retrying a batch with the same `operationId` replays the steps that already ran instead of repeating them. Both batch writes require the `operationId`: generate it before the first call so a lost response can still be retried.
 
 Failures come back as tool errors with a code and a message, for example `PROFILE_NOT_FOUND`, `PROFILE_IN_USE`, `PROFILE_SCHEMA_MISMATCH`, `TIMEZONE_REQUIRED`, `PLAN_NOT_FOUND`, `NOTE_CHANGED`, `EDIT_PARTIALLY_APPLIED` or `FILES_EXIST`.

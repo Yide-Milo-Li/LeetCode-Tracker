@@ -55,6 +55,10 @@ const planStepSchema = z.object({
   action: z.enum(['remove', 'replace', 'append', 'replace_unfinished']),
   frontendId: z.string().trim().min(1).optional().describe('Problem frontendId for remove or replace'),
   feedbackReason: recommendationFeedbackReasonSchema.optional(),
+  confirmRevokePracticeIds: z.array(z.string().min(1)).optional()
+    .describe('For remove only. After user confirmation, copy the practiceIds from the dry run for this item. Removing the item revokes those records.'),
+}).refine(step => step.action === 'remove' || step.confirmRevokePracticeIds === undefined, {
+  message: 'Only remove steps can confirm practice revocations',
 });
 type PlanStep = z.infer<typeof planStepSchema>;
 
@@ -199,18 +203,22 @@ export function registerBatchTools({ register }: Registrar): void {
   register(
     'tracker_edit_today',
     {
-      description: `Apply 1 to ${MAX_PLAN_STEPS} ordered steps to a day's plan with expectedVersion and operationId. Actions: "remove" or "replace" (with frontendId and optional feedbackReason), "append", or "replace_unfinished" (must be last). Returns the new version, counts, and added/removed items.`,
+      description: `Apply 1 to ${MAX_PLAN_STEPS} ordered plan edits with expectedVersion and operationId. Actions: "remove", "replace", "append", "replace_unfinished" (last). Removing a completed item can also revoke practice records. Use dryRun to list the affected records, then get user confirmation and pass their IDs on the remove step.`,
       inputSchema: z.object({
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('YYYY-MM-DD; defaults to today in the configured timezone'),
         expectedVersion: z.number().int().positive().describe('Plan version from tracker_get_today'),
         steps: z.array(planStepSchema).min(1).max(MAX_PLAN_STEPS),
         operationId: batchOperationIdSchema,
+        dryRun: z.boolean().optional().default(false).describe('Validate targets and list practice records that would be revoked without changing the plan'),
       }),
     },
-    async (application, { date, expectedVersion, steps, operationId }) => {
+    async (application, { date, expectedVersion, steps, operationId, dryRun }) => {
       const targetDate = date ?? localDate(Date.now(), await configuredZone(application));
       const plan = (await application.planning.plans({ date: targetDate })).items[0];
       if (!plan) return refuse('PLAN_NOT_FOUND', `No study plan exists for ${targetDate}. Create it with tracker_create_today first.`);
+      if (dryRun && plan.version !== expectedVersion) {
+        return refuse('STALE_PLAN', `The plan is now at version ${plan.version}. Read it again before previewing changes.`);
+      }
       const base = await planAtVersion(application, plan, expectedVersion);
       if (!base) return refuse('STALE_PLAN', `Plan version ${expectedVersion} does not exist (current version ${plan.version}). Read the plan again with tracker_get_today.`);
 
@@ -234,6 +242,25 @@ export function registerBatchTools({ register }: Registrar): void {
         }
         touched.add(item.id);
         resolved.push({ step, itemId: item.id, label: `${step.action} ${item.problem.questionFrontendId}` });
+      }
+
+      // Completion evidence can change without incrementing the plan version. Use the live
+      // plan under the write lock and check all pending removals before running any steps.
+      const removals = resolved.flatMap(({ step, itemId }, index) => {
+        if (step.action !== 'remove') return [];
+        const item = plan.items.find(candidate => candidate.id === itemId);
+        if (!item) return []; // An earlier attempt may already have removed this item.
+        const practiceIds = item.evidenceIds.filter(id => id.startsWith('manual:')).map(id => id.slice('manual:'.length)).sort();
+        return [{ index, frontendId: step.frontendId, practiceIds, count: practiceIds.length }];
+      });
+      if (dryRun) return json({ dryRun: true, date: plan.date, version: plan.version, steps: resolved.map(item => item.label), removals });
+
+      const unconfirmed = removals.filter(({ index, practiceIds }) =>
+        JSON.stringify(practiceIds) !== JSON.stringify([...(steps[index].confirmRevokePracticeIds ?? [])].sort()));
+      if (unconfirmed.length) {
+        const impacts = unconfirmed.map(({ frontendId, count }) => `#${frontendId}: ${count} practice record(s)`);
+        return refuse('PRACTICE_REVOCATION_CONFIRMATION_REQUIRED',
+          `Review the current removals (${impacts.join(', ')}). Run dryRun, then pass the confirmed practiceIds on each remove step.`);
       }
 
       let version = expectedVersion;
@@ -277,7 +304,7 @@ export function registerBatchTools({ register }: Registrar): void {
         removed: base.items.map(item => item.problem.questionFrontendId).filter(id => !afterIds.has(id)),
       });
     },
-    'write',
+    ({ dryRun }) => (dryRun ? 'read' : 'write'),
     { destructive: true, idempotent: true },
   );
 }
