@@ -10,7 +10,9 @@ For source-mode startup with browser launch, run `npm run desktop` (`scripts/sta
 
 `npm run mcp:build` (`scripts/build-mcp.ts`) bundles the standalone MCP server into `apps/mcp/dist/leetcode-tracker-mcp.mjs` plus code-split chunks. Splitting is required: a single-file bundle initializes zod lazily and fails at startup. See the [MCP server guide](../apps/mcp/README.md).
 
-To verify LCT with a signed-in client, build the MCP bundle and run `node scripts/verify-lct-skill.mjs` with one argument. Use `codex` for the app-server skill picker, `codex-exec` for the non-interactive CLI, or `antigravity` for the CLI slash command. Each live test uses account quota and a temporary synthetic plan. It checks the host's successful MCP call and the random problem IDs and command menu in the final model response. Set `CODEX_BIN` or `AGY_BIN` if the CLI is outside PATH. Set `LCT_NODE` and `LCT_MCP_ENTRY` to verify the runtime and MCP extracted from a desktop installer.
+To verify LCT with a signed-in client, build the MCP bundle and run `node scripts/verify-lct-skill.mjs <host> [scenario]`. Use `codex` for the app-server skill picker or `antigravity` for the CLI slash command. The default `menu` scenario also supports `codex-exec`. Set `CODEX_BIN` or `AGY_BIN` if the executable is outside PATH. Set `LCT_NODE` and `LCT_MCP_ENTRY` to test the runtime and MCP extracted from a desktop installer.
+
+Run each of `today`, `log`, `note`, `review` and `setup` as the second argument to check the subcommands. Each run uses account quota and an isolated temporary database. The test checks model-issued tool calls and reads back the saved plan, practice records, notes, or strategy through a separate MCP connection. For confirmations it checks the database before sending a follow-up in the same conversation, then reads back the result. The host's test permissions apply only to the synthetic server and tools selected for that scenario.
 
 `npm run docs:check` validates maintained Markdown titles and local links without modifying files. See [tests](../tests/README.md) for isolated verification commands.
 
