@@ -178,10 +178,15 @@ test('strategy and today plan: create, append with replay, replace, remove and a
     });
     assert.equal(errorCode(badCounts), 'INVALID_INPUT');
 
+    const noReviews = { name: 'Zero reviews', weekdays: [1], dailyCount: 1, difficultyCounts: { Easy: 1, Medium: 0, Hard: 0 } };
+    const invalidPartial = await client.request('tools/call', { name: 'tracker_save_strategy',
+      arguments: { ...noReviews, review: { mode: 'partial', count: 0 } } });
+    assert.ok(invalidPartial.error || invalidPartial.result?.isError);
     const strategy = (await client.call('tracker_save_strategy', {
       name: 'Every day', weekdays: [0, 1, 2, 3, 4, 5, 6], dailyCount: 3,
-      difficultyCounts: { Easy: 1, Medium: 2, Hard: 0 }, review: { mode: 'none' },
+      difficultyCounts: { Easy: 1, Medium: 2, Hard: 0 }, review: { mode: 'none', count: 0 },
     })).structuredContent.strategy;
+    assert.equal(strategy.rules.reviewEnabled, false);
     assert.deepEqual(strategy.weekdays, [0, 1, 2, 3, 4, 5, 6]);
     const occupiedDay = await client.call('tracker_save_strategy', {
       name: 'Occupied Monday', weekdays: [1], dailyCount: 1, difficultyCounts: { Easy: 1, Medium: 0, Hard: 0 }, review: { mode: 'none' },

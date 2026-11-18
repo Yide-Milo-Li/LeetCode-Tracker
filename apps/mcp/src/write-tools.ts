@@ -54,7 +54,9 @@ const strategyCountsSchema = z.object({
     .describe('How many of each difficulty; must add up to dailyCount'),
   review: z.object({
     mode: z.enum(['none', 'partial', 'all']).describe('none: only new problems; partial: some reviews; all: only reviews'),
-    count: z.number().int().min(1).optional().describe('Reviews per day when mode is partial'),
+    count: z.number().int().min(0).optional().describe('For partial, 1 to dailyCount; for none, omit or use 0'),
+  }).refine(review => review.count !== 0 || review.mode === 'none', {
+    path: ['count'], message: 'A zero review count requires mode "none".',
   }),
 });
 
