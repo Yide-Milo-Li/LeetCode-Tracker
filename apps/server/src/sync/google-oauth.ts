@@ -26,7 +26,7 @@ export const DEFAULT_GOOGLE_ENDPOINTS: GoogleEndpoints = {
   driveUpload: 'https://www.googleapis.com/upload/drive/v3',
 };
 
-/** OAuth client registered by the user as a Google Cloud "Desktop app". */
+/** OAuth client registered as a Google Cloud "Desktop app". */
 export interface GoogleClientConfig {
   clientId: string;
   /** Desktop clients receive a secret Google documents as non-confidential; optional for PKCE-only clients. */
@@ -120,6 +120,11 @@ export class GoogleAuthorizationFlow {
       throw new SyncTransportError('SYNC_RECONNECT_REQUIRED', 'Google did not return offline access');
     }
     return json.refresh_token;
+  }
+
+  /** Invalidate pending redirects when starting over or changing clients. */
+  clear(): void {
+    this.pending.clear();
   }
 
   /** Drop the pending state without completing it (user denied consent). */

@@ -40,6 +40,9 @@ export function SyncSection({ lang, sync }: SyncSectionProps) {
   const receivable = status?.heads.filter(h => h.compatible) ?? [];
   const latestId = status?.heads.length === 1 ? status.heads[0].snapshotId : null;
   const otherDevices = status?.devices.filter(d => d.deviceId !== status.deviceId) ?? [];
+  const google = status?.google;
+  const googleConnected = google?.connected && !google.reconnectRequired;
+  const canSaveCustomClient = Boolean(sync.clientIdDraft.trim() || (google?.customClientAvailable && sync.clientSecretDraft.trim()));
   const methods: Array<{ id: SyncTransportKind; label: string }> = [
     { id: 'none', label: zh ? '关闭' : 'Off' },
     { id: 'folder', label: zh ? '同步文件夹' : 'Sync folder' },
@@ -61,8 +64,8 @@ export function SyncSection({ lang, sync }: SyncSectionProps) {
                 ? '接收前会自动生成本地安全备份。API Key、Google 授权和同步设置只保存在本机。'
                 : 'Receiving always creates a local safety backup first. API keys, Google access and sync settings stay on each device.'}</p>
               <p>{zh
-                ? '“同步文件夹”可以选择 Google Drive 桌面版里的目录；“Google Drive”直接使用你自己的 OAuth 客户端，数据存放在应用专用的隐藏目录。'
-                : '"Sync folder" can point at a folder inside Google Drive for desktop. "Google Drive" uses your own OAuth client and stores data in a hidden app folder.'}</p>
+                ? '“同步文件夹”可以选择 Google Drive 桌面版里的目录；“Google Drive”直接连接你的账号，快照存放在应用专用的隐藏目录。'
+                : '"Sync folder" can point at a folder inside Google Drive for desktop. "Google Drive" connects directly to your account and stores snapshots in a hidden app folder.'}</p>
             </div>
           }
         />
@@ -105,34 +108,74 @@ export function SyncSection({ lang, sync }: SyncSectionProps) {
           </Field>
         )}
 
-        {sync.transportDraft === 'gdrive' && (
+        {sync.transportDraft === 'gdrive' && google && (
           <>
-            <Field
-              label={zh ? 'OAuth 客户端 ID' : 'OAuth client ID'}
-              hint={status?.google.clientConfigured
-                ? (zh ? '已保存。留空则保持不变。' : 'Saved. Leave empty to keep it.')
-                : (zh ? '在 Google Cloud 创建“桌面应用”类型的客户端，并将发布状态设为“正式版”。' : 'Create a "Desktop app" client in Google Cloud and set its publishing status to "In production".')}
-            >
-              <input type="text" value={sync.clientIdDraft} onChange={(e) => sync.setClientIdDraft(e.target.value)} autoComplete="off" spellCheck={false} placeholder="….apps.googleusercontent.com" />
-            </Field>
-            <Field label={zh ? 'OAuth 客户端密钥（可选）' : 'OAuth client secret (optional)'}>
-              <input type="password" value={sync.clientSecretDraft} onChange={(e) => sync.setClientSecretDraft(e.target.value)} autoComplete="off" spellCheck={false} />
-            </Field>
-            <div className="action-row">
-              {status?.google.connected && !status.google.reconnectRequired ? (
-                <>
-                  <span className="field-status">{zh ? '已连接 Google Drive' : 'Google Drive connected'}</span>
-                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => void sync.disconnectGoogle()} disabled={disabled}>
-                    {zh ? '断开' : 'Disconnect'}
+            {google.clientConfigured && (
+              <div className="action-row">
+                {status?.transport === 'gdrive' && googleConnected ? (
+                  <>
+                    <span className="field-status">{zh ? '已连接 Google Drive' : 'Google Drive connected'}</span>
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => void sync.disconnectGoogle()} disabled={disabled}>
+                      {zh ? '断开' : 'Disconnect'}
+                    </button>
+                  </>
+                ) : (
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => void sync.connectGoogle()} disabled={disabled}>
+                    <Cloud size={14} />
+                    <span>{google.reconnectRequired
+                      ? (zh ? '重新连接 Google Drive' : 'Reconnect Google Drive')
+                      : (zh ? '连接 Google Drive' : 'Connect Google Drive')}</span>
                   </button>
-                </>
-              ) : (
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => void sync.connectGoogle()} disabled={disabled}>
-                  <Cloud size={14} />
-                  <span>{status?.google.reconnectRequired ? (zh ? '重新连接 Google Drive' : 'Reconnect Google Drive') : (zh ? '连接 Google Drive' : 'Connect Google Drive')}</span>
-                </button>
-              )}
-            </div>
+                )}
+              </div>
+            )}
+            <details className="sync-oauth-settings" open={!google.clientConfigured}>
+              <summary>{zh ? '高级设置 · OAuth 客户端' : 'Advanced OAuth settings'}</summary>
+              <div className="settings-stack">
+                {google.clientSource && (
+                  <span className="field-status">
+                    {google.clientSource === 'bundled'
+                      ? (zh ? '正在使用 LCT 官方客户端' : 'Using the LCT OAuth client')
+                      : (zh ? '正在使用自建 OAuth 客户端' : 'Using a custom OAuth client')}
+                  </span>
+                )}
+                {google.bundledClientAvailable && (
+                  <p className="restore-confirm-note">{zh
+                    ? '切换客户端后请重新授权。不同 Google Cloud 项目的快照历史分别保存在各自的 Drive 目录。'
+                    : 'Reconnect after switching clients. Different Google Cloud projects have separate snapshot histories.'}</p>
+                )}
+                {google.clientSource !== 'bundled' && google.bundledClientAvailable && (
+                  <div className="action-row">
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => void sync.saveGoogleClient(true)} disabled={disabled}>
+                      {zh ? '使用 LCT 官方客户端' : 'Use the LCT OAuth client'}
+                    </button>
+                  </div>
+                )}
+                {google.clientSource !== 'custom' && google.customClientAvailable && (
+                  <div className="action-row">
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => void sync.saveGoogleClient(false)} disabled={disabled}>
+                      {zh ? '使用已配置的自建客户端' : 'Use the configured custom client'}
+                    </button>
+                  </div>
+                )}
+                <Field
+                  label={zh ? 'OAuth 客户端 ID' : 'OAuth client ID'}
+                  hint={google.customClientAvailable
+                    ? (zh ? '自建客户端已配置。留空可保留其 ID。' : 'A custom client is configured. Leave blank to keep its ID.')
+                    : (zh ? '在 Google Cloud 中创建「桌面应用」类型的 OAuth 客户端。' : 'Create a Desktop app OAuth client in Google Cloud.')}
+                >
+                  <input type="text" value={sync.clientIdDraft} onChange={(e) => sync.setClientIdDraft(e.target.value)} autoComplete="off" spellCheck={false} placeholder="….apps.googleusercontent.com" disabled={disabled} />
+                </Field>
+                <Field label={zh ? 'OAuth 客户端密钥（如有）' : 'OAuth client secret (if provided)'}>
+                  <input type="password" value={sync.clientSecretDraft} onChange={(e) => sync.setClientSecretDraft(e.target.value)} autoComplete="off" spellCheck={false} disabled={disabled} />
+                </Field>
+                <div className="action-row">
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => void sync.saveGoogleClient()} disabled={disabled || !canSaveCustomClient}>
+                    {zh ? '保存并使用自建客户端' : 'Save and use custom client'}
+                  </button>
+                </div>
+              </div>
+            </details>
           </>
         )}
 

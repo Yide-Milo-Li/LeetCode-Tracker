@@ -4,7 +4,9 @@
 
 Device sync through a sync folder or the Google Drive app data folder is implemented in source ([device sync](sync.md)): snapshot envelope contracts, content hashing, fork-aware graph rules, folder and Drive adapters, loopback PKCE OAuth, `/api/v1/sync/*` routes, the Settings → Data panel, a desktop folder picker and the Google consent host allowlist. No schema or bundle format change.
 
-Verified locally with synthetic data only: type-check, `tests/device-sync.test.ts` (graph rules, hash stability, two-device sync-folder round trip, forks, corrupt/incomplete/future snapshots, OAuth state handling and a fake Drive API round trip), the full `npm test` chain, and Rust fmt/tests. Not verified: a real Google account and OAuth client, Google Drive for desktop file arrival behavior, packaged Windows/macOS apps, and a two-machine handoff.
+Automated coverage includes two-device folder sync, fork handling, invalid snapshots, OAuth client selection and a simulated Drive API round trip. Installed-app acceptance verified a Google Drive for desktop folder handoff from macOS to Windows and direct Google Drive authorization and snapshot listing with a custom client on macOS.
+
+On November 18, 2026, a macOS Apple Silicon build with LCT's bundled production desktop client connected from a clean profile. Google Auth Platform showed External, In production and verified branding. Google consent displayed LeetCode Tracker, the grant contained only `drive.appdata`, and the Settings panel updated automatically after the callback. The build downloaded, previewed and restored an existing snapshot with 4,046 problems. A separate two-profile test used the fresh grant to publish and receive a synthetic snapshot through the real Drive API, with file names isolated from the existing snapshot history. The temporary Drive files were removed after verification. The bundled production client was exercised on macOS.
 
 ## Release 1.3.1 — current delivery baseline
 

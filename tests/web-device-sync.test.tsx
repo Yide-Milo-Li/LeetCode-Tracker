@@ -50,7 +50,10 @@ function status(overrides: Partial<SyncStatus> = {}): SyncStatus {
     deviceId: '33333333-3333-4333-8333-333333333333',
     deviceName: 'Laptop',
     folderPath: 'G:\\My Drive',
-    google: { clientConfigured: false, connected: false, reconnectRequired: false },
+    google: {
+      clientConfigured: false, clientSource: null, bundledClientAvailable: false, customClientAvailable: false,
+      connected: false, reconnectRequired: false,
+    },
     baseSnapshotId: null,
     localDirty: false,
     classification: 'remote-ahead',
@@ -108,17 +111,33 @@ it('refreshes Google Drive when returning to the app after consent', async (t) =
   stubSettings();
   const pending = status({
     transport: 'gdrive', configured: false, classification: null, heads: [],
-    google: { clientConfigured: true, connected: false, reconnectRequired: false },
+    google: {
+      ...status().google, clientConfigured: true, clientSource: 'bundled', bundledClientAvailable: true,
+    },
   });
   const connected = { ...pending, configured: true, google: { ...pending.google, connected: true } };
   let consentComplete = false;
-  mock.method(api, 'getSyncStatus', async () => consentComplete ? connected : pending);
-  mock.method(api, 'connectGoogleDrive', async () => ({ authUrl: 'https://accounts.google.com/o/oauth2/v2/auth' }));
-  mock.method(window, 'open', () => null);
+  let selected = false;
+  mock.method(api, 'getSyncStatus', async () => {
+    if (consentComplete) return connected;
+    return selected ? pending : { ...pending, transport: 'none' as const };
+  });
+  const configure = mock.method(api, 'configureSync', async () => {
+    selected = true;
+    return pending;
+  });
+  const connect = mock.method(api, 'connectGoogleDrive', async () => ({ authUrl: 'https://accounts.google.com/o/oauth2/v2/auth' }));
+  const open = mock.method(window, 'open', () => null);
   const check = mock.method(api, 'checkSync', async () => ({ ...connected, classification: 'empty-remote' as const }));
 
   await renderData();
+  fireEvent.click(screen.getByRole('button', { name: 'Google Drive' }));
+  const advanced = screen.getByText('Advanced OAuth settings').closest('details');
+  assert.equal(advanced?.open, false, 'custom credential fields are initially collapsed');
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Connect Google Drive' })); });
+  assert.deepEqual(configure.mock.calls[0].arguments[0], { transport: 'gdrive' });
+  assert.equal(connect.mock.callCount(), 1);
+  assert.equal(open.mock.calls[0].arguments[0], 'https://accounts.google.com/o/oauth2/v2/auth');
   assert.ok(screen.getByText(/This panel will update automatically/));
   assert.equal(screen.queryByRole('button', { name: 'Check' }), null);
   assert.equal(check.mock.callCount(), 0);

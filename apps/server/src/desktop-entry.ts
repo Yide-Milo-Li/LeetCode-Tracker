@@ -18,6 +18,10 @@ import { acquireDatabaseLease, DatabaseLeaseBusyError } from '../../../packages/
 import { setTimeout as delay } from 'node:timers/promises';
 import { DesktopAgent } from './desktop-agent.ts';
 import type { DesktopMcpLaunch } from '../../../packages/contracts/src/desktop-agent.ts';
+import type { GoogleClientConfig } from './sync/google-oauth.ts';
+
+/** Supplied only by the desktop server bundler. Desktop OAuth clients are public clients. */
+declare const __LCT_BUNDLED_GOOGLE_CLIENT__: GoogleClientConfig | undefined;
 
 async function acquireDesktopLease(dbPath: string): Promise<() => void> {
   const deadline = Date.now() + 2000;
@@ -121,6 +125,9 @@ export async function startDesktopServer(): Promise<void> {
       sessionSecret: config.sessionSecret,
       disableStatic: true,
       desktopAgent: agent,
+      deviceSync: {
+        bundledGoogleClient: typeof __LCT_BUNDLED_GOOGLE_CLIENT__ === 'undefined' ? undefined : __LCT_BUNDLED_GOOGLE_CLIENT__,
+      },
     });
     openedApp = app;
 

@@ -80,6 +80,7 @@ export const syncConfigInputSchema = z.object({
   transport: syncTransportKindSchema,
   folderPath: z.string().trim().min(1).max(1024).optional(),
   deviceName: deviceName.optional(),
+  googleUseBundledClient: z.boolean().optional(),
   googleClientId: z.string().trim().max(300).optional(),
   googleClientSecret: z.string().trim().max(300).optional(),
 }).strict();
@@ -127,7 +128,14 @@ export interface SyncStatus {
   deviceId: string;
   deviceName: string;
   folderPath: string | null;
-  google: { clientConfigured: boolean; connected: boolean; reconnectRequired: boolean };
+  google: {
+    clientConfigured: boolean;
+    clientSource: 'bundled' | 'custom' | null;
+    bundledClientAvailable: boolean;
+    customClientAvailable: boolean;
+    connected: boolean;
+    reconnectRequired: boolean;
+  };
   baseSnapshotId: string | null;
   localDirty: boolean;
   /** Null until a remote listing succeeded in this process. */

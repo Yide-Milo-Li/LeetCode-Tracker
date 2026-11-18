@@ -35,7 +35,7 @@ export interface AppOptions {
   sessionSecret?: string;
   desktopAgent?: DesktopAgent;
   profileDirectory?: string;
-  /** Test seams for device sync (fetch, Google endpoints, clock); defaults use real Google. */
+  /** Device sync configuration and test seams; defaults use real Google. */
   deviceSync?: Partial<DeviceSyncOptions>;
 }
 

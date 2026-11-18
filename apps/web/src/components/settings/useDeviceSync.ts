@@ -26,6 +26,8 @@ const SYNC_ERROR_COPY: Record<string, { en: string; zh: string }> = {
   SYNC_RECONNECT_REQUIRED: { en: 'Google Drive access expired or was revoked. Connect again.', zh: 'Google Drive 授权已过期或被撤销，请重新连接。' },
   SYNC_INVALID_FOLDER: { en: 'Enter an existing folder with an absolute path.', zh: '请填写一个已存在文件夹的绝对路径。' },
   SYNC_FOLDER_REQUIRED: { en: 'Choose a sync folder first.', zh: '请先选择同步文件夹。' },
+  SYNC_CONFIG_CHANGED: { en: 'Sync settings changed. Try again.', zh: '同步设置已更改，请重试。' },
+  SYNC_GOOGLE_BUNDLED_CLIENT_UNAVAILABLE: { en: 'This build does not include an LCT OAuth client.', zh: '此版本未内置 LCT OAuth 客户端。' },
   SYNC_GOOGLE_CLIENT_REQUIRED: { en: 'Enter your Google OAuth client ID first.', zh: '请先填写 Google OAuth 客户端 ID。' },
 };
 
@@ -166,12 +168,8 @@ export function useDeviceSync(lang: Language, active: boolean) {
       transport: transportDraft,
       ...(transportDraft === 'folder' && folderDraft.trim() ? { folderPath: folderDraft.trim() } : {}),
       ...(deviceNameDraft.trim() ? { deviceName: deviceNameDraft.trim() } : {}),
-      ...(clientIdDraft.trim() ? { googleClientId: clientIdDraft.trim() } : {}),
-      ...(clientSecretDraft.trim() ? { googleClientSecret: clientSecretDraft.trim() } : {}),
     }), zh ? '保存同步设置失败。' : 'Could not save sync settings.');
     if (!next) return;
-    setClientSecretDraft('');
-    setClientIdDraft('');
     applyStatus(next, true);
     if (next.transport !== 'gdrive') setGoogleAuthDeadline(null);
     setPreview(null);
@@ -233,33 +231,61 @@ export function useDeviceSync(lang: Language, active: boolean) {
     if (result) setHistory(result.items);
   }
 
+  async function saveGoogleClient(useBundledClient?: boolean) {
+    const clientId = clientIdDraft.trim();
+    const clientSecret = clientSecretDraft.trim();
+    const next = await run('config', () => api.configureSync({
+      transport: 'gdrive',
+      ...(useBundledClient === undefined ? {
+        ...(clientId ? { googleClientId: clientId } : {}),
+        ...(clientSecret ? { googleClientSecret: clientSecret } : {}),
+      } : { googleUseBundledClient: useBundledClient }),
+    }), zh ? '无法保存 OAuth 客户端。' : 'Could not save the OAuth client.');
+    if (!next) return;
+    applyStatus(next);
+    if (useBundledClient === undefined) {
+      setClientIdDraft('');
+      setClientSecretDraft('');
+    }
+    setGoogleAuthDeadline(null);
+    setPreview(null);
+    setHistory(null);
+    publishOperation.current = null;
+    if (next.configured) await check();
+    else setNotice(zh ? '客户端已保存。请连接 Google Drive。' : 'OAuth client saved. Connect Google Drive to continue.');
+  }
+
   async function connectGoogle() {
     setGoogleAuthDeadline(null);
-    const deadline = await run('connect', async () => {
-      // Activate the transport and persist any newly typed client before starting OAuth.
-      if (status?.transport !== 'gdrive' || clientIdDraft.trim() || clientSecretDraft.trim()) {
-        applyStatus(await api.configureSync({
-          transport: 'gdrive',
-          ...(clientIdDraft.trim() ? { googleClientId: clientIdDraft.trim() } : {}),
-          ...(clientSecretDraft.trim() ? { googleClientSecret: clientSecretDraft.trim() } : {}),
-        }), true);
-        setClientIdDraft('');
-        setClientSecretDraft('');
+    const result = await run('connect', async () => {
+      if (status?.transport !== 'gdrive') {
+        const next = await api.configureSync({ transport: 'gdrive' });
+        applyStatus(next);
+        setPreview(null);
+        setHistory(null);
+        if (next.google.connected && !next.google.reconnectRequired) return 'already-connected';
       }
       const deadline = Date.now() + GOOGLE_AUTH_TIMEOUT_MS;
       const { authUrl } = await api.connectGoogleDrive();
       await openExternalUrl(authUrl);
       return deadline;
     }, zh ? '无法开始 Google 授权。' : 'Could not start Google authorization.');
-    if (deadline !== undefined) {
-      setGoogleAuthDeadline(deadline);
+    if (result === 'already-connected') {
+      await check();
+    } else if (result !== undefined) {
+      setGoogleAuthDeadline(result);
       setNotice(zh ? '请在浏览器中完成 Google 授权。连接状态会自动更新。' : 'Finish signing in to Google in your browser. This panel will update automatically.');
     }
   }
 
   async function disconnectGoogle() {
     const next = await run('disconnect', () => api.disconnectGoogleDrive(), zh ? '断开失败。' : 'Disconnect failed.');
-    if (next) applyStatus(next, true);
+    if (!next) return;
+    setGoogleAuthDeadline(null);
+    setPreview(null);
+    setHistory(null);
+    publishOperation.current = null;
+    applyStatus(next, true);
   }
 
   return {
@@ -287,6 +313,7 @@ export function useDeviceSync(lang: Language, active: boolean) {
     startPreview,
     confirmReceive,
     loadHistory,
+    saveGoogleClient,
     connectGoogle,
     disconnectGoogle,
   };

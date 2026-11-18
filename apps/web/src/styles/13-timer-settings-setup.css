@@ -181,6 +181,12 @@
   gap: 12px;
   align-content: start;
 }
+.sync-oauth-settings > summary {
+  cursor: pointer;
+}
+.sync-oauth-settings > .settings-stack {
+  margin-top: 12px;
+}
 .restore-confirm {
   display: grid;
   gap: 8px;

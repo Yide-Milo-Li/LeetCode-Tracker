@@ -21,8 +21,14 @@ async function bundleDesktopServer(): Promise<void> {
     fs.mkdirSync(outdir, { recursive: true });
   }
 
+  const clientId = process.env.LCT_GOOGLE_DESKTOP_CLIENT_ID?.trim();
+  const clientSecret = process.env.LCT_GOOGLE_DESKTOP_CLIENT_SECRET?.trim();
+  if (clientSecret && !clientId) throw new Error('LCT_GOOGLE_DESKTOP_CLIENT_ID is required when bundling a Google Desktop client secret');
+  const bundledGoogleClient = clientId ? { clientId, clientSecret } : undefined;
+
   const startTime = Date.now();
   await build({
+    define: { __LCT_BUNDLED_GOOGLE_CLIENT__: JSON.stringify(bundledGoogleClient) ?? 'undefined' },
     entryPoints: [entryPoint],
     bundle: true,
     platform: 'node',

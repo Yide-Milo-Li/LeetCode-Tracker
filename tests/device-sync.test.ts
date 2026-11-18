@@ -503,7 +503,10 @@ test('Google Drive: PKCE loopback connect, appDataFolder round trip, revoke and 
     assert.ok(!JSON.stringify(a.store.exportMigrationBundle(5)).includes('refresh-1'));
 
     const status = (await A.call('GET', '/api/v1/sync/status')).body;
-    assert.deepEqual(status.google, { clientConfigured: true, connected: true, reconnectRequired: false });
+    assert.deepEqual(status.google, {
+      clientConfigured: true, clientSource: 'custom', bundledClientAvailable: false, customClientAvailable: true,
+      connected: true, reconnectRequired: false,
+    });
     const published = await A.call('POST', '/api/v1/sync/publish', {});
     assert.equal(published.status, 200, JSON.stringify(published.body));
     assert.equal([...google.files.values()].filter(f => f.name.startsWith('snap-')).length, 2);
@@ -531,6 +534,103 @@ test('Google Drive: PKCE loopback connect, appDataFolder round trip, revoke and 
     } finally { await fresh.app.close(); }
   } finally {
     await A.app.close(); await B.app.close(); a.close(); b.close();
+  }
+});
+
+test('Google Drive: bundled client is the default, while legacy clients and their grants survive an upgrade', async () => {
+  const google = fakeGoogle();
+  const bundledGoogleClient = { clientId: 'official.apps.example', clientSecret: 'official-desktop-secret' };
+  const fresh = await profile('gd-bundled'), legacy = await profile('gd-legacy-custom');
+  let markExchangeStarted!: () => void;
+  let releaseExchange!: () => void;
+  const tokenExchangeStarted = new Promise<void>(resolve => { markExchangeStarted = resolve; });
+  const releaseTokenExchange = new Promise<void>(resolve => { releaseExchange = resolve; });
+  let delayExchange = false;
+  const options = {
+    bundledGoogleClient,
+    googleEndpoints: google.endpoints,
+    fetch: (async (input, init) => {
+      if (delayExchange && new URLSearchParams(String(init?.body)).get('grant_type') === 'authorization_code') {
+        markExchangeStarted();
+        await releaseTokenExchange;
+      }
+      return google.fetchImpl(input, init);
+    }) as typeof fetch,
+  };
+  writeSyncSettings(legacy.db, {
+    sync_transport: 'gdrive',
+    sync_google_client_id: 'original.apps.example',
+    sync_google_client_secret: 'original-desktop-secret',
+    sync_google_refresh_token: 'refresh-1',
+  });
+  const freshDevice = await device(fresh, options), legacyDevice = await device(legacy, options);
+  async function begin(d: typeof freshDevice) {
+    const res = await d.call('POST', '/api/v1/sync/google/connect');
+    assert.equal(res.status, 200);
+    return new URL(res.body.authUrl).searchParams;
+  }
+  async function finish(d: typeof freshDevice, query: URLSearchParams) {
+    return d.app.inject({
+      method: 'GET',
+      url: `/api/v1/sync/google/callback?state=${query.get('state')}&code=good-code`,
+    });
+  }
+  try {
+    const config = (await freshDevice.call('PUT', '/api/v1/sync/config', { transport: 'gdrive' })).body;
+    assert.deepEqual(config.google, {
+      clientConfigured: true, clientSource: 'bundled', bundledClientAvailable: true, customClientAvailable: false,
+      connected: false, reconnectRequired: false,
+    });
+    const first = await begin(freshDevice);
+    assert.equal(first.get('client_id'), 'official.apps.example');
+    assert.equal(first.has('client_secret'), false);
+    assert.equal((await finish(freshDevice, first)).statusCode, 200);
+    assert.equal(new URLSearchParams(google.state.lastTokenBody).get('client_secret'), 'official-desktop-secret');
+    assert.equal((await freshDevice.call('POST', '/api/v1/sync/check')).body.classification, 'empty-remote');
+
+    const legacyStatus = (await legacyDevice.call('POST', '/api/v1/sync/check')).body;
+    assert.equal(legacyStatus.google.clientSource, 'custom');
+    assert.equal(legacyStatus.google.connected, true);
+    assert.equal(new URLSearchParams(google.state.lastTokenBody).get('client_secret'), 'original-desktop-secret');
+
+    const oldConnect = await begin(legacyDevice);
+    delayExchange = true;
+    const staleCallback = finish(legacyDevice, oldConnect);
+    await tokenExchangeStarted;
+    const switched = (await legacyDevice.call('PUT', '/api/v1/sync/config', {
+      transport: 'gdrive', googleUseBundledClient: true,
+    })).body;
+    assert.equal(switched.google.clientSource, 'bundled');
+    assert.equal(switched.google.customClientAvailable, true);
+    assert.equal(switched.google.connected, false);
+    assert.equal(switched.classification, null);
+    assert.equal(readSyncSetting(legacy.db, 'sync_google_client_id'), 'original.apps.example');
+    assert.equal(google.state.revoked, false);
+    delayExchange = false;
+    releaseExchange();
+    assert.equal((await staleCallback).statusCode, 400);
+    assert.equal(readSyncSetting(legacy.db, 'sync_google_refresh_token'), null);
+
+    const restored = (await legacyDevice.call('PUT', '/api/v1/sync/config', {
+      transport: 'gdrive', googleUseBundledClient: false,
+    })).body;
+    assert.equal(restored.google.clientSource, 'custom');
+    const original = await begin(legacyDevice);
+    assert.equal(original.get('client_id'), 'original.apps.example');
+    assert.equal((await finish(legacyDevice, original)).statusCode, 200);
+    assert.equal(new URLSearchParams(google.state.lastTokenBody).get('client_secret'), 'original-desktop-secret');
+
+    await legacyDevice.call('PUT', '/api/v1/sync/config', { transport: 'gdrive', googleClientId: 'new-custom.apps.example' });
+    const newCustom = await begin(legacyDevice);
+    assert.equal(newCustom.get('client_id'), 'new-custom.apps.example');
+    assert.equal((await finish(legacyDevice, newCustom)).statusCode, 200);
+    assert.equal(new URLSearchParams(google.state.lastTokenBody).has('client_secret'), false);
+  } finally {
+    releaseExchange();
+    await freshDevice.app.close();
+    await legacyDevice.app.close();
+    fresh.close();
+    legacy.close();
   }
 });
 

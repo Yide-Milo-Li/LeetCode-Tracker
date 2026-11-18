@@ -37,6 +37,7 @@ import {
   encodeSnapshotFile,
   readSyncSetting,
   writeSyncSettings,
+  type SyncSettingKey,
 } from '../../../../packages/database/src/device-sync.ts';
 import { validateMigrationBundle } from '../../../../packages/database/src/migration-bundle.ts';
 import type { CatalogStore } from '../../../../packages/database/src/store.ts';
@@ -77,8 +78,10 @@ export interface DeviceSyncOptions {
   appVersion: string;
   fetch?: typeof fetch;
   googleEndpoints?: Partial<GoogleEndpoints>;
-  /** Fallback OAuth client from the environment (source runs); Settings values take precedence. */
+  /** Custom OAuth client from the environment (source runs). Settings values take precedence. */
   googleClient?: Partial<GoogleClientConfig>;
+  /** Default OAuth client supplied when building an official desktop package. */
+  bundledGoogleClient?: GoogleClientConfig;
   now?: () => number;
   /** Max preview age before receive requires a fresh preview. */
   previewTtlMs?: number;
@@ -138,6 +141,9 @@ const futureEnvelopeSchema = z.object({
   payloadBytes: z.number().int().nonnegative().default(0),
 });
 
+type SyncSettingsPatch = Partial<Record<SyncSettingKey, string | null>>;
+type SelectedGoogleClient = GoogleClientConfig & { source: 'bundled' | 'custom' };
+
 const PREVIEW_TTL_MS = 30 * 60 * 1000;
 
 /** Short, path-bearing description of a bundle validation failure (Zod issues or a plain error). */
@@ -156,13 +162,14 @@ export class DeviceSyncService {
   private readonly endpoints: GoogleEndpoints;
   private readonly now: () => number;
   private readonly authFlow: GoogleAuthorizationFlow;
-  private readonly metaCache = new Map<string, RemoteSnapshot | 'unreadable'>();
+  private metaCache = new Map<string, RemoteSnapshot | 'unreadable'>();
   private readonly publishReplays = new Map<string, { fingerprint: string; result: SyncPublishResult }>();
   private tokenSource: { key: string; source: GoogleAccessTokenSource } | null = null;
   private listing: Listing | null = null;
   private preview: PendingPreview | null = null;
   private lastError: string | null = null;
   private reconnectRequired = false;
+  private googleAuthGeneration = 0;
 
   constructor(ctx: DeviceSyncContext, options: DeviceSyncOptions) {
     this.ctx = ctx;
@@ -181,18 +188,23 @@ export class DeviceSyncService {
   status(): SyncStatus {
     const { deviceId, deviceName } = this.identity();
     const transport = this.transport();
+    const client = this.googleClient();
+    const connected = this.googleRefreshToken(client) !== null;
     const local = this.localState();
     const graph = this.listing ? classifySyncState(this.listing.snapshots, local.baseId, local.dirty) : null;
     return {
       transport,
-      configured: this.isConfigured(transport),
+      configured: transport === 'folder' ? this.setting(K.folderPath) !== null : transport === 'gdrive' && connected,
       deviceId,
       deviceName,
       folderPath: this.setting(K.folderPath),
       google: {
-        clientConfigured: this.googleClient() !== null,
-        connected: this.setting(K.googleRefreshToken) !== null,
-        reconnectRequired: this.reconnectRequired,
+        clientConfigured: client !== null,
+        clientSource: client?.source ?? null,
+        bundledClientAvailable: this.options.bundledGoogleClient !== undefined,
+        customClientAvailable: Boolean(this.setting(K.googleClientId) ?? this.options.googleClient?.clientId),
+        connected,
+        reconnectRequired: this.reconnectRequired || (!connected && this.setting(K.googleRefreshToken) !== null),
       },
       baseSnapshotId: local.baseId,
       localDirty: local.dirty,
@@ -223,7 +235,7 @@ export class DeviceSyncService {
    * cached listings and previews; changing the OAuth client forgets the stored refresh token.
    */
   async configure(input: SyncConfigInput): Promise<SyncStatus> {
-    const values: Partial<Record<(typeof K)[keyof typeof K], string | null>> = { [K.transport]: input.transport };
+    const values: SyncSettingsPatch = { [K.transport]: input.transport };
     if (input.folderPath !== undefined) {
       try {
         values[K.folderPath] = await validateSyncFolder(input.folderPath);
@@ -231,19 +243,44 @@ export class DeviceSyncService {
         throw new DeviceSyncError(400, 'SYNC_INVALID_FOLDER', error instanceof Error ? error.message : 'Invalid sync folder');
       }
     }
-    if (input.transport === 'folder' && !(values[K.folderPath] ?? this.setting(K.folderPath))) {
-      throw new DeviceSyncError(400, 'SYNC_FOLDER_REQUIRED', 'Choose a sync folder first');
-    }
     if (input.deviceName !== undefined) values[K.deviceName] = input.deviceName;
-    if (input.googleClientId !== undefined) {
-      const next = input.googleClientId || null;
-      if (next !== this.setting(K.googleClientId)) values[K.googleRefreshToken] = null;
-      values[K.googleClientId] = next;
-    }
-    if (input.googleClientSecret !== undefined) values[K.googleClientSecret] = input.googleClientSecret || null;
-    await this.ctx.writeLock.run(() => writeSyncSettings(this.ctx.store.db, values));
-    this.resetRemoteState();
-    return this.status();
+
+    return this.ctx.writeLock.run(() => {
+      if (input.transport === 'folder' && !(values[K.folderPath] ?? this.setting(K.folderPath))) {
+        throw new DeviceSyncError(400, 'SYNC_FOLDER_REQUIRED', 'Choose a sync folder first');
+      }
+      if (input.googleUseBundledClient && !this.options.bundledGoogleClient) {
+        throw new DeviceSyncError(400, 'SYNC_GOOGLE_BUNDLED_CLIENT_UNAVAILABLE', 'This build does not include a Google OAuth client');
+      }
+      if (input.googleClientId !== undefined) {
+        const nextId = input.googleClientId || null;
+        if (nextId !== this.setting(K.googleClientId)) values[K.googleClientSecret] = null;
+        values[K.googleClientId] = nextId;
+      }
+      if (input.googleClientSecret !== undefined) values[K.googleClientSecret] = input.googleClientSecret || null;
+      if (input.googleUseBundledClient !== undefined || input.googleClientId !== undefined || input.googleClientSecret !== undefined) {
+        values[K.googleClientMode] = input.googleUseBundledClient ? 'bundled' : null;
+      }
+
+      const previousClient = this.googleClient();
+      const nextClient = this.googleClient(values);
+      const clientChanged = previousClient?.clientId !== nextClient?.clientId;
+      if (clientChanged) {
+        values[K.googleRefreshToken] = null;
+        values[K.googleAuthorizedClientId] = null;
+      }
+      const transportChanged = input.transport !== this.transport();
+      const folderChanged = values[K.folderPath] !== undefined && values[K.folderPath] !== this.setting(K.folderPath);
+      writeSyncSettings(this.ctx.store.db, values);
+
+      if (clientChanged || previousClient?.clientSecret !== nextClient?.clientSecret || transportChanged) {
+        this.invalidateGoogleAuthorization();
+      }
+      if (clientChanged || transportChanged || folderChanged) this.publishReplays.clear();
+      if (clientChanged) this.reconnectRequired = false;
+      this.resetRemoteState();
+      return this.status();
+    });
   }
 
   /** List the remote store and refresh classification. */
@@ -340,6 +377,7 @@ export class DeviceSyncService {
    * Only the most recent preview can be committed.
    */
   async previewReceive(snapshotId: string): Promise<SyncReceivePreview> {
+    const cache = this.metaCache;
     const blobs = this.requireStore();
     const listing = await this.refreshListing(blobs);
     const snapshot = listing.snapshots.find(s => s.snapshotId === snapshotId);
@@ -350,11 +388,13 @@ export class DeviceSyncService {
     try {
       bytes = await blobs.read(names.data);
     } catch (error) {
+      this.requireCurrentRemote(cache);
       if (error instanceof SyncTransportError && error.code === 'SYNC_NOT_FOUND') {
         throw new DeviceSyncError(409, 'SYNC_NOT_READY', 'Snapshot data has not finished syncing to this device yet');
       }
       throw this.toApiError(error);
     }
+    this.requireCurrentRemote(cache);
     // Integrity first (transport damage), then content validity (data this build cannot accept).
     let payload: unknown;
     try {
@@ -484,11 +524,13 @@ export class DeviceSyncService {
   beginGoogleConnect(port: number): string {
     const client = this.googleClient();
     if (!client) throw new DeviceSyncError(400, 'SYNC_GOOGLE_CLIENT_REQUIRED', 'Enter your Google OAuth client ID first');
+    this.invalidateGoogleAuthorization();
     return this.authFlow.begin(client, `http://127.0.0.1:${port}/api/v1/sync/google/callback`);
   }
 
   /** Complete authorization from the browser redirect and persist the refresh token. */
   async completeGoogleConnect(state: string, code: string): Promise<void> {
+    const generation = this.googleAuthGeneration;
     let refreshToken: string;
     try {
       refreshToken = await this.authFlow.complete(state, code);
@@ -496,9 +538,19 @@ export class DeviceSyncService {
       // A stale or forged callback must not mark an existing connection as broken.
       throw new DeviceSyncError(400, 'SYNC_AUTHORIZATION_FAILED', error instanceof Error ? error.message : 'Authorization failed');
     }
-    await this.ctx.writeLock.run(() => writeSyncSettings(this.ctx.store.db, { [K.googleRefreshToken]: refreshToken }));
-    this.reconnectRequired = false;
-    this.resetRemoteState();
+    await this.ctx.writeLock.run(() => {
+      const client = this.googleClient();
+      if (!client || generation !== this.googleAuthGeneration) {
+        throw new DeviceSyncError(400, 'SYNC_AUTHORIZATION_FAILED', 'The Google authorization has been superseded');
+      }
+      writeSyncSettings(this.ctx.store.db, {
+        [K.googleRefreshToken]: refreshToken,
+        [K.googleAuthorizedClientId]: client.clientId,
+      });
+      this.reconnectRequired = false;
+      this.publishReplays.clear();
+      this.resetRemoteState();
+    });
   }
 
   /** The user denied consent or Google returned an error. */
@@ -508,15 +560,26 @@ export class DeviceSyncService {
 
   /** Revoke (best effort) and forget the stored Google token. */
   async disconnectGoogle(): Promise<SyncStatus> {
-    const token = this.setting(K.googleRefreshToken);
+    const token = await this.ctx.writeLock.run(() => {
+      const refreshToken = this.googleRefreshToken();
+      writeSyncSettings(this.ctx.store.db, {
+        [K.googleRefreshToken]: null,
+        [K.googleAuthorizedClientId]: null,
+        ...(this.transport() === 'gdrive' ? { [K.transport]: 'none' } : {}),
+      });
+      this.invalidateGoogleAuthorization();
+      this.publishReplays.clear();
+      this.reconnectRequired = false;
+      this.resetRemoteState();
+      return refreshToken;
+    });
     if (token) await revokeGoogleToken(token, this.endpoints, this.fetchImpl);
-    await this.ctx.writeLock.run(() => writeSyncSettings(this.ctx.store.db, {
-      [K.googleRefreshToken]: null,
-      ...(this.transport() === 'gdrive' ? { [K.transport]: 'none' } : {}),
-    }));
-    this.reconnectRequired = false;
-    this.resetRemoteState();
     return this.status();
+  }
+
+  private invalidateGoogleAuthorization(): void {
+    this.googleAuthGeneration++;
+    this.authFlow.clear();
   }
 
   // ---------------------------------------------------------------------------
@@ -544,17 +607,25 @@ export class DeviceSyncService {
     return value === 'folder' || value === 'gdrive' ? value : 'none';
   }
 
-  private isConfigured(transport: SyncTransportKind): boolean {
-    if (transport === 'folder') return this.setting(K.folderPath) !== null;
-    if (transport === 'gdrive') return this.googleClient() !== null && this.setting(K.googleRefreshToken) !== null;
-    return false;
+  private googleClient(overrides: SyncSettingsPatch = {}): SelectedGoogleClient | null {
+    const read = (key: SyncSettingKey) => key in overrides ? overrides[key] ?? null : this.setting(key);
+    const bundled = this.options.bundledGoogleClient;
+    const bundledClient = bundled ? { ...bundled, source: 'bundled' as const } : null;
+    if (read(K.googleClientMode) === 'bundled') return bundledClient;
+
+    const env = this.options.googleClient;
+    const clientId = read(K.googleClientId) ?? env?.clientId;
+    if (!clientId) return bundledClient;
+    const clientSecret = read(K.googleClientSecret) ?? (clientId === env?.clientId ? env.clientSecret : undefined);
+    return { clientId, clientSecret, source: 'custom' };
   }
 
-  private googleClient(): GoogleClientConfig | null {
-    const clientId = this.setting(K.googleClientId) ?? this.options.googleClient?.clientId ?? null;
-    if (!clientId) return null;
-    const clientSecret = this.setting(K.googleClientSecret) ?? this.options.googleClient?.clientSecret;
-    return { clientId, ...(clientSecret ? { clientSecret } : {}) };
+  private googleRefreshToken(client = this.googleClient()): string | null {
+    if (!client) return null;
+    const authorizedId = this.setting(K.googleAuthorizedClientId);
+    // Older grants have no recorded ID. They only ever came from a custom client.
+    if (authorizedId ? authorizedId !== client.clientId : client.source === 'bundled') return null;
+    return this.setting(K.googleRefreshToken);
   }
 
   /** Blob store for the configured transport. */
@@ -566,9 +637,9 @@ export class DeviceSyncService {
     }
     if (transport === 'gdrive') {
       const client = this.googleClient();
-      const refreshToken = this.setting(K.googleRefreshToken);
+      const refreshToken = this.googleRefreshToken(client);
       if (client && refreshToken) {
-        const key = `${client.clientId}\n${refreshToken}`;
+        const key = JSON.stringify([client.clientId, client.clientSecret, refreshToken]);
         if (this.tokenSource?.key !== key) {
           this.tokenSource = { key, source: new GoogleAccessTokenSource(client, refreshToken, this.endpoints, this.fetchImpl, this.now) };
         }
@@ -582,7 +653,8 @@ export class DeviceSyncService {
   private resetRemoteState(): void {
     this.listing = null;
     this.preview = null;
-    this.metaCache.clear();
+    this.metaCache = new Map();
+    this.tokenSource = null;
     this.lastError = null;
   }
 
@@ -610,6 +682,7 @@ export class DeviceSyncService {
 
   /** List and parse remote metadata. Snapshot metadata is immutable and cached by name. */
   private async refreshListing(blobs: SyncBlobStore): Promise<Listing> {
+    const cache = this.metaCache;
     try {
       const names = await blobs.list();
       const snapshots: RemoteSnapshot[] = [];
@@ -619,10 +692,10 @@ export class DeviceSyncService {
         const parsed = parseSyncBlobName(name);
         if (!parsed) continue;
         if (parsed.type === 'meta') {
-          let entry = this.metaCache.get(name);
+          let entry = cache.get(name);
           if (!entry) {
             entry = this.parseMeta(await blobs.read(name), parsed.snapshotId, parsed.createdAt);
-            this.metaCache.set(name, entry);
+            cache.set(name, entry);
           }
           if (entry === 'unreadable') unreadable++;
           else snapshots.push(entry);
@@ -635,12 +708,20 @@ export class DeviceSyncService {
           }
         }
       }
+      this.requireCurrentRemote(cache);
       this.listing = { snapshots, devices, unreadable, checkedAt: this.now() };
       this.lastError = null;
       this.reconnectRequired = false;
       return this.listing;
     } catch (error) {
+      this.requireCurrentRemote(cache);
       throw this.toApiError(error);
+    }
+  }
+
+  private requireCurrentRemote(cache: typeof this.metaCache): void {
+    if (cache !== this.metaCache) {
+      throw new DeviceSyncError(409, 'SYNC_CONFIG_CHANGED', 'Sync settings changed. Try again.');
     }
   }
 
