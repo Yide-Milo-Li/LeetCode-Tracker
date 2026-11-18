@@ -4,6 +4,7 @@
 import {
   problemNoteListQuerySchema,
   upsertProblemNoteSchema,
+  saveProblemNotesSchema,
   noteFormatRequestSchema,
   noteLayoutSchema,
 } from '../../../contracts/src/notes.ts';
@@ -91,5 +92,30 @@ export function createNotesOperations(context: ApplicationContext) {
         return fail(404, { error: 'NOTE_SAVE_FAILED', message });
       }
     };
-  return { formatStatus, format, list, read, save };
+  /**
+   * saveMany: writes every note in one transaction, or none. `guard` sees each
+   * target's current content inside that transaction and may throw to refuse.
+   */
+  const saveMany = async (input: unknown = {}, options: { guard?: (current: Map<string, string>) => void } = {}) => {
+    const parseRes = saveProblemNotesSchema.safeParse(input);
+    if (!parseRes.success) {
+      return fail(400, {
+        error: 'INVALID_NOTE_PAYLOAD',
+        message: parseRes.error.issues.map((i) => i.message).join('; '),
+      });
+    }
+    const missing = parseRes.data.notes.filter(({ frontendId }) => !store.getProblem(frontendId, 'frontendId'));
+    if (missing.length) {
+      return fail(404, {
+        error: 'PROBLEM_NOT_FOUND',
+        message: `Not in the catalog: ${missing.map(({ frontendId }) => frontendId).join(', ')}`,
+      });
+    }
+    const notes = await writeLock.run(() => store.saveProblemNotes(
+      parseRes.data.notes.map(({ frontendId, content }) => ({ questionFrontendId: frontendId, content })),
+      options.guard,
+    ));
+    return { notes };
+  };
+  return { formatStatus, format, list, read, save, saveMany };
 }

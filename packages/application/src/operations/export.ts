@@ -23,6 +23,17 @@ export function createExportOperations(context: ApplicationContext) {
     return artifact(zipBuffer, 'application/zip', "leetcode-obsidian-vault.zip");
   };
 
+  /** knowledgeFiles: the Obsidian vault files as relative paths; the adapter decides where they go. */
+  const knowledgeFiles = async (input: unknown = {}) => {
+    const parseRes = exportKnowledgeQuerySchema.safeParse(input);
+    if (!parseRes.success) {
+      return fail(400, { error: 'INVALID_QUERY', message: parseRes.error.issues.map((i) => i.message).join('; ') });
+    }
+    const systemLang = (store.getSettings().language as 'en' | 'zh' | undefined) ?? 'en';
+    const lang = (input as { lang?: unknown }).lang === undefined ? systemLang : parseRes.data.lang;
+    return { lang, files: store.generateKnowledgeFiles(parseRes.data.scope, lang) };
+  };
+
   /** notion: validates input and preserves existing business rules. */
   const notion = async (input: unknown = {}) => {
       const table = (input as Record<string, string | undefined>).table;
@@ -77,5 +88,5 @@ export function createExportOperations(context: ApplicationContext) {
       const markdown = generateProblemMarkdown(exportData, lang);
       return artifact(markdown, 'text/markdown; charset=utf-8', filename);
     };
-  return { obsidian, notion, markdown };
+  return { obsidian, knowledgeFiles, notion, markdown };
 }

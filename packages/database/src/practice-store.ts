@@ -232,80 +232,111 @@ export function queryPracticeRecords(
   };
 }
 
+/** One validated creation request with everything the insert needs. */
+export interface PreparedPracticeInsert {
+  problem: CatalogProblem;
+  validated: ReturnType<typeof createPracticeRecordSchema.parse>;
+  precision: TimePrecision;
+  fingerprint: string;
+}
+
 /**
- * Atomically create a practice or return a matching operation's existing record ID.
- * Reject conflicting fingerprints even when another writer commits during backup.
+ * Insert one practice inside the caller's open transaction, or return the
+ * record an earlier request with the same operation ID created.
  */
-export function insertPracticeRecordTransaction(
+function insertPracticeRow(
   db: DatabaseSync,
-  problem: CatalogProblem,
-  validated: ReturnType<typeof createPracticeRecordSchema.parse>,
-  precision: TimePrecision,
-  fingerprint: string,
+  { problem, validated, precision, fingerprint }: PreparedPracticeInsert,
   defaultTimezone: string | null
-): string {
+): { id: string; replayed: boolean } {
+  // Backup yields before the transaction; recheck both identity and content
+  // under the write lock instead of trusting the earlier replay lookup.
+  const concurrentReplay = replayPracticeOperation(
+    db,
+    validated.operationId,
+    fingerprint,
+    (recordId) => getPracticeRecord(db, recordId)
+  );
+  if (concurrentReplay) return { id: concurrentReplay.id, replayed: true };
+
   const id = randomUUID();
   const now = Date.now();
+  db.prepare(
+    `
+    INSERT INTO practice_records (
+      id, question_id, completed, practiced_at, time_precision, notes, status, created_at, updated_at, revoked_at
+    ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, NULL)
+  `
+  ).run(
+    id,
+    problem.questionId,
+    validated.completed ? 1 : 0,
+    validated.practicedAt,
+    precision,
+    validated.notes ?? null,
+    now,
+    now
+  );
 
+  db.prepare('UPDATE practice_records SET source_timezone=? WHERE id=?').run(
+    validated.sourceTimezone ?? defaultTimezone,
+    id
+  );
+  db.prepare('UPDATE practice_records SET duration_minutes=? WHERE id=?').run(
+    validated.durationMinutes ?? null,
+    id
+  );
+  db.prepare('UPDATE practice_records SET outcome=? WHERE id=?').run(
+    validated.outcome ?? null,
+    id
+  );
+
+  if (validated.operationId) {
+    db.prepare(
+      'INSERT INTO practice_operations(id,fingerprint,record_id) VALUES(?,?,?)'
+    ).run(validated.operationId, fingerprint, id);
+  }
+
+  incrementPracticeRevision(db);
+  return { id, replayed: false };
+}
+
+/**
+ * Create several practices in one transaction: either every record is created
+ * (or replayed from its operation receipt) or none is. Any conflict rolls back
+ * the whole batch.
+ */
+export function insertPracticeRecordsTransaction(
+  db: DatabaseSync,
+  inserts: PreparedPracticeInsert[],
+  defaultTimezone: string | null
+): Array<{ id: string; replayed: boolean }> {
   db.exec('BEGIN IMMEDIATE;');
   try {
-    // Backup yields before this transaction; recheck both identity and content
-    // under the write lock instead of trusting the earlier replay lookup.
-    const concurrentReplay = replayPracticeOperation(
-      db,
-      validated.operationId,
-      fingerprint,
-      (recordId) => getPracticeRecord(db, recordId)
-    );
-
-    if (concurrentReplay) {
-      db.exec('COMMIT;');
-      return concurrentReplay.id;
-    }
-
-    db.prepare(
-      `
-      INSERT INTO practice_records (
-        id, question_id, completed, practiced_at, time_precision, notes, status, created_at, updated_at, revoked_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, NULL)
-    `
-    ).run(
-      id,
-      problem.questionId,
-      validated.completed ? 1 : 0,
-      validated.practicedAt,
-      precision,
-      validated.notes ?? null,
-      now,
-      now
-    );
-
-    db.prepare('UPDATE practice_records SET source_timezone=? WHERE id=?').run(
-      validated.sourceTimezone ?? defaultTimezone,
-      id
-    );
-    db.prepare('UPDATE practice_records SET duration_minutes=? WHERE id=?').run(
-      validated.durationMinutes ?? null,
-      id
-    );
-    db.prepare('UPDATE practice_records SET outcome=? WHERE id=?').run(
-      validated.outcome ?? null,
-      id
-    );
-
-    if (validated.operationId) {
-      db.prepare(
-        'INSERT INTO practice_operations(id,fingerprint,record_id) VALUES(?,?,?)'
-      ).run(validated.operationId, fingerprint, id);
-    }
-
-    incrementPracticeRevision(db);
+    const results = inserts.map((insert) => insertPracticeRow(db, insert, defaultTimezone));
     db.exec('COMMIT;');
-    return id;
+    return results;
   } catch (err) {
     db.exec('ROLLBACK;');
     throw err;
   }
+}
+
+/** Content identity of a creation request; a reused operation ID must match it exactly. */
+export function practiceFingerprint(
+  validated: ReturnType<typeof createPracticeRecordSchema.parse>,
+  precision: TimePrecision
+): string {
+  return JSON.stringify([
+    validated.questionFrontendId,
+    validated.completed,
+    validated.practicedAt,
+    precision,
+    validated.notes ?? null,
+    validated.durationMinutes ?? null,
+    validated.sourceTimezone ?? null,
+    validated.outcome ?? null,
+  ]);
 }
 
 /**

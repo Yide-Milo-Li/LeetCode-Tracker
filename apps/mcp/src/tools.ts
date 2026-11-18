@@ -17,6 +17,9 @@ import { MCP_SERVER_VERSION } from './version.ts';
 import { createRegistrar, TOOL_NAMES, WRITE_TOOL_NAMES } from './registrar.ts';
 import { contentHash, summarizePlan } from './views.ts';
 import { registerWriteTools } from './write-tools.ts';
+import { registerNoteTools } from './note-tools.ts';
+import { registerBatchTools } from './batch-tools.ts';
+import { registerCatalogTools } from './catalog-tools.ts';
 
 /**
  * Registers the tracker tools. Each call gets its own application instance:
@@ -27,6 +30,9 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
   const registrar = createRegistrar(rawServer, profile);
   const server = { registerTool: registrar.register };
   registerWriteTools(registrar);
+  registerNoteTools(registrar);
+  registerBatchTools(registrar);
+  registerCatalogTools(registrar);
 
   // 1. tracker_status
   server.registerTool(
@@ -416,22 +422,26 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
   server.registerTool(
     'tracker_list_notes',
     {
-      description: 'List problem review notes summaries across the catalog with filters for custom notes and search keyword.',
+      description: 'List problem note summaries with filters. Find problems that still need a note with noteState "empty" or "stub" (only the unedited template), narrowed by tag or difficulty. scope "all" (default) covers the whole catalog; "practiced" only problems with practice history.',
       inputSchema: z.object({
-        hasNote: z.enum(['all', 'true', 'false']).optional().default('all').describe('Filter by whether custom note content exists'),
+        hasNote: z.enum(['all', 'true', 'false']).optional().default('all').describe('Filter by whether a written note exists (true) or not (false: empty or template only)'),
+        noteState: z.enum(['empty', 'stub', 'written']).optional().describe('Finer filter: empty (no text), stub (unedited template only), written. Overrides hasNote.'),
         search: z.string().optional().describe('Search keyword in problem title or ID'),
         difficulty: z.enum(['all', 'Easy', 'Medium', 'Hard']).optional().default('all').describe('Difficulty filter'),
+        tag: z.string().optional().describe('Topic tag slug, e.g. "dynamic-programming"'),
         scope: z.enum(['all', 'practiced']).optional().default('all').describe('all includes saved notes on unpracticed problems; practiced limits to active practice or progress evidence'),
         page: z.number().int().min(1).optional().default(1).describe('Page number, 1-indexed (default 1)'),
         limit: z.number().int().min(1).max(100).optional().default(20).describe('Items per page, max 100 (default 20)'),
       }),
     },
-    async (application, { hasNote = 'all', search, difficulty = 'all', scope = 'all', page = 1, limit = 20 }) => {
+    async (application, { hasNote = 'all', noteState, search, difficulty = 'all', tag, scope = 'all', page = 1, limit = 20 }) => {
 
       const result = await application.notes.list({
-        hasNote,
+        hasNote: noteState ? 'all' : hasNote,
+        noteState,
         search,
         difficulty,
+        tag: tag?.trim() || undefined,
         scope,
         page,
         limit,

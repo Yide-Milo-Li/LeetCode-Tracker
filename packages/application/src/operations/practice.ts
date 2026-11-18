@@ -3,6 +3,7 @@
  */
 import {
   createPracticeRecordSchema,
+  createPracticeRecordsSchema,
   practiceQuerySchema,
   updatePracticeRecordSchema,
 } from '../../../contracts/src/practice.ts';
@@ -25,6 +26,33 @@ export function createPracticeOperations(context: ApplicationContext) {
     try {
       const record = await writeLock.run(() => store.createPracticeRecord(parseRes.data));
       return record;
+    } catch (err) {
+      if (err instanceof PracticeConflictError) {
+        return fail(409, { error: err.code, message: err.message });
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes('not found in catalog')) {
+        return fail(404, { error: 'PROBLEM_NOT_FOUND', message });
+      }
+      return fail(500, { error: 'STORAGE_ERROR', message });
+    }
+  };
+
+  /** createMany: creates every record in one transaction, or none when any fails. */
+  const createMany = async (input: unknown = {}) => {
+    const parseRes = createPracticeRecordsSchema.safeParse(input);
+    if (!parseRes.success) {
+      return fail(400, {
+        error: 'INVALID_REQUEST',
+        message: parseRes.error.issues
+          .map(i => `${i.path.length ? `${i.path.join('.')}: ` : ''}${i.message}`)
+          .join('; '),
+      });
+    }
+
+    try {
+      const items = await writeLock.run(() => store.createPracticeRecords(parseRes.data.records));
+      return { items };
     } catch (err) {
       if (err instanceof PracticeConflictError) {
         return fail(409, { error: err.code, message: err.message });
@@ -133,5 +161,5 @@ export function createPracticeOperations(context: ApplicationContext) {
     });
   };
 
-  return { create, query, read, update, revoke, stats, byOperation };
+  return { create, createMany, query, read, update, revoke, stats, byOperation };
 }

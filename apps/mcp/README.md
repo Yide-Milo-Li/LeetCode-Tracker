@@ -24,6 +24,12 @@ Reads and previews open a short-lived read-only connection per call, so they wor
 
 ## Getting started without the desktop app
 
+The quickest start is to let your MCP client's model fill the catalog from what it knows about LeetCode. Once the server is configured (see below), ask it in one sentence, for example "Set up my LeetCode tracker with the problems you know", or pick the `init_question_bank` prompt (in Claude Code: `/mcp__leetcode-tracker__init_question_bank`, optionally with a scope such as `NeetCode 150` or `problems 1-500`). The model checks `tracker_catalog_coverage`, sends problems with `tracker_import_problems` in batches of up to 200 in ascending ID order, and continues from the missing ranges each batch reports. The first batch creates the profile and sets the timezone from this machine.
+
+The data comes from model memory, so expect some wrong or missing titles and tags, especially for newer problems. Imports are keyed by frontend ID and never delete anything, so you can resend corrected entries or fill gaps later without losing practice history or notes.
+
+To import a file you already have instead:
+
 ```sh
 leetcode-tracker-mcp import ./problems.jsonl --dry-run   # validate, writes nothing
 leetcode-tracker-mcp import ./problems.jsonl             # create or update the profile
@@ -81,7 +87,12 @@ Add `"--db", "/path/to/tracker.sqlite"` to the arguments to use a different prof
 | `tracker_get_strategies` | read | Strategies and the weekday schedule |
 | `tracker_preview_note` | read | Compare a proposed note with the current one |
 | `tracker_preview_today_rules` | read | Check a one-day rule change without applying it |
+| `tracker_get_problems` | read | Up to 50 problems at once with note state, practice count and last outcome |
+| `tracker_get_notes` | read | Up to 20 notes at once, each with its state and `contentHash` |
+| `tracker_catalog_coverage` | read | Catalog size, counts by difficulty and missing frontend ID ranges; works before a profile exists |
+| `tracker_get_note_context` | read | Everything for writing one note: problem, all attempts, review stage, current note and headings, template, related written notes |
 | `tracker_import_catalog` | write | Import a local `.jsonl` catalog file; `dryRun` validates only |
+| `tracker_import_problems` | write | Add or update up to 200 problems sent as data; creates the profile when missing; `dryRun` validates only |
 | `tracker_create_practice` | write | Record a practice attempt (requires a client-generated `operationId`) |
 | `tracker_update_practice` | write, overwrites | Change a practice record (needs `expectedRevision`) |
 | `tracker_revoke_practice` | write, removes | Revoke a practice record (needs `expectedRevision`) |
@@ -93,8 +104,38 @@ Add `"--db", "/path/to/tracker.sqlite"` to the arguments to use a different prof
 | `tracker_remove_today_item` | write, removes | Remove a problem from the day's plan (needs `expectedVersion`) |
 | `tracker_replace_today_items` | write, overwrites | Swap one or all unfinished problems (needs `expectedVersion`) |
 | `tracker_apply_today_rules` | write, overwrites | Rebuild the day's plan with one-day rule changes (needs `expectedVersion`) |
+| `tracker_create_practices` | write | Record up to 50 attempts in one transaction, all or nothing (requires a client-generated `operationId`); `dryRun` validates only |
+| `tracker_patch_note` | write, overwrites | Append to or replace one section of a note (needs `expectedContentHash`) |
+| `tracker_save_notes` | write, overwrites | Replace up to 20 notes in one transaction (each needs `expectedContentHash`); `dryRun` checks only |
+| `tracker_edit_today` | write, removes | Remove, replace and append several plan items in order (needs `expectedVersion`) |
+| `tracker_export_notes` | writes files | Write the notes knowledge base and a mistake log to a local directory |
 
-Failures come back as tool errors with a code and a message, for example `PROFILE_NOT_FOUND`, `PROFILE_IN_USE`, `PROFILE_SCHEMA_MISMATCH`, `TIMEZONE_REQUIRED`, `PLAN_NOT_FOUND` or `NOTE_CHANGED`.
+`tracker_list_notes` also filters by `tag` and `noteState`: `empty`, `stub` (only the unedited note template) or `written`.
+
+## Prompts
+
+| Prompt | Arguments | Purpose |
+| --- | --- | --- |
+| `init_question_bank` | `scope` (optional) | Fill the problem catalog from the model's own LeetCode knowledge in batches, then report coverage |
+
+## Writing notes with your MCP client
+
+The server has no AI provider; the model in your MCP client writes the notes. A typical flow for filling in missing notes:
+
+1. `tracker_list_notes` with `noteState: "empty"` (or `"stub"`) and a `tag` to find problems that still need a note.
+2. `tracker_get_note_context` for each one: problem details, every attempt with outcome, duration and remark, the review stage, the current note with its section headings, the template in your language, and problems with shared tags that already have notes.
+3. Save a complete note with `tracker_save_note`, several at once with `tracker_save_notes`, or add to one section with `tracker_patch_note`, for example a dated entry under a "Review Log" heading. Patch headings match without emoji or case, so `"Edge Cases & Traps"` finds `## ⚠️ Edge Cases & Traps`; a missing section is created at the end, and an empty note can start from the template.
+
+`tracker_export_notes` writes the knowledge base to a directory, for example an Obsidian vault folder: one Markdown file per problem under `problems/`, a README with Dataview queries, Notion CSVs and `mistakes.md`, which lists unsolved, assisted and unfinished attempts with their remarks, most recent first. It reads the profile without the lease, so it works while the desktop app is running. It refuses to replace existing files unless you pass `overwrite: true`.
+
+## Batches
+
+- `tracker_create_practices` is all or nothing: every record is created in one SQLite transaction after one backup, or none is.
+- `tracker_save_notes` checks every `expectedContentHash` first; if any note changed, nothing is saved and the error lists each conflict.
+- `tracker_edit_today` checks every step against the plan at `expectedVersion` (the items exist, no item is changed twice, completed items are not replaced) before changing anything. The steps then run in order and are **not** one transaction, because each plan change runs the problem picker in its own transaction and a removal can also revoke practice records. If a later step fails, for example when no replacement candidate is left, the error `EDIT_PARTIALLY_APPLIED` names the steps that ran and the plan's new version.
+- Each step gets an operation ID derived from the batch `operationId`, so retrying a batch with the same `operationId` replays the steps that already ran instead of repeating them. `tracker_create_practices` requires the `operationId`, like `tracker_create_practice`: generate it before the first call so a lost response can still be retried.
+
+Failures come back as tool errors with a code and a message, for example `PROFILE_NOT_FOUND`, `PROFILE_IN_USE`, `PROFILE_SCHEMA_MISMATCH`, `TIMEZONE_REQUIRED`, `PLAN_NOT_FOUND`, `NOTE_CHANGED`, `EDIT_PARTIALLY_APPLIED` or `FILES_EXIST`.
 
 ## How writes stay safe
 

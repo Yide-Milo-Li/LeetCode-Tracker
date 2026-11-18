@@ -48,6 +48,7 @@ import type {
 import {
   getProblemNote,
   upsertProblemNote,
+  upsertProblemNotesTransaction,
   listProblemNoteSummaries,
   registerNotesFunctions,
 } from './notes-store.ts';
@@ -58,6 +59,7 @@ import {
 } from './bundle.ts';
 import {
   generateKnowledgeZip,
+  generateKnowledgeEntries,
   generateNotionCsvs,
 } from './knowledge-exporter.ts';
 
@@ -90,7 +92,9 @@ import {
   replayPracticeOperation,
   getPracticeRecord,
   queryPracticeRecords,
-  insertPracticeRecordTransaction,
+  insertPracticeRecordsTransaction,
+  practiceFingerprint,
+  type PreparedPracticeInsert,
   updatePracticeRecordTransaction,
   revokePracticeRecordTransaction,
   getPracticeStatistics,
@@ -287,6 +291,12 @@ export class CatalogStore {
     return getCatalogStatistics(this.db, this.getCatalogRevision());
   }
 
+  /** Every frontend ID in the catalog, for coverage checks without loading full problems. */
+  public getFrontendIds(): string[] {
+    const rows = this.db.prepare('SELECT frontend_question_id AS id FROM problems').all() as Array<{ id: string }>;
+    return rows.map((row) => row.id);
+  }
+
   /** Query historical import audit records with pagination. */
   public getImportHistory(options: { page?: number; limit?: number } = {}): {
     total: number;
@@ -344,46 +354,44 @@ export class CatalogStore {
 
   /** Add a manual practice record for a specific problem. */
   public async createPracticeRecord(input: CreatePracticeRecordInput): Promise<PracticeRecord> {
-    const validated = createPracticeRecordSchema.parse(input);
-    const precision: TimePrecision =
-      validated.timePrecision ?? (validated.practicedAt.includes('T') ? 'datetime' : 'date');
-    const fingerprint = JSON.stringify([
-      validated.questionFrontendId,
-      validated.completed,
-      validated.practicedAt,
-      precision,
-      validated.notes ?? null,
-      validated.durationMinutes ?? null,
-      validated.sourceTimezone ?? null,
-      validated.outcome ?? null,
-    ]);
-    const problem = this.getProblem(validated.questionFrontendId, 'frontendId');
-    if (!problem) {
-      throw new Error(`Problem '${validated.questionFrontendId}' not found in catalog.`);
-    }
+    const [created] = await this.createPracticeRecords([input]);
+    return created.record;
+  }
+
+  /**
+   * Add several practice records atomically: every record is created (or
+   * replayed from its operation ID) in one transaction after one backup, or
+   * nothing is written. Problems are resolved before any write.
+   */
+  public async createPracticeRecords(
+    inputs: CreatePracticeRecordInput[]
+  ): Promise<Array<{ record: PracticeRecord; replayed: boolean }>> {
+    const prepared: PreparedPracticeInsert[] = inputs.map((input) => {
+      const validated = createPracticeRecordSchema.parse(input);
+      const precision: TimePrecision =
+        validated.timePrecision ?? (validated.practicedAt.includes('T') ? 'datetime' : 'date');
+      const problem = this.getProblem(validated.questionFrontendId, 'frontendId');
+      if (!problem) {
+        throw new Error(`Problem '${validated.questionFrontendId}' not found in catalog.`);
+      }
+      return { problem, validated, precision, fingerprint: practiceFingerprint(validated, precision) };
+    });
 
     const run = this.writeQueue.then(async () => {
-      const replay = replayPracticeOperation(
-        this.db,
-        validated.operationId,
-        fingerprint,
-        (id) => this.getPracticeRecord(id)
+      // A batch made only of replays is answered without a backup or a write.
+      const replays = prepared.map((item) =>
+        replayPracticeOperation(this.db, item.validated.operationId, item.fingerprint, (id) => this.getPracticeRecord(id))
       );
-      if (replay) return replay;
+      if (replays.every(Boolean)) {
+        return replays.map((record) => ({ record: record!, replayed: true }));
+      }
 
       if (this.backupManager) {
         await this.backupManager.performPreImportBackup(this.db);
       }
 
-      const id = insertPracticeRecordTransaction(
-        this.db,
-        problem,
-        validated,
-        precision,
-        fingerprint,
-        this.getSettings().timezone
-      );
-      return this.getPracticeRecord(id)!;
+      const results = insertPracticeRecordsTransaction(this.db, prepared, this.getSettings().timezone);
+      return results.map(({ id, replayed }) => ({ record: this.getPracticeRecord(id)!, replayed }));
     });
 
     this.writeQueue = run.then(() => {}, () => {});
@@ -684,6 +692,18 @@ export class CatalogStore {
     return upsertProblemNote(this.db, questionFrontendId, content);
   }
 
+  /**
+   * Create or replace several notes in one transaction after one backup.
+   * `guard` runs inside the transaction so callers can refuse the whole batch
+   * when any note changed since it was read.
+   */
+  public saveProblemNotes(
+    entries: Array<{ questionFrontendId: string; content: string }>,
+    guard?: (current: Map<string, string>) => void
+  ): Promise<ProblemNote[]> {
+    return this.protectedWrite(() => upsertProblemNotesTransaction(this.db, entries, guard));
+  }
+
   /** Query problem note summaries with practice activity, difficulty, and tag filters. */
   public listProblemNotes(query: Partial<ProblemNoteListQuery> = {}): { items: ProblemNoteSummary[]; total: number } {
     return listProblemNoteSummaries(this.db, query);
@@ -710,6 +730,11 @@ export class CatalogStore {
   /** Generate full Obsidian knowledge base ZIP archive buffer. */
   public generateObsidianZip(scope: 'all' | 'practiced' = 'all', lang: 'en' | 'zh' = 'en'): Buffer {
     return generateKnowledgeZip(this.db, scope, lang);
+  }
+
+  /** The same knowledge base files as the ZIP, for writing into a directory. */
+  public generateKnowledgeFiles(scope: 'all' | 'practiced' = 'all', lang: 'en' | 'zh' = 'en'): Array<{ name: string; content: string }> {
+    return generateKnowledgeEntries(this.db, scope, lang);
   }
 
   /** Generate Notion database CSV tables (problems summary and practice history). */

@@ -21,6 +21,22 @@ export const upsertProblemNoteSchema = z.object({
 
 export type UpsertProblemNoteInput = z.infer<typeof upsertProblemNoteSchema>;
 
+/** Most notes one batch save may write. */
+export const MAX_NOTE_BATCH = 20;
+
+/** Several complete notes saved together, all or nothing. */
+export const saveProblemNotesSchema = z.object({
+  notes: z.array(z.object({
+    frontendId: z.string().trim().min(1).max(100),
+    content: z.string().max(100000),
+  }).strict()).min(1).max(MAX_NOTE_BATCH),
+}).strict().refine(
+  v => new Set(v.notes.map(n => n.frontendId)).size === v.notes.length,
+  { message: 'Each problem may appear only once in a batch' }
+);
+
+export type SaveProblemNotesInput = z.infer<typeof saveProblemNotesSchema>;
+
 /** An AI request processes the provided draft only; selection uses UTF-16 offsets. */
 export const noteFormatRequestSchema = z.object({
   content: z.string().min(1).max(100000),
@@ -69,6 +85,8 @@ export const problemNoteListQuerySchema = z.object({
   search: z.string().max(100).optional(),
   difficulty: z.enum(['Easy', 'Medium', 'Hard', 'all']).default('all'),
   hasNote: z.enum(['true', 'false', 'all']).default('all'),
+  /** Finer than hasNote: empty (no text), stub (unedited template only) or written. */
+  noteState: z.enum(['empty', 'stub', 'written']).optional(),
   scope: z.enum(['practiced', 'all']).default('practiced'),
   tag: z.string().max(100).optional(),
   page: z.coerce.number().int().positive().default(1),

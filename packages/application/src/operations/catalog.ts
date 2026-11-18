@@ -185,11 +185,13 @@ export function createCatalogOperations(context: ApplicationContext) {
     const stats = store.getCatalogStats();
     return stats;
   };
+  /** frontendIds: every catalog frontend ID, for coverage checks. */
+  const frontendIds = async () => ({ ids: store.getFrontendIds() });
   /** Read an exact imported frontend ID without fuzzy search or pagination. */
   const read = async (_input: unknown = {}, params: { frontendId: string }) => {
     const id = params.frontendId.trim();
     if (!id) return fail(400, { error: 'INVALID_REQUEST', message: 'Frontend ID is required.' });
     return { problem: store.getProblem(id, 'frontendId') ?? null };
   };
-  return { preview, commit, history, result, query, tags, stats, read };
+  return { preview, commit, history, result, query, tags, stats, frontendIds, read };
 }

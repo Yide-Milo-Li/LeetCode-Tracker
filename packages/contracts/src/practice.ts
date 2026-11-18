@@ -64,6 +64,22 @@ export const createPracticeRecordSchema = z.object({
 
 export type CreatePracticeRecordInput = z.infer<typeof createPracticeRecordSchema>;
 
+/** Most records one batch may create; keeps one transaction and one response small. */
+export const MAX_PRACTICE_BATCH = 50;
+
+/** Several practice records created together, all or nothing. */
+export const createPracticeRecordsSchema = z.object({
+  records: z.array(createPracticeRecordSchema).min(1).max(MAX_PRACTICE_BATCH),
+}).strict().refine(
+  v => {
+    const ids = v.records.map(r => r.operationId).filter(Boolean);
+    return new Set(ids).size === ids.length;
+  },
+  { message: 'Each record in a batch needs a distinct operationId' }
+);
+
+export type CreatePracticeRecordsInput = z.infer<typeof createPracticeRecordsSchema>;
+
 /** Input payload for modifying an existing manual practice record. */
 export const updatePracticeRecordSchema = z.object({
   completed: z.boolean().optional(),

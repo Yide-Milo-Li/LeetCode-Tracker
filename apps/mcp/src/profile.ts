@@ -90,7 +90,7 @@ export class TrackerProfile {
     if (!this.exists()) {
       throw new ProfileError(
         'PROFILE_NOT_FOUND',
-        `No LeetCode Tracker profile at ${this.location.dbPath}. Import a problem catalog first (tracker_import_catalog or "leetcode-tracker-mcp import <file>"), or open the desktop app once.`,
+        `No LeetCode Tracker profile at ${this.location.dbPath}. Import a problem catalog first: send problems with tracker_import_problems (for example from your own knowledge of LeetCode), import a .jsonl file with tracker_import_catalog or "leetcode-tracker-mcp import <file>", or open the desktop app once.`,
       );
     }
     const db = new DatabaseSync(this.location.dbPath, { readOnly: true });
@@ -98,7 +98,7 @@ export class TrackerProfile {
       // A read-only connection cannot migrate, so any other version must be handled by a writer.
       const version = inspectCatalogSchema(db, true);
       if (version === null) {
-        throw new ProfileError('PROFILE_EMPTY', 'The profile has not been initialized yet. Import a problem catalog first.');
+        throw new ProfileError('PROFILE_EMPTY', 'The profile has not been initialized yet. Import a problem catalog first with tracker_import_problems or tracker_import_catalog.');
       }
       if (version !== CURRENT_SCHEMA_VERSION) {
         throw new ProfileError(

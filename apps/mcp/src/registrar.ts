@@ -21,6 +21,10 @@ export const READ_TOOL_NAMES = [
   'tracker_get_strategies',
   'tracker_preview_note',
   'tracker_preview_today_rules',
+  'tracker_get_problems',
+  'tracker_get_notes',
+  'tracker_get_note_context',
+  'tracker_catalog_coverage',
 ] as const;
 
 export const WRITE_TOOL_NAMES = [
@@ -36,6 +40,12 @@ export const WRITE_TOOL_NAMES = [
   'tracker_remove_today_item',
   'tracker_replace_today_items',
   'tracker_apply_today_rules',
+  'tracker_create_practices',
+  'tracker_patch_note',
+  'tracker_save_notes',
+  'tracker_edit_today',
+  'tracker_export_notes',
+  'tracker_import_problems',
 ] as const;
 
 export const TOOL_NAMES = [...READ_TOOL_NAMES, ...WRITE_TOOL_NAMES] as const;
@@ -47,8 +57,10 @@ export type ToolResult = { content: Array<{ type: 'text'; text: string }>; isErr
  * read: short-lived read-only connection, no lease.
  * preview: like read, but an empty in-memory profile when none exists yet.
  * write: exclusive lease for the duration of the call.
+ * export: reads the profile like read, but writes files outside it, so hosts
+ *   still treat the tool as one that changes something.
  */
-export type ToolAccess = 'read' | 'preview' | 'write';
+export type ToolAccess = 'read' | 'preview' | 'write' | 'export';
 
 export interface WriteHints {
   /** The change removes or hides data the user may want back. */
@@ -110,7 +122,7 @@ export function createRegistrar(rawServer: McpServer, profile: TrackerProfile) {
         const args = rawArgs as z.infer<S>;
         const run = (application: TrackerApplication) => handler(application, args);
         const mode = typeof access === 'function' ? access(args) : access;
-        const result = await (mode === 'read' ? profile.read(run) : mode === 'preview' ? profile.preview(run) : profile.write(run));
+        const result = await (mode === 'read' || mode === 'export' ? profile.read(run) : mode === 'preview' ? profile.preview(run) : profile.write(run));
         const text = result.content.find(item => item.type === 'text')?.text;
         if (!text || result.isError) {
           // Refusals carry "CODE: message" text; expose the code as structured content too.
