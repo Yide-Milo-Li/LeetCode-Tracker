@@ -73,7 +73,7 @@ Browse a filterable problem list alongside a Markdown editor and CommonMark/GFM 
 
 ### Appearance and keyboard access
 
-Ten palettes, English/Chinese text, and light/dark/system appearance support desktop work, and selecting a palette dynamically tints the window/Dock icon to match. All eight gallery screenshots were refreshed for 1.3.0 using an isolated fictional catalog and synthetic practice history. They illustrate the current browser UI, not the full native WebView acceptance matrix.
+Ten palettes, English/Chinese text, and light/dark/system appearance support desktop work, and selecting a palette dynamically tints the window/Dock icon to match. All eight gallery screenshots show light mode with the default palette, captured from an isolated fictional catalog and synthetic practice history. They illustrate the current browser UI, not the full native WebView acceptance matrix.
 
 | Shortcut | Action |
 | --- | --- |
