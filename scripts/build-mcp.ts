@@ -1,6 +1,6 @@
 /**
- * Bundles the standalone MCP server into one executable ES module so the npm
- * package ships without the workspace packages. Node built-ins (including
+ * Bundles the standalone MCP executable, chunks and skill so the npm package
+ * ships without the workspace packages. Node built-ins (including
  * node:sqlite) stay external.
  */
 import * as path from 'node:path';
@@ -41,10 +41,13 @@ export async function bundleMcp(desktop = false): Promise<void> {
     minify: false,
     logLevel: 'warning',
   });
+  const skillDir = path.join(outdir, 'skills/lct');
+  fs.mkdirSync(skillDir, { recursive: true });
+  fs.copyFileSync(path.join(repoRoot, 'skills/lct/SKILL.md'), path.join(skillDir, 'SKILL.md'));
   const size = fs.readdirSync(outdir, { recursive: true, withFileTypes: true })
     .filter(entry => entry.isFile())
     .reduce((total, entry) => total + fs.statSync(path.join(entry.parentPath, entry.name)).size, 0);
-  console.log(`[Build] ${path.relative(repoRoot, outfile)} (+chunks) ${(size / 1024).toFixed(0)} KiB in ${Date.now() - started} ms`);
+  console.log(`[Build] ${path.relative(repoRoot, outfile)} (+chunks and skill) ${(size / 1024).toFixed(0)} KiB in ${Date.now() - started} ms`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === import.meta.filename) await bundleMcp();

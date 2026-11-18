@@ -11,6 +11,7 @@ import { createServer } from './server.ts';
 import { createTrackerToolRegistry } from './tools.ts';
 import { callTrackerTool, type ToolName } from './registrar.ts';
 import { MCP_SERVER_VERSION } from './version.ts';
+import { installSkill, SKILL_CLIENTS } from './install-skill.ts';
 
 async function callSetupTool(profile: TrackerProfile, name: ToolName, args: Record<string, unknown>) {
   const result = await callTrackerTool(createTrackerToolRegistry(profile).get(name)!, profile, args);
@@ -25,9 +26,11 @@ Usage:
   leetcode-tracker-mcp import <file.jsonl> [--dry-run]    Import a JSON Lines problem catalog
   leetcode-tracker-mcp set-timezone <IANA zone>           Set the timezone used for "today"
   leetcode-tracker-mcp where                              Print the profile path
+  leetcode-tracker-mcp install-skill --client <${SKILL_CLIENTS.join('|')}> [--force]
 
 Options:
   --db <path>     Profile database (default: the desktop app profile, or LEETCODE_TRACKER_DB)
+  --force        Replace an existing, different copy of the LCT skill
   -h, --help      Show this help
   -v, --version   Show the version
 `;
@@ -38,6 +41,8 @@ async function main(argv: string[]): Promise<number> {
     allowPositionals: true,
     options: {
       db: { type: 'string' },
+      client: { type: 'string' },
+      force: { type: 'boolean' },
       'dry-run': { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h', default: false },
       version: { type: 'boolean', short: 'v', default: false },
@@ -46,8 +51,28 @@ async function main(argv: string[]): Promise<number> {
   if (values.help) { process.stdout.write(USAGE); return 0; }
   if (values.version) { process.stdout.write(`${MCP_SERVER_VERSION}\n`); return 0; }
 
-  const profile = new TrackerProfile(resolveProfileLocation({ explicitDbPath: values.db }));
   const [command, argument] = positionals;
+  if (command === 'install-skill') {
+    const client = SKILL_CLIENTS.find(name => name === values.client);
+    if (!client || argument !== undefined || values.db !== undefined || values['dry-run']) {
+      process.stderr.write(USAGE);
+      return 2;
+    }
+    const source = new URL(
+      import.meta.url.endsWith('.ts') ? '../../../skills/lct/SKILL.md' : './skills/lct/SKILL.md',
+      import.meta.url,
+    );
+    const { status, target } = installSkill(client, source, values.force);
+    process.stdout.write(status === 'unchanged' ? `LCT skill is already up to date at ${target}\n`
+      : `LCT skill ${status} at ${target}\n`);
+    return 0;
+  }
+  if (values.client !== undefined || values.force) {
+    process.stderr.write('--client and --force apply to install-skill only.\n');
+    return 2;
+  }
+
+  const profile = new TrackerProfile(resolveProfileLocation({ explicitDbPath: values.db }));
 
   switch (command) {
     case undefined:

@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { acquireDatabaseLease } from '../packages/database/src/lease.ts';
@@ -28,8 +28,8 @@ function workspace() {
   return { dir, dbPath: join(dir, 'profile', 'tracker.sqlite'), catalogPath, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
-function cli(entry: string, args: string[]) {
-  return spawnSync(process.execPath, [entry, ...args], { encoding: 'utf8', cwd: repoRoot });
+function cli(entry: string, args: string[], env = process.env) {
+  return spawnSync(process.execPath, [entry, ...args], { encoding: 'utf8', cwd: repoRoot, env });
 }
 
 test('profile location defaults to the desktop app data directory per platform', () => {
@@ -68,6 +68,41 @@ test('CLI dry run creates nothing; import creates the profile and initializes th
 
     assert.equal(cli(sourceEntry, ['set-timezone', 'Not/AZone', '--db', w.dbPath]).status, 1);
     assert.equal(cli(sourceEntry, ['set-timezone', 'Asia/Shanghai', '--db', w.dbPath]).status, 0);
+  } finally { w.cleanup(); }
+});
+
+test('install-skill writes to the selected client only and protects existing skill content', () => {
+  const w = workspace();
+  const claudeDir = join(w.dir, 'Claude Config');
+  const env = { ...process.env, HOME: w.dir, USERPROFILE: w.dir, CLAUDE_CONFIG_DIR: claudeDir, LEETCODE_TRACKER_DB: w.dbPath };
+  const text = readFileSync(join(repoRoot, 'skills/lct/SKILL.md'), 'utf8');
+  try {
+    assert.equal(cli(sourceEntry, ['install-skill'], env).status, 2);
+    assert.equal(cli(sourceEntry, ['install-skill', '--client', 'invalid'], env).status, 2);
+    assert.equal(cli(sourceEntry, ['where', '--client', 'codex'], env).status, 2);
+    assert.equal(existsSync(claudeDir), false);
+    for (const [client, dir] of [
+      ['claude-code', join(claudeDir, 'skills')],
+      ['codex', join(w.dir, '.agents', 'skills')],
+      ['antigravity', join(w.dir, '.gemini', 'config', 'skills')],
+    ]) {
+      const args = ['install-skill', '--client', client!];
+      const target = join(dir!, 'lct', 'SKILL.md');
+      const installed = cli(sourceEntry, args, env);
+      assert.equal(installed.status, 0, installed.stderr);
+      assert.equal(readFileSync(target, 'utf8'), text);
+      assert.match(cli(sourceEntry, args, env).stdout, /already up to date/);
+
+      writeFileSync(target, 'My custom skill');
+      const conflict = cli(sourceEntry, args, env);
+      assert.equal(conflict.status, 1);
+      assert.match(conflict.stderr, /--force/);
+      assert.equal(readFileSync(target, 'utf8'), 'My custom skill');
+      const updated = cli(sourceEntry, [...args, '--force'], env);
+      assert.equal(updated.status, 0, updated.stderr);
+      assert.equal(readFileSync(target, 'utf8'), text);
+    }
+    assert.equal(existsSync(w.dbPath), false);
   } finally { w.cleanup(); }
 });
 
@@ -158,6 +193,10 @@ test('bundled executable negotiates the current protocol and closes writes, read
   assert.equal(build.status, 0, build.stderr);
   const w = workspace();
   try {
+    const skills = { ...process.env, HOME: w.dir, USERPROFILE: w.dir };
+    const installed = cli(bundleEntry, ['install-skill', '--client', 'codex'], skills);
+    assert.equal(installed.status, 0, installed.stderr);
+    assert.deepEqual(readFileSync(join(w.dir, '.agents/skills/lct/SKILL.md')), readFileSync(join(repoRoot, 'skills/lct/SKILL.md')));
     writeFileSync(w.catalogPath, Array.from({ length: 30 }, (_, index) => JSON.stringify({
       id: String(index + 1), title: `Bundle synthetic ${index + 1}`,
       difficulty: index < 10 ? 'Easy' : index < 20 ? 'Medium' : 'Hard', tags: ['Array'],
