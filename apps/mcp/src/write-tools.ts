@@ -19,7 +19,7 @@ import { isTimeZone, localDate } from '../../../packages/contracts/src/time.ts';
 import { rulePatchSchema, type RulePatch } from '../../../packages/contracts/src/recommendations.ts';
 import { percentagesForCounts, reviewPercentForCount } from '../../web/src/strategy-counts.ts';
 import { ProfileError } from './profile.ts';
-import { TIMEZONE_HINT } from './operations.ts';
+import { setTimeZone, TIMEZONE_HINT } from './operations.ts';
 import { json, refuse, type Registrar } from './registrar.ts';
 import { summarizePlan } from './views.ts';
 
@@ -197,6 +197,51 @@ export function registerWriteTools({ register }: Registrar): void {
     },
     'write',
     { destructive: true, idempotent: true },
+  );
+
+  register(
+    'tracker_delete_strategy',
+    {
+      description: 'Delete a study strategy. Its weekdays become rest days until another strategy takes them; plans already generated keep their items and history. Requires its version from tracker_get_strategies.',
+      inputSchema: z.object({
+        strategyId: z.string().min(1),
+        expectedVersion: z.number().int().positive(),
+      }),
+    },
+    async (application, { strategyId, expectedVersion }) => {
+      const id = strategyId.trim();
+      const strategy = (await application.planning.strategies()).items.find(candidate => candidate.id === id);
+      // Deleted strategies are not listed, so a retry after a lost response also lands here.
+      if (!strategy) return refuse('STRATEGY_NOT_FOUND', `No active strategy ${id}; it may already be deleted. Check tracker_get_strategies.`);
+      await application.planning.deleteStrategy({ body: { expectedVersion }, query: {} }, { id });
+      return json({ status: 'applied', strategyId: id, name: strategy.name, freedWeekdays: strategy.weekdays });
+    },
+    'write',
+    { destructive: true, idempotent: false },
+  );
+
+  // ---------------------------------------------------------------- settings
+
+  register(
+    'tracker_set_timezone',
+    {
+      description: 'Set the IANA timezone (for example "America/Los_Angeles" or "Asia/Shanghai") that decides what "today" means for plans, practice dates and streaks. Use it when a tool reports TIMEZONE_REQUIRED or the user moves. Creates the profile if there is none.',
+      inputSchema: z.object({
+        timezone: z.string().trim().min(1).max(100).describe('IANA timezone name'),
+      }),
+    },
+    async (application, { timezone }) => {
+      const previous = (await application.settings.get()).timezone ?? null;
+      let zone: string;
+      try {
+        zone = await setTimeZone(application, timezone);
+      } catch (error) {
+        return refuse('INVALID_TIMEZONE', error instanceof Error ? error.message : String(error));
+      }
+      return json({ status: previous === zone ? 'unchanged' : 'applied', timezone: zone, previous, today: localDate(Date.now(), zone) });
+    },
+    'write',
+    { destructive: false, idempotent: true },
   );
 
   // -------------------------------------------------------------- today plan

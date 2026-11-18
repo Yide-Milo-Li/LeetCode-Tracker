@@ -36,6 +36,8 @@ export const WRITE_TOOL_NAMES = [
   'tracker_edit_today',
   'tracker_export_notes',
   'tracker_import_problems',
+  'tracker_delete_strategy',
+  'tracker_set_timezone',
 ] as const;
 
 export const TOOL_NAMES = [...READ_TOOL_NAMES, ...WRITE_TOOL_NAMES] as const;

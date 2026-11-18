@@ -16,7 +16,7 @@ import type { TrackerProfile } from './profile.ts';
 import { importCatalog, TIMEZONE_HINT } from './operations.ts';
 import { MCP_SERVER_VERSION } from './version.ts';
 import { createRegistrar, json, TOOL_NAMES, WRITE_TOOL_NAMES } from './registrar.ts';
-import { practiceView, summarizePlan, weakTopicsView } from './views.ts';
+import { practiceView, profileZone, summarizePlan, weakTopicsView } from './views.ts';
 import { registerWriteTools } from './write-tools.ts';
 import { registerNoteTools } from './note-tools.ts';
 import { registerBatchTools } from './batch-tools.ts';
@@ -220,6 +220,7 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
       }),
     },
     async (application, { ids, frontendId, page = 1, limit = 20, order = 'desc' }) => {
+      const zone = await profileZone(application);
       if (ids) {
         const records = [];
         const notFound: string[] = [];
@@ -229,7 +230,7 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
             if (error instanceof ApplicationError && error.status === 404) return null;
             throw error;
           });
-          if (record) records.push(practiceView(record));
+          if (record) records.push(practiceView(record, zone));
           else notFound.push(id);
         }
         return json({ total: records.length, returned: records.length, records, notFound });
@@ -250,7 +251,7 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
         limit,
         order,
       });
-      const records = result.items.map(practiceView);
+      const records = result.items.map(record => practiceView(record, zone));
       return json({ total: result.total, page, limit, returned: records.length, records });
     },
   );

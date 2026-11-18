@@ -4,7 +4,7 @@ import { isTimeZone } from '../../../packages/contracts/src/time.ts';
 
 /** Shown wherever a missing timezone blocks date-based answers; there is no settings UI here. */
 export const TIMEZONE_HINT =
-  'No timezone is configured. Run "leetcode-tracker-mcp set-timezone <IANA zone>" (for example America/Los_Angeles), or set it in the desktop app.';
+  'No timezone is configured. Set it with tracker_set_timezone (an IANA zone such as America/Los_Angeles), "leetcode-tracker-mcp set-timezone <zone>", or the desktop app.';
 
 /** IANA zone of this machine, or null when the runtime reports something unusable. */
 export function systemTimeZone(): string | null {

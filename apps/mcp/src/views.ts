@@ -4,6 +4,7 @@ import type { DailyPlan } from '../../../packages/contracts/src/recommendations.
 import type { PracticeRecord } from '../../../packages/contracts/src/practice.ts';
 import type { KnowledgeProfileReport } from '../../../packages/contracts/src/knowledge-profile.ts';
 import { hasMeaningfulNoteContent } from '../../../packages/contracts/src/notes.ts';
+import { isTimeZone, localDate } from '../../../packages/contracts/src/time.ts';
 
 /**
  * Schema v12 notes carry no revision, so saves compare a hash of the content
@@ -59,8 +60,27 @@ export function summarizePlan(plan: DailyPlan) {
   };
 }
 
+/**
+ * The calendar day a practice belongs to. practicedAt is stored in UTC, so its
+ * first ten characters can be the next or previous day; models copied that
+ * into notes. Exact times use the profile timezone (what "today" means for
+ * plans and streaks), then the zone the record was made in.
+ */
+export function practiceLocalDate(record: Pick<PracticeRecord, 'practicedAt' | 'timePrecision' | 'sourceTimezone'>, zone: string | null): string {
+  if (record.timePrecision === 'date') return record.practicedAt.slice(0, 10);
+  const effective = zone ?? record.sourceTimezone;
+  const instant = Date.parse(record.practicedAt);
+  return effective && isTimeZone(effective) && !Number.isNaN(instant) ? localDate(instant, effective) : record.practicedAt.slice(0, 10);
+}
+
+/** The profile timezone when one is configured and valid. */
+export async function profileZone(application: { settings: { get(): Promise<{ timezone?: string | null }> } }): Promise<string | null> {
+  const { timezone } = await application.settings.get();
+  return timezone && isTimeZone(timezone) ? timezone : null;
+}
+
 /** A practice record as list and lookup tools show it, with the revision edits need. */
-export function practiceView(record: PracticeRecord) {
+export function practiceView(record: PracticeRecord, zone: string | null) {
   return {
     id: record.id,
     questionId: record.questionId,
@@ -68,6 +88,7 @@ export function practiceView(record: PracticeRecord) {
     problemTitle: record.problemTitle,
     completed: record.completed,
     practicedAt: record.practicedAt,
+    localDate: practiceLocalDate(record, zone),
     timePrecision: record.timePrecision,
     durationMinutes: record.durationMinutes,
     notes: record.notes,
@@ -96,6 +117,8 @@ export function weakTopicsView(report: KnowledgeProfileReport) {
     asOfDate: report.asOfDate,
     windowDays: report.windowDays,
     evaluations,
+    // Names only: enough to say what is still being learned without the full evidence.
+    developingTopics: report.topics.filter(topic => topic.overallEvaluation === 'developing').map(topic => topic.tagName).slice(0, 30),
     topics: report.topics
       .filter(topic => topic.isWeak)
       .sort((a, b) => struggles(b) - struggles(a) || a.tagName.localeCompare(b.tagName))

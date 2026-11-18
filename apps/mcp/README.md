@@ -86,7 +86,7 @@ Tools that work on several items take one item too; there are no separate single
 | `tracker_list_notes` | read | Note summaries across the catalog, filtered by `tag`, `noteState` or `scope` |
 | `tracker_get_notes` | read | 1 to 20 notes with state and `contentHash`; long notes are read in parts with `offset` |
 | `tracker_get_note_context` | read | Everything for writing one note: problem, all attempts, review stage, current note and headings, template, related written notes |
-| `tracker_get_progress` | read | Streaks, difficulty distribution, top tags, trends; `weakTopics: true` adds the topics that need reinforcement and why |
+| `tracker_get_progress` | read | Streaks, difficulty distribution, top tags, trends; `weakTopics: true` adds the topics that need reinforcement and why, and names the ones still developing |
 | `tracker_get_strategies` | read | Strategies and the weekday schedule |
 | `tracker_import_catalog` | write | Import a local `.jsonl` catalog file; `dryRun` |
 | `tracker_import_problems` | write | Add or update up to 200 problems sent as data; creates the profile when missing; `dryRun` |
@@ -97,12 +97,16 @@ Tools that work on several items take one item too; there are no separate single
 | `tracker_patch_note` | write, overwrites | Append to or replace one section of a note (needs `expectedContentHash`) |
 | `tracker_create_strategy` | write | Create a strategy from counts and assign weekdays |
 | `tracker_update_strategy` | write, overwrites | Change a strategy (needs `expectedVersion`) |
+| `tracker_delete_strategy` | write, removes | Delete a strategy; its weekdays become rest days and generated plans stay (needs `expectedVersion`) |
+| `tracker_set_timezone` | write | Set the IANA timezone that decides "today"; creates the profile when missing |
 | `tracker_create_today` | write | Generate the day's plan, or return the existing one |
 | `tracker_edit_today` | write, removes | Remove, replace or append plan items, or replace every unfinished one, in up to 10 ordered steps (needs `expectedVersion`) |
 | `tracker_apply_today_rules` | write, overwrites | Rebuild the day's plan with one-day rule changes (needs `expectedVersion`); `dryRun` |
 | `tracker_export_notes` | writes files | Write the notes knowledge base and a mistake log to a local directory |
 
 `tracker_list_notes` filters `noteState` by `empty`, `stub` (only the unedited note template) or `written`.
+
+Practice records keep `practicedAt` in UTC; every tool that returns them also gives `localDate`, the calendar day in the profile timezone, which is what notes and summaries should show.
 
 ## Prompts
 

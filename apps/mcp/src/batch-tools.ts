@@ -19,7 +19,7 @@ import { isTimeZone, localDate } from '../../../packages/contracts/src/time.ts';
 import { TIMEZONE_HINT } from './operations.ts';
 import { ProfileError } from './profile.ts';
 import { json, refuse, type Registrar } from './registrar.ts';
-import { noteState, stepOperationId, summarizePlan } from './views.ts';
+import { noteState, practiceLocalDate, profileZone, stepOperationId, summarizePlan } from './views.ts';
 
 const MAX_PROBLEM_BATCH = 50;
 const MAX_PLAN_STEPS = 10;
@@ -91,6 +91,7 @@ export function registerBatchTools({ register }: Registrar): void {
       }),
     },
     async (application, { frontendIds, recentPractices = 3 }) => {
+      const zone = await profileZone(application);
       const problems = [];
       const notFound: string[] = [];
       for (const raw of new Set(frontendIds)) {
@@ -114,6 +115,7 @@ export function registerBatchTools({ register }: Registrar): void {
           recentPractices: practice.items.slice(0, recentPractices).map(record => ({
             id: record.id,
             practicedAt: record.practicedAt,
+            localDate: practiceLocalDate(record, zone),
             completed: record.completed,
             outcome: record.outcome,
             durationMinutes: record.durationMinutes,
@@ -196,6 +198,7 @@ export function registerBatchTools({ register }: Registrar): void {
           completed: record.completed,
           outcome: record.outcome,
           practicedAt: record.practicedAt,
+          localDate: practiceLocalDate(record, zone),
           timePrecision: record.timePrecision,
           durationMinutes: record.durationMinutes,
           status: record.status,

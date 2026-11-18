@@ -491,5 +491,61 @@ test('progress lists weak topics with the evidence behind them', async () => {
     assert.deepEqual(medium.outcomes, { independent: 0, assisted: 1, unsolved: 2, unrecorded: 0 });
     assert.equal(weakTopics.evaluations.needsReinforcement, 1);
     assert.equal(weakTopics.evaluations.developing + weakTopics.evaluations.recentlyStable, 1, 'Array is evaluated but not weak');
+    assert.equal(weakTopics.developingTopics.length, weakTopics.evaluations.developing, 'developing topics are named');
+  } finally { await client.close(); p.cleanup(); }
+});
+
+test('the timezone can be set from the client, also before any profile exists', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tracker-mcp-tz-'));
+  const dbPath = join(dir, 'tracker.sqlite');
+  const { client } = await StdioClient.start(entry, dbPath);
+  try {
+    assert.equal(errorCode(await client.call('tracker_set_timezone', { timezone: 'Mars/Olympus' })), 'INVALID_TIMEZONE');
+    const set = (await client.call('tracker_set_timezone', { timezone: 'Asia/Tokyo' })).structuredContent;
+    assert.deepEqual([set.status, set.timezone, set.previous], ['applied', 'Asia/Tokyo', null]);
+    assert.match(set.today, /^\d{4}-\d{2}-\d{2}$/);
+    assert.equal((await client.call('tracker_set_timezone', { timezone: 'Asia/Tokyo' })).structuredContent.status, 'unchanged');
+    const status = (await client.call('tracker_status')).structuredContent;
+    assert.equal(status.timezone.timezone, 'Asia/Tokyo');
+    const moved = (await client.call('tracker_set_timezone', { timezone: 'America/Los_Angeles' })).structuredContent;
+    assert.equal(moved.previous, 'Asia/Tokyo');
+  } finally { await client.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('deleting a strategy frees its weekdays and keeps existing plans', async () => {
+  const p = profileWithCatalog();
+  const { client } = await StdioClient.start(entry, p.dbPath);
+  try {
+    const plan = await createDailyPlan(client);
+    const strategy = (await client.call('tracker_get_strategies')).structuredContent.strategies[0];
+    assert.ok(errorCode(await client.call('tracker_delete_strategy', { strategyId: strategy.id, expectedVersion: strategy.version + 1 })), 'stale version is refused');
+    const deleted = (await client.call('tracker_delete_strategy', { strategyId: strategy.id, expectedVersion: strategy.version })).structuredContent;
+    assert.deepEqual(deleted.freedWeekdays, [0, 1, 2, 3, 4, 5, 6]);
+    const after = (await client.call('tracker_get_strategies')).structuredContent;
+    assert.equal(after.strategies.length, 0);
+    assert.ok(after.weeklySchedule.every((entry: any) => entry.strategyId === null));
+    assert.equal((await client.call('tracker_get_today')).structuredContent.planId, plan.planId, 'the generated plan stays');
+    assert.equal(errorCode(await client.call('tracker_delete_strategy', { strategyId: strategy.id, expectedVersion: strategy.version })), 'STRATEGY_NOT_FOUND');
+    const replacement = await client.call('tracker_create_strategy', {
+      name: 'Weekdays', weekdays: [1, 2, 3, 4, 5], dailyCount: 2, difficultyCounts: { Easy: 1, Medium: 1, Hard: 0 }, review: { mode: 'none' },
+    });
+    assert.equal(replacement.isError, undefined, 'freed weekdays can be assigned again');
+  } finally { await client.close(); p.cleanup(); }
+});
+
+test('practice outputs give the calendar day in the profile timezone, not the UTC date', async () => {
+  const p = profileWithCatalog();
+  const { client } = await StdioClient.start(entry, p.dbPath);
+  try {
+    await client.call('tracker_set_timezone', { timezone: 'America/Los_Angeles' });
+    // 02:30 UTC on Nov 18 is still Nov 17 in Los Angeles.
+    const created = (await client.call('tracker_create_practices', { operationId: randomUUID(), records: [
+      { questionFrontendId: '5', completed: true, practicedAt: '2026-11-18T02:30:00Z' },
+      { questionFrontendId: '6', completed: true, practicedAt: '2026-11-18' },
+    ] })).structuredContent.records;
+    assert.deepEqual(created.map((record: any) => record.localDate), ['2026-11-17', '2026-11-18']);
+    assert.equal((await client.call('tracker_list_practices', { frontendId: '5' })).structuredContent.records[0].localDate, '2026-11-17');
+    assert.equal((await client.call('tracker_get_problems', { frontendIds: ['5'] })).structuredContent.problems[0].recentPractices[0].localDate, '2026-11-17');
+    assert.equal((await client.call('tracker_get_note_context', { frontendId: '5' })).structuredContent.practices[0].localDate, '2026-11-17');
   } finally { await client.close(); p.cleanup(); }
 });

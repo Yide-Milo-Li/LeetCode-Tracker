@@ -19,7 +19,7 @@ import type { CatalogProblem } from '../../../packages/contracts/src/sync.ts';
 import { listHeadings, patchSection, SectionPatchError } from './note-sections.ts';
 import { ProfileError } from './profile.ts';
 import { json, refuse, type Registrar } from './registrar.ts';
-import { contentHash, noteState } from './views.ts';
+import { contentHash, noteState, practiceLocalDate, profileZone } from './views.ts';
 
 type Lang = 'en' | 'zh';
 const langSchema = z.enum(['en', 'zh']).optional().describe('Template and export language; defaults to the profile language');
@@ -104,7 +104,7 @@ function assertHash(frontendId: string, current: string, expected: string): void
 }
 
 /** Mistake log: problems with unsolved, assisted or unfinished attempts, most recent first. */
-function mistakesMarkdown(records: PracticeRecord[], problems: Map<string, CatalogProblem>, lang: Lang): string {
+function mistakesMarkdown(records: PracticeRecord[], problems: Map<string, CatalogProblem>, lang: Lang, zone: string | null): string {
   const zh = lang === 'zh';
   const byProblem = new Map<string, PracticeRecord[]>();
   for (const record of records) {
@@ -143,7 +143,7 @@ function mistakesMarkdown(records: PracticeRecord[], problems: Map<string, Catal
     for (const attempt of [...attempts].sort((a, b) => b.practicedAt.localeCompare(a.practicedAt))) {
       const minutes = attempt.durationMinutes ? (zh ? `，${attempt.durationMinutes} 分钟` : `, ${attempt.durationMinutes} min`) : '';
       const remark = attempt.notes?.trim() ? (zh ? `：${attempt.notes.trim()}` : `: ${attempt.notes.trim()}`) : '';
-      lines.push(`- ${attempt.practicedAt.slice(0, 10)} ${outcomeLabel(attempt)}${minutes}${remark}`);
+      lines.push(`- ${practiceLocalDate(attempt, zone)} ${outcomeLabel(attempt)}${minutes}${remark}`);
     }
     lines.push('');
   }
@@ -154,7 +154,7 @@ export function registerNoteTools({ register }: Registrar): void {
   register(
     'tracker_get_note_context',
     {
-      description: 'Everything needed to write or improve one problem\'s solution note in a single call: problem details, every practice attempt, review stage, the current note with its contentHash and section headings, the note template, and related problems (shared tags) that already have written notes. Then save with tracker_save_notes or edit one section with tracker_patch_note.',
+      description: 'Everything needed to write or improve one problem\'s solution note in a single call: problem details, every practice attempt (localDate is the calendar day in the profile timezone; practicedAt is UTC), review stage, the current note with its contentHash and section headings, the note template, and related problems (shared tags) that already have written notes. Then save with tracker_save_notes or edit one section with tracker_patch_note.',
       inputSchema: z.object({
         frontendId: z.string().trim().min(1).describe('Problem frontend ID, e.g. "42"'),
         lang: langSchema,
@@ -167,6 +167,7 @@ export function registerNoteTools({ register }: Registrar): void {
       const language = await profileLang(application, lang);
       const note = await currentNote(application, id);
       const practices = await activePractices(application, id, 'asc');
+      const zone = await profileZone(application);
       const solved = practices.filter(record => record.completed);
       return json({
         problem: {
@@ -190,6 +191,7 @@ export function registerNoteTools({ register }: Registrar): void {
         },
         practices: practices.map(record => ({
           practicedAt: record.practicedAt,
+          localDate: practiceLocalDate(record, zone),
           completed: record.completed,
           outcome: record.outcome,
           durationMinutes: record.durationMinutes,
@@ -396,7 +398,7 @@ export function registerNoteTools({ register }: Registrar): void {
           const { problem } = await application.catalog.read({}, { frontendId: id });
           if (problem) problems.set(id, problem);
         }
-        files.push({ name: 'mistakes.md', content: mistakesMarkdown(records, problems, language) });
+        files.push({ name: 'mistakes.md', content: mistakesMarkdown(records, problems, language, await profileZone(application)) });
       }
 
       const targets = files.map(file => ({ ...file, target: path.resolve(root, file.name) }));
