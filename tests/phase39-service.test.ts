@@ -65,11 +65,18 @@ it('falls back locally when a service-level deadline expires or configuration ch
     const plan = (await f.service.ensureDailyPlan()).plan!;
     assert.equal(plan.provenance?.callReason, 'provider_reconfigured'); assert.equal(plan.source, 'local');
   } finally { f.db.close(); }
-  const hung = await fixture({ selectPlanProblems: async () => new Promise(() => {}) }, { ...base, preference: 'Iterative solutions' }, 12, 230);
+  // Expire the budget after provider dispatch. A slow runner can otherwise exhaust it during local selection.
+  const start = Date.now();
+  let now = start;
+  const hung = await fixture({ selectPlanProblems: async () => {
+    now += 5000;
+    return new Promise(() => {});
+  } }, { ...base, preference: 'Iterative solutions' }, 12, 5000);
+  const clock = mock.method(Date, 'now', () => now);
   try {
     const plan = (await hung.service.ensureDailyPlan()).plan!;
     assert.equal(plan.source, 'local'); assert.equal(plan.provenance?.callReason, 'provider_failed'); assert.equal(plan.items.length, 2);
-  } finally { hung.db.close(); }
+  } finally { clock.mock.restore(); hung.db.close(); }
 });
 
 it('reuses validated intent only within the same profile, revisions, calendar and provider generation', async () => {
