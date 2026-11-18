@@ -121,7 +121,7 @@ test('A stdio client follows the desktop lease and can use only the opted-in wri
     const plans = await fetch(url('/api/v1/daily-plans'), { headers: desktopHeaders });
     assert.equal(plans.status, 200);
     const { items } = await plans.json() as { items: DailyPlan[] };
-    assert.equal(items[0].id, prepared.structuredContent.plan.id);
+    assert.equal(items[0].id, prepared.structuredContent.plan.planId);
 
     assert.equal(await stopTestServer(server), 0);
     server = undefined;
