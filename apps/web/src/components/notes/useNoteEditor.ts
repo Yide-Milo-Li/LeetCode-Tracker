@@ -22,7 +22,7 @@ import { formatNoteInWorker } from '../../markdown-format-client.ts';
 import type { FormatOnSaveSetting } from './useFormatOnSaveSetting.ts';
 
 /** One visit of one selected problem; `active` turns false when the selection changes or unmounts. */
-export type EditorSession = { active: boolean; saving: boolean; saveVersion: number };
+export type EditorSession = { active: boolean; saving: boolean; saveVersion: number; frontendId: string | null };
 
 /** AI format review bound to the visit and draft revision it was opened for. */
 export type AiReview = {
@@ -52,6 +52,7 @@ interface UseNoteEditorOptions {
 }
 
 interface NoteSnapshot { content: string; hash?: string }
+interface SubmittedDraft { content: string; base: NoteSnapshot; failed?: { error: unknown } }
 
 /**
  * Own the editor for the selected problem.
@@ -87,6 +88,8 @@ export function useNoteEditor({
   }, []);
   const [savedContent, setSavedContent] = useState('');
   const savedSnapshot = useRef<NoteSnapshot>({ content: '' });
+  // The editor visit may end before a save settles. Its submitted text belongs to the problem.
+  const submittedDrafts = useRef(new Map<string, SubmittedDraft>());
   const [conflict, setConflict] = useState<NoteSnapshot | null>();
   const seenExternalRevision = useRef(externalRevision);
   const initialLoad = useRef(Promise.resolve());
@@ -103,7 +106,7 @@ export function useNoteEditor({
   const [aiReview, setAiReview] = useState<AiReview | null>(null);
   const aiSerial = useRef(0);
   const [retryRevision, setRetryRevision] = useState(0);
-  const editorSession = useRef({ active: false, saving: false, saveVersion: 0 });
+  const editorSession = useRef<EditorSession>({ active: false, saving: false, saveVersion: 0, frontendId: null });
   const savingRevision = useRef<number | null>(null);
   const problemSaveVersion = useRef<Map<string, number>>(new Map());
   const problemSaveChain = useRef<Map<string, Promise<void>>>(new Map());
@@ -111,7 +114,7 @@ export function useNoteEditor({
 
   useEffect(() => {
     // A -> B -> A creates a new visit too; comparing question IDs alone is insufficient.
-    const session = { active: true, saving: false, saveVersion: 0 };
+    const session = { active: true, saving: false, saveVersion: 0, frontendId: selectedId };
     editorSession.current = session;
     savingRevision.current = null;
     setSavingNote(false);
@@ -251,9 +254,19 @@ export function useNoteEditor({
       .then((res) => {
         if (!active) return;
         const content = res.note?.content ?? '';
-        setNoteContent(content);
-        rememberSaved(content, res.contentHash);
-        setConflict(undefined);
+        const submitted = submittedDrafts.current.get(selectedId);
+        if (submitted && submitted.content !== content) {
+          setNoteContent(submitted.content);
+          rememberSaved(submitted.base.content, submitted.base.hash);
+          const changed = content !== submitted.base.content;
+          setConflict(changed ? { content, hash: res.contentHash } : undefined);
+          if (!changed && submitted.failed) setSaveError(localizeApiError(submitted.failed.error, lang));
+        } else {
+          submittedDrafts.current.delete(selectedId);
+          setNoteContent(content);
+          rememberSaved(content, res.contentHash);
+          setConflict(undefined);
+        }
       })
       .catch(() => {
         if (active) {
@@ -367,7 +380,8 @@ export function useNoteEditor({
   async function saveNote(overwrite: boolean) {
     const session = editorSession.current;
     if (!selectedId || !(overwrite ? canOverwrite : canSave) || !session.active || session.saving) return;
-    const expectedHash = overwrite ? conflict?.hash : savedSnapshot.current.hash;
+    const base = (overwrite ? conflict : savedSnapshot.current) ?? savedSnapshot.current;
+    const expectedHash = base.hash;
     // Synchronous guard also blocks repeated shortcuts before React commits savingNote.
     session.saving = true;
     const saveVersion = ++session.saveVersion;
@@ -377,6 +391,8 @@ export function useNoteEditor({
     const isLatestProblemSave = () =>
       editorSession.current.active && problemSaveVersion.current.get(targetId) === problemVersion;
     const targetContent = draft.current.value;
+    const submitted: SubmittedDraft = { content: targetContent, base };
+    submittedDrafts.current.set(targetId, submitted);
     const targetRevision = draft.current.revision;
     savingRevision.current = targetRevision;
     const bypass = bypassFormatRevision.current === targetRevision;
@@ -420,6 +436,7 @@ export function useNoteEditor({
       const result = await currentWrite;
       if (!result || !isLatestProblemSave()) return;
       const { note } = result;
+      if (submittedDrafts.current.get(targetId) === submitted) submittedDrafts.current.delete(targetId);
       if (session.active) {
         rememberSaved(note.content, result.contentHash);
         setConflict(undefined);
@@ -461,11 +478,17 @@ export function useNoteEditor({
       // the latest filters while mounted, without reloading the current editor draft.
       if (editorSession.current.active) setListRevision((current) => current + 1);
     } catch (err) {
-      if (session.active && isLatestProblemSave()) {
+      if (isLatestProblemSave() && submittedDrafts.current.get(targetId) === submitted) {
+        submitted.failed = { error: err };
+      }
+      const visibleSession = editorSession.current;
+      const stillViewingDraft = () => visibleSession.active && visibleSession.frontendId === targetId
+        && isLatestProblemSave() && submittedDrafts.current.get(targetId) === submitted;
+      if (stillViewingDraft()) {
         if (err instanceof ApiError && err.code === 'NOTE_CHANGED') {
           setConflict(null);
           const current = await api.getNote(targetId).catch(() => undefined);
-          if (current && session.active && isLatestProblemSave()) {
+          if (current && stillViewingDraft()) {
             setConflict({ content: current.note?.content ?? '', hash: current.contentHash });
           }
         } else {
@@ -481,7 +504,12 @@ export function useNoteEditor({
     }
   }
 
+  function discardRecoveredDraft() {
+    if (selectedId && !editorSession.current.saving) submittedDrafts.current.delete(selectedId);
+  }
+
   function reloadSavedVersion() {
+    discardRecoveredDraft();
     if (!conflict) {
       handleRetryLoad();
       return;
@@ -510,6 +538,7 @@ export function useNoteEditor({
     isBlank,
     canSave,
     hasUnsavedChanges,
+    discardRecoveredDraft,
     handleSaveNote: () => saveNote(false),
     hasConflict: conflict !== undefined,
     reloadSavedVersion,

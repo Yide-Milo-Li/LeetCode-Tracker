@@ -70,7 +70,7 @@ export function NotesWorkspace({
     setItems: list.setItems,
     setListRevision: list.setListRevision,
   });
-  const { canSave, handleSaveNote, hasUnsavedChanges, aiReview, closeAiReview } = editor;
+  const { canSave, handleSaveNote, hasUnsavedChanges, aiReview, closeAiReview, discardRecoveredDraft } = editor;
 
   const [showTimeline, setShowTimeline] = useState(false);
 
@@ -140,10 +140,11 @@ export function NotesWorkspace({
   const handleDiscardAndSwitch = useCallback(() => {
     if (!pendingTargetId) return;
     const target = pendingTargetId;
+    discardRecoveredDraft();
     setShowUnsavedModal(false);
     setPendingTargetId(null);
     setSelectedId(target);
-  }, [pendingTargetId]);
+  }, [pendingTargetId, discardRecoveredDraft]);
 
   /** Cancel switching and stay on the current problem note. */
   const handleCancelSwitch = useCallback(() => {

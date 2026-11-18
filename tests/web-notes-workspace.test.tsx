@@ -41,7 +41,7 @@ Object.defineProperty(globalThis, 'navigator', { configurable: true, value: dom.
 
 const React = await import('react');
 const { render, fireEvent, screen, act, cleanup } = await import('@testing-library/react');
-const { api } = await import('../apps/web/src/api.ts');
+const { api, ApiError } = await import('../apps/web/src/api.ts');
 const { NotesWorkspace } = await import('../apps/web/src/components/NotesWorkspace.tsx');
 const { QuickCopyButtons } = await import('../apps/web/src/components/QuickCopyButtons.tsx');
 const { QuickNoteDrawer } = await import('../apps/web/src/components/QuickNoteDrawer.tsx');
@@ -200,6 +200,33 @@ describe('NotesWorkspace request ownership', () => {
     await act(async () => { pending.resolve({ note: editorNote('1', 'shared draft') }); });
     assert.equal((screen.getByRole('button', { name: /save note/i }) as HTMLButtonElement).disabled, false);
   });
+
+  for (const returnBeforeFailure of [false, true]) {
+    it(`recovers a conflicted submission when returning ${returnBeforeFailure ? 'before' : 'after'} its failure`, async () => {
+      mockEditorProblems();
+      const pending = deferred<{ note: ReturnType<typeof editorNote> }>();
+      let currentA = 'Original A';
+      mock.method(api, 'getNote', async (id: string) => {
+        const content = id === '1' ? currentA : 'Original B';
+        return { note: editorNote(id, content), contentHash: content };
+      });
+      mock.method(api, 'upsertNote', () => pending.promise);
+      await act(async () => { render(<NotesWorkspace lang="en" notesFormatOnSave={false} />); });
+      await act(async () => { fireEvent.change(noteEditor(), { target: { value: 'Submitted draft' } }); });
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: /save note/i })); });
+      await act(async () => { fireEvent.click(screen.getByText('Problem B')); });
+      currentA = 'MCP update';
+      if (returnBeforeFailure) await act(async () => { fireEvent.click(screen.getByText('Problem A')); });
+      await act(async () => { pending.reject(new ApiError(409, 'NOTE_CHANGED', 'Conflict')); });
+      if (!returnBeforeFailure) {
+        assert.equal(noteEditor().value, 'Original B');
+        await act(async () => { fireEvent.click(screen.getByText('Problem A')); });
+      }
+      assert.equal(noteEditor().value, 'Submitted draft');
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Load saved version' })); });
+      assert.equal(noteEditor().value, 'MCP update');
+    });
+  }
 
   it('does not refresh or write again when a save finishes after unmount', async () => {
     const list = mockEditorProblems();

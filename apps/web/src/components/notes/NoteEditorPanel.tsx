@@ -51,7 +51,7 @@ export function NoteEditorPanel({ lang, editor, isMac, codeMenu, viewMode, onVie
               <span>{noteContent.trim().length === 0 ? t.noteClearedSuccess : t.noteSaved}</span>
             </span>
           )}
-          {saveError && <span className="nw-save-error">{saveError}</span>}
+          {saveError && <span className="nw-save-error" role="alert">{saveError}</span>}
           {formatNotice && <span role="status" className="nw-format-notice">{formatNotice}</span>}
           {canUndoFormat && (
             <button type="button" className="btn btn-secondary btn-sm" onClick={handleUndoFormat}>
