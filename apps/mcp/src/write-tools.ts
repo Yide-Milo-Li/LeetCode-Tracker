@@ -125,7 +125,7 @@ export function registerWriteTools({ register }: Registrar): void {
   register(
     'tracker_get_strategies',
     {
-      description: 'List study strategies (rules, daily counts, difficulty mix, tags, review share, and weekdays) and active weekday.',
+      description: 'List study strategies (rules, daily count, difficulty mix, tags, review share and weekdays) with today\'s weekday.',
       inputSchema: z.object({}),
     },
     async (application) => {

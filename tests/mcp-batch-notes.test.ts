@@ -261,7 +261,7 @@ test('plan edits validate every step first, apply in order and replay on retry',
     const edited = (await client.call('tracker_edit_today', { expectedVersion: plan.version, steps, operationId })).structuredContent;
     assert.deepEqual(edited.applied, [`remove ${a}`, `replace ${b}`, 'append']);
     assert.equal(edited.totalCount, 3);
-    assert.deepEqual(edited.removed.sort(), [a, b].sort());
+    assert.deepEqual([...edited.removed].sort(), [a, b].sort());
     assert.equal(edited.added.length, 2);
     const ids = (await client.call('tracker_get_today')).structuredContent.items.map((item: any) => item.frontendId);
     assert.equal(ids.length, 3);
