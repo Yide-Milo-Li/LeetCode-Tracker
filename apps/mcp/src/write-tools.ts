@@ -75,7 +75,7 @@ function rulesFromCounts(counts: z.infer<typeof strategyCountsSchema>): Pick<Rul
 }
 
 const weekdaysSchema = z.array(z.number().int().min(0).max(6)).max(7)
-  .describe('Weekdays this strategy plans, 0 = Sunday ... 6 = Saturday. A weekday moves here from any other strategy.');
+  .describe('Weekdays this strategy plans, 0 = Sunday ... 6 = Saturday. If another strategy already owns any requested weekday, the whole save returns WEEKDAY_CONFLICT. Free the weekday on its current strategy before assigning it here.');
 
 export function registerWriteTools({ register }: Registrar): void {
   // ---------------------------------------------------------------- practice

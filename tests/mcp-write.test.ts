@@ -60,6 +60,7 @@ test('write tools are annotated so hosts ask before running them', async () => {
     }
     assert.equal((byName.get('tracker_create_practices') as any).destructiveHint, false);
     assert.equal((byName.get('tracker_save_strategy') as any).idempotentHint, false);
+    assert.match(JSON.stringify(tools.find((tool: any) => tool.name === 'tracker_save_strategy').inputSchema), /WEEKDAY_CONFLICT/);
     assert.equal((byName.get('tracker_get_notes') as any).readOnlyHint, true);
   } finally { await client.close(); p.cleanup(); }
 });
@@ -182,6 +183,13 @@ test('strategy and today plan: create, append with replay, replace, remove and a
       difficultyCounts: { Easy: 1, Medium: 2, Hard: 0 }, review: { mode: 'none' },
     })).structuredContent.strategy;
     assert.deepEqual(strategy.weekdays, [0, 1, 2, 3, 4, 5, 6]);
+    const occupiedDay = await client.call('tracker_save_strategy', {
+      name: 'Occupied Monday', weekdays: [1], dailyCount: 1, difficultyCounts: { Easy: 1, Medium: 0, Hard: 0 }, review: { mode: 'none' },
+    });
+    assert.equal(errorCode(occupiedDay), 'WEEKDAY_CONFLICT');
+    const currentStrategies = (await client.call('tracker_get_strategies')).structuredContent.strategies;
+    assert.deepEqual(currentStrategies.map((item: { id: string }) => item.id), [strategy.id]);
+    assert.deepEqual(currentStrategies[0].weekdays, strategy.weekdays);
     const strategies = (await client.call('tracker_get_strategies')).structuredContent;
     assert.deepEqual(strategies.strategies[0].weekdays, [0, 1, 2, 3, 4, 5, 6]);
     assert.equal(strategies.weeklySchedule, undefined);
