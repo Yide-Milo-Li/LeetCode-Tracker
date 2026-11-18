@@ -1,11 +1,24 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { fail } from './errors.ts';
 /** A failed write cannot poison the next operation in the serialization queue. */
 export class AsyncLock {
   private queue: Promise<void> = Promise.resolve();
+  private readonly group = new AsyncLocalStorage<{ active: boolean }>();
+
   run<T>(fn: () => T | Promise<T>): Promise<T> {
+    if (this.group.getStore()?.active) return Promise.resolve().then(fn);
     const result = this.queue.then(fn);
     this.queue = result.then(() => {}, () => {});
     return result;
+  }
+
+  /** Keep a compound tool's awaited steps together while its public operations reuse this lock. */
+  runGroup<T>(fn: () => Promise<T>): Promise<T> {
+    return this.run(async () => {
+      const group = { active: true };
+      try { return await this.group.run(group, fn); }
+      finally { group.active = false; }
+    });
   }
 }
 /** Counts queued work before its first await and owns exclusive restore admission. */

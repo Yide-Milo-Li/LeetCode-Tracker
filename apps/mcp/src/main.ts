@@ -3,14 +3,20 @@
  *
  * stdout is reserved for JSON-RPC while serving, so every diagnostic goes to stderr.
  */
-import { readFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { parseArgs } from 'node:util';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { ProfileError, TrackerProfile, resolveProfileLocation } from './profile.ts';
 import { createServer } from './server.ts';
-import { importCatalog, setTimeZone } from './operations.ts';
+import { createTrackerToolRegistry } from './tools.ts';
+import { callTrackerTool, type ToolName } from './registrar.ts';
 import { MCP_SERVER_VERSION } from './version.ts';
+
+async function callSetupTool(profile: TrackerProfile, name: ToolName, args: Record<string, unknown>) {
+  const result = await callTrackerTool(createTrackerToolRegistry(profile).get(name)!, profile, args);
+  if (result.isError) throw new Error(result.content[0]?.text ?? 'The tool failed.');
+  return result.structuredContent!;
+}
 
 const USAGE = `leetcode-tracker-mcp ${MCP_SERVER_VERSION}
 
@@ -55,18 +61,16 @@ async function main(argv: string[]): Promise<number> {
     }
     case 'import': {
       if (!argument) { process.stderr.write(USAGE); return 2; }
-      const content = await readFile(path.resolve(argument), 'utf8');
-      const dryRun = values['dry-run'];
-      const result = dryRun
-        ? await profile.preview(application => importCatalog(application, content, { dryRun }))
-        : await profile.write(application => importCatalog(application, content, { dryRun }));
+      const result = await callSetupTool(profile, 'tracker_import_catalog', {
+        path: path.resolve(argument), dryRun: values['dry-run'],
+      });
       process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-      return result.validCount > 0 || result.totalLines === 0 ? 0 : 1;
+      return Number(result.validCount) > 0 || result.totalLines === 0 ? 0 : 1;
     }
     case 'set-timezone': {
       if (!argument) { process.stderr.write(USAGE); return 2; }
-      const zone = await profile.write(application => setTimeZone(application, argument));
-      process.stdout.write(`Timezone set to ${zone}\n`);
+      const result = await callSetupTool(profile, 'tracker_set_timezone', { timezone: argument });
+      process.stdout.write(`Timezone set to ${result.timezone}\n`);
       return 0;
     }
     case 'where': {

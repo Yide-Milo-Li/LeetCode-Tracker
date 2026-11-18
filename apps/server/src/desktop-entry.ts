@@ -14,7 +14,20 @@ import * as readline from 'node:readline';
 import type { AddressInfo } from 'node:net';
 import { CatalogStore } from '../../../packages/database/src/store.ts';
 import { buildApp } from './app.ts';
-import { acquireDatabaseLease } from '../../../packages/database/src/lease.ts';
+import { acquireDatabaseLease, DatabaseLeaseBusyError } from '../../../packages/database/src/lease.ts';
+import { setTimeout as delay } from 'node:timers/promises';
+import { DesktopAgent } from './desktop-agent.ts';
+
+async function acquireDesktopLease(dbPath: string): Promise<() => void> {
+  const deadline = Date.now() + 2000;
+  for (;;) {
+    try { return acquireDatabaseLease(dbPath); }
+    catch (error) {
+      if (!(error instanceof DatabaseLeaseBusyError) || Date.now() >= deadline) throw error;
+      await delay(100);
+    }
+  }
+}
 
 /**
  * Configuration payload received over the private initialization stream.
@@ -86,8 +99,10 @@ export async function startDesktopServer(): Promise<void> {
     fs.mkdirSync(config.backupDir, { recursive: true });
   }
 
-  const release = acquireDatabaseLease(config.dbPath);
+  const release = await acquireDesktopLease(config.dbPath);
+  const agent = new DesktopAgent({ dbPath: config.dbPath, backupDir: config.backupDir });
   let openedDb: DatabaseSync | undefined;
+  let openedApp: Awaited<ReturnType<typeof buildApp>> | undefined;
   let isShuttingDown = false;
 
   try {
@@ -99,7 +114,9 @@ export async function startDesktopServer(): Promise<void> {
       store,
       sessionSecret: config.sessionSecret,
       disableStatic: true,
+      desktopAgent: agent,
     });
+    openedApp = app;
 
     const host = '127.0.0.1';
     const port = config.port ?? 0;
@@ -107,6 +124,7 @@ export async function startDesktopServer(): Promise<void> {
 
     const address = app.server.address() as AddressInfo;
     const actualPort = address.port;
+    agent.start(actualPort);
 
     // Emit structured ready message on stdout
     const readyMessage = JSON.stringify({
@@ -128,6 +146,7 @@ export async function startDesktopServer(): Promise<void> {
           rl.close();
         }
         process.stdin.pause();
+        agent.stop();
         await app.close();
         db.close();
         release();
@@ -147,7 +166,11 @@ export async function startDesktopServer(): Promise<void> {
     process.on('SIGTERM', () => void gracefulShutdown('SIGTERM'));
   } catch (error) {
     try {
-      openedDb?.close();
+      try { agent.stop(); }
+      finally {
+        try { await openedApp?.close(); }
+        finally { openedDb?.close(); }
+      }
     } finally {
       release();
     }

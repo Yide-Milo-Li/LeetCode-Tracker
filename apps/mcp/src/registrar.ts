@@ -3,10 +3,12 @@
  * errors. Every tool module registers through this so the rules stay uniform.
  */
 import { z } from 'zod';
-import type { CallToolResult, McpServer } from '@modelcontextprotocol/server';
 import type { TrackerApplication } from '../../../packages/application/src/application.ts';
 import { ApplicationError } from '../../../packages/application/src/errors.ts';
-import { ProfileError, type TrackerProfile } from './profile.ts';
+import { ProfileError } from './profile-error.ts';
+import type { TrackerProfile } from './profile.ts';
+import { DESKTOP_AGENT_PROTOCOL, type AgentResult } from '../../../packages/contracts/src/desktop-agent.ts';
+import { forwardDesktopWrite } from './desktop-agent-client.ts';
 
 export const READ_TOOL_NAMES = [
   'tracker_status',
@@ -71,7 +73,7 @@ export function refuse(code: string, message: string): ToolResult {
 }
 
 /** Convert any failure into a coded tool error the model can explain to the user. */
-function toolError(error: unknown): CallToolResult {
+export function toolError(error: unknown): AgentResult {
   let code = 'MCP_QUERY_FAILED';
   let message = 'The request failed. See the server log for details.';
   if (error instanceof ProfileError || error instanceof ApplicationError) {
@@ -132,42 +134,95 @@ function compactInputSchema<S extends z.ZodObject>(schema: S): z.ZodObject {
   }) as z.ZodObject;
 }
 
-export type Registrar = ReturnType<typeof createRegistrar>;
+type PreparedArgs = Record<string, unknown>;
+type ToolAnnotations = {
+  readOnlyHint: boolean;
+  destructiveHint: boolean;
+  idempotentHint: boolean;
+  openWorldHint: boolean;
+};
 
-export function createRegistrar(rawServer: McpServer, profile: TrackerProfile) {
-  function register<S extends z.ZodObject>(
+export interface RegisteredTool {
+  name: ToolName;
+  description: string;
+  inputSchema: z.ZodObject;
+  annotations: ToolAnnotations;
+  prepare: (args: unknown) => Promise<PreparedArgs>;
+  access: (args: PreparedArgs) => ToolAccess;
+  invoke: (application: TrackerApplication, args: PreparedArgs) => Promise<AgentResult>;
+}
+
+export type Registrar = ReturnType<typeof createRegistrar>;
+type ProfileContext = Pick<TrackerProfile, 'exists' | 'location'>;
+
+export function createRegistrar(profile: ProfileContext) {
+  const tools = new Map<string, RegisteredTool>();
+  function register<S extends z.ZodObject, P extends z.ZodObject = S>(
     name: ToolName,
-    config: { description: string; inputSchema: S },
-    handler: (application: TrackerApplication, args: z.infer<S>) => Promise<ToolResult>,
-    access: ToolAccess | ((args: z.infer<S>) => ToolAccess) = 'read',
+    config: {
+      description: string;
+      inputSchema: S;
+      prepare?: { schema: P; map: (input: z.infer<S>) => Promise<z.input<P>> };
+    },
+    handler: (application: TrackerApplication, args: z.infer<NoInfer<P>>) => Promise<ToolResult>,
+    access: ToolAccess | ((args: z.infer<NoInfer<P>>) => ToolAccess) = 'read',
     hints: WriteHints = { destructive: false, idempotent: false },
   ): void {
     const readOnly = access === 'read' || access === 'preview';
-    const annotations = {
-      readOnlyHint: readOnly,
-      destructiveHint: !readOnly && hints.destructive,
-      idempotentHint: readOnly || hints.idempotent,
-      openWorldHint: false,
+    const preparedSchema = config.prepare?.schema ?? config.inputSchema;
+    const parse = (schema: z.ZodObject, input: unknown): PreparedArgs => {
+      const parsed = schema.safeParse(input);
+      if (parsed.success) return parsed.data;
+      throw new ProfileError('INVALID_INPUT', parsed.error.issues.map(issue =>
+        [issue.path.join('.'), issue.message].filter(Boolean).join(': ')).join('; '));
     };
-    // Widen the schema so the SDK's conditional callback type resolves; args are validated by the SDK.
-    const inputSchema: z.ZodObject = compactInputSchema(config.inputSchema);
-    rawServer.registerTool(name, { description: config.description, inputSchema, annotations }, async (rawArgs: unknown): Promise<CallToolResult> => {
-      try {
-        const args = rawArgs as z.infer<S>;
-        const run = (application: TrackerApplication) => handler(application, args);
-        const mode = typeof access === 'function' ? access(args) : access;
-        const result = await (mode === 'read' || mode === 'export' ? profile.read(run) : mode === 'preview' ? profile.preview(run) : profile.write(run));
+    tools.set(name, {
+      name,
+      description: config.description,
+      inputSchema: compactInputSchema(config.inputSchema),
+      annotations: {
+        readOnlyHint: readOnly,
+        destructiveHint: !readOnly && hints.destructive,
+        idempotentHint: readOnly || hints.idempotent,
+        openWorldHint: false,
+      },
+      prepare: async (input) => {
+        const args = parse(config.inputSchema, input);
+        return config.prepare ? await config.prepare.map(args as z.infer<S>) as PreparedArgs : args;
+      },
+      access: (args) => {
+        const parsed = parse(preparedSchema, args) as z.infer<P>;
+        return typeof access === 'function' ? access(parsed) : access;
+      },
+      invoke: async (application, args) => {
+        const result = await handler(application, parse(preparedSchema, args) as z.infer<P>);
         const text = result.content.find(item => item.type === 'text')?.text;
         if (!text || result.isError) {
-          // Refusals carry "CODE: message" text; expose the code as structured content too.
           const match = text ? /^([A-Z][A-Z0-9_]+): (.*)$/s.exec(text) : null;
           return match ? { ...result, structuredContent: { error: match[1], message: match[2] } } : result;
         }
         return { ...result, structuredContent: JSON.parse(text) as Record<string, unknown> };
-      } catch (error) {
-        return toolError(error);
-      }
+      },
     });
   }
-  return { register, profile };
+  return { register, profile, tools };
+}
+
+export async function callTrackerTool(tool: RegisteredTool, profile: TrackerProfile, input: unknown): Promise<AgentResult> {
+  try {
+    const args = await tool.prepare(input);
+    const run = (application: TrackerApplication) => tool.invoke(application, args);
+    const mode = tool.access(args);
+    if (mode === 'read' || mode === 'export') return await profile.read(run);
+    if (mode === 'preview') return await profile.preview(run);
+    try { return await profile.write(run); }
+    catch (error) {
+      if (!(error instanceof ProfileError) || error.code !== 'PROFILE_IN_USE') throw error;
+    }
+    const forwarded = await forwardDesktopWrite(profile.location.dbPath, { version: DESKTOP_AGENT_PROTOCOL, name: tool.name, args });
+    // If the owner stopped before dispatch, retry ownership once.
+    return forwarded ?? await profile.write(run);
+  } catch (error) {
+    return toolError(error);
+  }
 }

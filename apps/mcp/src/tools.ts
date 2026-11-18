@@ -8,11 +8,10 @@
 import { readFile, stat } from 'node:fs/promises';
 import * as path from 'node:path';
 import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/server';
 import { isTimeZone, localDate } from '../../../packages/contracts/src/time.ts';
 import type { CatalogProblem } from '../../../packages/contracts/src/sync.ts';
 import { ApplicationError } from '../../../packages/application/src/errors.ts';
-import type { TrackerProfile } from './profile.ts';
+import { ProfileError, type TrackerProfile } from './profile.ts';
 import { importCatalog, TIMEZONE_HINT } from './operations.ts';
 import { MCP_SERVER_VERSION } from './version.ts';
 import { createRegistrar, json } from './registrar.ts';
@@ -22,13 +21,9 @@ import { registerNoteTools } from './note-tools.ts';
 import { registerBatchTools } from './batch-tools.ts';
 import { registerCatalogTools } from './catalog-tools.ts';
 
-/**
- * Registers the tracker tools. Each call gets its own application instance:
- * reads use a short-lived read-only connection, writes hold the lease only
- * for that one call.
- */
-export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfile): void {
-  const registrar = createRegistrar(rawServer, profile);
+/** Both transports use the same tool definitions and handlers. */
+export function createTrackerToolRegistry(profile: Pick<TrackerProfile, 'exists' | 'location'>) {
+  const registrar = createRegistrar(profile);
   const server = { registerTool: registrar.register };
   registerWriteTools(registrar);
   registerNoteTools(registrar);
@@ -315,24 +310,23 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
   server.registerTool(
     'tracker_import_catalog',
     {
-      description: 'Import or update problems from a local JSON Lines catalog file (one problem per line with id, title, difficulty and tags). Existing practice records and notes are kept. Set dryRun to preview counts and errors without saving. Fails with PROFILE_IN_USE while the desktop app is running.',
+      description: 'Import or update problems from a local JSON Lines catalog file (one problem per line with id, title, difficulty and tags). Existing practice records and notes are kept. Set dryRun to preview counts and errors without saving.',
       inputSchema: z.object({
         path: z.string().min(1).describe('Absolute path to a .jsonl catalog file on this machine'),
         dryRun: z.boolean().optional().default(false).describe('Validate and count changes without saving (default false)'),
       }),
+      prepare: {
+        schema: z.object({ content: z.string(), dryRun: z.boolean() }).strict(),
+        map: async ({ path: filePath, dryRun }) => {
+          if (!path.isAbsolute(filePath)) throw new ProfileError('INVALID_PATH', 'Provide an absolute file path.');
+          const info = await stat(filePath).catch(() => null);
+          if (!info?.isFile()) throw new ProfileError('FILE_NOT_FOUND', filePath);
+          return { content: await readFile(filePath, 'utf8'), dryRun };
+        },
+      },
     },
-    async (application, { path: filePath, dryRun = false }) => {
-      if (!path.isAbsolute(filePath)) {
-        return { isError: true, content: [{ type: 'text', text: 'INVALID_PATH: Provide an absolute file path.' }] };
-      }
-      const info = await stat(filePath).catch(() => null);
-      if (!info?.isFile()) {
-        return { isError: true, content: [{ type: 'text', text: `FILE_NOT_FOUND: ${filePath}` }] };
-      }
-      const content = await readFile(filePath, 'utf8');
-      const result = await importCatalog(application, content, { dryRun });
-      return json(result);
-    },
+    async (application, { content, dryRun }) => json(await importCatalog(application, content, { dryRun })),
     ({ dryRun }) => (dryRun ? 'preview' : 'write'),
   );
+  return registrar.tools;
 }

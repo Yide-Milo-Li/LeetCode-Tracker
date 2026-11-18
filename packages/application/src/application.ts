@@ -26,7 +26,7 @@ export function createTrackerApplication(dependencies: ApplicationDependencies) 
   const gate = new OperationGate();
   const context: ApplicationContext = {
     store: dependencies.store, gemini: dependencies.modelService,
-    writeLock: new AsyncLock(),
+    writeLock: dependencies.writeLock ?? new AsyncLock(),
     planningService: new PlanningService(dependencies.store, dependencies.modelService, 60000, dependencies.diagnosticSink),
     activePreviews: new Map(), activeProgressPreviews: new Map(),
     refreshModelConfiguration: dependencies.refreshModelConfiguration ?? (() => {}),

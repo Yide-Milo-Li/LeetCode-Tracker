@@ -22,6 +22,7 @@ export interface ActiveProgressPreview {
 export interface ApplicationDependencies {
   store: CatalogStore;
   modelService: ModelService;
+  writeLock?: AsyncLock;
   diagnosticSink?: DiagnosticSink;
   /** Re-resolve persisted provider configuration; exceptions after restore become warnings. */
   refreshModelConfiguration?: () => void | Promise<void>;

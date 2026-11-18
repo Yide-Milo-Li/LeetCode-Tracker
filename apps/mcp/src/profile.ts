@@ -15,6 +15,11 @@ import { CURRENT_SCHEMA_VERSION, inspectCatalogSchema } from '../../../packages/
 import { createTrackerApplication, type TrackerApplication } from '../../../packages/application/src/application.ts';
 import { openTrackerRuntime } from '../../../packages/application/src/runtime.ts';
 import type { ModelService } from '../../../packages/application/src/types.ts';
+import { DatabaseLeaseBusyError } from '../../../packages/database/src/lease.ts';
+import { ProfileError } from './profile-error.ts';
+import { profileInUse } from './desktop-agent-client.ts';
+
+export { ProfileError } from './profile-error.ts';
 
 /** Tauri bundle identifier; the desktop app stores its profile under this directory name. */
 export const DESKTOP_IDENTIFIER = 'com.leetcodetracker.desktop';
@@ -22,16 +27,6 @@ export const DESKTOP_IDENTIFIER = 'com.leetcodetracker.desktop';
 export interface ProfileLocation {
   dbPath: string;
   backupDir: string;
-}
-
-/** A failure the MCP client should see by code, with a message that tells the user what to do. */
-export class ProfileError extends Error {
-  readonly code: string;
-  constructor(code: string, message: string) {
-    super(message);
-    this.name = 'ProfileError';
-    this.code = code;
-  }
 }
 
 /**
@@ -149,12 +144,7 @@ export class TrackerProfile {
         configure: () => ({ modelService: this.modelService }),
       });
     } catch (error) {
-      if (error instanceof Error && error.message.startsWith('Database is in use')) {
-        throw new ProfileError(
-          'PROFILE_IN_USE',
-          'The LeetCode Tracker desktop app is using this profile, so changes are blocked. Quit it (tray > Quit) and retry, or make the change in the desktop app. Reads still work.',
-        );
-      }
+      if (error instanceof DatabaseLeaseBusyError) throw profileInUse();
       throw error;
     }
     try {

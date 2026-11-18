@@ -15,9 +15,74 @@ import * as os from 'node:os';
 import { spawn, type ChildProcess } from 'node:child_process';
 import * as readline from 'node:readline';
 import type { DailyPlan } from '../packages/contracts/src/recommendations.ts';
+import { StdioClient } from './fixtures/mcp-stdio-client.ts';
+import { DESKTOP_AGENT_HEADER, DESKTOP_AGENT_PATH } from '../packages/contracts/src/desktop-agent.ts';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
 const bundledServerPath = path.join(repoRoot, 'apps/server/dist/desktop-server.mjs');
+
+test('A stdio client follows the desktop lease and can use only the opted-in write bridge', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'desktop-agent-test-'));
+  const dbPath = path.join(dir, 'tracker.sqlite');
+  const endpointPath = dbPath + '.agent.json';
+  const sessionSecret = 'synthetic-desktop-session-token-agent-test';
+  const startup = { dbPath, backupDir: path.join(dir, 'backups'), sessionSecret, nonce: 'synthetic-agent-nonce' };
+  const fixture = path.join(dir, 'catalog.jsonl');
+  fs.copyFileSync(bundledServerPath, path.join(dir, 'desktop-server.mjs'));
+  fs.writeFileSync(fixture, JSON.stringify({ id: '1', title: 'Two Sum', difficulty: 'Easy' }));
+  let server: ServerHandle | undefined;
+  let client: StdioClient | undefined;
+  try {
+    server = await launchTestServer(startup);
+    const started = await StdioClient.start(path.join(repoRoot, 'apps/mcp/src/main.ts'), dbPath);
+    client = started.client;
+    const url = (route: string) => `http://127.0.0.1:${server!.port}${route}`;
+    const setEnabled = (enabled: boolean) => fetch(url('/api/v1/desktop-agent'), {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', 'x-desktop-session-token': sessionSecret },
+      body: JSON.stringify({ enabled }),
+    });
+    const catalog = () => client!.call('tracker_import_catalog', { path: fixture });
+    const callAgent = (headers: Record<string, string>, name: string, args: Record<string, unknown>) =>
+      fetch(url(DESKTOP_AGENT_PATH), {
+        method: 'POST', headers: { 'content-type': 'application/json', ...headers },
+        body: JSON.stringify({ version: 1, name, args }),
+      });
+    assert.equal(fs.existsSync(endpointPath), false);
+    assert.equal((await catalog()).structuredContent.error, 'PROFILE_IN_USE');
+    assert.equal((await client.call('tracker_import_catalog', { path: fixture, dryRun: true })).structuredContent.insertCount, 1);
+    assert.equal((await setEnabled(true)).status, 200);
+    const { token } = JSON.parse(fs.readFileSync(endpointPath, 'utf8'));
+    const agentHeaders = { [DESKTOP_AGENT_HEADER]: token };
+    assert.equal((await callAgent({ 'x-desktop-session-token': sessionSecret }, 'tracker_import_catalog', {})).status, 401);
+    assert.equal((await callAgent({ ...agentHeaders, origin: 'http://localhost' }, 'tracker_import_catalog', {})).status, 401);
+    assert.equal((await fetch(url('/api/v1/settings'), { headers: agentHeaders })).status, 401);
+    const rejectedPath = await callAgent(agentHeaders, 'tracker_import_catalog', { path: fixture, dryRun: false });
+    assert.equal((await rejectedPath.json() as { structuredContent: { error: string } }).structuredContent.error, 'INVALID_INPUT');
+    const read = await callAgent(agentHeaders, 'tracker_status', {});
+    assert.equal((await read.json() as { structuredContent: { error: string } }).structuredContent.error, 'INVALID_TOOL_ACCESS');
+    assert.equal((await catalog()).structuredContent.insertCount, 1);
+    assert.equal((await client.call('tracker_catalog_coverage')).structuredContent.totalProblems, 1);
+
+    assert.equal(await stopTestServer(server), 0);
+    server = undefined;
+    assert.equal(fs.existsSync(endpointPath), false);
+    server = await launchTestServer(startup);
+    assert.notEqual(JSON.parse(fs.readFileSync(endpointPath, 'utf8')).token, token);
+    assert.equal((await callAgent(agentHeaders, 'tracker_set_timezone', { timezone: 'Asia/Shanghai' })).status, 401);
+    assert.equal((await setEnabled(false)).status, 200);
+    assert.equal(fs.existsSync(endpointPath), false);
+    assert.equal((await catalog()).structuredContent.error, 'PROFILE_IN_USE');
+
+    assert.equal(await stopTestServer(server), 0);
+    server = undefined;
+    assert.equal((await client.call('tracker_set_timezone', { timezone: 'Asia/Shanghai' })).structuredContent.timezone, 'Asia/Shanghai');
+  } finally {
+    await client?.close();
+    if (server) await stopTestServer(server);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 interface ServerHandle {
   child: ChildProcess;

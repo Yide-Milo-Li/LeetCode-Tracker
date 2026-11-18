@@ -23,6 +23,8 @@ import {
 import { GOOGLE_CALLBACK_PATH } from './routes/sync.ts';
 import { DeviceSyncService, type DeviceSyncOptions } from './sync/sync-service.ts';
 import { refreshAfterProfileReplace } from './profile-refresh.ts';
+import { DESKTOP_AGENT_HEADER, DESKTOP_AGENT_PATH } from '../../../packages/contracts/src/desktop-agent.ts';
+import { registerDesktopAgentRoutes, type DesktopAgent } from './desktop-agent.ts';
 
 /** Version reported by health checks and written into sync snapshots. */
 export const APP_VERSION = '1.3.1';
@@ -34,6 +36,7 @@ export interface AppOptions {
   staticRoot?: string;
   disableStatic?: boolean;
   sessionSecret?: string;
+  desktopAgent?: DesktopAgent;
   profileDirectory?: string;
   /** Test seams for device sync (fetch, Google endpoints, clock); defaults use real Google. */
   deviceSync?: Partial<DeviceSyncOptions>;
@@ -76,6 +79,10 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   if (options.sessionSecret) {
     const requiredSecret = options.sessionSecret;
     app.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
+      if (options.desktopAgent && request.method === 'POST' && request.url.split('?')[0] === DESKTOP_AGENT_PATH) {
+        if (!request.headers.origin && options.desktopAgent.authenticate(request.headers[DESKTOP_AGENT_HEADER])) return;
+        return reply.code(401).send({ error: 'UNAUTHORIZED_AGENT', message: 'Invalid or missing desktop agent token.' });
+      }
       // The system browser delivers the OAuth redirect without the session header; that route
       // only accepts a single-use state created by an authenticated connect request.
       if (request.method === 'GET' && request.url.split('?')[0] === GOOGLE_CALLBACK_PATH) return;
@@ -144,6 +151,9 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     activeProgressPreviews,
     deviceSync,
   });
+  if (options.desktopAgent && options.sessionSecret) {
+    registerDesktopAgentRoutes(app, options.desktopAgent, store, writeLock, () => planningService.clearTransientState());
+  }
 
   // Static Assets Serving (Production Web UI)
   const defaultStaticRoot = path.resolve(import.meta.dirname, '../../web/dist');
