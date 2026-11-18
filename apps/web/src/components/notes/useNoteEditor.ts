@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import {
   api,
+  ApiError,
   type ProblemNoteSummary,
   type PracticeRecord,
   type NoteFormatResponse,
@@ -40,6 +41,7 @@ export type AiReview = {
 interface UseNoteEditorOptions {
   lang: Language;
   selectedId: string | null;
+  externalRevision?: number;
   /** Raw controlled prop; `boolean` wins over the resolved setting refs at save time. */
   controlledFormatOnSave: boolean | null | undefined;
   formatSetting: FormatOnSaveSetting;
@@ -48,6 +50,8 @@ interface UseNoteEditorOptions {
   setItems: Dispatch<SetStateAction<ProblemNoteSummary[]>>;
   setListRevision: Dispatch<SetStateAction<number>>;
 }
+
+interface NoteSnapshot { content: string; hash?: string }
 
 /**
  * Own the editor for the selected problem.
@@ -60,6 +64,7 @@ interface UseNoteEditorOptions {
 export function useNoteEditor({
   lang,
   selectedId,
+  externalRevision,
   controlledFormatOnSave,
   formatSetting,
   setSelectedSummary,
@@ -81,6 +86,14 @@ export function useNoteEditor({
     setNoteContentState(value);
   }, []);
   const [savedContent, setSavedContent] = useState('');
+  const savedSnapshot = useRef<NoteSnapshot>({ content: '' });
+  const [conflict, setConflict] = useState<NoteSnapshot | null>();
+  const seenExternalRevision = useRef(externalRevision);
+  const initialLoad = useRef(Promise.resolve());
+  const rememberSaved = useCallback((content: string, hash?: string) => {
+    savedSnapshot.current = { content, hash };
+    setSavedContent(content);
+  }, []);
   const [loadingNote, setLoadingNote] = useState(false);
   const [noteLoadError, setNoteLoadError] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
@@ -105,6 +118,7 @@ export function useNoteEditor({
     setFormatUndo(null);
     setAiReview(null);
     setFormatNotice('');
+    setConflict(undefined);
     aiSerial.current++;
     return () => { session.active = false; };
   }, [selectedId]);
@@ -219,7 +233,7 @@ export function useNoteEditor({
     if (!selectedId) {
       setSelectedSummary(null);
       setNoteContent('');
-      setSavedContent('');
+      rememberSaved('');
       setPractices([]);
       setNoteLoadError(false);
       return;
@@ -232,13 +246,14 @@ export function useNoteEditor({
     setNoteLoadError(false);
 
     // Fetch note content
-    api
+    const noteLoad = api
       .getNote(selectedId)
       .then((res) => {
         if (!active) return;
         const content = res.note?.content ?? '';
         setNoteContent(content);
-        setSavedContent(content);
+        rememberSaved(content, res.contentHash);
+        setConflict(undefined);
       })
       .catch(() => {
         if (active) {
@@ -251,7 +266,7 @@ export function useNoteEditor({
 
     // Fetch practice timeline
     setLoadingPractices(true);
-    api
+    const practiceLoad = api
       .getPracticeRecords({ questionFrontendId: selectedId, page: 1, limit: 100 })
       .then((res) => {
         if (!active) return;
@@ -263,11 +278,48 @@ export function useNoteEditor({
       .finally(() => {
         if (active) setLoadingPractices(false);
       });
+    initialLoad.current = Promise.all([noteLoad, practiceLoad]).then(() => {});
 
     return () => {
       active = false;
     };
-  }, [selectedId, retryRevision]);
+  }, [selectedId, retryRevision, rememberSaved, setNoteContent, setSelectedSummary]);
+
+  useEffect(() => {
+    if (seenExternalRevision.current === externalRevision) return;
+    seenExternalRevision.current = externalRevision;
+    if (!selectedId) return;
+    const session = editorSession.current;
+    const writeVersion = session.saveVersion;
+    let active = true;
+    // Finish the initial loads first so their responses cannot overwrite a newer refresh.
+    const refreshNote = async () => {
+      const { note, contentHash } = await api.getNote(selectedId);
+      if (!active || !session.active || session.saving || session.saveVersion !== writeVersion) return;
+      setNoteLoadError(false);
+      const content = note?.content ?? '';
+      if (savedSnapshot.current.content === content) {
+        setConflict(undefined);
+        return;
+      }
+      // A background read may reconcile a clean editor. A draft retains its own base until the user chooses.
+      if (draft.current.value === savedSnapshot.current.content || draft.current.value === content) {
+        if (draft.current.value !== content) setNoteContent(content);
+        rememberSaved(content, contentHash);
+        setConflict(undefined);
+      } else {
+        setConflict({ content, hash: contentHash });
+      }
+    };
+    const refreshPractices = async () => {
+      const result = await api.getPracticeRecords({ questionFrontendId: selectedId, page: 1, limit: 100 });
+      if (active && session.active) setPractices(result.items);
+    };
+    void initialLoad.current.then(async () => {
+      if (active) await Promise.allSettled([refreshNote(), refreshPractices()]);
+    });
+    return () => { active = false; };
+  }, [externalRevision, selectedId, rememberSaved, setNoteContent]);
 
   /** Retry through the cancellable loading effect rather than a separate unguarded request. */
   const handleRetryLoad = useCallback(() => {
@@ -278,12 +330,14 @@ export function useNoteEditor({
   const isModified = noteContent !== savedContent;
   const isBlank = noteContent.trim().length === 0;
   const hasMeaningful = hasMeaningfulNoteContent(noteContent);
-  const canSave =
+  const canSaveDraft =
     !loadingNote &&
     !savingNote &&
     !noteLoadError &&
     isModified &&
-    (isBlank ? savedContent.trim().length > 0 : hasMeaningful);
+    (isBlank ? (conflict?.content ?? savedContent).trim().length > 0 : hasMeaningful);
+  const canSave = canSaveDraft && conflict === undefined;
+  const canOverwrite = canSaveDraft && Boolean(conflict?.hash);
 
   // Phase 30: Unsaved note modifications check
   // A saved snapshot may switch safely, but newer edits made while saving still need protection.
@@ -310,9 +364,10 @@ export function useNoteEditor({
   }, [hasUnsavedChanges]);
 
   /** Persist one snapshot, serializing per-problem writes and ignoring responses from obsolete visits or superseded saves. */
-  async function handleSaveNote() {
+  async function saveNote(overwrite: boolean) {
     const session = editorSession.current;
-    if (!selectedId || !canSave || !session.active || session.saving) return;
+    if (!selectedId || !(overwrite ? canOverwrite : canSave) || !session.active || session.saving) return;
+    const expectedHash = overwrite ? conflict?.hash : savedSnapshot.current.hash;
     // Synchronous guard also blocks repeated shortcuts before React commits savingNote.
     session.saving = true;
     const saveVersion = ++session.saveVersion;
@@ -351,7 +406,9 @@ export function useNoteEditor({
         .catch(() => {})
         .then(async () => {
           if (!isLatestProblemSave()) return null;
-          return api.upsertNote(targetId, formatted.content);
+          return expectedHash === undefined
+            ? api.upsertNote(targetId, formatted.content)
+            : api.upsertNote(targetId, formatted.content, expectedHash);
         });
       problemSaveChain.current.set(
         targetId,
@@ -364,7 +421,8 @@ export function useNoteEditor({
       if (!result || !isLatestProblemSave()) return;
       const { note } = result;
       if (session.active) {
-        setSavedContent(note.content);
+        rememberSaved(note.content, result.contentHash);
+        setConflict(undefined);
         setSaveSuccess(true);
         if (formatted.status === 'skipped') setFormatNotice(t.notesFormatSkipped);
         if (formatted.status === 'formatted' && note.content === formatted.content && draft.current.revision === targetRevision) {
@@ -404,7 +462,15 @@ export function useNoteEditor({
       if (editorSession.current.active) setListRevision((current) => current + 1);
     } catch (err) {
       if (session.active && isLatestProblemSave()) {
-        setSaveError(localizeApiError(err, lang));
+        if (err instanceof ApiError && err.code === 'NOTE_CHANGED') {
+          setConflict(null);
+          const current = await api.getNote(targetId).catch(() => undefined);
+          if (current && session.active && isLatestProblemSave()) {
+            setConflict({ content: current.note?.content ?? '', hash: current.contentHash });
+          }
+        } else {
+          setSaveError(localizeApiError(err, lang));
+        }
       }
     } finally {
       session.saving = false;
@@ -413,6 +479,17 @@ export function useNoteEditor({
         setSavingNote(false);
       }
     }
+  }
+
+  function reloadSavedVersion() {
+    if (!conflict) {
+      handleRetryLoad();
+      return;
+    }
+    setNoteContent(conflict.content);
+    rememberSaved(conflict.content, conflict.hash);
+    setConflict(undefined);
+    setSaveError('');
   }
 
   return {
@@ -433,7 +510,11 @@ export function useNoteEditor({
     isBlank,
     canSave,
     hasUnsavedChanges,
-    handleSaveNote,
+    handleSaveNote: () => saveNote(false),
+    hasConflict: conflict !== undefined,
+    reloadSavedVersion,
+    canOverwrite,
+    keepMyDraft: () => saveNote(true),
     practices,
     loadingPractices,
     aiReview,

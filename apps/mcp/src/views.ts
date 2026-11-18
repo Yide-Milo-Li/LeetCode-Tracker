@@ -6,13 +6,7 @@ import type { KnowledgeProfileReport } from '../../../packages/contracts/src/kno
 import { hasMeaningfulNoteContent } from '../../../packages/contracts/src/notes.ts';
 import { isTimeZone, localDate } from '../../../packages/contracts/src/time.ts';
 
-/**
- * Schema v12 notes carry no revision, so saves compare a hash of the content
- * the model last read. The hash of '' stands for "no note yet".
- */
-export function contentHash(content: string): string {
-  return createHash('sha256').update(content, 'utf8').digest('hex').slice(0, 16);
-}
+export { contentHash } from '../../../packages/database/src/note-hash.ts';
 
 /**
  * empty: no note or only whitespace; stub: only the unedited template

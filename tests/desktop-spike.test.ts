@@ -63,6 +63,30 @@ test('A stdio client follows the desktop lease and can use only the opted-in wri
     assert.equal((await read.json() as { structuredContent: { error: string } }).structuredContent.error, 'INVALID_TOOL_ACCESS');
     assert.equal((await catalog()).structuredContent.insertCount, 1);
     assert.equal((await client.call('tracker_catalog_coverage')).structuredContent.totalProblems, 1);
+    const desktopHeaders = { 'content-type': 'application/json', 'x-desktop-session-token': sessionSecret };
+    const getStatus = async () => (await fetch(url('/api/v1/desktop-agent'), { headers: desktopHeaders })).json();
+    const getNote = async () => (await fetch(url('/api/v1/notes/1'), { headers: desktopHeaders })).json();
+    const beforeNote = await getNote() as { contentHash: string };
+    const saved = await client.call('tracker_save_notes', { notes: [
+      { frontendId: '1', content: 'Agent explanation', expectedContentHash: beforeNote.contentHash },
+    ] });
+    assert.equal(saved.structuredContent.applied, 1);
+    assert.equal((await getStatus() as { revision: number }).revision, 2);
+    const stale = await fetch(url('/api/v1/notes/1'), {
+      method: 'PUT', headers: desktopHeaders,
+      body: JSON.stringify({ content: 'Stale desktop draft', expectedContentHash: beforeNote.contentHash }),
+    });
+    assert.equal(stale.status, 409);
+    const current = await getNote() as { note: { content: string }; contentHash: string };
+    assert.equal(current.note.content, 'Agent explanation');
+    assert.equal((await fetch(url('/api/v1/notes/1'), {
+      method: 'PUT', headers: desktopHeaders,
+      body: JSON.stringify({ content: 'Reviewed desktop draft', expectedContentHash: current.contentHash }),
+    })).status, 200);
+    await client.call('tracker_save_notes', { notes: [
+      { frontendId: '1', content: 'Agent overwrite', expectedContentHash: current.contentHash },
+    ] }).then(result => assert.equal(result.structuredContent.error, 'NOTE_CHANGED'));
+    assert.equal((await getStatus() as { revision: number }).revision, 2, 'conflicts do not publish activity');
 
     assert.equal(await stopTestServer(server), 0);
     server = undefined;

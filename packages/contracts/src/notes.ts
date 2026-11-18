@@ -17,6 +17,7 @@ export type ProblemNote = z.infer<typeof problemNoteSchema>;
 /** Input payload for creating or updating a problem note. */
 export const upsertProblemNoteSchema = z.object({
   content: z.string().max(100000),
+  expectedContentHash: z.string().regex(/^[a-f0-9]{16}$/).optional(),
 }).strict();
 
 export type UpsertProblemNoteInput = z.infer<typeof upsertProblemNoteSchema>;

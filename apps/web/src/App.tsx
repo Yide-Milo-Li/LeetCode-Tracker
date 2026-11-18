@@ -70,6 +70,9 @@ function WorkspaceFallback({ label }: { label: string }) {
   );
 }
 import { useDailyPlan } from './hooks/useDailyPlan.ts';
+import { useDesktopAgent } from './hooks/useDesktopAgent.ts';
+import { activityLabel } from './desktop-agent-copy.ts';
+import type { DesktopAgentStatus } from '../../../packages/contracts/src/desktop-agent.ts';
 import { usePreferences } from './hooks/usePreferences.ts';
 import type { PracticeRecord } from './api.ts';
 import { localizeApiError } from './error-i18n.ts';
@@ -127,6 +130,17 @@ export function App() {
   const openPractice = useCallback((request: PracticeRequest) => setPracticeQueue((queue) => [...queue, request]), []);
   const reportPracticeOutcome = useCallback((outcome: PracticeOutcome) => setOutcomes((items) => [...items, outcome]), []);
   const plan = useDailyPlan(lang);
+  const [desktopAgentRevision, setDesktopAgentRevision] = useState(0);
+  const [dismissedActivity, dismissActivity] = useState('');
+  const applyAgentChange = useCallback((status: DesktopAgentStatus) => {
+    setRevision(value => value + 1);
+    setDesktopAgentRevision(value => value + 1);
+    setTimezone(status.timezone);
+    void plan.refresh();
+  }, [setTimezone, plan.refresh]);
+  const desktopAgent = useDesktopAgent(applyAgentChange);
+  const latestActivity = desktopAgent?.activity[0];
+  const activityId = latestActivity ? desktopAgent?.instance + ':' + latestActivity.revision : '';
   const current = useRef(view);
   const scrolls = useRef<Partial<Record<View, number>>>({});
   const priorTimezone = useRef<string | null>(null);
@@ -239,8 +253,8 @@ export function App() {
     [navigate],
   );
   const workspace = useMemo(
-    () => ({ revision, timezone, selectedNoteProblem, navigate, openRecords, notifyMutation, openPractice, reportPracticeOutcome }),
-    [revision, timezone, selectedNoteProblem, navigate, openRecords, notifyMutation, openPractice, reportPracticeOutcome],
+    () => ({ revision, desktopAgentRevision, timezone, selectedNoteProblem, navigate, openRecords, notifyMutation, openPractice, reportPracticeOutcome }),
+    [revision, desktopAgentRevision, timezone, selectedNoteProblem, navigate, openRecords, notifyMutation, openPractice, reportPracticeOutcome],
   );
   const zh = lang === 'zh';
   const error = errorCause ? localizeApiError(errorCause, lang) : '';
@@ -407,6 +421,12 @@ export function App() {
           </div>
         </aside>
         <main id="main-content" className="main-content" tabIndex={-1}>
+          {latestActivity && activityId !== dismissedActivity && (
+            <Feedback tone="info">
+              {activityLabel(latestActivity, lang)}{' '}
+              <button className="text-link" onClick={() => dismissActivity(activityId)}>{zh ? '关闭提示' : 'Dismiss'}</button>
+            </Feedback>
+          )}
           {outcomes.map((outcome, index) => (
             <Feedback key={index} tone={outcome.error ? 'error' : 'success'}>
               {outcome.error

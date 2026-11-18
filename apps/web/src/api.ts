@@ -4,6 +4,7 @@
  * progress snapshot management, Gemini-assisted text formatting, and user preferences.
  */
 import type { RecommendationFeedbackReason } from '../../../packages/contracts/src/recommendations.ts';
+import type { DesktopAgentStatus } from '../../../packages/contracts/src/desktop-agent.ts';
 import type {
   CatalogProblem,
   CatalogQueryInput,
@@ -473,14 +474,14 @@ export const notesApi = {
     return request<{ items: ProblemNoteSummary[]; total: number }>(`/notes${qs ? `?${qs}` : ''}`);
   },
 
-  getNote(frontendId: string, { signal }: ReadOptions = {}): Promise<{ note: ProblemNote | null }> {
-    return request<{ note: ProblemNote | null }>(`/notes/${encodeURIComponent(frontendId)}`, { signal });
+  getNote(frontendId: string, { signal }: ReadOptions = {}): Promise<{ note: ProblemNote | null; contentHash?: string }> {
+    return request(`/notes/${encodeURIComponent(frontendId)}`, { signal });
   },
 
-  upsertNote(frontendId: string, content: string): Promise<{ note: ProblemNote }> {
-    return request<{ note: ProblemNote }>(`/notes/${encodeURIComponent(frontendId)}`, {
+  upsertNote(frontendId: string, content: string, expectedContentHash?: string): Promise<{ note: ProblemNote; contentHash?: string }> {
+    return request(`/notes/${encodeURIComponent(frontendId)}`, {
       method: 'PUT',
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, expectedContentHash }),
     });
   },
 };
@@ -589,6 +590,7 @@ export const syncApi = {
 
 /** Unified API client instance aggregating all endpoint domains. */
 export const api = {
+  getDesktopAgentStatus: () => request<DesktopAgentStatus>('/desktop-agent'),
   ...catalogApi,
   ...settingsApi,
   ...practiceApi,

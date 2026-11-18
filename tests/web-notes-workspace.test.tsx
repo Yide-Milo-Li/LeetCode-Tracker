@@ -46,6 +46,7 @@ const { NotesWorkspace } = await import('../apps/web/src/components/NotesWorkspa
 const { QuickCopyButtons } = await import('../apps/web/src/components/QuickCopyButtons.tsx');
 const { QuickNoteDrawer } = await import('../apps/web/src/components/QuickNoteDrawer.tsx');
 const { TodayProblemRow } = await import('../apps/web/src/components/TodayProblemRow.tsx');
+const { WorkspaceContext } = await import('../apps/web/src/workspace.tsx');
 
 beforeEach(() => {
   mock.method(api, 'getSettings', async () => ({ language: 'en', theme: 'light', timezone: null, updatedAt: 0 }));
@@ -92,6 +93,36 @@ function noteEditor() {
 }
 
 describe('NotesWorkspace request ownership', () => {
+  it('keeps a dirty draft after an AI client update and overwrites only the version shown', async () => {
+    mockEditorProblems();
+    let remote = { note: editorNote('1', 'Original'), contentHash: 'original' };
+    mock.method(api, 'getNote', async () => remote);
+    const save = mock.method(api, 'upsertNote', async (id: string, content: string, expected?: string) => {
+      assert.equal(expected, remote.contentHash);
+      remote = { note: editorNote(id, content), contentHash: 'saved' };
+      return remote;
+    });
+    const view = (desktopAgentRevision: number) => (
+      <WorkspaceContext.Provider value={{ revision: 0, desktopAgentRevision, timezone: null, navigate() {}, openPractice() {}, notifyMutation() {} }}>
+        <NotesWorkspace lang="en" notesFormatOnSave={false} />
+      </WorkspaceContext.Provider>
+    );
+    let rerender!: ReturnType<typeof render>['rerender'];
+    await act(async () => { ({ rerender } = render(view(0))); });
+    remote = { note: editorNote('1', 'First AI note'), contentHash: 'first' };
+    await act(async () => { rerender(view(1)); });
+    assert.equal(noteEditor().value, 'First AI note', 'a clean editor takes the latest copy');
+    await act(async () => { fireEvent.change(noteEditor(), { target: { value: 'My draft' } }); });
+    remote = { note: editorNote('1', 'Second AI note'), contentHash: 'second' };
+    await act(async () => { rerender(view(2)); });
+    assert.equal(noteEditor().value, 'My draft');
+    assert.equal((screen.getByRole('button', { name: /save note/i }) as HTMLButtonElement).disabled, true);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Overwrite with my draft' })); });
+    assert.equal(save.mock.callCount(), 1);
+    assert.equal(remote.note.content, 'My draft');
+    assert.equal(screen.queryByRole('button', { name: 'Load saved version' }), null);
+  });
+
   for (const fails of [false, true]) {
     it(`ignores stale retry ${fails ? 'failure' : 'success'} after switching and editing another problem`, async () => {
       mockEditorProblems();

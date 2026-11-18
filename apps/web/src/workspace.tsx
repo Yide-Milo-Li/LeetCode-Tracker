@@ -47,6 +47,7 @@ export interface RecordsFilterRequest extends RecordsFilter {
 }
 export interface WorkspaceState {
   revision: number;
+  desktopAgentRevision?: number;
   timezone: string | null;
   selectedNoteProblem?: string | null;
   navigate: (view: View, targetId?: string) => void;

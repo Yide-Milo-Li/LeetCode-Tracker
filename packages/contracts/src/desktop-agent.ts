@@ -27,3 +27,18 @@ export const agentResultSchema = z.object({
   structuredContent: z.record(z.string(), z.unknown()).optional(),
 });
 export type AgentResult = z.infer<typeof agentResultSchema>;
+
+export interface DesktopAgentActivity {
+  revision: number;
+  tool: string;
+  at: string;
+  count?: number;
+}
+
+export interface DesktopAgentStatus {
+  enabled: boolean;
+  instance: string;
+  revision: number;
+  timezone: string | null;
+  activity: DesktopAgentActivity[];
+}

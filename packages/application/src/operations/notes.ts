@@ -12,8 +12,9 @@ import { applyAiLayout, MarkdownFormatError, prepareAiFormat } from '../../../ma
 import type { ApplicationContext } from '../context.ts';
 import { ApplicationError, fail } from '../errors.ts';
 import { LLMError } from '../types.ts';
+import { contentHash, NoteContentConflictError } from '../../../database/src/note-hash.ts';
 /** Create operations over the owning application's shared context. */
-export function createNotesOperations(context: ApplicationContext) {
+export function createNotesOperations(context: Pick<ApplicationContext, 'store' | 'writeLock' | 'gemini'>) {
   const { store, writeLock, gemini } = context;
   /** Report public provider metadata without exposing credentials. */
   const formatStatus = async () => {
@@ -64,7 +65,7 @@ export function createNotesOperations(context: ApplicationContext) {
       }
 
       const note = store.getProblemNote(frontendId.trim());
-      return { note };
+      return { note, contentHash: contentHash(note?.content ?? '') };
     };
 
   /** save: validates input and preserves existing business rules. */
@@ -84,10 +85,11 @@ export function createNotesOperations(context: ApplicationContext) {
 
       try {
         const note = await writeLock.run(() =>
-          store.upsertProblemNote(frontendId.trim(), parseRes.data.content)
+          store.upsertProblemNote(frontendId.trim(), parseRes.data.content, parseRes.data.expectedContentHash)
         );
-        return { note };
+        return { note, contentHash: contentHash(note.content) };
       } catch (err) {
+        if (err instanceof NoteContentConflictError) return fail(409, { error: 'NOTE_CHANGED', message: err.message });
         const message = err instanceof Error ? err.message : String(err);
         return fail(404, { error: 'NOTE_SAVE_FAILED', message });
       }

@@ -267,7 +267,6 @@ export function registerNoteTools({ register }: Registrar): void {
     async (application, { frontendId, heading, mode, content, expectedContentHash, level, startFromTemplate }) => {
       const problem = await requireProblem(application, frontendId);
       const id = problem.questionFrontendId;
-      // The write lease is held for this whole call, so nothing can change between this check and the save.
       const current = await currentNote(application, id);
       assertHash(id, current, expectedContentHash);
       const base = !current.trim() && startFromTemplate ? NOTE_TEMPLATES[startFromTemplate] : current;
@@ -280,7 +279,7 @@ export function registerNoteTools({ register }: Registrar): void {
       }
       if (patched.content.length > 100000) return refuse('NOTE_TOO_LARGE', 'The patched note would exceed 100000 characters.');
       if (patched.content === current) return json({ status: 'unchanged', frontendId: id, contentHash: contentHash(current) });
-      const { note } = await application.notes.save({ content: patched.content }, { frontendId: id });
+      const { note } = await application.notes.save({ content: patched.content, expectedContentHash }, { frontendId: id });
       return json({
         status: 'applied',
         frontendId: id,

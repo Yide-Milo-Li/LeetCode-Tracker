@@ -4,7 +4,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
   problemNoteListQuerySchema,
-  upsertProblemNoteSchema,
   noteFormatRequestSchema,
   noteLayoutSchema,
 } from '../../../../packages/contracts/src/notes.ts';
@@ -12,8 +11,12 @@ import { applyAiLayout, MarkdownFormatError, prepareAiFormat } from '../../../..
 import { LLMError } from '../llm/types.ts';
 import type { RouteContext } from './types.ts';
 
+import { ApplicationError } from '../../../../packages/application/src/errors.ts';
+import { createNotesOperations } from '../../../../packages/application/src/operations/notes.ts';
+
 export function registerNotesRoutes(app: FastifyInstance, context: RouteContext): void {
-  const { store, writeLock, gemini } = context;
+  const { store, gemini } = context;
+  const notes = createNotesOperations(context);
 
   /** Report only public provider metadata, including environment-supplied configuration. */
   app.get('/api/v1/notes/format/status', async (_request, reply) => {
@@ -57,46 +60,16 @@ export function registerNotesRoutes(app: FastifyInstance, context: RouteContext)
     return reply.status(200).send(result);
   });
 
-  /** GET /api/v1/notes/:frontendId: Retrieve a problem's long-form note */
-  app.get(
-    '/api/v1/notes/:frontendId',
+  const noteRoute = (save: boolean) =>
     async (request: FastifyRequest<{ Params: { frontendId: string } }>, reply: FastifyReply) => {
-      const frontendId = request.params.frontendId;
-      if (!frontendId?.trim()) {
-        return reply.status(400).send({ error: 'MISSING_FRONTEND_ID', message: 'frontendId is required' });
-      }
-
-      const note = store.getProblemNote(frontendId.trim());
-      return reply.status(200).send({ note });
-    }
-  );
-
-  /** PUT /api/v1/notes/:frontendId: Create or update a problem's long-form note */
-  app.put(
-    '/api/v1/notes/:frontendId',
-    async (request: FastifyRequest<{ Params: { frontendId: string } }>, reply: FastifyReply) => {
-      const frontendId = request.params.frontendId;
-      if (!frontendId?.trim()) {
-        return reply.status(400).send({ error: 'MISSING_FRONTEND_ID', message: 'frontendId is required' });
-      }
-
-      const parseRes = upsertProblemNoteSchema.safeParse(request.body);
-      if (!parseRes.success) {
-        return reply.status(400).send({
-          error: 'INVALID_NOTE_PAYLOAD',
-          message: parseRes.error.issues.map((i) => i.message).join('; '),
-        });
-      }
-
       try {
-        const note = await writeLock.run(() =>
-          store.upsertProblemNote(frontendId.trim(), parseRes.data.content)
-        );
-        return reply.status(200).send({ note });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return reply.status(404).send({ error: 'NOTE_SAVE_FAILED', message });
+        const result = await (save ? notes.save(request.body, request.params) : notes.read({}, request.params));
+        return reply.send(result);
+      } catch (error) {
+        if (error instanceof ApplicationError) return reply.code(error.status).send(error.details);
+        throw error;
       }
-    }
-  );
+    };
+  app.get('/api/v1/notes/:frontendId', noteRoute(false));
+  app.put('/api/v1/notes/:frontendId', noteRoute(true));
 }

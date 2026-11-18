@@ -4,6 +4,7 @@
  * Pure offline persistence: zero network I/O, local storage only.
  * Coordinates modular query, migration, import, and planning delegates.
  */
+import { contentHash, NoteContentConflictError } from './note-hash.ts';
 import { DatabaseSync } from 'node:sqlite';
 import type {
   CatalogProblem,
@@ -688,8 +689,12 @@ export class CatalogStore {
   }
 
   /** Create or update a problem's long-form note atomically. */
-  public upsertProblemNote(questionFrontendId: string, content: string): ProblemNote {
-    return upsertProblemNote(this.db, questionFrontendId, content);
+  public upsertProblemNote(questionFrontendId: string, content: string, expectedContentHash?: string): ProblemNote {
+    if (expectedContentHash === undefined) return upsertProblemNote(this.db, questionFrontendId, content);
+    const [note] = upsertProblemNotesTransaction(this.db, [{ questionFrontendId, content }], current => {
+      if (contentHash(current.get(questionFrontendId) ?? '') !== expectedContentHash) throw new NoteContentConflictError();
+    });
+    return note;
   }
 
   /**
