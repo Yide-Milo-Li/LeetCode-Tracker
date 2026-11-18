@@ -29,6 +29,10 @@ const SYNC_ERROR_COPY: Record<string, { en: string; zh: string }> = {
   SYNC_GOOGLE_CLIENT_REQUIRED: { en: 'Enter your Google OAuth client ID first.', zh: '请先填写 Google OAuth 客户端 ID。' },
 };
 
+// Match the loopback authorization window and check promptly when returning from the browser.
+const GOOGLE_AUTH_TIMEOUT_MS = 10 * 60 * 1000;
+const GOOGLE_AUTH_CHECK_MS = 3_000;
+
 /**
  * Load sync status the first time `active` turns true (the Data tab opens) and expose the actions
  * behind the sync panel.
@@ -50,6 +54,7 @@ export function useDeviceSync(lang: Language, active: boolean) {
   const [deviceNameDraft, setDeviceNameDraft] = useState('');
   const [clientIdDraft, setClientIdDraft] = useState('');
   const [clientSecretDraft, setClientSecretDraft] = useState('');
+  const [googleAuthDeadline, setGoogleAuthDeadline] = useState<number | null>(null);
   /** One publish intent keeps its operation ID until a response confirms the result. */
   const publishOperation = useRef<{ key: string; id: string } | null>(null);
 
@@ -109,6 +114,53 @@ export function useDeviceSync(lang: Language, active: boolean) {
     return () => { current = false; };
   }, [active]);
 
+  const check = useCallback(async () => {
+    const next = await run('check', () => api.checkSync(), zh ? '检查同步失败。' : 'Sync check failed.');
+    if (next) applyStatus(next);
+  }, [applyStatus, run, zh]);
+
+  useEffect(() => {
+    if (!active || busy || googleAuthDeadline === null) return;
+    const deadline = googleAuthDeadline;
+    let cancelled = false;
+    let reading = false;
+
+    async function refreshGoogleStatus() {
+      if (reading || document.visibilityState === 'hidden') return;
+      reading = true;
+      try {
+        const next = await api.getSyncStatus();
+        if (cancelled) return;
+        if (next.transport === 'gdrive' && next.google.connected && !next.google.reconnectRequired) {
+          applyStatus(next);
+          setGoogleAuthDeadline(null);
+          void check();
+          return;
+        }
+      } catch {
+        // A transient local status read can be retried while authorization is pending.
+      } finally {
+        reading = false;
+      }
+      if (!cancelled && Date.now() >= deadline) {
+        setGoogleAuthDeadline(null);
+        setNotice(zh ? 'Google 授权未完成，请重新连接。' : 'Google sign-in did not finish. Connect again to retry.');
+      }
+    }
+
+    const refresh = () => void refreshGoogleStatus();
+    const timer = window.setInterval(refresh, GOOGLE_AUTH_CHECK_MS);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    refresh();
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [active, applyStatus, busy, check, googleAuthDeadline, zh]);
+
   async function saveConfig() {
     const next = await run('config', () => api.configureSync({
       transport: transportDraft,
@@ -121,6 +173,7 @@ export function useDeviceSync(lang: Language, active: boolean) {
     setClientSecretDraft('');
     setClientIdDraft('');
     applyStatus(next, true);
+    if (next.transport !== 'gdrive') setGoogleAuthDeadline(null);
     setPreview(null);
     setHistory(null);
     if (next.configured) await check();
@@ -130,11 +183,6 @@ export function useDeviceSync(lang: Language, active: boolean) {
   async function chooseFolder() {
     const folder = await pickFolder().catch(() => null);
     if (folder) setFolderDraft(folder);
-  }
-
-  async function check() {
-    const next = await run('check', () => api.checkSync(), zh ? '检查同步失败。' : 'Sync check failed.');
-    if (next) applyStatus(next);
   }
 
   async function publish(allowFork = false) {
@@ -186,9 +234,10 @@ export function useDeviceSync(lang: Language, active: boolean) {
   }
 
   async function connectGoogle() {
-    const result = await run('connect', async () => {
-      // Persist a newly typed client before asking the server for a consent URL.
-      if (clientIdDraft.trim() || clientSecretDraft.trim()) {
+    setGoogleAuthDeadline(null);
+    const deadline = await run('connect', async () => {
+      // Activate the transport and persist any newly typed client before starting OAuth.
+      if (status?.transport !== 'gdrive' || clientIdDraft.trim() || clientSecretDraft.trim()) {
         applyStatus(await api.configureSync({
           transport: 'gdrive',
           ...(clientIdDraft.trim() ? { googleClientId: clientIdDraft.trim() } : {}),
@@ -197,11 +246,15 @@ export function useDeviceSync(lang: Language, active: boolean) {
         setClientIdDraft('');
         setClientSecretDraft('');
       }
+      const deadline = Date.now() + GOOGLE_AUTH_TIMEOUT_MS;
       const { authUrl } = await api.connectGoogleDrive();
       await openExternalUrl(authUrl);
-      return true;
+      return deadline;
     }, zh ? '无法开始 Google 授权。' : 'Could not start Google authorization.');
-    if (result) setNotice(zh ? '已在浏览器中打开 Google 授权。完成后点击“检查更新”。' : 'Google sign-in opened in your browser. Click "Check" when done.');
+    if (deadline !== undefined) {
+      setGoogleAuthDeadline(deadline);
+      setNotice(zh ? '请在浏览器中完成 Google 授权。连接状态会自动更新。' : 'Finish signing in to Google in your browser. This panel will update automatically.');
+    }
   }
 
   async function disconnectGoogle() {

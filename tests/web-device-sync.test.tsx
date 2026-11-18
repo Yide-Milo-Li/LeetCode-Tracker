@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 
 // Install the DOM before React DOM loads so its event handling uses the browser path.
-const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/' });
+const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/', pretendToBeVisual: true });
 Object.assign(globalThis, {
   window: dom.window,
   document: dom.window.document,
@@ -101,6 +101,40 @@ it('saves a sync folder and checks the remote right away', async () => {
   assert.equal(check.mock.callCount(), 1);
   assert.ok(screen.getByText(/Nothing published yet/));
   assert.ok(screen.getByRole('button', { name: /Publish this device/ }));
+});
+
+it('refreshes Google Drive when returning to the app after consent', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'] });
+  stubSettings();
+  const pending = status({
+    transport: 'gdrive', configured: false, classification: null, heads: [],
+    google: { clientConfigured: true, connected: false, reconnectRequired: false },
+  });
+  const connected = { ...pending, configured: true, google: { ...pending.google, connected: true } };
+  let consentComplete = false;
+  mock.method(api, 'getSyncStatus', async () => consentComplete ? connected : pending);
+  mock.method(api, 'connectGoogleDrive', async () => ({ authUrl: 'https://accounts.google.com/o/oauth2/v2/auth' }));
+  mock.method(window, 'open', () => null);
+  const check = mock.method(api, 'checkSync', async () => ({ ...connected, classification: 'empty-remote' as const }));
+
+  await renderData();
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Connect Google Drive' })); });
+  assert.ok(screen.getByText(/This panel will update automatically/));
+  assert.equal(screen.queryByRole('button', { name: 'Check' }), null);
+  assert.equal(check.mock.callCount(), 0);
+  fireEvent.change(screen.getByLabelText(/This device’s name/), { target: { value: 'Edited name' } });
+
+  consentComplete = true;
+  // Consent finished in time, but the user stayed in the browser past the authorization window.
+  t.mock.timers.tick(10 * 60 * 1000 + 1);
+  await act(async () => { fireEvent.focus(window); });
+  assert.ok(screen.getByText('Google Drive connected'));
+  assert.ok(screen.getByRole('button', { name: 'Check' }));
+  assert.ok(screen.getByText(/Nothing published yet/));
+  assert.equal(screen.queryByText(/This panel will update automatically/), null);
+  assert.equal((screen.getByLabelText(/This device’s name/) as HTMLInputElement).value, 'Edited name');
+  await act(async () => { fireEvent.focus(window); });
+  assert.equal(check.mock.callCount(), 1);
 });
 
 it('retries a failed publish with the same operation ID', async () => {
