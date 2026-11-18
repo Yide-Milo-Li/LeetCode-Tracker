@@ -53,6 +53,7 @@ import {
   fallbackOverridePrompt,
 } from './fallbacks.ts';
 import type { ModelService } from './types.ts';
+import { AsyncLock } from './locks.ts';
 
 const ZH_DIFFICULTY: Record<Difficulty, string> = { Easy: '简单', Medium: '中等', Hard: '困难' };
 
@@ -60,6 +61,7 @@ export class PlanningService {
   private readonly store: CatalogStore;
   private readonly planning: PlanningStore;
   private readonly gemini?: ModelService;
+  private readonly writeLock: AsyncLock;
   private readonly pendingEnsures = new Map<string, Promise<EnsureResult>>();
   private readonly timeoutMs: number;
   private readonly activeOverridePreviews = new Map<string, OverridePreview>();
@@ -81,10 +83,11 @@ export class PlanningService {
     this.pendingEnsures.clear();
   }
 
-  constructor(store: CatalogStore, gemini?: ModelService, timeoutMs = 60000, diagnosticSink?: DiagnosticSink) {
+  constructor(store: CatalogStore, gemini?: ModelService, timeoutMs = 60000, diagnosticSink?: DiagnosticSink, writeLock = new AsyncLock()) {
     this.timeoutMs = Math.min(timeoutMs, 60000);
     this.diagnosticSink = diagnosticSink;
     this.store = store;
+    this.writeLock = writeLock;
     this.planning = store.planning;
     this.gemini = gemini;
   }
@@ -217,6 +220,11 @@ export class PlanningService {
     this.pendingEnsures.set(key, generation);
     try { return await generation; }
     finally { if (this.pendingEnsures.get(key) === generation) this.pendingEnsures.delete(key); }
+  }
+
+  /** Serialize the commit with desktop writes after any provider work has completed. */
+  private commitPlan(...args: Parameters<PlanningStore['commit']>) {
+    return this.writeLock.run(() => this.planning.commit(...args));
   }
 
   /** Share evidence and committed budget history across every selection path. */
@@ -411,7 +419,7 @@ export class PlanningService {
     if (this.transientEpoch !== epoch) {
       throw new PlanningError('STALE_DATA', 'Profile changed while the daily plan was being generated; retry', 409);
     }
-    const committed = await this.planning.commit(
+    const committed = await this.commitPlan(
       this.withTimeEstimate(plan),
       stamp,
       null,
@@ -566,7 +574,7 @@ export class PlanningService {
       ...(options.feedbackReason ? { feedback: [...(plan.feedback ?? []), ...itemsToReplace.filter(i => !updatedItems.includes(i)).map(i => ({ questionId: i.problem.questionId, action: 'replace' as const, reason: options.feedbackReason!, recordedAt: now }))] } : {}),
     };
 
-    return this.planning.commit(
+    return this.commitPlan(
       this.withTimeEstimate(newPlan),
       stamp,
       plan.version,
@@ -712,7 +720,7 @@ export class PlanningService {
       planningRevision: stamp.planning,
     };
 
-    return this.planning.commit(
+    return this.commitPlan(
       this.withTimeEstimate(newPlan),
       stamp,
       plan.version,
@@ -823,7 +831,7 @@ export class PlanningService {
       planningRevision: stamp.planning,
     };
 
-    return this.planning.commit(
+    return this.commitPlan(
       this.withTimeEstimate(newPlan),
       stamp,
       plan.version,
@@ -1166,7 +1174,7 @@ export class PlanningService {
       throw new PlanningError('PREVIEW_EXPIRED', 'Calendar date changed; preview again', 400);
 
     if (basePlan && preview.changed.length === 0) {
-      const committed = await this.planning.commit(
+      const committed = await this.commitPlan(
         basePlan,
         preview.revision,
         options.expectedVersion,
@@ -1276,7 +1284,7 @@ export class PlanningService {
       };
     }
 
-    const committed = await this.planning.commit(
+    const committed = await this.commitPlan(
       this.withTimeEstimate(planToCommit),
       preview.revision,
       options.expectedVersion,

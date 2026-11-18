@@ -36,3 +36,10 @@ export interface ApplicationContext {
   activeProgressPreviews: Map<string, ActiveProgressPreview>;
   refreshModelConfiguration: () => void | Promise<void>;
 }
+
+/** Discard state derived from a profile before its snapshot was replaced. */
+export function resetTransientState(context: ApplicationContext): void {
+  context.activePreviews.clear();
+  context.activeProgressPreviews.clear();
+  context.planningService.clearTransientState();
+}

@@ -5,13 +5,13 @@ import { readLiveDatabaseLease } from '../../../packages/database/src/lease.ts';
 import {
   agentCallSchema, DESKTOP_AGENT_HEADER, DESKTOP_AGENT_PATH, DESKTOP_AGENT_PROTOCOL,
   MAX_AGENT_REQUEST_BYTES, type AgentEndpoint, type AgentResult,
-  type DesktopAgentStatus, type DesktopAgentActivity, type DesktopMcpLaunch,
+  type DesktopAgentStatus, type DesktopAgentActivity, type DesktopMcpLaunch, type AgentWriteWarning,
 } from '../../../packages/contracts/src/desktop-agent.ts';
 import { createTrackerToolRegistry } from '../../mcp/src/tools.ts';
 import { toolError } from '../../mcp/src/registrar.ts';
 import { ProfileError } from '../../mcp/src/profile-error.ts';
-import { localModelService, type ProfileLocation } from '../../mcp/src/profile.ts';
-import { createTrackerApplication } from '../../../packages/application/src/application.ts';
+import type { ProfileLocation } from '../../mcp/src/profile.ts';
+import type { TrackerApplication } from '../../../packages/application/src/application.ts';
 import type { AsyncLock } from '../../../packages/application/src/locks.ts';
 import type { CatalogStore } from '../../../packages/database/src/store.ts';
 
@@ -100,13 +100,15 @@ export class DesktopAgent {
 export function registerDesktopAgentRoutes(
   app: FastifyInstance,
   agent: DesktopAgent,
-  store: CatalogStore,
-  writeLock: AsyncLock,
-  invalidateRecommendations: () => void,
+  { store, writeLock, application, invalidateRecommendations, remoteWarning }: {
+    store: CatalogStore;
+    writeLock: AsyncLock;
+    application: TrackerApplication;
+    invalidateRecommendations: () => void;
+    remoteWarning: () => AgentWriteWarning | undefined;
+  },
 ): void {
   const registry = createTrackerToolRegistry({ location: agent.location, exists: () => true });
-  const application = createTrackerApplication({ store, modelService: localModelService, writeLock });
-  app.addHook('onClose', () => application.close());
 
   const status = () => agent.status(store.getSettings().timezone);
   app.get('/api/v1/desktop-agent', async () => status());
@@ -132,8 +134,9 @@ export function registerDesktopAgentRoutes(
           return toolError(new ProfileError('PROFILE_IN_USE', 'AI client writes are disabled in desktop Settings.'));
         }
         const before = agentDataRevision(store);
+        const warning = remoteWarning();
         let result: AgentResult | undefined;
-        try { return result = await tool.invoke(application, args); }
+        try { result = await tool.invoke(application, args); }
         finally {
           const info = result?.isError ? undefined : result?.structuredContent;
           const noteChanged = (name === 'tracker_patch_note' || name === 'tracker_save_notes') && info?.status === 'applied';
@@ -148,6 +151,12 @@ export function registerDesktopAgentRoutes(
             invalidateRecommendations();
           }
         }
+        if (!warning) return result;
+        const structuredContent = { ...result.structuredContent, warnings: [warning] };
+        const content = result.isError
+          ? [...result.content, { type: 'text' as const, text: warning.message }]
+          : [{ type: 'text' as const, text: JSON.stringify(structuredContent) }];
+        return { ...result, content, structuredContent };
       });
     } catch (error) { return toolError(error); }
   });

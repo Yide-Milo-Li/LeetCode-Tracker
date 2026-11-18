@@ -1,5 +1,5 @@
 /** One business state owner shared by HTTP, direct calls and experimental tools. */
-import type { ApplicationContext, ApplicationDependencies } from './context.ts';
+import { resetTransientState, type ApplicationContext, type ApplicationDependencies } from './context.ts';
 import { AsyncLock, OperationGate } from './locks.ts';
 import { PlanningService } from './planning.ts';
 import { createCatalogOperations } from './operations/catalog.ts';
@@ -24,10 +24,11 @@ function protect<T extends Record<string, (...args: never[]) => unknown>>(operat
 /** Uses an already opened Store; database ownership stays with the runtime/caller. */
 export function createTrackerApplication(dependencies: ApplicationDependencies) {
   const gate = new OperationGate();
+  const writeLock = dependencies.writeLock ?? new AsyncLock();
   const context: ApplicationContext = {
     store: dependencies.store, gemini: dependencies.modelService,
-    writeLock: dependencies.writeLock ?? new AsyncLock(),
-    planningService: new PlanningService(dependencies.store, dependencies.modelService, 60000, dependencies.diagnosticSink),
+    writeLock,
+    planningService: new PlanningService(dependencies.store, dependencies.modelService, 60000, dependencies.diagnosticSink, writeLock),
     activePreviews: new Map(), activeProgressPreviews: new Map(),
     refreshModelConfiguration: dependencies.refreshModelConfiguration ?? (() => {}),
   };
@@ -43,6 +44,8 @@ export function createTrackerApplication(dependencies: ApplicationDependencies) 
     settings: protect(createSettingsOperations(context), gate),
     mastery: protect(createMasteryOperations(context), gate),
     knowledgeProfile: protect(createKnowledgeProfileOperations(context), gate),
+    resetTransientState: () => resetTransientState(context),
+    invalidateRecommendations: () => context.planningService.clearTransientState(),
     isBusy: () => gate.isBusy(),
     assertAvailable: (restore = false) => gate.assertAvailable(restore),
     close: () => gate.drain(),

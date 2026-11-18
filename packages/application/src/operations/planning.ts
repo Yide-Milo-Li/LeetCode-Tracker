@@ -109,7 +109,7 @@ export function createPlanningOperations(context: ApplicationContext) {
       return fail(400, { error: 'INVALID_INPUT', issues: parsed.error.issues });
     }
     try {
-      const updated = await writeLock.run(() => planningService.replacePlanItems(id, parsed.data));
+      const updated = await writeLock.runGroup(() => planningService.replacePlanItems(id, parsed.data));
       return updated;
     } catch (err) {
       if (err instanceof PlanningError) return fail(err.status, { error: err.code, message: err.message });
@@ -125,7 +125,7 @@ export function createPlanningOperations(context: ApplicationContext) {
       return fail(400, { error: 'INVALID_INPUT', issues: parsed.error.issues });
     }
     try {
-      const updated = await writeLock.run(() => planningService.appendPlanItem(id, parsed.data));
+      const updated = await writeLock.runGroup(() => planningService.appendPlanItem(id, parsed.data));
       return updated;
     } catch (err) {
       if (err instanceof PlanningError) return fail(err.status, { error: err.code, message: err.message });
@@ -141,7 +141,7 @@ export function createPlanningOperations(context: ApplicationContext) {
       return fail(400, { error: 'INVALID_INPUT', issues: parsed.error.issues });
     }
     try {
-      const updated = await writeLock.run(() => planningService.removePlanItem(id, parsed.data));
+      const updated = await writeLock.runGroup(() => planningService.removePlanItem(id, parsed.data));
       return updated;
     } catch (err) {
       if (err instanceof PlanningError) return fail(err.status, { error: err.code, message: err.message });
@@ -197,7 +197,7 @@ export function createPlanningOperations(context: ApplicationContext) {
     }).safeParse(input);
     if (!parsed.success) return fail(400, { error: 'INVALID_INPUT', issues: parsed.error.issues });
     try {
-      return await writeLock.run(() => planningService.applyDailyPlanRules(parsed.data));
+      return await writeLock.runGroup(() => planningService.applyDailyPlanRules(parsed.data));
     } catch (err) {
       if (err instanceof PlanningError) return fail(err.status, { error: err.code, message: err.message });
       return fail(500, { error: 'INTERNAL_ERROR', message: err instanceof Error ? err.message : String(err) });

@@ -203,6 +203,18 @@ export class DeviceSyncService {
     };
   }
 
+  /** Advisory from the last listing. Bridge writes never contact the sync transport. */
+  agentWriteWarning(): import('../../../../packages/contracts/src/desktop-agent.ts').AgentWriteWarning | undefined {
+    if (!this.listing) return;
+    const { classification } = classifySyncState(this.listing.snapshots, this.setting(K.baseSnapshotId), false);
+    if (classification === 'remote-ahead') {
+      return { code: 'SYNC_REMOTE_AHEAD', message: 'Device sync has a newer snapshot. Review it under Settings → Data → Device sync before making more changes.' };
+    }
+    if (classification === 'fork') {
+      return { code: 'SYNC_FORK', message: 'Device sync found divergent snapshots. Review the available versions in Settings → Data → Device sync.' };
+    }
+  }
+
   /**
    * Update transport, folder, device name or OAuth client. Changing the transport or folder drops
    * cached listings and previews; changing the OAuth client forgets the stored refresh token.

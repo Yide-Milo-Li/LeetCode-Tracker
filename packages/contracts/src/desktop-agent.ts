@@ -28,6 +28,8 @@ export const agentResultSchema = z.object({
 });
 export type AgentResult = z.infer<typeof agentResultSchema>;
 
+export interface AgentWriteWarning { code: 'SYNC_REMOTE_AHEAD' | 'SYNC_FORK'; message: string }
+
 export interface DesktopAgentActivity {
   revision: number;
   tool: string;

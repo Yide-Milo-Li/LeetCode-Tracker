@@ -15,6 +15,9 @@ import { computeContentHash, writeSyncSettings, readSyncSetting } from '../packa
 import { classifySyncState, findHeads, type SyncGraphNode } from '../packages/domain/src/device-sync.ts';
 import { buildApp } from '../apps/server/src/app.ts';
 import { isSyncBlobName } from '../apps/server/src/sync/blob-store.ts';
+import { DesktopAgent } from '../apps/server/src/desktop-agent.ts';
+import { acquireDatabaseLease } from '../packages/database/src/lease.ts';
+import { DESKTOP_AGENT_HEADER, DESKTOP_AGENT_PATH } from '../packages/contracts/src/desktop-agent.ts';
 
 /** Isolated profile with real backups so receive exercises the safety-backup path. */
 async function profile(label: string) {
@@ -130,6 +133,64 @@ test('sync folder hands a profile to a second device and back, with acknowledgem
     assert.equal(a.store.getSettings().openaiApiKey, 'synthetic-source-secret', 'local credentials survive receive');
   } finally {
     await A.app.close(); await B.app.close(); a.close(); b.close(); rmSync(shared, { recursive: true, force: true });
+  }
+});
+
+test('desktop MCP writes report known remote changes and remain publishable local data', async () => {
+  const shared = mkdtempSync(join(tmpdir(), 'agent sync '));
+  const source = await profile('agent-source'), target = await profile('agent-target');
+  const remote = await device(source);
+  const dbPath = join(target.dir, 'tracker.sqlite');
+  const release = acquireDatabaseLease(dbPath);
+  const agent = new DesktopAgent({ dbPath, backupDir: join(target.dir, 'backups') });
+  const sessionSecret = 'synthetic-device-sync-session-secret';
+  const app = await buildApp({ store: target.store, disableStatic: true, sessionSecret, desktopAgent: agent });
+  const call = async (method: 'GET' | 'POST' | 'PUT', url: string, payload?: object) => {
+    const reply = await app.inject({ method, url, payload, headers: { 'x-desktop-session-token': sessionSecret } });
+    assert.equal(reply.statusCode, 200, reply.body);
+    return reply.json();
+  };
+  try {
+    await app.listen({ host: '127.0.0.1', port: 0 });
+    const address = app.server.address();
+    assert.ok(address && typeof address === 'object');
+    agent.start(address.port);
+    await seedMigrationProfile(source.store);
+    const config = { transport: 'folder', folderPath: shared };
+    assert.equal((await remote.call('PUT', '/api/v1/sync/config', config)).status, 200);
+    const published = await remote.call('POST', '/api/v1/sync/publish', {});
+    assert.equal(published.body.published, true);
+    await call('PUT', '/api/v1/sync/config', config);
+    await call('PUT', '/api/v1/desktop-agent', { enabled: true });
+    assert.equal((await call('POST', '/api/v1/sync/check')).classification, 'remote-ahead');
+    const { token } = JSON.parse(readFileSync(dbPath + '.agent.json', 'utf8'));
+    async function importProblem(id: string) {
+      const reply = await app.inject({
+        method: 'POST', url: DESKTOP_AGENT_PATH,
+        headers: { [DESKTOP_AGENT_HEADER]: token },
+        payload: {
+          version: 1, name: 'tracker_import_problems',
+          args: { problems: [{ id, title: 'Synthetic problem', difficulty: 'Easy' }] },
+        },
+      });
+      assert.equal(reply.statusCode, 200, reply.body);
+      const result = reply.json();
+      assert.deepEqual(JSON.parse(result.content[0].text), result.structuredContent);
+      return result.structuredContent;
+    }
+    const forwarded = await importProblem('991');
+    assert.equal(forwarded.insertCount, 1);
+    assert.equal(forwarded.warnings[0].code, 'SYNC_REMOTE_AHEAD');
+    assert.equal((await call('GET', '/api/v1/sync/status')).localDirty, true);
+    const { previewId } = await call('POST', '/api/v1/sync/receive/preview', { snapshotId: published.body.snapshot.snapshotId });
+    await call('POST', '/api/v1/sync/receive', { previewId, localChanges: 'discard' });
+    assert.equal((await importProblem('992')).warnings, undefined);
+    assert.equal((await call('POST', '/api/v1/sync/publish', {})).published, true);
+  } finally {
+    agent.stop();
+    await app.close(); await remote.app.close();
+    release(); source.close(); target.close();
+    rmSync(shared, { recursive: true, force: true });
   }
 });
 

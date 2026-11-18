@@ -14,16 +14,19 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import { spawn, type ChildProcess } from 'node:child_process';
 import * as readline from 'node:readline';
+import { createServer } from 'node:http';
+import { once } from 'node:events';
 import type { DailyPlan } from '../packages/contracts/src/recommendations.ts';
 import { StdioClient } from './fixtures/mcp-stdio-client.ts';
 import { DESKTOP_AGENT_HEADER, DESKTOP_AGENT_PATH } from '../packages/contracts/src/desktop-agent.ts';
 import { clientConfig } from '../apps/web/src/desktop-agent-copy.ts';
+import { acquireDatabaseLease } from '../packages/database/src/lease.ts';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
 const bundledServerPath = path.join(repoRoot, 'apps/server/dist/desktop-server.mjs');
 
 test('A stdio client follows the desktop lease and can use only the opted-in write bridge', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'desktop-agent-test-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'desktop agent 测试 '));
   const dbPath = path.join(dir, 'tracker.sqlite');
   const endpointPath = dbPath + '.agent.json';
   const sessionSecret = 'synthetic-desktop-session-token-agent-test';
@@ -68,7 +71,13 @@ test('A stdio client follows the desktop lease and can use only the opted-in wri
     assert.equal((await catalog()).structuredContent.error, 'PROFILE_IN_USE');
     assert.equal((await client.call('tracker_import_catalog', { path: fixture, dryRun: true })).structuredContent.insertCount, 1);
     assert.equal((await setEnabled(true)).status, 200);
-    const { token } = JSON.parse(fs.readFileSync(endpointPath, 'utf8'));
+    const endpoint = JSON.parse(fs.readFileSync(endpointPath, 'utf8'));
+    const { token } = endpoint;
+    fs.writeFileSync(endpointPath, JSON.stringify({ ...endpoint, leaseToken: 'a3d80f50-43ac-4bbe-8ff6-b6d967616e02' }));
+    assert.equal((await catalog()).structuredContent.error, 'PROFILE_IN_USE', 'stale discovery cannot route to the current process');
+    fs.writeFileSync(endpointPath, JSON.stringify({ ...endpoint, version: 999 }));
+    assert.equal((await catalog()).structuredContent.error, 'AGENT_VERSION_MISMATCH');
+    fs.writeFileSync(endpointPath, JSON.stringify(endpoint));
     const agentHeaders = { [DESKTOP_AGENT_HEADER]: token };
     assert.equal((await callAgent({ 'x-desktop-session-token': sessionSecret }, 'tracker_import_catalog', {})).status, 401);
     assert.equal((await callAgent({ ...agentHeaders, origin: 'http://localhost' }, 'tracker_import_catalog', {})).status, 401);
@@ -102,6 +111,18 @@ test('A stdio client follows the desktop lease and can use only the opted-in wri
     ] }).then(result => assert.equal(result.structuredContent.error, 'NOTE_CHANGED'));
     assert.equal((await getStatus() as { revision: number }).revision, 2, 'conflicts do not publish activity');
 
+    const strategy = await client.call('tracker_save_strategy', {
+      name: 'Desktop bridge strategy', weekdays: [0, 1, 2, 3, 4, 5, 6], dailyCount: 1,
+      difficultyCounts: { Easy: 1, Medium: 0, Hard: 0 }, review: { mode: 'none' },
+    });
+    assert.equal(strategy.structuredContent.status, 'applied');
+    const prepared = await client.call('tracker_create_today');
+    assert.equal(prepared.structuredContent.status, 'ready', JSON.stringify(prepared.structuredContent));
+    const plans = await fetch(url('/api/v1/daily-plans'), { headers: desktopHeaders });
+    assert.equal(plans.status, 200);
+    const { items } = await plans.json() as { items: DailyPlan[] };
+    assert.equal(items[0].id, prepared.structuredContent.plan.id);
+
     assert.equal(await stopTestServer(server), 0);
     server = undefined;
     assert.equal(fs.existsSync(endpointPath), false);
@@ -118,6 +139,41 @@ test('A stdio client follows the desktop lease and can use only the opted-in wri
   } finally {
     await client?.close();
     if (server) await stopTestServer(server);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('An interrupted desktop reply does not run the operation again after the lease is released', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'desktop-agent-lost-reply-'));
+  const dbPath = path.join(dir, 'tracker.sqlite');
+  const entry = path.join(repoRoot, 'apps/server/dist/mcp/leetcode-tracker-mcp.mjs');
+  const { client } = await StdioClient.start(entry, dbPath);
+  let release: (() => void) | undefined;
+  const dropping = createServer((request) => {
+    request.resume();
+    request.on('end', () => {
+      release?.();
+      request.socket.destroy();
+    });
+  });
+  try {
+    assert.equal((await client.call('tracker_set_timezone', { timezone: 'UTC' })).isError, undefined);
+    release = acquireDatabaseLease(dbPath);
+    const lease = JSON.parse(fs.readFileSync(dbPath + '.lock', 'utf8'));
+    dropping.listen(0, '127.0.0.1');
+    await once(dropping, 'listening');
+    const address = dropping.address();
+    assert.ok(address && typeof address === 'object');
+    fs.writeFileSync(dbPath + '.agent.json', JSON.stringify({
+      version: 1, pid: lease.pid, leaseToken: lease.token, port: address.port, token: 'a'.repeat(64),
+    }));
+    const result = await client.call('tracker_set_timezone', { timezone: 'Asia/Shanghai' });
+    assert.equal(result.structuredContent.error, 'AGENT_WRITE_UNCERTAIN');
+    assert.equal((await client.call('tracker_set_timezone', { timezone: 'UTC' })).structuredContent.status, 'unchanged');
+  } finally {
+    release?.();
+    await new Promise<void>(resolve => dropping.close(() => resolve()));
+    await client.close();
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });

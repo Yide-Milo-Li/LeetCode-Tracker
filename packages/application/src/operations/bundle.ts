@@ -3,7 +3,7 @@
  */
 import { snapshotBundleSchema } from '../../../contracts/src/notes.ts';
 import { validateMigrationBundle } from '../../../database/src/migration-bundle.ts';
-import type { ApplicationContext } from '../context.ts';
+import { resetTransientState, type ApplicationContext } from '../context.ts';
 import { fail, artifact } from '../errors.ts';
 /** Create operations over the owning application's shared context. */
 export function createBundleOperations(context: ApplicationContext) {
@@ -45,9 +45,7 @@ export function createBundleOperations(context: ApplicationContext) {
 
     try {
       const result = await writeLock.run(() => store.importSnapshotBundle(parseRes.data));
-      context.activePreviews.clear();
-      context.activeProgressPreviews.clear();
-      context.planningService.clearTransientState();
+      resetTransientState(context);
       let warning: string | undefined;
       try {
         await context.refreshModelConfiguration();

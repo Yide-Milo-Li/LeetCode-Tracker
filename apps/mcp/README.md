@@ -26,6 +26,8 @@ Choose Claude Code, Claude Desktop, or Codex in the same panel and copy the conf
 
 If a tool reports `AGENT_WRITE_UNCERTAIN`, read the affected data to check whether the change was applied before retrying. Reuse the original operation ID when the tool accepts one.
 
+Forwarded writes count as local changes for device sync. When the latest sync check found a newer or divergent snapshot, the write result includes a warning. Review the available snapshots in **Settings → Data → Device sync**.
+
 ## Getting started without the desktop app
 
 The quickest start is to let your MCP client's model fill the catalog from what it knows about LeetCode. Once the server is configured (see below), ask it in one sentence, for example "Set up my LeetCode tracker with the problems you know", or pick the `init_question_bank` prompt (in Claude Code: `/mcp__leetcode-tracker__init_question_bank`, optionally with a scope such as `NeetCode 150` or `problems 1-500`). The model checks `tracker_catalog_coverage`, sends problems with `tracker_import_problems` in batches of up to 200 in ascending ID order, and continues from the missing ranges each batch reports. The first batch creates the profile and sets the timezone from this machine.
