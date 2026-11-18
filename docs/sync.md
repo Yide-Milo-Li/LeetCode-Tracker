@@ -55,7 +55,7 @@ You provide your own OAuth client:
 1. In the [Google Cloud console](https://console.cloud.google.com/), create a project and enable the **Google Drive API**.
 2. Configure the OAuth consent screen (External), add yourself as a user, and set the publishing status to **In production**. In "Testing" status Google issues refresh tokens that expire after 7 days ([Google OAuth 2.0 documentation](https://developers.google.com/identity/protocols/oauth2)). Google shows an "unverified app" notice for your own client; that is expected.
 3. Create credentials → **OAuth client ID** → application type **Desktop app**. Google documents that the secret of an installed app is not treated as confidential.
-4. In the app: Settings → Data → Device sync → **Google Drive**, paste the client ID (and secret), then **Connect Google Drive**. Approve in the browser; the tab confirms when the app has stored access. Click **Check**.
+4. In the app: Settings → Data → Device sync → **Google Drive**, paste the client ID (and secret), then **Connect Google Drive**. Approve in the browser. When the tab confirms the connection, return to the app. It updates the connection status and checks for snapshots automatically.
 5. Repeat on every other computer with the same Google account. The same client ID can be reused.
 
 For source runs you can instead set `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` in `.env`; values saved in Settings take precedence.
