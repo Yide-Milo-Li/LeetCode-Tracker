@@ -16,7 +16,7 @@ import type { TrackerProfile } from './profile.ts';
 import { importCatalog, TIMEZONE_HINT } from './operations.ts';
 import { MCP_SERVER_VERSION } from './version.ts';
 import { createRegistrar, json, TOOL_NAMES, WRITE_TOOL_NAMES } from './registrar.ts';
-import { practiceView, summarizePlan } from './views.ts';
+import { practiceView, summarizePlan, weakTopicsView } from './views.ts';
 import { registerWriteTools } from './write-tools.ts';
 import { registerNoteTools } from './note-tools.ts';
 import { registerBatchTools } from './batch-tools.ts';
@@ -303,12 +303,13 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
   server.registerTool(
     'tracker_get_progress',
     {
-      description: 'Get comprehensive learning progress statistics, streak metrics, difficulty distribution, top tags, and activity trends.',
+      description: 'Get comprehensive learning progress statistics, streak metrics, difficulty distribution, top tags, and activity trends. Set weakTopics to also get the topics that need reinforcement over the last 30 days, with the evidence behind each (the same analysis the planner uses to pick focus problems).',
       inputSchema: z.object({
         year: z.number().int().min(2000).max(2100).optional().describe('Target calendar year for heatmap data (defaults to current year)'),
+        weakTopics: z.boolean().optional().default(false).describe('Include topics that need reinforcement (default false)'),
       }),
     },
-    async (application, { year }) => {
+    async (application, { year, weakTopics = false }) => {
       const settings = await application.settings.get();
       if (!settings.timezone || !isTimeZone(settings.timezone)) return { isError: true, content: [{ type: 'text', text: `TIMEZONE_REQUIRED: ${TIMEZONE_HINT}` }] };
       const dashboard = await application.dashboard.summary({ year });
@@ -326,6 +327,7 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
         yearlyActiveDaysCount: dashboard.yearlyActivity.days.length,
         recentActiveDays: dashboard.yearlyActivity.days.slice(-14),
         dataStatus: dashboard.dataStatus,
+        ...(weakTopics ? { weakTopics: weakTopicsView(await application.knowledgeProfile.report()) } : {}),
       };
 
       return {

@@ -2,6 +2,7 @@
 import { createHash } from 'node:crypto';
 import type { DailyPlan } from '../../../packages/contracts/src/recommendations.ts';
 import type { PracticeRecord } from '../../../packages/contracts/src/practice.ts';
+import type { KnowledgeProfileReport } from '../../../packages/contracts/src/knowledge-profile.ts';
 import { hasMeaningfulNoteContent } from '../../../packages/contracts/src/notes.ts';
 
 /**
@@ -73,5 +74,50 @@ export function practiceView(record: PracticeRecord) {
     outcome: record.outcome,
     status: record.status,
     revision: record.revision,
+  };
+}
+
+/**
+ * Topics the knowledge profile marks as needing reinforcement, with only the
+ * evidence a model needs to explain why: per weak difficulty, the outcome
+ * counts, durations and the rule that fired. Topics with the most assisted or
+ * unsolved attempts come first.
+ */
+export function weakTopicsView(report: KnowledgeProfileReport) {
+  const struggles = (topic: KnowledgeProfileReport['topics'][number]) => topic.reinforcementDifficulties
+    .reduce((sum, difficulty) => sum + topic.difficulties[difficulty].outcomeCounts.assisted + topic.difficulties[difficulty].outcomeCounts.unsolved, 0);
+  const evaluations = { needsReinforcement: 0, developing: 0, recentlyStable: 0 };
+  for (const topic of report.topics) {
+    if (topic.overallEvaluation === 'needs_reinforcement') evaluations.needsReinforcement++;
+    else if (topic.overallEvaluation === 'developing') evaluations.developing++;
+    else if (topic.overallEvaluation === 'recently_stable') evaluations.recentlyStable++;
+  }
+  return {
+    asOfDate: report.asOfDate,
+    windowDays: report.windowDays,
+    evaluations,
+    topics: report.topics
+      .filter(topic => topic.isWeak)
+      .sort((a, b) => struggles(b) - struggles(a) || a.tagName.localeCompare(b.tagName))
+      .map(topic => ({
+        tag: topic.tagName,
+        slug: topic.tagSlug,
+        solved: topic.solvedCount,
+        catalogProblems: topic.totalCatalogProblems,
+        lastPracticedAt: topic.lastPracticedAt,
+        daysSinceLastPractice: topic.daysSinceLastPractice,
+        difficulties: topic.reinforcementDifficulties.map(difficulty => {
+          const evidence = topic.difficulties[difficulty];
+          return {
+            difficulty,
+            reasons: evidence.reasons,
+            problems: evidence.distinctProblemCount,
+            practiceDays: evidence.practiceDaysCount,
+            outcomes: evidence.outcomeCounts,
+            avgDurationMinutes: evidence.avgDurationMinutes,
+            longDurationRate: evidence.longDurationRate,
+          };
+        }),
+      })),
   };
 }

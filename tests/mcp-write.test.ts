@@ -463,3 +463,33 @@ test('plan edits and rule changes require a client operationId', async () => {
     assert.equal((await client.call('tracker_get_today')).structuredContent.version, plan.version, 'nothing changed');
   } finally { await client.close(); p.cleanup(); }
 });
+
+test('progress lists weak topics with the evidence behind them', async () => {
+  const p = profileWithCatalog();
+  const { client } = await StdioClient.start(entry, p.dbPath);
+  try {
+    await client.call('tracker_import_problems', { problems: [31, 32, 33].map(id => ({ id, title: `Synthetic DP ${id}`, difficulty: 'Medium', tags: ['Dynamic Programming'] })) });
+    const now = Date.now();
+    const at = (daysAgo: number) => new Date(now - daysAgo * 86_400_000).toISOString();
+    await client.call('tracker_create_practices', { operationId: randomUUID(), records: [
+      { questionFrontendId: '31', completed: false, outcome: 'unsolved', practicedAt: at(2) },
+      { questionFrontendId: '32', completed: true, outcome: 'assisted', practicedAt: at(1) },
+      { questionFrontendId: '33', completed: false, outcome: 'unsolved', practicedAt: at(0) },
+      { questionFrontendId: '11', completed: true, outcome: 'independent', practicedAt: at(2) },
+      { questionFrontendId: '12', completed: true, outcome: 'independent', practicedAt: at(1) },
+      { questionFrontendId: '13', completed: true, outcome: 'independent', practicedAt: at(0) },
+    ] });
+
+    const plain = (await client.call('tracker_get_progress')).structuredContent;
+    assert.equal(plain.weakTopics, undefined, 'only on request');
+    const { weakTopics } = (await client.call('tracker_get_progress', { weakTopics: true })).structuredContent;
+    assert.equal(weakTopics.windowDays, 30);
+    assert.deepEqual(weakTopics.topics.map((topic: any) => topic.tag), ['Dynamic Programming']);
+    const [medium] = weakTopics.topics[0].difficulties;
+    assert.equal(medium.difficulty, 'Medium');
+    assert.deepEqual(medium.reasons, ['feedback_assistance']);
+    assert.deepEqual(medium.outcomes, { independent: 0, assisted: 1, unsolved: 2, unrecorded: 0 });
+    assert.equal(weakTopics.evaluations.needsReinforcement, 1);
+    assert.equal(weakTopics.evaluations.developing + weakTopics.evaluations.recentlyStable, 1, 'Array is evaluated but not weak');
+  } finally { await client.close(); p.cleanup(); }
+});

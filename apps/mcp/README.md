@@ -86,7 +86,7 @@ Tools that work on several items take one item too; there are no separate single
 | `tracker_list_notes` | read | Note summaries across the catalog, filtered by `tag`, `noteState` or `scope` |
 | `tracker_get_notes` | read | 1 to 20 notes with state and `contentHash`; long notes are read in parts with `offset` |
 | `tracker_get_note_context` | read | Everything for writing one note: problem, all attempts, review stage, current note and headings, template, related written notes |
-| `tracker_get_progress` | read | Streaks, difficulty distribution, top tags, trends |
+| `tracker_get_progress` | read | Streaks, difficulty distribution, top tags, trends; `weakTopics: true` adds the topics that need reinforcement and why |
 | `tracker_get_strategies` | read | Strategies and the weekday schedule |
 | `tracker_import_catalog` | write | Import a local `.jsonl` catalog file; `dryRun` |
 | `tracker_import_problems` | write | Add or update up to 200 problems sent as data; creates the profile when missing; `dryRun` |
@@ -109,6 +109,10 @@ Tools that work on several items take one item too; there are no separate single
 | Prompt | Arguments | Purpose |
 | --- | --- | --- |
 | `init_question_bank` | `scope` (optional) | Fill the problem catalog from the model's own LeetCode knowledge in batches, then report coverage |
+| `write_note` | `frontendId`, `lang` (optional) | Write a missing note from the problem's practice history, or extend a written one section by section without replacing your text |
+| `review_weak_topics` | `focus` (optional) | Explain which topics need reinforcement, from the last 30 days, and suggest problems to redo; changes nothing until you agree |
+
+Prompts add no tool definitions to the model's context; the client loads one only when you pick it. Claude Code lists them as `/mcp__leetcode-tracker__<name>`.
 
 ## Writing notes with your MCP client
 

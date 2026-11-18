@@ -1,7 +1,8 @@
 /**
  * MCP prompts: ready-made requests a user can pick in their client (Claude
  * Code shows them as /mcp__leetcode-tracker__<name>) instead of explaining a
- * multi-step workflow in their own words.
+ * multi-step workflow in their own words. Prompts cost no tool context: the
+ * client only loads one when the user picks it.
  */
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
@@ -27,6 +28,41 @@ export function initQuestionBankText(scope?: string): string {
   ].join('\n');
 }
 
+/** The request behind write_note: gather context, then write or extend the note without losing the user's text. */
+export function writeNoteText(frontendId: string, lang?: 'en' | 'zh'): string {
+  const language = lang ? `, lang "${lang}"` : '';
+  return [
+    `Write or improve my solution note for LeetCode problem ${frontendId}.`,
+    '',
+    'Steps:',
+    `1. Call tracker_get_note_context with frontendId "${frontendId}"${language}. It returns the problem, every attempt I made, the current note with its contentHash and headings, the note template, and related problems that already have notes.`,
+    '2. If the note state is "empty" or "stub", write a complete note that follows the template\'s sections, in the template\'s language, and save it with tracker_save_notes using the contentHash from step 1.',
+    '3. If the note state is "written", keep my text. Add only what is missing with tracker_patch_note in append mode, one section per call, passing the contentHash returned by the previous call.',
+    '4. Ground the note in my attempts: where I needed help or failed (assisted or unsolved attempts and their remarks) belongs in the pitfalls section, and a dated line can go under a review log heading. General algorithm knowledge is fine; do not invent details about my attempts.',
+    '5. Mention related problems from relatedNotes where the technique carries over.',
+    '',
+    'When you finish, tell me which sections you wrote or changed.',
+  ].join('\n');
+}
+
+/** The request behind review_weak_topics: read-only analysis first, changes only after the user agrees. */
+export function reviewWeakTopicsText(focus?: string): string {
+  const scope = focus?.trim() ? `Focus on: ${focus.trim()}.` : 'Cover at most the five weakest topics.';
+  return [
+    'Review my weak LeetCode topics and suggest what to practice next.',
+    '',
+    scope,
+    '',
+    'Steps:',
+    '1. Call tracker_get_progress with weakTopics: true. Each weak topic lists the difficulties that need reinforcement and why: a high share of assisted or unsolved attempts, or attempts that take long.',
+    '2. For each topic, find the problems I practiced with tracker_list_notes (tag set to the topic slug, scope "practiced"), then check their recent outcomes with tracker_get_problems. Read my notes with tracker_get_notes where they explain a mistake.',
+    '3. For each topic, tell me what the evidence says is going wrong, two or three problems from my history worth redoing, and one new problem type to try.',
+    '4. Do not change anything yet. If I agree, you can focus a day on these topics with tracker_apply_today_rules (run it with dryRun first) or adjust a strategy with tracker_update_strategy.',
+    '',
+    'If no topic needs reinforcement, say so and name the topics that are still developing.',
+  ].join('\n');
+}
+
 export function registerPrompts(server: McpServer): void {
   server.registerPrompt(
     'init_question_bank',
@@ -40,6 +76,35 @@ export function registerPrompts(server: McpServer): void {
     },
     ({ scope }) => ({
       messages: [{ role: 'user' as const, content: { type: 'text' as const, text: initQuestionBankText(scope) } }],
+    }),
+  );
+
+  server.registerPrompt(
+    'write_note',
+    {
+      title: 'Write a solution note',
+      description: 'Write or extend one problem\'s solution note from its practice history, keeping any text already there.',
+      argsSchema: z.object({
+        frontendId: z.string().trim().min(1).max(100).describe('Problem frontend ID, e.g. "42"'),
+        lang: z.enum(['en', 'zh']).optional().describe('Note language; default: the profile language'),
+      }),
+    },
+    ({ frontendId, lang }) => ({
+      messages: [{ role: 'user' as const, content: { type: 'text' as const, text: writeNoteText(frontendId, lang) } }],
+    }),
+  );
+
+  server.registerPrompt(
+    'review_weak_topics',
+    {
+      title: 'Review weak topics',
+      description: 'Explain which topics need reinforcement and why, from the last 30 days of practice, and suggest problems to redo. Changes nothing until you agree.',
+      argsSchema: z.object({
+        focus: z.string().max(200).optional().describe('Limit the review, e.g. "dynamic programming" or "Medium only"'),
+      }),
+    },
+    ({ focus }) => ({
+      messages: [{ role: 'user' as const, content: { type: 'text' as const, text: reviewWeakTopicsText(focus) } }],
     }),
   );
 }

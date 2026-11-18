@@ -68,7 +68,7 @@ test('the setup prompt carries the batch workflow and the requested scope', asyn
   const { client } = await StdioClient.start(entry, w.dbPath);
   try {
     const { prompts } = (await client.request('prompts/list')).result;
-    assert.deepEqual(prompts.map((prompt: any) => prompt.name), ['init_question_bank']);
+    assert.deepEqual(prompts.map((prompt: any) => prompt.name), ['init_question_bank', 'write_note', 'review_weak_topics']);
     const { messages } = (await client.request('prompts/get', { name: 'init_question_bank', arguments: { scope: 'NeetCode 150' } })).result;
     const text = messages[0].content.text;
     assert.match(text, /Scope: NeetCode 150\./);
@@ -76,5 +76,24 @@ test('the setup prompt carries the batch workflow and the requested scope', asyn
     assert.match(text, /batches of up to 200/);
     const fallback = (await client.request('prompts/get', { name: 'init_question_bank', arguments: {} })).result.messages[0].content.text;
     assert.match(fallback, /every LeetCode problem you know reliably/);
+  } finally { await client.close(); w.cleanup(); }
+});
+
+test('note and weak-topic prompts name the tools and guard existing text', async () => {
+  const w = emptyDir();
+  const { client } = await StdioClient.start(entry, w.dbPath);
+  try {
+    const get = async (name: string, args: Record<string, string>) => (await client.request('prompts/get', { name, arguments: args })).result;
+    const note = (await get('write_note', { frontendId: '42', lang: 'zh' })).messages[0].content.text;
+    assert.match(note, /tracker_get_note_context with frontendId "42", lang "zh"/);
+    assert.match(note, /keep my text/);
+    assert.match(note, /tracker_patch_note/);
+    const missing = await client.request('prompts/get', { name: 'write_note', arguments: {} });
+    assert.ok(missing.error, 'frontendId is required');
+
+    const review = (await get('review_weak_topics', {})).messages[0].content.text;
+    assert.match(review, /weakTopics: true/);
+    assert.match(review, /Do not change anything yet/);
+    assert.match((await get('review_weak_topics', { focus: 'Dynamic Programming' })).messages[0].content.text, /Focus on: Dynamic Programming\./);
   } finally { await client.close(); w.cleanup(); }
 });
