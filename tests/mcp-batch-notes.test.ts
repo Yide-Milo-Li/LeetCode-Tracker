@@ -119,9 +119,11 @@ test('note context, section patches and note-state filters support filling in mi
       { questionFrontendId: '5', completed: true, outcome: 'independent' },
       { questionFrontendId: '7', completed: false, outcome: 'unsolved' },
     ] });
-    const blank = (await client.call('tracker_get_note', { frontendId: '5' })).structuredContent;
-    await client.call('tracker_save_note', { frontendId: '5', content: '## Key Idea\nSliding window.', expectedContentHash: blank.contentHash });
-    await client.call('tracker_save_note', { frontendId: '7', content: NOTE_TEMPLATES.en, expectedContentHash: blank.contentHash });
+    const blank = (await client.call('tracker_get_notes', { frontendIds: ['5'] })).structuredContent.notes[0];
+    await client.call('tracker_save_notes', { notes: [
+      { frontendId: '5', content: '## Key Idea\nSliding window.', expectedContentHash: blank.contentHash },
+      { frontendId: '7', content: NOTE_TEMPLATES.en, expectedContentHash: blank.contentHash },
+    ] });
 
     const context = (await client.call('tracker_get_note_context', { frontendId: '3', lang: 'zh' })).structuredContent;
     assert.equal(context.problem.title, 'Synthetic 3');
@@ -145,7 +147,7 @@ test('note context, section patches and note-state filters support filling in mi
     })).structuredContent;
     assert.equal(patched.status, 'applied');
     assert.equal(patched.state, 'written');
-    const note = (await client.call('tracker_get_note', { frontendId: '3' })).structuredContent;
+    const note = (await client.call('tracker_get_notes', { frontendIds: ['3'] })).structuredContent.notes[0];
     assert.match(note.content, /^## 💡 核心思路\n- 双指针从两端收缩。\n\n---/);
     assert.equal(note.contentHash, patched.contentHash);
 
@@ -162,7 +164,7 @@ test('note context, section patches and note-state filters support filling in mi
 
     const problems = (await client.call('tracker_get_problems', { frontendIds: ['3', '7', '8', 'x'] })).structuredContent;
     assert.deepEqual(problems.problems.map((problem: any) => [problem.frontendId, problem.noteState, problem.totalPractices]), [['3', 'written', 2], ['7', 'stub', 1], ['8', 'empty', 0]]);
-    assert.equal(problems.problems[0].lastPractice.outcome, 'independent');
+    assert.deepEqual(problems.problems[0].recentPractices.map((record: any) => record.outcome), ['independent', 'assisted'], 'newest first');
     assert.deepEqual(problems.notFound, ['x']);
   } finally { await client.close(); p.cleanup(); }
 });
@@ -217,7 +219,7 @@ test('batch note saves refuse every entry when any note changed', async () => {
   const { client } = await StdioClient.start(entry, p.dbPath);
   try {
     const read = (await client.call('tracker_get_notes', { frontendIds: ['1', '2'] })).structuredContent.notes;
-    const first = (await client.call('tracker_save_note', { frontendId: '1', content: 'edited elsewhere', expectedContentHash: read[0].contentHash })).structuredContent;
+    const first = (await client.call('tracker_save_notes', { notes: [{ frontendId: '1', content: 'edited elsewhere', expectedContentHash: read[0].contentHash }] })).structuredContent.notes[0];
 
     const notes = [
       { frontendId: '1', content: 'one', expectedContentHash: read[0].contentHash },
@@ -227,7 +229,7 @@ test('batch note saves refuse every entry when any note changed', async () => {
     const conflict = await client.call('tracker_save_notes', { notes });
     assert.equal(errorCode(conflict), 'NOTE_CHANGED');
     assert.match(conflict.structuredContent.message, /^Nothing was saved\. These notes changed since they were read: 1 /);
-    assert.equal((await client.call('tracker_get_note', { frontendId: '2' })).structuredContent.hasNote, false);
+    assert.equal((await client.call('tracker_get_notes', { frontendIds: ['2'] })).structuredContent.notes[0].state, 'empty');
 
     notes[0].expectedContentHash = first.contentHash;
     const saved = (await client.call('tracker_save_notes', { notes })).structuredContent;
@@ -295,8 +297,8 @@ test('note export writes the knowledge base and a mistake log without clobbering
       { questionFrontendId: '14', completed: true, outcome: 'assisted', notes: 'hint on invariant', practicedAt: '2026-11-12' },
       { questionFrontendId: '27', completed: false, outcome: 'unsolved', practicedAt: '2026-11-14' },
     ] });
-    const blank = (await client.call('tracker_get_note', { frontendId: '14' })).structuredContent;
-    await client.call('tracker_save_note', { frontendId: '14', content: '## Key Idea\nMonotonic stack.', expectedContentHash: blank.contentHash });
+    const blank = (await client.call('tracker_get_notes', { frontendIds: ['14'] })).structuredContent.notes[0];
+    await client.call('tracker_save_notes', { notes: [{ frontendId: '14', content: '## Key Idea\nMonotonic stack.', expectedContentHash: blank.contentHash }] });
 
     assert.equal(errorCode(await client.call('tracker_export_notes', { directory: 'relative/dir' })), 'INVALID_PATH');
     const directory = join(p.dir, 'vault');

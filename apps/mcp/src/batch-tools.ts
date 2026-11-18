@@ -68,6 +68,10 @@ const planStepSchema = z.discriminatedUnion('action', [
     feedbackReason: recommendationFeedbackReasonSchema.optional(),
   }),
   z.object({ action: z.literal('append') }),
+  z.object({
+    action: z.literal('replace_unfinished'),
+    feedbackReason: recommendationFeedbackReasonSchema.optional(),
+  }),
 ]);
 type PlanStep = z.infer<typeof planStepSchema>;
 
@@ -82,31 +86,42 @@ export function registerBatchTools({ register }: Registrar): void {
   register(
     'tracker_get_problems',
     {
-      description: `Look up to ${MAX_PROBLEM_BATCH} problems at once: details, note state (empty, stub = unedited template, written), practice count, last attempt and outcome. Unknown IDs are listed in notFound.`,
+      description: `Look up 1 to ${MAX_PROBLEM_BATCH} problems by frontend ID: details, note state (empty, stub = unedited template, written), practice count and the most recent attempts with the id and revision tracker_update_practice needs. Unknown IDs are listed in notFound.`,
       inputSchema: z.object({
         frontendIds: z.array(z.string().trim().min(1).max(100)).min(1).max(MAX_PROBLEM_BATCH),
+        recentPractices: z.number().int().min(0).max(10).optional().default(3)
+          .describe('Most recent active attempts to include per problem (default 3)'),
       }),
     },
-    async (application, { frontendIds }) => {
+    async (application, { frontendIds, recentPractices = 3 }) => {
       const problems = [];
       const notFound: string[] = [];
       for (const raw of new Set(frontendIds)) {
         const { problem } = await application.catalog.read({}, { frontendId: raw });
         if (!problem) { notFound.push(raw); continue; }
         const id = problem.questionFrontendId;
-        const note = (await application.notes.read({}, { frontendId: id })).note?.content ?? '';
-        const practice = await application.practice.query({ questionFrontendId: id, limit: 1 });
-        const last = practice.items[0] ?? null;
+        const note = (await application.notes.read({}, { frontendId: id })).note;
+        // limit must be at least 1; with recentPractices 0 the one record only supplies the total.
+        const practice = await application.practice.query({ questionFrontendId: id, limit: Math.max(1, recentPractices) });
         problems.push({
+          questionId: problem.questionId,
           frontendId: id,
           title: problem.title,
           difficulty: problem.difficulty,
           tags: problem.topicTags.map(tag => tag.name),
           url: problem.url,
           isPaidOnly: problem.isPaidOnly,
-          noteState: noteState(note),
+          noteState: noteState(note?.content),
+          noteUpdatedAt: note?.content.trim() ? note.updatedAt : null,
           totalPractices: practice.total,
-          lastPractice: last && { practicedAt: last.practicedAt, completed: last.completed, outcome: last.outcome },
+          recentPractices: practice.items.slice(0, recentPractices).map(record => ({
+            id: record.id,
+            practicedAt: record.practicedAt,
+            completed: record.completed,
+            outcome: record.outcome,
+            durationMinutes: record.durationMinutes,
+            revision: record.revision,
+          })),
         });
       }
       return json({ problems, notFound });
@@ -184,6 +199,9 @@ export function registerBatchTools({ register }: Registrar): void {
           completed: record.completed,
           outcome: record.outcome,
           practicedAt: record.practicedAt,
+          timePrecision: record.timePrecision,
+          durationMinutes: record.durationMinutes,
+          status: record.status,
           revision: record.revision,
           replayed,
         })),
@@ -196,7 +214,7 @@ export function registerBatchTools({ register }: Registrar): void {
   register(
     'tracker_edit_today',
     {
-      description: `Apply up to ${MAX_PLAN_STEPS} changes to a day's plan in order with one expectedVersion: {"action":"remove"|"replace","frontendId":"12"} or {"action":"append"}. Every step is checked against the plan before anything changes. The steps are not one transaction: if a later step fails (for example no replacement candidate is left), the earlier ones stay applied and the error says which ran and the plan's new version. Retrying with the same operationId replays the finished steps.`,
+      description: `Change a day's plan: up to ${MAX_PLAN_STEPS} steps applied in order with one expectedVersion. Steps: {"action":"remove","frontendId":"12"}, {"action":"replace","frontendId":"12"} (new pick for that problem), {"action":"append"} (one more problem chosen by the plan's rules), {"action":"replace_unfinished"} (new picks for every unfinished problem; must be the last step). remove and replace take an optional feedbackReason that helps future plans avoid similar picks. Every step is checked against the plan before anything changes. The steps are not one transaction: if a later step fails (for example no replacement candidate is left), the earlier ones stay applied and the error says which ran and the plan's new version. Retrying with the same operationId replays the finished steps.`,
       inputSchema: z.object({
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('YYYY-MM-DD; defaults to today in the configured timezone'),
         expectedVersion: z.number().int().positive().describe('Plan version from tracker_get_today'),
@@ -216,6 +234,12 @@ export function registerBatchTools({ register }: Registrar): void {
       const resolved: Array<{ step: PlanStep; itemId?: string; label: string }> = [];
       for (const [index, step] of steps.entries()) {
         if (step.action === 'append') { resolved.push({ step, label: 'append' }); continue; }
+        if (step.action === 'replace_unfinished') {
+          // It swaps items the caller has not named, so later steps could no longer be checked against the plan.
+          if (index !== steps.length - 1) return refuse('INVALID_INPUT', `steps.${index}: replace_unfinished must be the last step.`);
+          resolved.push({ step, label: 'replace unfinished' });
+          continue;
+        }
         if (!step.frontendId && !step.itemId) return refuse('INVALID_INPUT', `steps.${index}: give frontendId or itemId.`);
         const item = base.items.find(candidate =>
           (step.itemId && candidate.id === step.itemId) ||
@@ -237,6 +261,8 @@ export function registerBatchTools({ register }: Registrar): void {
         try {
           if (step.action === 'append') {
             current = await application.planning.append({ operationId: stepId, expectedVersion: version }, { id: plan.id });
+          } else if (step.action === 'replace_unfinished') {
+            current = await application.planning.replace({ operationId: stepId, expectedVersion: version, mode: 'all_unfinished', feedbackReason: step.feedbackReason }, { id: plan.id });
           } else if (step.action === 'remove') {
             current = await application.planning.remove({ operationId: stepId, expectedVersion: version, itemId, feedbackReason: step.feedbackReason }, { id: plan.id });
           } else {

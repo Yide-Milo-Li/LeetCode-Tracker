@@ -91,16 +91,16 @@ test('stdio server lists annotated tools and answers reads from the profile', as
     const search = await client.call('tracker_search_problems', { difficulty: 'Medium' });
     assert.deepEqual(search.structuredContent.problems.map((p: { frontendId: string }) => p.frontendId), ['15']);
 
-    const problem = await client.call('tracker_get_problem', { frontendId: '42' });
-    assert.equal(problem.structuredContent.problem.title, 'Synthetic Water');
-    assert.equal((await client.call('tracker_get_problem', { frontendId: '9999' })).structuredContent.found, false);
+    const problems = (await client.call('tracker_get_problems', { frontendIds: ['42', '9999'] })).structuredContent;
+    assert.equal(problems.problems[0].title, 'Synthetic Water');
+    assert.deepEqual(problems.notFound, ['9999']);
 
     const today = await client.call('tracker_get_today', { date: '2026-11-17' });
     assert.equal(today.structuredContent.hasPlan, false);
     const progress = await client.call('tracker_get_progress');
     assert.equal(progress.structuredContent.difficultyDistribution.Hard.total, 1);
     assert.equal((await client.call('tracker_list_practices')).structuredContent.total, 0);
-    assert.equal((await client.call('tracker_get_note', { frontendId: '1' })).structuredContent.hasNote, false);
+    assert.equal((await client.call('tracker_get_notes', { frontendIds: ['1'] })).structuredContent.notes[0].state, 'empty');
 
     const invalid = await client.request('tools/call', { name: 'tracker_search_problems', arguments: { limit: 0 } });
     assert.ok(invalid.error || invalid.result.isError, 'schema violations are rejected');

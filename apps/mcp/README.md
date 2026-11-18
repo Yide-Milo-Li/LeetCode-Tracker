@@ -73,44 +73,36 @@ Add `"--db", "/path/to/tracker.sqlite"` to the arguments to use a different prof
 
 ## Tools
 
+Tools that work on several items take one item too; there are no separate single-item versions. Tools with `dryRun` check the request and show what would change without saving.
+
 | Tool | Access | Purpose |
 | --- | --- | --- |
 | `tracker_status` | read | Version, profile path, catalog counts, streak, timezone, today's plan summary |
 | `tracker_search_problems` | read | Search the catalog by keyword, difficulty or tag |
-| `tracker_get_problem` | read | One problem with note presence and recent practice |
+| `tracker_get_problems` | read | 1 to 50 problems with note state, practice count and recent attempts (with `revision`) |
+| `tracker_catalog_coverage` | read | Catalog size, counts by difficulty and missing frontend ID ranges; works before a profile exists |
 | `tracker_get_today` | read | The stored plan for today or a given date, with its `version` (never generates one) |
-| `tracker_list_practices` | read | Paginated practice records with `revision`, optionally for one problem |
-| `tracker_get_practice` | read | One practice record |
-| `tracker_list_notes` | read | Note summaries across the catalog; optional `scope: "practiced"` limits to practiced problems |
-| `tracker_get_note` | read | A problem's Markdown note in chunks, with `contentHash` |
+| `tracker_list_practices` | read | Paginated practice records with `revision`, optionally for one problem, or specific records by `ids` |
+| `tracker_list_notes` | read | Note summaries across the catalog, filtered by `tag`, `noteState` or `scope` |
+| `tracker_get_notes` | read | 1 to 20 notes with state and `contentHash`; long notes are read in parts with `offset` |
+| `tracker_get_note_context` | read | Everything for writing one note: problem, all attempts, review stage, current note and headings, template, related written notes |
 | `tracker_get_progress` | read | Streaks, difficulty distribution, top tags, trends |
 | `tracker_get_strategies` | read | Strategies and the weekday schedule |
-| `tracker_preview_note` | read | Compare a proposed note with the current one |
-| `tracker_preview_today_rules` | read | Check a one-day rule change without applying it |
-| `tracker_get_problems` | read | Up to 50 problems at once with note state, practice count and last outcome |
-| `tracker_get_notes` | read | Up to 20 notes at once, each with its state and `contentHash` |
-| `tracker_catalog_coverage` | read | Catalog size, counts by difficulty and missing frontend ID ranges; works before a profile exists |
-| `tracker_get_note_context` | read | Everything for writing one note: problem, all attempts, review stage, current note and headings, template, related written notes |
-| `tracker_import_catalog` | write | Import a local `.jsonl` catalog file; `dryRun` validates only |
-| `tracker_import_problems` | write | Add or update up to 200 problems sent as data; creates the profile when missing; `dryRun` validates only |
-| `tracker_create_practice` | write | Record a practice attempt (requires a client-generated `operationId`) |
+| `tracker_import_catalog` | write | Import a local `.jsonl` catalog file; `dryRun` |
+| `tracker_import_problems` | write | Add or update up to 200 problems sent as data; creates the profile when missing; `dryRun` |
+| `tracker_create_practices` | write | Record 1 to 50 attempts in one transaction, all or nothing (requires a client-generated `operationId`); `dryRun` |
 | `tracker_update_practice` | write, overwrites | Change a practice record (needs `expectedRevision`) |
 | `tracker_revoke_practice` | write, removes | Revoke a practice record (needs `expectedRevision`) |
-| `tracker_save_note` | write, overwrites | Replace a problem's note (needs `expectedContentHash`) |
+| `tracker_save_notes` | write, overwrites | Replace 1 to 20 notes in one transaction (each needs `expectedContentHash`); `dryRun` shows where each note would change |
+| `tracker_patch_note` | write, overwrites | Append to or replace one section of a note (needs `expectedContentHash`) |
 | `tracker_create_strategy` | write | Create a strategy from counts and assign weekdays |
 | `tracker_update_strategy` | write, overwrites | Change a strategy (needs `expectedVersion`) |
 | `tracker_create_today` | write | Generate the day's plan, or return the existing one |
-| `tracker_append_today` | write | Add one problem to the day's plan (needs `expectedVersion`) |
-| `tracker_remove_today_item` | write, removes | Remove a problem from the day's plan (needs `expectedVersion`) |
-| `tracker_replace_today_items` | write, overwrites | Swap one or all unfinished problems (needs `expectedVersion`) |
-| `tracker_apply_today_rules` | write, overwrites | Rebuild the day's plan with one-day rule changes (needs `expectedVersion`) |
-| `tracker_create_practices` | write | Record up to 50 attempts in one transaction, all or nothing (requires a client-generated `operationId`); `dryRun` validates only |
-| `tracker_patch_note` | write, overwrites | Append to or replace one section of a note (needs `expectedContentHash`) |
-| `tracker_save_notes` | write, overwrites | Replace up to 20 notes in one transaction (each needs `expectedContentHash`); `dryRun` checks only |
-| `tracker_edit_today` | write, removes | Remove, replace and append several plan items in order (needs `expectedVersion`) |
+| `tracker_edit_today` | write, removes | Remove, replace or append plan items, or replace every unfinished one, in up to 10 ordered steps (needs `expectedVersion`) |
+| `tracker_apply_today_rules` | write, overwrites | Rebuild the day's plan with one-day rule changes (needs `expectedVersion`); `dryRun` |
 | `tracker_export_notes` | writes files | Write the notes knowledge base and a mistake log to a local directory |
 
-`tracker_list_notes` also filters by `tag` and `noteState`: `empty`, `stub` (only the unedited note template) or `written`.
+`tracker_list_notes` filters `noteState` by `empty`, `stub` (only the unedited note template) or `written`.
 
 ## Prompts
 
@@ -124,7 +116,7 @@ The server has no AI provider; the model in your MCP client writes the notes. A 
 
 1. `tracker_list_notes` with `noteState: "empty"` (or `"stub"`) and a `tag` to find problems that still need a note.
 2. `tracker_get_note_context` for each one: problem details, every attempt with outcome, duration and remark, the review stage, the current note with its section headings, the template in your language, and problems with shared tags that already have notes.
-3. Save a complete note with `tracker_save_note`, several at once with `tracker_save_notes`, or add to one section with `tracker_patch_note`, for example a dated entry under a "Review Log" heading. Patch headings match without emoji or case, so `"Edge Cases & Traps"` finds `## ⚠️ Edge Cases & Traps`; a missing section is created at the end, and an empty note can start from the template.
+3. Save complete notes with `tracker_save_notes`, or add to one section with `tracker_patch_note`, for example a dated entry under a "Review Log" heading. Patch headings match without emoji or case, so `"Edge Cases & Traps"` finds `## ⚠️ Edge Cases & Traps`; a missing section is created at the end, and an empty note can start from the template.
 
 `tracker_export_notes` writes the knowledge base to a directory, for example an Obsidian vault folder: one Markdown file per problem under `problems/`, a README with Dataview queries, Notion CSVs and `mistakes.md`, which lists unsolved, assisted and unfinished attempts with their remarks, most recent first. It reads the profile without the lease, so it works while the desktop app is running. It refuses to replace existing files unless you pass `overwrite: true`.
 
@@ -133,7 +125,7 @@ The server has no AI provider; the model in your MCP client writes the notes. A 
 - `tracker_create_practices` is all or nothing: every record is created in one SQLite transaction after one backup, or none is.
 - `tracker_save_notes` checks every `expectedContentHash` first; if any note changed, nothing is saved and the error lists each conflict.
 - `tracker_edit_today` checks every step against the plan at `expectedVersion` (the items exist, no item is changed twice, completed items are not replaced) before changing anything. The steps then run in order and are **not** one transaction, because each plan change runs the problem picker in its own transaction and a removal can also revoke practice records. If a later step fails, for example when no replacement candidate is left, the error `EDIT_PARTIALLY_APPLIED` names the steps that ran and the plan's new version.
-- Each step gets an operation ID derived from the batch `operationId`, so retrying a batch with the same `operationId` replays the steps that already ran instead of repeating them. `tracker_create_practices` requires the `operationId`, like `tracker_create_practice`: generate it before the first call so a lost response can still be retried.
+- Each step gets an operation ID derived from the batch `operationId`, so retrying a batch with the same `operationId` replays the steps that already ran instead of repeating them. `tracker_create_practices` requires the `operationId`: generate it before the first call so a lost response can still be retried.
 
 Failures come back as tool errors with a code and a message, for example `PROFILE_NOT_FOUND`, `PROFILE_IN_USE`, `PROFILE_SCHEMA_MISMATCH`, `TIMEZONE_REQUIRED`, `PLAN_NOT_FOUND`, `NOTE_CHANGED`, `EDIT_PARTIALLY_APPLIED` or `FILES_EXIST`.
 

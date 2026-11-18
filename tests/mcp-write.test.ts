@@ -31,17 +31,35 @@ function profileWithCatalog() {
 const today = () => new Date().toISOString().slice(0, 10);
 const errorCode = (result: any) => result.structuredContent?.error;
 
+/** One practice record through the batch tool, which is the only creation tool. */
+function createPractice(client: StdioClient, record: Record<string, unknown>, operationId: string = randomUUID()) {
+  return client.call('tracker_create_practices', { operationId, records: [record] });
+}
+
+async function readNote(client: StdioClient, frontendId: string) {
+  return (await client.call('tracker_get_notes', { frontendIds: [frontendId] })).structuredContent.notes[0];
+}
+
+function saveNote(client: StdioClient, frontendId: string, content: string, expectedContentHash: string, dryRun = false) {
+  return client.call('tracker_save_notes', { notes: [{ frontendId, content, expectedContentHash }], dryRun });
+}
+
+/** A plan edit; one step behaves like the old single-purpose plan tools. */
+function editToday(client: StdioClient, expectedVersion: number, steps: unknown[], operationId: string = randomUUID()) {
+  return client.call('tracker_edit_today', { expectedVersion, steps, operationId });
+}
+
 test('write tools are annotated so hosts ask before running them', async () => {
   const p = profileWithCatalog();
   const { client } = await StdioClient.start(entry, p.dbPath);
   try {
     const { tools } = (await client.request('tools/list')).result;
     const byName = new Map(tools.map((tool: any) => [tool.name, tool.annotations]));
-    for (const name of ['tracker_revoke_practice', 'tracker_save_note', 'tracker_remove_today_item', 'tracker_apply_today_rules']) {
+    for (const name of ['tracker_revoke_practice', 'tracker_save_notes', 'tracker_edit_today', 'tracker_apply_today_rules']) {
       assert.deepEqual(byName.get(name), { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false }, name);
     }
-    assert.equal((byName.get('tracker_create_practice') as any).destructiveHint, false);
-    assert.equal((byName.get('tracker_preview_note') as any).readOnlyHint, true);
+    assert.equal((byName.get('tracker_create_practices') as any).destructiveHint, false);
+    assert.equal((byName.get('tracker_get_notes') as any).readOnlyHint, true);
   } finally { await client.close(); p.cleanup(); }
 });
 
@@ -50,19 +68,20 @@ test('practice create replays by operationId; update and revoke require the curr
   const { client } = await StdioClient.start(entry, p.dbPath);
   try {
     const operationId = randomUUID();
-    const args = { operationId, questionFrontendId: '12', completed: true, outcome: 'independent', durationMinutes: 25 };
-    const created = await client.call('tracker_create_practice', args);
+    const args = { questionFrontendId: '12', completed: true, outcome: 'independent', durationMinutes: 25 };
+    const created = await createPractice(client, args, operationId);
     assert.equal(created.structuredContent.status, 'applied');
-    const record = created.structuredContent.record;
+    const record = created.structuredContent.records[0];
     assert.equal(record.revision, 1);
     assert.equal(record.timePrecision, 'datetime');
     assert.equal(record.practicedAt.slice(0, 10), today());
 
-    const replay = await client.call('tracker_create_practice', args);
-    assert.equal(replay.structuredContent.record.id, record.id, 'same operationId returns the first record');
+    const replay = await createPractice(client, args, operationId);
+    assert.equal(replay.structuredContent.records[0].id, record.id, 'same operationId returns the first record');
+    assert.equal(replay.structuredContent.records[0].replayed, true);
     assert.equal((await client.call('tracker_list_practices')).structuredContent.total, 1);
-    assert.ok(errorCode(await client.call('tracker_create_practice', { ...args, durationMinutes: 30 })), 'reused operationId with new args is refused');
-    assert.equal(errorCode(await client.call('tracker_create_practice', { operationId: randomUUID(), questionFrontendId: '999', completed: true })), 'PROBLEM_NOT_FOUND');
+    assert.ok(errorCode(await createPractice(client, { ...args, durationMinutes: 30 }, operationId)), 'reused operationId with new args is refused');
+    assert.equal(errorCode(await createPractice(client, { questionFrontendId: '999', completed: true })), 'PROBLEM_NOT_FOUND');
 
     const listed = (await client.call('tracker_list_practices')).structuredContent.records[0];
     assert.equal(listed.revision, 1);
@@ -78,29 +97,71 @@ test('practice create replays by operationId; update and revoke require the curr
   } finally { await client.close(); p.cleanup(); }
 });
 
+test('practice records can be fetched by id, revoked ones included', async () => {
+  const p = profileWithCatalog();
+  const { client } = await StdioClient.start(entry, p.dbPath);
+  try {
+    const created = (await client.call('tracker_create_practices', {
+      operationId: randomUUID(),
+      records: [{ questionFrontendId: '1', completed: true }, { questionFrontendId: '2', completed: false }],
+    })).structuredContent.records;
+    await client.call('tracker_revoke_practice', { practiceId: created[1].id, expectedRevision: 1 });
+    const missing = randomUUID();
+    const fetched = (await client.call('tracker_list_practices', { ids: [created[0].id, created[1].id, missing] })).structuredContent;
+    assert.deepEqual(fetched.records.map((record: any) => [record.questionFrontendId, record.status]), [['1', 'active'], ['2', 'revoked']]);
+    assert.deepEqual(fetched.notFound, [missing]);
+    assert.equal(fetched.records[1].revision, 2);
+  } finally { await client.close(); p.cleanup(); }
+});
+
 test('note saves are guarded by the content hash the model last read', async () => {
   const p = profileWithCatalog();
   const { client } = await StdioClient.start(entry, p.dbPath);
   try {
-    const empty = (await client.call('tracker_get_note', { frontendId: '3' })).structuredContent;
-    assert.equal(empty.hasNote, false);
+    const empty = await readNote(client, '3');
+    assert.equal(empty.state, 'empty');
 
     const content = '# Synthetic 3\n\nTwo pointers from both ends.';
-    const preview = (await client.call('tracker_preview_note', { frontendId: '3', content })).structuredContent;
-    assert.equal(preview.expectedContentHash, empty.contentHash);
-    assert.equal(preview.hasExistingNote, false);
+    const preview = (await saveNote(client, '3', content, empty.contentHash, true)).structuredContent;
+    assert.equal(preview.dryRun, true);
+    assert.equal(preview.notes[0].currentContentHash, empty.contentHash);
+    assert.equal(preview.notes[0].hasExistingNote, false);
+    assert.equal(preview.notes[0].newLength, content.length);
+    assert.equal(preview.notes[0].firstDifferentLine, 1);
+    assert.equal((await readNote(client, '3')).state, 'empty', 'a dry run saves nothing');
 
-    const saved = await client.call('tracker_save_note', { frontendId: '3', content, expectedContentHash: empty.contentHash });
+    const saved = await saveNote(client, '3', content, empty.contentHash);
     assert.equal(saved.structuredContent.status, 'applied');
-    const read = (await client.call('tracker_get_note', { frontendId: '3' })).structuredContent;
+    const read = await readNote(client, '3');
     assert.equal(read.content, content);
-    assert.equal(read.contentHash, saved.structuredContent.contentHash);
+    assert.equal(read.contentHash, saved.structuredContent.notes[0].contentHash);
 
-    const conflict = await client.call('tracker_save_note', { frontendId: '3', content: 'overwrite', expectedContentHash: empty.contentHash });
+    const conflict = await saveNote(client, '3', 'overwrite', empty.contentHash);
     assert.equal(errorCode(conflict), 'NOTE_CHANGED');
-    assert.equal((await client.call('tracker_get_note', { frontendId: '3' })).structuredContent.content, content);
-    assert.equal((await client.call('tracker_save_note', { frontendId: '3', content, expectedContentHash: read.contentHash })).structuredContent.status, 'unchanged');
-    assert.equal(errorCode(await client.call('tracker_save_note', { frontendId: '999', content, expectedContentHash: empty.contentHash })), 'PROBLEM_NOT_FOUND');
+    assert.equal((await readNote(client, '3')).content, content);
+    assert.equal((await saveNote(client, '3', content, read.contentHash)).structuredContent.status, 'unchanged');
+    assert.equal(errorCode(await saveNote(client, '999', content, empty.contentHash)), 'PROBLEM_NOT_FOUND');
+  } finally { await client.close(); p.cleanup(); }
+});
+
+test('long notes are read in parts with offset while contentHash covers the whole note', async () => {
+  const p = profileWithCatalog();
+  const { client } = await StdioClient.start(entry, p.dbPath);
+  try {
+    const content = `# Long\n\n${'x'.repeat(450)}`;
+    await saveNote(client, '4', content, (await readNote(client, '4')).contentHash);
+    const parts: string[] = [];
+    let offset: number | null = 0;
+    let hash: string | null = null;
+    while (offset !== null) {
+      const note: any = (await client.call('tracker_get_notes', { frontendIds: ['4'], maxChars: 200, offset })).structuredContent.notes[0];
+      hash ??= note.contentHash;
+      assert.equal(note.contentHash, hash, 'every part carries the whole-note hash');
+      parts.push(note.content);
+      offset = note.nextOffset;
+    }
+    assert.equal(parts.length, 3);
+    assert.equal(parts.join(''), content);
   } finally { await client.close(); p.cleanup(); }
 });
 
@@ -129,45 +190,45 @@ test('strategy and today plan: create, append with replay, replace, remove and a
     assert.equal(again.plan.planId, created.plan.planId, 'ensure returns the existing plan');
 
     const operationId = randomUUID();
-    const appended = (await client.call('tracker_append_today', { expectedVersion: created.plan.version, operationId })).structuredContent;
+    const appended = (await editToday(client, created.plan.version, [{ action: 'append' }], operationId)).structuredContent;
     assert.equal(appended.plan.totalCount, 4);
-    const replayed = (await client.call('tracker_append_today', { expectedVersion: created.plan.version, operationId })).structuredContent;
+    const replayed = (await editToday(client, created.plan.version, [{ action: 'append' }], operationId)).structuredContent;
     assert.equal(replayed.plan.totalCount, 4, 'replay does not add a second problem');
-    assert.ok(errorCode(await client.call('tracker_append_today', { expectedVersion: created.plan.version })), 'stale version is refused');
+    assert.ok(errorCode(await editToday(client, created.plan.version, [{ action: 'append' }])), 'stale version is refused');
 
     const target = appended.plan.items[0].frontendId;
-    const replaced = (await client.call('tracker_replace_today_items', { expectedVersion: appended.plan.version, mode: 'one', frontendId: target })).structuredContent;
+    const replaced = (await editToday(client, appended.plan.version, [{ action: 'replace', frontendId: target }])).structuredContent;
     assert.equal(replaced.plan.items.some((item: any) => item.frontendId === target), false);
     assert.equal(replaced.plan.totalCount, 4);
 
     const removeTarget = replaced.plan.items[1].frontendId;
-    const removed = (await client.call('tracker_remove_today_item', {
-      expectedVersion: replaced.plan.version, frontendId: removeTarget, feedbackReason: 'already_familiar',
-    })).structuredContent;
-    assert.equal(removed.removed, removeTarget);
+    const removed = (await editToday(client, replaced.plan.version, [{ action: 'remove', frontendId: removeTarget, feedbackReason: 'already_familiar' }])).structuredContent;
+    assert.deepEqual(removed.applied, [`remove ${removeTarget}`]);
     assert.equal(removed.plan.totalCount, 3);
-    assert.equal(errorCode(await client.call('tracker_remove_today_item', { expectedVersion: removed.plan.version, frontendId: '999' })), 'PLAN_ITEM_NOT_FOUND');
+    assert.equal(errorCode(await editToday(client, removed.plan.version, [{ action: 'remove', frontendId: '999' }])), 'PLAN_ITEM_NOT_FOUND');
 
     // Solving a plan item through the practice tool completes it, and rule changes must keep it.
     const solved = removed.plan.items.find((item: any) => item.difficulty === 'Easy') ?? removed.plan.items[0];
-    await client.call('tracker_create_practice', { operationId: randomUUID(), questionFrontendId: solved.frontendId, completed: true, outcome: 'assisted' });
+    await createPractice(client, { questionFrontendId: solved.frontendId, completed: true, outcome: 'assisted' });
     const afterPractice = (await client.call('tracker_get_today')).structuredContent;
     assert.equal(afterPractice.items.find((item: any) => item.frontendId === solved.frontendId).completed, true);
     assert.equal(afterPractice.completedCount, 1);
     const conflicting = { dailyCount: 2, difficulty: { Easy: 0, Medium: 0, Hard: 100 }, reviewEnabled: false, reviewPercent: null };
     if (solved.difficulty !== 'Hard') {
-      assert.equal(errorCode(await client.call('tracker_apply_today_rules', { rules: conflicting, expectedVersion: removed.plan.version })), 'RULES_NOT_APPLICABLE');
+      assert.equal(errorCode(await client.call('tracker_apply_today_rules', { rules: conflicting, expectedVersion: removed.plan.version, operationId: randomUUID() })), 'RULES_NOT_APPLICABLE');
     }
 
     const rules = { dailyCount: 3, difficulty: { Easy: 0, Medium: 0, Hard: 100 }, reviewEnabled: false, reviewPercent: null };
     rules.difficulty = { Easy: solved.difficulty === 'Easy' ? 100 / 3 : 0, Medium: solved.difficulty === 'Medium' ? 100 / 3 : 0, Hard: solved.difficulty === 'Hard' ? 100 : 200 / 3 };
-    const preview = (await client.call('tracker_preview_today_rules', { rules })).structuredContent;
+    const preview = (await client.call('tracker_apply_today_rules', { rules, expectedVersion: removed.plan.version, operationId: randomUUID(), dryRun: true })).structuredContent;
+    assert.equal(preview.dryRun, true);
     assert.deepEqual(preview.issues, []);
-    const applied = (await client.call('tracker_apply_today_rules', { rules, expectedVersion: removed.plan.version })).structuredContent;
+    assert.equal((await client.call('tracker_get_today')).structuredContent.version, removed.plan.version, 'a dry run leaves the plan alone');
+    const applied = (await client.call('tracker_apply_today_rules', { rules, expectedVersion: removed.plan.version, operationId: randomUUID() })).structuredContent;
     assert.equal(applied.plan.totalCount, 3);
     assert.ok(applied.plan.items.some((item: any) => item.frontendId === solved.frontendId && item.completed), 'completed item is kept');
     assert.equal(applied.plan.items.filter((item: any) => item.difficulty === 'Hard').length, solved.difficulty === 'Hard' ? 3 : 2);
-    const unknownTag = await client.call('tracker_apply_today_rules', { rules: { tags: ['no-such-tag'] }, expectedVersion: applied.plan.version });
+    const unknownTag = await client.call('tracker_apply_today_rules', { rules: { tags: ['no-such-tag'] }, expectedVersion: applied.plan.version, operationId: randomUUID() });
     assert.equal(errorCode(unknownTag), 'RULES_NOT_APPLICABLE');
     assert.match(unknownTag.structuredContent.message, /no-such-tag/);
 
@@ -181,15 +242,33 @@ test('strategy and today plan: create, append with replay, replace, remove and a
   } finally { await client.close(); p.cleanup(); }
 });
 
+test('replace_unfinished swaps every unfinished item and must be the last step', async () => {
+  const p = profileWithCatalog();
+  const { client } = await StdioClient.start(entry, p.dbPath);
+  try {
+    const plan = await createDailyPlan(client);
+    const solved = plan.items[0];
+    await createPractice(client, { questionFrontendId: solved.frontendId, completed: true });
+    assert.equal(errorCode(await editToday(client, plan.version, [{ action: 'replace_unfinished' }, { action: 'append' }])), 'INVALID_INPUT');
+    const result = (await editToday(client, plan.version, [{ action: 'replace_unfinished' }])).structuredContent;
+    const before = new Set(plan.items.slice(1).map((item: any) => item.frontendId));
+    assert.equal(result.plan.totalCount, 3);
+    assert.ok(result.plan.items.some((item: any) => item.frontendId === solved.frontendId && item.completed), 'the completed item stays');
+    assert.equal(result.plan.items.filter((item: any) => before.has(item.frontendId)).length, 0, 'every unfinished item is new');
+  } finally { await client.close(); p.cleanup(); }
+});
+
 test('writes report PROFILE_IN_USE while the desktop holds the lease; previews still work', async () => {
   const p = profileWithCatalog();
   const release = acquireDatabaseLease(p.dbPath);
   const { client } = await StdioClient.start(entry, p.dbPath);
   try {
-    assert.equal(errorCode(await client.call('tracker_create_practice', { operationId: randomUUID(), questionFrontendId: '1', completed: true })), 'PROFILE_IN_USE');
+    assert.equal(errorCode(await createPractice(client, { questionFrontendId: '1', completed: true })), 'PROFILE_IN_USE');
     assert.equal(errorCode(await client.call('tracker_create_today')), 'PROFILE_IN_USE');
-    const preview = await client.call('tracker_preview_note', { frontendId: '1', content: 'draft' });
+    const empty = await readNote(client, '1');
+    const preview = await saveNote(client, '1', 'draft', empty.contentHash, true);
     assert.equal(preview.isError, undefined);
+    assert.equal(preview.structuredContent.wouldApply, true);
     assert.equal((await client.call('tracker_list_practices')).structuredContent.total, 0);
   } finally {
     await client.close();
@@ -212,16 +291,16 @@ test('practice creation requires a client operationId before any write, includin
   const { client } = await StdioClient.start(entry, p.dbPath);
   try {
     const { tools } = (await client.request('tools/list')).result;
-    assert.ok(tools.find((tool: any) => tool.name === 'tracker_create_practice').inputSchema.required.includes('operationId'));
-    const args = { questionFrontendId: '1', completed: false };
+    assert.ok(tools.find((tool: any) => tool.name === 'tracker_create_practices').inputSchema.required.includes('operationId'));
+    const records = [{ questionFrontendId: '1', completed: false }];
     for (let attempt = 0; attempt < 2; attempt++) {
-      const rejected = await client.request('tools/call', { name: 'tracker_create_practice', arguments: args });
+      const rejected = await client.request('tools/call', { name: 'tracker_create_practices', arguments: { records } });
       assert.ok(rejected.error || rejected.result?.isError, 'missing id must be rejected before creating a record');
     }
     assert.equal((await client.call('tracker_list_practices')).structuredContent.total, 0);
-    const request = { ...args, operationId: randomUUID() };
-    await client.call('tracker_create_practice', request); // Treat the first response as lost.
-    assert.equal((await client.call('tracker_create_practice', request)).isError, undefined);
+    const request = { records, operationId: randomUUID() };
+    await client.call('tracker_create_practices', request); // Treat the first response as lost.
+    assert.equal((await client.call('tracker_create_practices', request)).isError, undefined);
     assert.equal((await client.call('tracker_list_practices')).structuredContent.total, 1);
   } finally { await client.close(); p.cleanup(); }
 });
@@ -230,21 +309,21 @@ test('practice retries recover immutable creation defaults after edits, timezone
   const p = profileWithCatalog();
   let { client } = await StdioClient.start(entry, p.dbPath);
   try {
-    const implicit = { questionFrontendId: '1', completed: false, operationId: randomUUID() };
-    const explicit = { questionFrontendId: '2', completed: false, practicedAt: '2026-10-01T10:00:00Z', operationId: randomUUID() };
-    const first = (await client.call('tracker_create_practice', implicit)).structuredContent.record;
-    const second = (await client.call('tracker_create_practice', explicit)).structuredContent.record;
+    const implicit = { record: { questionFrontendId: '1', completed: false }, operationId: randomUUID() };
+    const explicit = { record: { questionFrontendId: '2', completed: false, practicedAt: '2026-10-01T10:00:00Z' }, operationId: randomUUID() };
+    const first = (await createPractice(client, implicit.record, implicit.operationId)).structuredContent.records[0];
+    const second = (await createPractice(client, explicit.record, explicit.operationId)).structuredContent.records[0];
     await client.call('tracker_update_practice', { practiceId: first.id, expectedRevision: 1, practicedAt: '2026-10-02', timePrecision: 'date' });
     await client.close();
     assert.equal(spawnSync(process.execPath, [entry, 'set-timezone', 'Asia/Tokyo', '--db', p.dbPath]).status, 0);
     client = (await StdioClient.start(entry, p.dbPath)).client;
     for (const [request, original] of [[implicit, first], [explicit, second]] as const) {
-      const replay = await client.call('tracker_create_practice', request);
+      const replay = await createPractice(client, request.record, request.operationId);
       assert.equal(replay.isError, undefined, JSON.stringify(replay));
-      assert.equal(replay.structuredContent.record.id, original.id);
-      assert.equal(errorCode(await client.call('tracker_create_practice', { ...request, durationMinutes: 30 })), 'OPERATION_CONFLICT');
+      assert.equal(replay.structuredContent.records[0].id, original.id);
+      assert.equal(errorCode(await createPractice(client, { ...request.record, durationMinutes: 30 }, request.operationId)), 'OPERATION_CONFLICT');
     }
-    assert.equal((await client.call('tracker_get_practice', { recordId: first.id })).structuredContent.record.practicedAt, '2026-10-02');
+    assert.equal((await client.call('tracker_list_practices', { ids: [first.id] })).structuredContent.records[0].practicedAt, '2026-10-02');
     assert.equal((await client.call('tracker_list_practices')).structuredContent.total, 2, 'replay must neither duplicate nor undo edits');
   } finally { await client.close(); p.cleanup(); }
 });
@@ -254,22 +333,24 @@ test('remove and single replacement replay original targets and snapshots after 
   let { client } = await StdioClient.start(entry, p.dbPath);
   try {
     const initial = await createDailyPlan(client);
-    const replaceArgs = { frontendId: initial.items[0].frontendId, expectedVersion: initial.version, operationId: randomUUID(), feedbackReason: 'topic_mismatch' };
-    const replaced = (await client.call('tracker_replace_today_items', replaceArgs)).structuredContent;
-    const removeArgs = { itemId: replaced.plan.items[0].itemId, expectedVersion: replaced.plan.version, operationId: randomUUID(), feedbackReason: 'already_familiar' };
-    const removed = (await client.call('tracker_remove_today_item', removeArgs)).structuredContent;
-    const frontendArgs = { frontendId: removed.plan.items[0].frontendId, expectedVersion: removed.plan.version, operationId: randomUUID() };
-    const frontendRemoved = (await client.call('tracker_remove_today_item', frontendArgs)).structuredContent;
-    const appended = (await client.call('tracker_append_today', { expectedVersion: frontendRemoved.plan.version, operationId: randomUUID() })).structuredContent.plan;
+    const replaceArgs = { expectedVersion: initial.version, operationId: randomUUID(), steps: [{ action: 'replace', frontendId: initial.items[0].frontendId, feedbackReason: 'topic_mismatch' }] };
+    const replaced = (await client.call('tracker_edit_today', replaceArgs)).structuredContent;
+    const removeArgs = { expectedVersion: replaced.plan.version, operationId: randomUUID(), steps: [{ action: 'remove', itemId: replaced.plan.items[0].itemId, feedbackReason: 'already_familiar' }] };
+    const removed = (await client.call('tracker_edit_today', removeArgs)).structuredContent;
+    const frontendArgs = { expectedVersion: removed.plan.version, operationId: randomUUID(), steps: [{ action: 'remove', frontendId: removed.plan.items[0].frontendId }] };
+    const frontendRemoved = (await client.call('tracker_edit_today', frontendArgs)).structuredContent;
+    const appended = (await editToday(client, frontendRemoved.plan.version, [{ action: 'append' }])).structuredContent.plan;
     await client.close();
     client = (await StdioClient.start(entry, p.dbPath)).client;
-    assert.deepEqual((await client.call('tracker_replace_today_items', replaceArgs)).structuredContent, replaced);
-    assert.deepEqual((await client.call('tracker_remove_today_item', removeArgs)).structuredContent, removed);
-    assert.deepEqual((await client.call('tracker_remove_today_item', frontendArgs)).structuredContent, frontendRemoved);
+    assert.deepEqual((await client.call('tracker_edit_today', replaceArgs)).structuredContent, replaced);
+    assert.deepEqual((await client.call('tracker_edit_today', removeArgs)).structuredContent, removed);
+    assert.deepEqual((await client.call('tracker_edit_today', frontendArgs)).structuredContent, frontendRemoved);
     assert.equal((await client.call('tracker_get_today')).structuredContent.version, appended.version);
-    assert.equal(errorCode(await client.call('tracker_replace_today_items', { ...replaceArgs, frontendId: initial.items[1].frontendId })), 'OPERATION_REUSED');
-    assert.equal(errorCode(await client.call('tracker_remove_today_item', { ...removeArgs, feedbackReason: 'other' })), 'OPERATION_REUSED');
-    assert.equal(errorCode(await client.call('tracker_remove_today_item', { ...removeArgs, operationId: randomUUID() })), 'STALE_PLAN');
+    const otherTarget = { ...replaceArgs, steps: [{ ...replaceArgs.steps[0], frontendId: initial.items[1].frontendId }] };
+    assert.equal(errorCode(await client.call('tracker_edit_today', otherTarget)), 'OPERATION_REUSED');
+    const otherReason = { ...removeArgs, steps: [{ ...removeArgs.steps[0], feedbackReason: 'other' }] };
+    assert.equal(errorCode(await client.call('tracker_edit_today', otherReason)), 'OPERATION_REUSED');
+    assert.equal(errorCode(await client.call('tracker_edit_today', { ...removeArgs, operationId: randomUUID() })), 'STALE_PLAN');
   } finally { await client.close(); p.cleanup(); }
 });
 
@@ -282,7 +363,7 @@ test('rules apply replays the full result across new previews, later plan change
     const applied = (await client.call('tracker_apply_today_rules', request)).structuredContent;
     assert.equal(applied.plan.totalCount, 4);
     assert.deepEqual((await client.call('tracker_apply_today_rules', request)).structuredContent, applied);
-    const appended = (await client.call('tracker_append_today', { expectedVersion: applied.plan.version, operationId: randomUUID() })).structuredContent.plan;
+    const appended = (await editToday(client, applied.plan.version, [{ action: 'append' }])).structuredContent.plan;
     await client.close();
     client = (await StdioClient.start(entry, p.dbPath)).client;
     const reordered = { ...request, rules: { difficulty: { Hard: 100, Medium: 0, Easy: 0 }, dailyCount: 4 } };
@@ -315,15 +396,15 @@ test('notes on unpracticed problems are discoverable with default and explicit a
   const p = profileWithCatalog();
   const { client } = await StdioClient.start(entry, p.dbPath);
   try {
-    const empty = (await client.call('tracker_get_note', { frontendId: '3' })).structuredContent;
-    await client.call('tracker_save_note', { frontendId: '3', content: '# Approach\n\nUse two pointers to find the answer in linear time.', expectedContentHash: empty.contentHash });
+    const empty = await readNote(client, '3');
+    await saveNote(client, '3', '# Approach\n\nUse two pointers to find the answer in linear time.', empty.contentHash);
     for (const scope of [undefined, 'all']) {
       const listed = (await client.call('tracker_list_notes', { hasNote: 'true', search: '3', ...(scope ? { scope } : {}) })).structuredContent;
       assert.equal(listed.total, 1);
       assert.equal(listed.notes[0].questionFrontendId, '3');
     }
     assert.equal((await client.call('tracker_list_notes', { hasNote: 'true', scope: 'practiced' })).structuredContent.total, 0);
-    await client.call('tracker_create_practice', { questionFrontendId: '3', completed: false, operationId: randomUUID() });
+    await createPractice(client, { questionFrontendId: '3', completed: false });
     assert.equal((await client.call('tracker_list_notes', { hasNote: 'true', scope: 'practiced' })).structuredContent.total, 1);
   } finally { await client.close(); p.cleanup(); }
 });
@@ -333,17 +414,17 @@ test('empty and whitespace note hashes round-trip and permit the next save witho
   const { client } = await StdioClient.start(entry, p.dbPath);
   try {
     for (const content of ['', ' \n\t', '\r\n   ']) {
-      const before = (await client.call('tracker_get_note', { frontendId: '3' })).structuredContent;
-      const saved = (await client.call('tracker_save_note', { frontendId: '3', content, expectedContentHash: before.contentHash })).structuredContent;
-      const read = (await client.call('tracker_get_note', { frontendId: '3' })).structuredContent;
-      const preview = (await client.call('tracker_preview_note', { frontendId: '3', content: '# Next note' })).structuredContent;
-      assert.equal(read.hasNote, false);
-      assert.equal(read.contentHash, saved.contentHash);
-      assert.equal(read.contentHash, preview.expectedContentHash);
-      const next = await client.call('tracker_save_note', { frontendId: '3', content: '# Next note', expectedContentHash: read.contentHash });
+      const before = await readNote(client, '3');
+      const saved = (await saveNote(client, '3', content, before.contentHash)).structuredContent;
+      const read = await readNote(client, '3');
+      const preview = (await saveNote(client, '3', '# Next note', read.contentHash, true)).structuredContent;
+      assert.equal(read.state, 'empty');
+      assert.equal(read.contentHash, saved.notes[0].contentHash);
+      assert.equal(read.contentHash, preview.notes[0].currentContentHash);
+      const next = await saveNote(client, '3', '# Next note', read.contentHash);
       assert.equal(next.isError, undefined);
-      assert.equal((await client.call('tracker_get_note', { frontendId: '3' })).structuredContent.content, '# Next note');
-      assert.equal(errorCode(await client.call('tracker_save_note', { frontendId: '3', content: 'stale', expectedContentHash: read.contentHash })), 'NOTE_CHANGED');
+      assert.equal((await readNote(client, '3')).content, '# Next note');
+      assert.equal(errorCode(await saveNote(client, '3', 'stale', read.contentHash)), 'NOTE_CHANGED');
     }
   } finally { await client.close(); p.cleanup(); }
 });

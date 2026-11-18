@@ -7,8 +7,7 @@
  * (tracker_patch_note), read and save several notes at once, and export the
  * knowledge base to a local directory.
  *
- * Every note write is guarded by the contentHash of the note as last read,
- * the same rule tracker_save_note uses.
+ * Every note write is guarded by the contentHash of the note as last read.
  */
 import { mkdir, stat, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
@@ -80,6 +79,22 @@ async function relatedWrittenNotes(application: TrackerApplication, problem: Cat
   return [...related.values()];
 }
 
+/** Where proposed content differs from the current note, so a dry run can show the change. */
+function noteDiff(current: string, proposed: string) {
+  const before = current.split('\n');
+  const after = proposed.split('\n');
+  const firstDifferent = before.findIndex((line, index) => line !== after[index]);
+  return {
+    hasExistingNote: current.trim().length > 0,
+    currentLength: current.length,
+    newLength: proposed.length,
+    currentLines: before.length,
+    newLines: after.length,
+    // 1-based; one past the last current line when the proposal only adds lines.
+    firstDifferentLine: current === proposed ? null : (firstDifferent === -1 ? before.length + 1 : firstDifferent + 1),
+  };
+}
+
 /** A refusal when the note changed since the caller read it. */
 function assertHash(frontendId: string, current: string, expected: string): void {
   const currentHash = contentHash(current);
@@ -139,7 +154,7 @@ export function registerNoteTools({ register }: Registrar): void {
   register(
     'tracker_get_note_context',
     {
-      description: 'Everything needed to write or improve one problem\'s solution note in a single call: problem details, every practice attempt, review stage, the current note with its contentHash and section headings, the note template, and related problems (shared tags) that already have written notes. Then save with tracker_save_note or edit one section with tracker_patch_note.',
+      description: 'Everything needed to write or improve one problem\'s solution note in a single call: problem details, every practice attempt, review stage, the current note with its contentHash and section headings, the note template, and related problems (shared tags) that already have written notes. Then save with tracker_save_notes or edit one section with tracker_patch_note.',
       inputSchema: z.object({
         frontendId: z.string().trim().min(1).describe('Problem frontend ID, e.g. "42"'),
         lang: langSchema,
@@ -187,7 +202,7 @@ export function registerNoteTools({ register }: Registrar): void {
           headings: listHeadings(note).map(heading => ({ level: heading.level, text: heading.text })),
           content: note.length <= CONTEXT_NOTE_LIMIT ? note : null,
           truncated: note.length > CONTEXT_NOTE_LIMIT,
-          hint: note.length > CONTEXT_NOTE_LIMIT ? 'The note is long; read it with tracker_get_note in chunks.' : undefined,
+          hint: note.length > CONTEXT_NOTE_LIMIT ? 'The note is long; read it with tracker_get_notes using offset and maxChars.' : undefined,
         },
         template: { lang: language, content: NOTE_TEMPLATES[language] },
         relatedNotes: maxRelated > 0 ? await relatedWrittenNotes(application, problem, maxRelated) : [],
@@ -199,27 +214,33 @@ export function registerNoteTools({ register }: Registrar): void {
   register(
     'tracker_get_notes',
     {
-      description: `Read up to ${MAX_NOTE_BATCH} notes at once, each with its state (empty, stub = unedited template, written) and the contentHash tracker_save_notes needs. Long notes are cut at maxChars; their contentHash still covers the whole note.`,
+      description: `Read the Markdown notes of 1 to ${MAX_NOTE_BATCH} problems, each with its state (empty, stub = unedited template, written) and the contentHash that tracker_save_notes and tracker_patch_note need. Each note returns up to maxChars characters from offset; read the rest of a long note by calling again with nextOffset. contentHash always covers the whole note.`,
       inputSchema: z.object({
         frontendIds: frontendIdsSchema(MAX_NOTE_BATCH),
         maxChars: z.number().int().min(200).max(20000).optional().default(4000).describe('Characters returned per note (default 4000)'),
+        offset: z.number().int().min(0).optional().default(0).describe('Character position to start from, for reading a long note in parts (default 0)'),
       }),
     },
-    async (application, { frontendIds, maxChars = 4000 }) => {
+    async (application, { frontendIds, maxChars = 4000, offset = 0 }) => {
       const notes = [];
       const notFound: string[] = [];
       for (const raw of new Set(frontendIds)) {
         const { problem } = await application.catalog.read({}, { frontendId: raw });
         if (!problem) { notFound.push(raw); continue; }
-        const content = await currentNote(application, problem.questionFrontendId);
+        const note = (await application.notes.read({}, { frontendId: problem.questionFrontendId })).note;
+        const content = note?.content ?? '';
+        const end = offset + maxChars;
         notes.push({
           frontendId: problem.questionFrontendId,
           title: problem.title,
           state: noteState(content),
           contentHash: contentHash(content),
+          updatedAt: note && content.trim() ? note.updatedAt : null,
           length: content.length,
-          truncated: content.length > maxChars,
-          content: content.slice(0, maxChars),
+          offset,
+          truncated: end < content.length,
+          nextOffset: end < content.length ? end : null,
+          content: content.slice(offset, end),
         });
       }
       return json({ notes, notFound });
@@ -230,7 +251,7 @@ export function registerNoteTools({ register }: Registrar): void {
   register(
     'tracker_patch_note',
     {
-      description: 'Edit one section of a problem\'s Markdown note without resending the rest. mode "append" adds content to the end of the section (dropping empty template bullets); "replace" swaps the section body. The heading is matched without its emoji or case, e.g. "Edge Cases & Traps"; a missing section is created at the end. Pass expectedContentHash from tracker_get_note or tracker_get_note_context. A blank note can start from the template.',
+      description: 'Edit one section of a problem\'s Markdown note without resending the rest. mode "append" adds content to the end of the section (dropping empty template bullets); "replace" swaps the section body. The heading is matched without its emoji or case, e.g. "Edge Cases & Traps"; a missing section is created at the end. Pass expectedContentHash from tracker_get_notes or tracker_get_note_context. A blank note can start from the template.',
       inputSchema: z.object({
         frontendId: z.string().trim().min(1),
         heading: z.string().trim().min(1).max(200).describe('Section heading text, e.g. "Complexity Analysis" or "复杂度分析"'),
@@ -276,7 +297,7 @@ export function registerNoteTools({ register }: Registrar): void {
   register(
     'tracker_save_notes',
     {
-      description: `Create or replace up to ${MAX_NOTE_BATCH} complete notes in one transaction. Each entry needs the expectedContentHash from tracker_get_notes or tracker_get_note_context; if any note changed since, nothing is saved and every conflict is listed. Set dryRun to check without saving.`,
+      description: `Create or replace 1 to ${MAX_NOTE_BATCH} complete Markdown notes in one transaction. Each entry needs the expectedContentHash from tracker_get_notes or tracker_get_note_context (for a problem with no note, the hash they return for the empty note); if any note changed since, nothing is saved and every conflict is listed. Set dryRun to compare the new content with the current notes without saving. To change one section of a note, tracker_patch_note is safer.`,
       inputSchema: z.object({
         notes: z.array(z.object({
           frontendId: z.string().trim().min(1),
@@ -300,6 +321,7 @@ export function registerNoteTools({ register }: Registrar): void {
         planned.push({
           frontendId: problem.questionFrontendId,
           content: entry.content,
+          current,
           expectedContentHash: entry.expectedContentHash,
           status: conflict ? 'conflict' : current === entry.content ? 'unchanged' : 'apply',
           currentContentHash: contentHash(current),
@@ -309,7 +331,15 @@ export function registerNoteTools({ register }: Registrar): void {
 
       const summary = planned.map(({ frontendId, status, currentContentHash }) => ({ frontendId, status, currentContentHash }));
       const conflicts = planned.filter(entry => entry.status === 'conflict');
-      if (dryRun) return json({ dryRun: true, wouldApply: conflicts.length === 0, notes: summary });
+      if (dryRun) {
+        return json({
+          dryRun: true,
+          wouldApply: conflicts.length === 0,
+          notes: planned.map(({ frontendId, status, currentContentHash, current, content }) => ({
+            frontendId, status, currentContentHash, ...noteDiff(current, content),
+          })),
+        });
+      }
       if (conflicts.length) {
         return refuse('NOTE_CHANGED', `Nothing was saved. These notes changed since they were read: ${conflicts.map(entry => `${entry.frontendId} (current contentHash ${entry.currentContentHash})`).join(', ')}. Read them again before saving.`);
       }

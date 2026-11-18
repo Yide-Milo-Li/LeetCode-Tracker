@@ -1,27 +1,27 @@
 /**
- * Write and preview tools: practice records, notes, and today's plan.
+ * Write tools for single records: practice edits, strategies, and creating or
+ * re-ruling a day's plan. Batch creation and plan item edits are in
+ * batch-tools.ts; note writes are in note-tools.ts.
  *
  * Confirmation is the MCP client's job: every tool here that changes data is
  * annotated readOnlyHint=false (and destructiveHint=true when it overwrites or
  * removes something), so hosts such as Claude Code and Codex ask the user
  * before running it. Safety on this side comes from the existing storage
  * rules on schema v12, without a new operation ledger:
- * - practice creation and plan changes replay by operationId, so a retried
- *   call with the same operationId never applies twice;
- * - practice edits require the record's current revision;
- * - plan changes require the plan's current version;
- * - note saves require a hash of the content the model last read.
+ * - plan changes replay by operationId, so a retried call with the same
+ *   operationId never applies twice, and require the plan's current version;
+ * - practice edits require the record's current revision.
  */
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { TrackerApplication } from '../../../packages/application/src/application.ts';
 import { isTimeZone, localDate } from '../../../packages/contracts/src/time.ts';
-import { recommendationFeedbackReasonSchema, rulePatchSchema, type RulePatch } from '../../../packages/contracts/src/recommendations.ts';
+import { rulePatchSchema, type RulePatch } from '../../../packages/contracts/src/recommendations.ts';
 import { percentagesForCounts, reviewPercentForCount } from '../../web/src/strategy-counts.ts';
 import { ProfileError } from './profile.ts';
 import { TIMEZONE_HINT } from './operations.ts';
 import { json, refuse, type Registrar } from './registrar.ts';
-import { contentHash, summarizePlan } from './views.ts';
+import { summarizePlan } from './views.ts';
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const requiredOperationIdSchema = z.string().uuid()
@@ -38,34 +38,6 @@ async function configuredZone(application: TrackerApplication): Promise<string> 
 
 async function resolveDate(application: TrackerApplication, date: string | undefined): Promise<string> {
   return date ?? localDate(Date.now(), await configuredZone(application));
-}
-
-async function requirePlan(application: TrackerApplication, date: string) {
-  const plan = (await application.planning.plans({ date })).items[0];
-  if (!plan) {
-    throw new ProfileError('PLAN_NOT_FOUND', `No study plan exists for ${date}. Create it with tracker_create_today first.`);
-  }
-  return plan;
-}
-
-/** Plan items are addressed by the frontend ID the model sees, or by itemId. */
-function findItem(plan: Awaited<ReturnType<typeof requirePlan>>, ref: { itemId?: string; frontendId?: string }) {
-  const item = plan.items.find(candidate =>
-    (ref.itemId && candidate.id === ref.itemId) ||
-    (ref.frontendId && candidate.problem.questionFrontendId === ref.frontendId.trim()));
-  if (!item) {
-    throw new ProfileError('PLAN_ITEM_NOT_FOUND', `Problem ${ref.frontendId ?? ref.itemId} is not in the plan for ${plan.date}.`);
-  }
-  return item;
-}
-
-/** Resolve the original target even when a successful first call has already removed it. */
-async function planAtVersion(application: TrackerApplication, plan: Awaited<ReturnType<typeof requirePlan>>, version: number) {
-  if (plan.version === version) return plan;
-  const { items } = await application.planning.versions({}, { id: plan.id });
-  const original = items.find(candidate => candidate.version === version);
-  if (!original) throw new ProfileError('STALE_PLAN', 'Plan has been modified; please reload.');
-  return original;
 }
 
 /**
@@ -105,51 +77,9 @@ export function registerWriteTools({ register }: Registrar): void {
   // ---------------------------------------------------------------- practice
 
   register(
-    'tracker_create_practice',
-    {
-      description: 'Record a practice attempt for a catalog problem. Safe to retry with the same operationId.',
-      inputSchema: z.object({
-        operationId: requiredOperationIdSchema,
-        questionFrontendId: z.string().min(1).describe('Problem frontend ID, e.g. "1"'),
-        completed: z.boolean().describe('Whether the problem was solved in this attempt'),
-        practicedAt: z.string().min(1).optional()
-          .describe('When it happened: ISO 8601 with offset such as "2026-11-17T20:30:00-08:00", or "YYYY-MM-DD" for a past day. Defaults to now. A date-only value does not complete a plan item added that same day.'),
-        timePrecision: z.enum(['datetime', 'date']).optional().describe('Inferred from practicedAt when omitted'),
-        durationMinutes: z.number().int().min(1).max(1440).nullable().optional(),
-        outcome: outcomeSchema.nullable().optional()
-          .describe('independent or assisted when completed; unsolved when not completed'),
-        notes: z.string().max(2000).optional().describe('Short remark stored with the record (the Markdown solution note is separate)'),
-      }),
-    },
-    async (application, args) => {
-      const operationId = args.operationId;
-      const zone = await configuredZone(application);
-      // Default to an exact timestamp, as the desktop does: plan completion only
-      // counts date-only evidence from days after the item was added.
-      // A retry without practicedAt reuses the first call's timestamp so the replay matches.
-      const earlier = await application.practice.byOperation(operationId);
-      const practicedAt = args.practicedAt?.trim() || earlier?.practicedAt || new Date().toISOString();
-      const record = await application.practice.create({
-        questionFrontendId: args.questionFrontendId.trim(),
-        completed: args.completed,
-        practicedAt,
-        timePrecision: args.timePrecision ?? (args.practicedAt ? (practicedAt.includes('T') ? 'datetime' : 'date') : earlier?.timePrecision ?? 'datetime'),
-        durationMinutes: args.durationMinutes,
-        outcome: args.outcome,
-        notes: args.notes,
-        operationId,
-        sourceTimezone: earlier ? earlier.sourceTimezone : zone,
-      });
-      return json({ status: 'applied', operationId, record });
-    },
-    'write',
-    { destructive: false, idempotent: true },
-  );
-
-  register(
     'tracker_update_practice',
     {
-      description: 'Change fields of an active practice record. Requires the revision returned by tracker_get_practice or tracker_list_practices; fails with a revision conflict if the record changed since.',
+      description: 'Change fields of an active practice record. Requires the revision returned by tracker_list_practices; fails with a revision conflict if the record changed since.',
       inputSchema: z.object({
         practiceId: z.string().min(1),
         expectedRevision: z.number().int().positive(),
@@ -181,69 +111,6 @@ export function registerWriteTools({ register }: Registrar): void {
     async (application, { practiceId, expectedRevision }) => {
       const record = await application.practice.revoke({ expectedRevision }, { id: practiceId.trim() });
       return json({ status: 'applied', record });
-    },
-    'write',
-    { destructive: true, idempotent: true },
-  );
-
-  // ------------------------------------------------------------------- notes
-
-  register(
-    'tracker_preview_note',
-    {
-      description: 'Compare proposed Markdown with a problem\'s current note without saving. Returns expectedContentHash for tracker_save_note.',
-      inputSchema: z.object({
-        frontendId: z.string().min(1),
-        content: z.string().max(100000),
-      }),
-    },
-    async (application, { frontendId, content }) => {
-      const id = frontendId.trim();
-      const { problem } = await application.catalog.read({}, { frontendId: id });
-      if (!problem) return refuse('PROBLEM_NOT_FOUND', `Problem ${id} is not in the catalog.`);
-      const current = (await application.notes.read({}, { frontendId: id })).note?.content ?? '';
-      const before = current.split('\n');
-      const after = content.split('\n');
-      const firstDifferentLine = before.findIndex((line, index) => line !== after[index]);
-      return json({
-        frontendId: id,
-        problemTitle: problem.title,
-        hasExistingNote: current.trim().length > 0,
-        expectedContentHash: contentHash(current),
-        unchanged: current === content,
-        currentLength: current.length,
-        newLength: content.length,
-        currentLines: before.length,
-        newLines: after.length,
-        firstDifferentLine: current === content ? null : (firstDifferentLine === -1 ? before.length + 1 : firstDifferentLine + 1),
-      });
-    },
-    'read',
-  );
-
-  register(
-    'tracker_save_note',
-    {
-      description: 'Create or replace a problem\'s Markdown solution note. Pass expectedContentHash from tracker_get_note or tracker_preview_note; the save is refused with NOTE_CHANGED if the note was edited since.',
-      inputSchema: z.object({
-        frontendId: z.string().min(1),
-        content: z.string().max(100000).describe('The complete new note; it replaces the existing one'),
-        expectedContentHash: z.string().min(1).describe('contentHash of the note as last read (for a problem with no note, the hash tracker_get_note returns)'),
-      }),
-    },
-    async (application, { frontendId, content, expectedContentHash }) => {
-      const id = frontendId.trim();
-      const { problem } = await application.catalog.read({}, { frontendId: id });
-      if (!problem) return refuse('PROBLEM_NOT_FOUND', `Problem ${id} is not in the catalog.`);
-      // The write lease is held for this whole call, so nothing can change between this check and the save.
-      const current = (await application.notes.read({}, { frontendId: id })).note?.content ?? '';
-      const currentHash = contentHash(current);
-      if (currentHash !== expectedContentHash) {
-        return refuse('NOTE_CHANGED', `The note for problem ${id} changed since it was read (current contentHash ${currentHash}). Read it again before saving.`);
-      }
-      if (current === content) return json({ status: 'unchanged', frontendId: id, contentHash: currentHash });
-      const { note } = await application.notes.save({ content }, { frontendId: id });
-      return json({ status: 'applied', frontendId: id, contentHash: contentHash(note.content), length: note.content.length, updatedAt: note.updatedAt });
     },
     'write',
     { destructive: true, idempotent: true },
@@ -348,114 +215,40 @@ export function registerWriteTools({ register }: Registrar): void {
     { destructive: false, idempotent: true },
   );
 
-  register(
-    'tracker_append_today',
-    {
-      description: 'Add one more problem to a day\'s plan; the problem is chosen by the plan\'s rules. Requires the plan version from tracker_get_today.',
-      inputSchema: z.object({
-        date: dateSchema.optional(),
-        expectedVersion: z.number().int().positive(),
-        operationId: operationIdSchema,
-      }),
-    },
-    async (application, { date, expectedVersion, operationId = randomUUID() }) => {
-      const plan = await requirePlan(application, await resolveDate(application, date));
-      const updated = await application.planning.append({ operationId, expectedVersion }, { id: plan.id });
-      return json({ status: 'applied', operationId, plan: summarizePlan(updated) });
-    },
-    'write',
-    { destructive: false, idempotent: true },
-  );
-
-  register(
-    'tracker_remove_today_item',
-    {
-      description: 'Remove a problem from a day\'s plan. Requires the plan version from tracker_get_today. An optional feedbackReason helps future plans avoid similar picks.',
-      inputSchema: z.object({
-        date: dateSchema.optional(),
-        expectedVersion: z.number().int().positive(),
-        frontendId: z.string().min(1).optional().describe('Frontend ID of the problem to remove'),
-        itemId: z.string().uuid().optional().describe('Alternative to frontendId'),
-        feedbackReason: recommendationFeedbackReasonSchema.optional(),
-        operationId: operationIdSchema,
-      }),
-    },
-    async (application, { date, expectedVersion, frontendId, itemId, feedbackReason, operationId = randomUUID() }) => {
-      if (!frontendId && !itemId) return refuse('INVALID_INPUT', 'Provide frontendId or itemId.');
-      const plan = await requirePlan(application, await resolveDate(application, date));
-      const item = findItem(await planAtVersion(application, plan, expectedVersion), { frontendId, itemId });
-      const updated = await application.planning.remove({ operationId, expectedVersion, itemId: item.id, feedbackReason }, { id: plan.id });
-      return json({ status: 'applied', operationId, removed: item.problem.questionFrontendId, plan: summarizePlan(updated) });
-    },
-    'write',
-    { destructive: true, idempotent: true },
-  );
-
-  register(
-    'tracker_replace_today_items',
-    {
-      description: 'Swap plan problems for new picks. mode "one" replaces the problem given by frontendId; "all_unfinished" replaces every unfinished item. Requires the plan version from tracker_get_today.',
-      inputSchema: z.object({
-        date: dateSchema.optional(),
-        expectedVersion: z.number().int().positive(),
-        mode: z.enum(['one', 'all_unfinished']).default('one'),
-        frontendId: z.string().min(1).optional().describe('Required when mode is "one"'),
-        feedbackReason: recommendationFeedbackReasonSchema.optional(),
-        operationId: operationIdSchema,
-      }),
-    },
-    async (application, { date, expectedVersion, mode = 'one', frontendId, feedbackReason, operationId = randomUUID() }) => {
-      if (mode === 'one' && !frontendId) return refuse('INVALID_INPUT', 'frontendId is required when mode is "one".');
-      const plan = await requirePlan(application, await resolveDate(application, date));
-      const itemId = mode === 'one' ? findItem(await planAtVersion(application, plan, expectedVersion), { frontendId }).id : undefined;
-      const updated = await application.planning.replace({ operationId, expectedVersion, mode, itemId, feedbackReason }, { id: plan.id });
-      return json({ status: 'applied', operationId, plan: summarizePlan(updated) });
-    },
-    'write',
-    { destructive: true, idempotent: true },
-  );
-
   const rulesInput = rulePatchSchema.describe(
     'Rule changes for this day only, e.g. {"dailyCount": 3, "difficulty": {"Easy": 0, "Medium": 70, "Hard": 30}, "tags": ["dynamic-programming"]}. Free-text preference needs an AI provider and is ignored here.',
   );
 
   register(
-    'tracker_preview_today_rules',
-    {
-      description: 'Check what a one-day rule change would do (candidate count, difficulty counts, issues) without changing the plan.',
-      inputSchema: z.object({ date: dateSchema.optional(), rules: rulesInput }),
-    },
-    async (application, { date, rules }) => {
-      const preview = await application.planning.previewOverride({ rules, date: await resolveDate(application, date) });
-      return json({
-        date: preview.date,
-        planVersion: preview.planVersion,
-        changed: preview.changed,
-        issues: preview.issues,
-        unresolved: preview.unresolved,
-        candidateCount: preview.candidateCount,
-        counts: preview.counts,
-      });
-    },
-    'read',
-  );
-
-  register(
     'tracker_apply_today_rules',
     {
-      description: 'Rebuild a day\'s plan with one-day rule changes. Pass the plan version from tracker_get_today as expectedVersion, or null when that day has no plan yet. Completed items are kept.',
+      description: 'Rebuild a day\'s plan with one-day rule changes. Pass the plan version from tracker_get_today as expectedVersion, or null when that day has no plan yet. Completed items are kept. Set dryRun to see what the rules would do (candidate count, difficulty counts, issues) without changing the plan.',
       inputSchema: z.object({
         date: dateSchema.optional(),
         rules: rulesInput,
         expectedVersion: z.number().int().positive().nullable(),
         operationId: operationIdSchema,
+        dryRun: z.boolean().optional().default(false).describe('Check the rule change without applying it (default false)'),
       }),
     },
-    async (application, { date, rules, expectedVersion, operationId = randomUUID() }) => {
+    async (application, { date, rules, expectedVersion, operationId = randomUUID(), dryRun = false }) => {
+      if (dryRun) {
+        const preview = await application.planning.previewOverride({ rules, date: await resolveDate(application, date) });
+        return json({
+          dryRun: true,
+          date: preview.date,
+          planVersion: preview.planVersion,
+          changed: preview.changed,
+          issues: preview.issues,
+          unresolved: preview.unresolved,
+          candidateCount: preview.candidateCount,
+          counts: preview.counts,
+        });
+      }
       const { plan, changed } = await application.planning.applyRules({ rules, date, expectedVersion, operationId });
       return json({ status: 'applied', operationId, changed, plan: summarizePlan(plan) });
     },
-    'write',
+    ({ dryRun }) => (dryRun ? 'read' : 'write'),
     { destructive: true, idempotent: true },
   );
 }

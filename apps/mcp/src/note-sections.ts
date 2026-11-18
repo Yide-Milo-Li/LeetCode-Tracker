@@ -90,7 +90,7 @@ export function findHeading(content: string, heading: string): NoteHeading | nul
   if (matches.length > 1) {
     throw new SectionPatchError(
       'SECTION_AMBIGUOUS',
-      `The note has ${matches.length} sections titled "${matches[0].text}". Edit it with tracker_save_note instead.`,
+      `The note has ${matches.length} sections titled "${matches[0].text}". Edit it with tracker_save_notes instead.`,
     );
   }
   return matches[0] ?? null;

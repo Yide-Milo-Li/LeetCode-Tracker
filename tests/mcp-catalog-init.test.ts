@@ -42,15 +42,15 @@ test('a client can build a catalog from nothing in batches and see what is missi
     assert.equal(imported.coverage.highestId, 6);
     assert.deepEqual(imported.coverage.byDifficulty, { Easy: 1, Medium: 3, Hard: 0 });
 
-    await client.call('tracker_create_practice', { operationId: randomUUID(), questionFrontendId: '1', completed: true });
+    await client.call('tracker_create_practices', { operationId: randomUUID(), records: [{ questionFrontendId: '1', completed: true }] });
     const second = (await client.call('tracker_import_problems', { problems: [
       { id: '1', title: 'Two Sum', difficulty: 'Easy', isPaidOnly: false },
       { id: '4', title: 'Median of Two Sorted Arrays', difficulty: 'Hard', tags: ['Array', 'Binary Search', 'Divide and Conquer'] },
     ] })).structuredContent;
     assert.equal(second.insertCount, 1);
     assert.deepEqual(second.coverage.missingRanges, ['5']);
-    const problem = (await client.call('tracker_get_problem', { frontendId: '1' })).structuredContent;
-    assert.deepEqual(problem.problem.tags, ['Array', 'Hash Table'], 'omitted tags keep the existing ones');
+    const problem = (await client.call('tracker_get_problems', { frontendIds: ['1'] })).structuredContent.problems[0];
+    assert.deepEqual(problem.tags, ['Array', 'Hash Table'], 'omitted tags keep the existing ones');
     assert.equal(problem.totalPractices, 1, 'practice history survives a re-import');
 
     const coverage = (await client.call('tracker_catalog_coverage')).structuredContent;

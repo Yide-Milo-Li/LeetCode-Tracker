@@ -11,11 +11,12 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { isTimeZone, localDate } from '../../../packages/contracts/src/time.ts';
 import type { CatalogProblem } from '../../../packages/contracts/src/sync.ts';
+import { ApplicationError } from '../../../packages/application/src/errors.ts';
 import type { TrackerProfile } from './profile.ts';
 import { importCatalog, TIMEZONE_HINT } from './operations.ts';
 import { MCP_SERVER_VERSION } from './version.ts';
-import { createRegistrar, TOOL_NAMES, WRITE_TOOL_NAMES } from './registrar.ts';
-import { contentHash, summarizePlan } from './views.ts';
+import { createRegistrar, json, TOOL_NAMES, WRITE_TOOL_NAMES } from './registrar.ts';
+import { practiceView, summarizePlan } from './views.ts';
 import { registerWriteTools } from './write-tools.ts';
 import { registerNoteTools } from './note-tools.ts';
 import { registerBatchTools } from './batch-tools.ts';
@@ -154,98 +155,7 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
     },
   );
 
-  // 3. tracker_get_problem
-  server.registerTool(
-    'tracker_get_problem',
-    {
-      description: 'Get full details of a specific problem by its frontend ID, including tags, custom notes existence, and recent practice history.',
-      inputSchema: z.object({
-        frontendId: z.string().min(1).describe('Problem frontend ID (e.g. "1", "15", "42")'),
-      }),
-    },
-    async (application, { frontendId }) => {
-
-      const trimmedId = frontendId.trim();
-      const { problem } = await application.catalog.read({}, { frontendId: trimmedId });
-
-      if (!problem) {
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
-              found: false,
-              frontendId: trimmedId,
-              message: `Problem with frontendId "${trimmedId}" not found in catalog.`,
-            }, null, 2),
-          }],
-        };
-      }
-
-      let hasNote = false;
-      let noteUpdatedAt: number | null = null;
-      try {
-        const noteResult = await application.notes.read({}, { frontendId: problem.questionFrontendId });
-        if (noteResult.note && noteResult.note.content.trim().length > 0) {
-          hasNote = true;
-          noteUpdatedAt = noteResult.note.updatedAt;
-        }
-      } catch {
-        // No note
-      }
-
-      let recentPractices: Array<{
-        id: string;
-        practicedAt: string;
-        durationMinutes: number | null;
-        completed: boolean;
-        outcome: string | null;
-        revision: number;
-      }> = [];
-      let totalPractices = 0;
-
-      try {
-        const practiceResult = await application.practice.query({
-          questionFrontendId: problem.questionFrontendId,
-          limit: 5,
-          order: 'desc',
-        });
-        totalPractices = practiceResult.total;
-        recentPractices = practiceResult.items.map((r) => ({
-          id: r.id,
-          practicedAt: r.practicedAt,
-          durationMinutes: r.durationMinutes,
-          completed: r.completed,
-          outcome: r.outcome,
-          revision: r.revision,
-        }));
-      } catch {
-        // Empty
-      }
-
-      const result = {
-        found: true,
-        problem: {
-          questionId: problem.questionId,
-          frontendId: problem.questionFrontendId,
-          title: problem.title,
-          difficulty: problem.difficulty,
-          tags: problem.topicTags.map((t) => t.name),
-          url: problem.url,
-          isPaidOnly: problem.isPaidOnly,
-        },
-        hasNote,
-        noteUpdatedAt,
-        totalPractices,
-        recentPractices,
-      };
-
-      return {
-        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-      };
-    },
-  );
-
-  // 4. tracker_get_today
+  // 3. tracker_get_today
   server.registerTool(
     'tracker_get_today',
     {
@@ -295,40 +205,43 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
     },
   );
 
-  // 5. tracker_list_practices
+  // 4. tracker_list_practices
   server.registerTool(
     'tracker_list_practices',
     {
-      description: 'List paginated practice session records with duration, timestamp, notes, completion details and the revision that update/revoke need.',
+      description: 'List practice records with duration, timestamp, remark, outcome and the revision that tracker_update_practice and tracker_revoke_practice need. Filter by problem, or pass ids to fetch specific records (revoked ones included).',
       inputSchema: z.object({
+        ids: z.array(z.string().trim().min(1)).min(1).max(50).optional()
+          .describe('Fetch these practice record IDs; other filters and paging are ignored. Unknown IDs are listed in notFound.'),
         frontendId: z.string().optional().describe('Filter by problem frontend ID (e.g. "1")'),
         page: z.number().int().min(1).optional().default(1).describe('Page number, 1-indexed (default 1)'),
         limit: z.number().int().min(1).max(100).optional().default(20).describe('Items per page, max 100 (default 20)'),
         order: z.enum(['asc', 'desc']).optional().default('desc').describe('Sort order by timestamp (default "desc")'),
       }),
     },
-    async (application, { frontendId, page = 1, limit = 20, order = 'desc' }) => {
+    async (application, { ids, frontendId, page = 1, limit = 20, order = 'desc' }) => {
+      if (ids) {
+        const records = [];
+        const notFound: string[] = [];
+        for (const id of new Set(ids)) {
+          // practice.read throws a 404 for an unknown ID; collect those instead of failing the call.
+          const record = await application.practice.read({}, { id }).catch((error: unknown) => {
+            if (error instanceof ApplicationError && error.status === 404) return null;
+            throw error;
+          });
+          if (record) records.push(practiceView(record));
+          else notFound.push(id);
+        }
+        return json({ total: records.length, returned: records.length, records, notFound });
+      }
 
       let problemId: string | undefined;
       if (frontendId) {
         const { problem: prob } = await application.catalog.read({}, { frontendId: frontendId.trim() });
-        if (prob) {
-          problemId = prob.questionFrontendId;
-        } else {
-          return {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                total: 0,
-                page,
-                limit,
-                returned: 0,
-                records: [],
-                message: `Problem "${frontendId}" not found in catalog.`,
-              }, null, 2),
-            }],
-          };
+        if (!prob) {
+          return json({ total: 0, page, limit, returned: 0, records: [], message: `Problem "${frontendId}" not found in catalog.` });
         }
+        problemId = prob.questionFrontendId;
       }
 
       const result = await application.practice.query({
@@ -337,88 +250,12 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
         limit,
         order,
       });
-
-      const records = result.items.map((r) => ({
-        id: r.id,
-        questionId: r.questionId,
-        questionFrontendId: r.questionFrontendId,
-        problemTitle: r.problemTitle,
-        completed: r.completed,
-        practicedAt: r.practicedAt,
-        timePrecision: r.timePrecision,
-        durationMinutes: r.durationMinutes,
-        notes: r.notes,
-        outcome: r.outcome,
-        status: r.status,
-        revision: r.revision,
-      }));
-
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            total: result.total,
-            page,
-            limit,
-            returned: records.length,
-            records,
-          }, null, 2),
-        }],
-      };
+      const records = result.items.map(practiceView);
+      return json({ total: result.total, page, limit, returned: records.length, records });
     },
   );
 
-  // 6. tracker_get_practice
-  server.registerTool(
-    'tracker_get_practice',
-    {
-      description: 'Get details for a specific practice record by its unique ID.',
-      inputSchema: z.object({
-        recordId: z.string().min(1).describe('The unique practice record ID'),
-      }),
-    },
-    async (application, { recordId }) => {
-
-      try {
-        const result = await application.practice.read({}, { id: recordId });
-        if (!result || 'error' in result) {
-          return {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                found: false,
-                recordId,
-                message: `Practice record "${recordId}" not found.`,
-              }, null, 2),
-            }],
-          };
-        }
-
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
-              found: true,
-              record: result,
-            }, null, 2),
-          }],
-        };
-      } catch (err) {
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
-              found: false,
-              recordId,
-              message: `Practice record "${recordId}" not found: ${err instanceof Error ? err.message : String(err)}`,
-            }, null, 2),
-          }],
-        };
-      }
-    },
-  );
-
-  // 7. tracker_list_notes
+  // 5. tracker_list_notes
   server.registerTool(
     'tracker_list_notes',
     {
@@ -462,65 +299,7 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
     },
   );
 
-  // 8. tracker_get_note
-  server.registerTool(
-    'tracker_get_note',
-    {
-      description: 'Get the markdown solution note for a specific problem by its frontend ID, with segmented chunk reading for long notes. Returns contentHash, which tracker_save_note needs as expectedContentHash.',
-      inputSchema: z.object({
-        frontendId: z.string().min(1).describe('Problem frontend ID (e.g. "1", "42")'),
-        chunkIndex: z.number().int().min(0).optional().default(0).describe('Zero-based chunk index for paginated reading of long notes (default 0)'),
-        chunkSize: z.number().int().min(500).max(10000).optional().default(3000).describe('Character limit per chunk (default 3000, max 10000)'),
-      }),
-    },
-    async (application, { frontendId, chunkIndex = 0, chunkSize = 3000 }) => {
-
-      const trimmedId = frontendId.trim();
-      const result = await application.notes.read({}, { frontendId: trimmedId });
-
-      if (!result.note || !result.note.content.trim()) {
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
-              frontendId: trimmedId,
-              hasNote: false,
-              contentHash: contentHash(result.note?.content ?? ''),
-              message: `No custom note found for problem "${trimmedId}".`,
-            }, null, 2),
-          }],
-        };
-      }
-
-      const fullContent = result.note.content;
-      const totalLength = fullContent.length;
-      const totalChunks = Math.max(1, Math.ceil(totalLength / chunkSize));
-      if (chunkIndex >= totalChunks) return { isError: true, content: [{ type: 'text', text: 'INVALID_CHUNK_INDEX' }] };
-      const start = chunkIndex * chunkSize;
-      const chunkText = fullContent.slice(start, start + chunkSize);
-      const hasMore = start + chunkSize < totalLength;
-
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            frontendId: trimmedId,
-            hasNote: true,
-            totalLength,
-            chunkIndex,
-            totalChunks,
-            hasMore,
-            nextChunkIndex: hasMore ? chunkIndex + 1 : null,
-            content: chunkText,
-            updatedAt: result.note.updatedAt,
-            contentHash: contentHash(fullContent),
-          }, null, 2),
-        }],
-      };
-    },
-  );
-
-  // 9. tracker_get_progress
+  // 6. tracker_get_progress
   server.registerTool(
     'tracker_get_progress',
     {
@@ -555,7 +334,7 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
     },
   );
 
-  // 10. tracker_import_catalog
+  // 7. tracker_import_catalog
   server.registerTool(
     'tracker_import_catalog',
     {

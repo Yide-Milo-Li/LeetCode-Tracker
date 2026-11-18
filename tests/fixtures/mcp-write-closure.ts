@@ -10,7 +10,12 @@ export async function verifyWriteClosure(initialClient: StdioClient, restart: ()
     assert.equal(result?.isError, undefined, `${name}: ${JSON.stringify(result)}`);
     return result.structuredContent;
   };
-  const omittedId = await client.request('tools/call', { name: 'tracker_create_practice', arguments: { questionFrontendId: '1', completed: false } });
+  const readNote = async (frontendId: string, extra: Record<string, unknown> = {}) =>
+    (await call('tracker_get_notes', { frontendIds: [frontendId], ...extra })).notes[0];
+  const saveNote = async (frontendId: string, content: string, expectedContentHash: string) =>
+    (await call('tracker_save_notes', { notes: [{ frontendId, content, expectedContentHash }] })).notes[0];
+
+  const omittedId = await client.request('tools/call', { name: 'tracker_create_practices', arguments: { records: [{ questionFrontendId: '1', completed: false }] } });
   assert.ok(omittedId.error || omittedId.result?.isError);
   assert.equal((await call('tracker_list_practices')).total, 0);
 
@@ -19,33 +24,33 @@ export async function verifyWriteClosure(initialClient: StdioClient, restart: ()
     difficultyCounts: { Easy: 1, Medium: 2, Hard: 0 }, review: { mode: 'none' },
   });
   const created = (await call('tracker_create_today')).plan;
-  const appendArgs = { expectedVersion: created.version, operationId: randomUUID() };
-  const appended = await call('tracker_append_today', appendArgs);
-  assert.deepEqual(await call('tracker_append_today', appendArgs), appended);
-  const replaceArgs = { frontendId: appended.plan.items[0].frontendId, expectedVersion: appended.plan.version, operationId: randomUUID() };
-  const replaced = await call('tracker_replace_today_items', replaceArgs);
-  assert.deepEqual(await call('tracker_replace_today_items', replaceArgs), replaced);
-  const removeArgs = { frontendId: replaced.plan.items[0].frontendId, expectedVersion: replaced.plan.version, operationId: randomUUID() };
-  const removed = await call('tracker_remove_today_item', removeArgs);
-  assert.deepEqual(await call('tracker_remove_today_item', removeArgs), removed);
+  const appendArgs = { expectedVersion: created.version, operationId: randomUUID(), steps: [{ action: 'append' }] };
+  const appended = await call('tracker_edit_today', appendArgs);
+  assert.deepEqual(await call('tracker_edit_today', appendArgs), appended);
+  const replaceArgs = { expectedVersion: appended.plan.version, operationId: randomUUID(), steps: [{ action: 'replace', frontendId: appended.plan.items[0].frontendId }] };
+  const replaced = await call('tracker_edit_today', replaceArgs);
+  assert.deepEqual(await call('tracker_edit_today', replaceArgs), replaced);
+  const removeArgs = { expectedVersion: replaced.plan.version, operationId: randomUUID(), steps: [{ action: 'remove', frontendId: replaced.plan.items[0].frontendId }] };
+  const removed = await call('tracker_edit_today', removeArgs);
+  assert.deepEqual(await call('tracker_edit_today', removeArgs), removed);
   const ruleArgs = { expectedVersion: removed.plan.version, operationId: randomUUID(), rules: { dailyCount: 3, difficulty: { Easy: 0, Medium: 0, Hard: 100 } } };
   const applied = await call('tracker_apply_today_rules', ruleArgs);
   assert.deepEqual(await call('tracker_apply_today_rules', ruleArgs), applied);
   assert.ok(applied.plan.items.every((item: any) => item.difficulty === 'Hard'));
 
-  const practiceArgs = { questionFrontendId: applied.plan.items[0].frontendId, completed: true, outcome: 'independent', operationId: randomUUID() };
-  let record = (await call('tracker_create_practice', practiceArgs)).record;
+  const practiceArgs = { operationId: randomUUID(), records: [{ questionFrontendId: applied.plan.items[0].frontendId, completed: true, outcome: 'independent' }] };
+  let record = (await call('tracker_create_practices', practiceArgs)).records[0];
   assert.equal((await call('tracker_get_today')).completedCount, 1);
   assert.equal((await call('tracker_get_progress')).overview.uniqueSolvedProblems, 1);
-  assert.equal((await call('tracker_get_problem', { frontendId: practiceArgs.questionFrontendId })).totalPractices, 1);
+  assert.equal((await call('tracker_get_problems', { frontendIds: [practiceArgs.records[0].questionFrontendId] })).problems[0].totalPractices, 1);
   record = (await call('tracker_update_practice', {
     practiceId: record.id, expectedRevision: record.revision, completed: false, outcome: 'unsolved',
     practicedAt: '2026-01-01', timePrecision: 'date', durationMinutes: 15,
   })).record;
   assert.equal((await call('tracker_get_today')).completedCount, 0);
   assert.equal((await call('tracker_get_progress')).overview.uniqueSolvedProblems, 0);
-  assert.equal((await call('tracker_create_practice', practiceArgs)).record.id, record.id);
-  assert.equal((await call('tracker_get_practice', { recordId: record.id })).record.durationMinutes, 15);
+  assert.equal((await call('tracker_create_practices', practiceArgs)).records[0].id, record.id);
+  assert.equal((await call('tracker_list_practices', { ids: [record.id] })).records[0].durationMinutes, 15);
   record = (await call('tracker_update_practice', {
     practiceId: record.id, expectedRevision: record.revision, completed: true, outcome: 'assisted',
     practicedAt: new Date().toISOString(), timePrecision: 'datetime',
@@ -56,31 +61,31 @@ export async function verifyWriteClosure(initialClient: StdioClient, restart: ()
   assert.equal((await call('tracker_get_progress')).overview.uniqueSolvedProblems, 0);
   assert.equal((await call('tracker_list_practices')).total, 0);
 
-  const before = await call('tracker_get_note', { frontendId: '3' });
+  const before = await readNote('3');
   const content = '# Solution\n\n' + 'Two pointers scan the array in linear time.\n'.repeat(180);
-  let saved = await call('tracker_save_note', { frontendId: '3', content, expectedContentHash: before.contentHash });
+  let saved = await saveNote('3', content, before.contentHash);
   let combined = '';
-  for (let chunkIndex = 0; ; chunkIndex++) {
-    const chunk = await call('tracker_get_note', { frontendId: '3', chunkSize: 1000, chunkIndex });
-    combined += chunk.content;
-    assert.equal(chunk.contentHash, saved.contentHash);
-    if (!chunk.hasMore) break;
+  for (let offset: number | null = 0; offset !== null;) {
+    const part: any = await readNote('3', { maxChars: 1000, offset });
+    combined += part.content;
+    assert.equal(part.contentHash, saved.contentHash);
+    offset = part.nextOffset;
   }
   assert.equal(combined, content);
   assert.equal((await call('tracker_list_notes', { hasNote: 'true' })).notes[0].questionFrontendId, '3');
-  const whitespace = await call('tracker_save_note', { frontendId: '3', content: ' \n\t', expectedContentHash: saved.contentHash });
-  const readWhitespace = await call('tracker_get_note', { frontendId: '3' });
+  const whitespace = await saveNote('3', ' \n\t', saved.contentHash);
+  const readWhitespace = await readNote('3');
   assert.equal(readWhitespace.contentHash, whitespace.contentHash);
-  saved = await call('tracker_save_note', { frontendId: '3', content, expectedContentHash: readWhitespace.contentHash });
+  saved = await saveNote('3', content, readWhitespace.contentHash);
 
   client = await restart();
-  assert.deepEqual(await call('tracker_replace_today_items', replaceArgs), replaced);
-  assert.deepEqual(await call('tracker_remove_today_item', removeArgs), removed);
+  assert.deepEqual(await call('tracker_edit_today', replaceArgs), replaced);
+  assert.deepEqual(await call('tracker_edit_today', removeArgs), removed);
   assert.deepEqual(await call('tracker_apply_today_rules', ruleArgs), applied);
-  assert.equal((await call('tracker_create_practice', practiceArgs)).record.status, 'revoked');
+  assert.equal((await call('tracker_create_practices', practiceArgs)).records[0].status, 'revoked');
   assert.equal((await call('tracker_list_practices')).total, 0, 'retry cannot reactivate a revoked record');
   assert.equal((await call('tracker_get_today')).version, applied.plan.version);
   assert.equal((await call('tracker_get_today')).completedCount, 0);
-  assert.equal((await call('tracker_get_note', { frontendId: '3' })).contentHash, saved.contentHash);
+  assert.equal((await readNote('3')).contentHash, saved.contentHash);
   assert.equal((await call('tracker_list_notes', { hasNote: 'true' })).notes[0].questionFrontendId, '3');
 }

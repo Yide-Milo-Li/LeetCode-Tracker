@@ -1,6 +1,7 @@
 /** Compact, model-facing shapes shared by read and write tools. */
 import { createHash } from 'node:crypto';
 import type { DailyPlan } from '../../../packages/contracts/src/recommendations.ts';
+import type { PracticeRecord } from '../../../packages/contracts/src/practice.ts';
 import { hasMeaningfulNoteContent } from '../../../packages/contracts/src/notes.ts';
 
 /**
@@ -54,5 +55,23 @@ export function summarizePlan(plan: DailyPlan) {
     completedCount: items.filter(item => item.completed).length,
     totalCount: items.length,
     items,
+  };
+}
+
+/** A practice record as list and lookup tools show it, with the revision edits need. */
+export function practiceView(record: PracticeRecord) {
+  return {
+    id: record.id,
+    questionId: record.questionId,
+    questionFrontendId: record.questionFrontendId,
+    problemTitle: record.problemTitle,
+    completed: record.completed,
+    practicedAt: record.practicedAt,
+    timePrecision: record.timePrecision,
+    durationMinutes: record.durationMinutes,
+    notes: record.notes,
+    outcome: record.outcome,
+    status: record.status,
+    revision: record.revision,
   };
 }
