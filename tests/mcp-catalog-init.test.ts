@@ -2,13 +2,29 @@
 import { test } from 'node:test';
 import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { StdioClient } from './fixtures/mcp-stdio-client.ts';
+import { TOOL_NAMES } from '../apps/mcp/src/registrar.ts';
+import { initQuestionBankText } from '../apps/mcp/src/prompts.ts';
 
 const entry = join(resolve(import.meta.dirname, '..'), 'apps/mcp/src/main.ts');
 const errorCode = (result: any) => result.structuredContent?.error;
+const skill = readFileSync(new URL('../skills/lct/SKILL.md', import.meta.url), 'utf8').replaceAll('\r\n', '\n');
+
+test('the shared LCT skill has portable frontmatter and references registered MCP tools', () => {
+  assert.match(skill, /^---\nname: lct\ndescription: [A-Za-z][^\n:#]+\n---\n\n/);
+  assert.ok(skill.length <= 3200, `LCT skill is ${skill.length} characters`);
+  const referenced = skill.match(/\btracker_\w+/g) ?? [];
+  assert.ok(referenced.length > 0);
+  for (const name of new Set(referenced)) {
+    assert.ok((TOOL_NAMES as readonly string[]).includes(name), name);
+  }
+  const importBatchLimit = initQuestionBankText().match(/batches of up to (\d+)/)?.[1];
+  assert.ok(importBatchLimit);
+  assert.ok(skill.includes(`batches of up to ${importBatchLimit}`));
+});
 
 function emptyDir() {
   const dir = mkdtempSync(join(tmpdir(), 'tracker-mcp-init-'));
@@ -87,13 +103,16 @@ test('note and weak-topic prompts name the tools and guard existing text', async
     const note = (await get('write_note', { frontendId: '42', lang: 'zh' })).messages[0].content.text;
     assert.match(note, /tracker_get_note_context with frontendId "42", lang "zh"/);
     assert.match(note, /keep my text/);
+    assert.match(note, /wait for my confirmation/);
     assert.match(note, /tracker_patch_note/);
+    assert.match(skill, /preview additions and confirm before using `tracker_patch_note` in append mode/);
     const missing = await client.request('prompts/get', { name: 'write_note', arguments: {} });
     assert.ok(missing.error, 'frontendId is required');
 
     const review = (await get('review_weak_topics', {})).messages[0].content.text;
     assert.match(review, /weakTopics: true/);
     assert.match(review, /Do not change anything yet/);
+    assert.match(skill, /tracker_get_progress` with `weakTopics: true`/);
     assert.match((await get('review_weak_topics', { focus: 'Dynamic Programming' })).messages[0].content.text, /Focus on: Dynamic Programming\./);
   } finally { await client.close(); w.cleanup(); }
 });
