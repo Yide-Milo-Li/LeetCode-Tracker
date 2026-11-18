@@ -26,8 +26,7 @@ export const WRITE_TOOL_NAMES = [
   'tracker_import_catalog',
   'tracker_update_practice',
   'tracker_revoke_practice',
-  'tracker_create_strategy',
-  'tracker_update_strategy',
+  'tracker_save_strategy',
   'tracker_create_today',
   'tracker_apply_today_rules',
   'tracker_create_practices',
@@ -90,6 +89,49 @@ function toolError(error: unknown): CallToolResult {
   return { isError: true, structuredContent: { error: code, message }, content: [{ type: 'text', text: `${code}: ${message}` }] };
 }
 
+function stripSchemaNoise(node: unknown): unknown {
+  if (!node || typeof node !== 'object') return node;
+  if (Array.isArray(node)) return node.map(stripSchemaNoise);
+  const out: Record<string, unknown> = {};
+  const record = node as Record<string, unknown>;
+  const isUuid = record.format === 'uuid';
+  for (const [key, value] of Object.entries(record)) {
+    if (key === '$schema') continue;
+    if (key === 'maximum' && value === Number.MAX_SAFE_INTEGER) continue;
+    if (isUuid && (key === 'pattern' || key === 'format')) continue;
+    out[key] = stripSchemaNoise(value);
+  }
+  return out;
+}
+
+/**
+ * Strip repetitive JSON Schema boilerplate ($schema, MAX_SAFE_INTEGER bounds,
+ * and Zod's 170-char UUID regex) from tools/list while keeping runtime Zod
+ * validation untouched.
+ */
+function compactInputSchema<S extends z.ZodObject>(schema: S): z.ZodObject {
+  const std = schema['~standard'] as unknown as {
+    jsonSchema?: {
+      input: (opts: unknown) => unknown;
+      output: (opts: unknown) => unknown;
+    };
+    [key: string]: unknown;
+  };
+  if (!std.jsonSchema) return schema;
+  const originalJsonSchema = std.jsonSchema;
+  return Object.create(schema, {
+    '~standard': {
+      value: {
+        ...std,
+        jsonSchema: {
+          input: (opts: unknown) => stripSchemaNoise(originalJsonSchema.input(opts)),
+          output: (opts: unknown) => stripSchemaNoise(originalJsonSchema.output(opts)),
+        },
+      },
+    },
+  }) as z.ZodObject;
+}
+
 export type Registrar = ReturnType<typeof createRegistrar>;
 
 export function createRegistrar(rawServer: McpServer, profile: TrackerProfile) {
@@ -108,7 +150,7 @@ export function createRegistrar(rawServer: McpServer, profile: TrackerProfile) {
       openWorldHint: false,
     };
     // Widen the schema so the SDK's conditional callback type resolves; args are validated by the SDK.
-    const inputSchema: z.ZodObject = config.inputSchema;
+    const inputSchema: z.ZodObject = compactInputSchema(config.inputSchema);
     rawServer.registerTool(name, { description: config.description, inputSchema, annotations }, async (rawArgs: unknown): Promise<CallToolResult> => {
       try {
         const args = rawArgs as z.infer<S>;

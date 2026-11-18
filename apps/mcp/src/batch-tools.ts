@@ -19,13 +19,13 @@ import { isTimeZone, localDate } from '../../../packages/contracts/src/time.ts';
 import { TIMEZONE_HINT } from './operations.ts';
 import { ProfileError } from './profile.ts';
 import { json, refuse, type Registrar } from './registrar.ts';
-import { noteState, practiceLocalDate, profileZone, stepOperationId, summarizePlan } from './views.ts';
+import { noteState, practiceLocalDate, profileLang, profileZone, stepOperationId, summarizePlanItem } from './views.ts';
 
 const MAX_PROBLEM_BATCH = 50;
 const MAX_PLAN_STEPS = 10;
 
 const batchOperationIdSchema = z.string().uuid()
-  .describe('UUID for the whole batch. Generate it before the first call and reuse it for every retry, including when a response is lost; finished steps are replayed instead of applied twice.');
+  .describe('Client UUID for the batch; reuse on retry so finished steps replay instead of repeating.');
 
 async function configuredZone(application: TrackerApplication): Promise<string> {
   const { timezone } = await application.settings.get();
@@ -51,25 +51,11 @@ const practiceInputSchema = z.object({
   notes: z.string().max(2000).optional().describe('Short remark stored with the record'),
 });
 
-const planStepSchema = z.discriminatedUnion('action', [
-  z.object({
-    action: z.literal('remove'),
-    frontendId: z.string().trim().min(1).optional(),
-    itemId: z.string().uuid().optional(),
-    feedbackReason: recommendationFeedbackReasonSchema.optional(),
-  }),
-  z.object({
-    action: z.literal('replace'),
-    frontendId: z.string().trim().min(1).optional(),
-    itemId: z.string().uuid().optional(),
-    feedbackReason: recommendationFeedbackReasonSchema.optional(),
-  }),
-  z.object({ action: z.literal('append') }),
-  z.object({
-    action: z.literal('replace_unfinished'),
-    feedbackReason: recommendationFeedbackReasonSchema.optional(),
-  }),
-]);
+const planStepSchema = z.object({
+  action: z.enum(['remove', 'replace', 'append', 'replace_unfinished']),
+  frontendId: z.string().trim().min(1).optional().describe('Problem frontendId for remove or replace'),
+  feedbackReason: recommendationFeedbackReasonSchema.optional(),
+});
 type PlanStep = z.infer<typeof planStepSchema>;
 
 /** The plan as it was at expectedVersion, so a retried batch resolves items against the same plan. */
@@ -83,7 +69,7 @@ export function registerBatchTools({ register }: Registrar): void {
   register(
     'tracker_get_problems',
     {
-      description: `Look up 1 to ${MAX_PROBLEM_BATCH} problems by frontend ID: details, note state (empty, stub = unedited template, written), practice count and the most recent attempts with the id and revision tracker_update_practice needs. Unknown IDs are listed in notFound.`,
+      description: `Look up 1 to ${MAX_PROBLEM_BATCH} problems by frontendId: details, noteState (empty/stub/written), practice count and recent attempts (with id and revision).`,
       inputSchema: z.object({
         frontendIds: z.array(z.string().trim().min(1).max(100)).min(1).max(MAX_PROBLEM_BATCH),
         recentPractices: z.number().int().min(0).max(10).optional().default(3)
@@ -102,7 +88,6 @@ export function registerBatchTools({ register }: Registrar): void {
         // limit must be at least 1; with recentPractices 0 the one record only supplies the total.
         const practice = await application.practice.query({ questionFrontendId: id, limit: Math.max(1, recentPractices) });
         problems.push({
-          questionId: problem.questionId,
           frontendId: id,
           title: problem.title,
           difficulty: problem.difficulty,
@@ -131,7 +116,7 @@ export function registerBatchTools({ register }: Registrar): void {
   register(
     'tracker_create_practices',
     {
-      description: `Record up to ${MAX_PRACTICE_BATCH} practice attempts in one transaction: either all are saved or none is. Pass questionFrontendId (e.g. "1") directly without calling tracker_get_problems first. Use it when the user reports several problems at once. Set dryRun to validate and show what would be recorded. Requires a client-generated operationId; retrying with it is safe.`,
+      description: `Record 1 to ${MAX_PRACTICE_BATCH} practice attempts in one transaction. Pass questionFrontendId (e.g. "1") directly without calling tracker_get_problems first. Set dryRun to validate only; requires operationId.`,
       inputSchema: z.object({
         operationId: batchOperationIdSchema,
         records: z.array(practiceInputSchema).min(1).max(MAX_PRACTICE_BATCH),
@@ -214,7 +199,7 @@ export function registerBatchTools({ register }: Registrar): void {
   register(
     'tracker_edit_today',
     {
-      description: `Change a day's plan: up to ${MAX_PLAN_STEPS} steps applied in order with one expectedVersion. Steps: {"action":"remove","frontendId":"12"}, {"action":"replace","frontendId":"12"} (new pick for that problem), {"action":"append"} (one more problem chosen by the plan's rules), {"action":"replace_unfinished"} (new picks for every unfinished problem; must be the last step). remove and replace take an optional feedbackReason that helps future plans avoid similar picks. Every step is checked against the plan before anything changes. The steps are not one transaction: if a later step fails (for example no replacement candidate is left), the earlier ones stay applied and the error says which ran and the plan's new version. Requires a client-generated operationId; retrying with it replays the finished steps.`,
+      description: `Apply 1 to ${MAX_PLAN_STEPS} ordered steps to a day's plan with expectedVersion and operationId. Actions: "remove" or "replace" (with frontendId and optional feedbackReason), "append", or "replace_unfinished" (must be last). Returns the new version, counts, and added/removed items.`,
       inputSchema: z.object({
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('YYYY-MM-DD; defaults to today in the configured timezone'),
         expectedVersion: z.number().int().positive().describe('Plan version from tracker_get_today'),
@@ -240,11 +225,9 @@ export function registerBatchTools({ register }: Registrar): void {
           resolved.push({ step, label: 'replace unfinished' });
           continue;
         }
-        if (!step.frontendId && !step.itemId) return refuse('INVALID_INPUT', `steps.${index}: give frontendId or itemId.`);
-        const item = base.items.find(candidate =>
-          (step.itemId && candidate.id === step.itemId) ||
-          (step.frontendId && candidate.problem.questionFrontendId === step.frontendId));
-        if (!item) return refuse('PLAN_ITEM_NOT_FOUND', `steps.${index}: problem ${step.frontendId ?? step.itemId} is not in the plan for ${base.date}.`);
+        if (!step.frontendId) return refuse('INVALID_INPUT', `steps.${index}: give frontendId.`);
+        const item = base.items.find(candidate => candidate.problem.questionFrontendId === step.frontendId);
+        if (!item) return refuse('PLAN_ITEM_NOT_FOUND', `steps.${index}: problem ${step.frontendId} is not in the plan for ${base.date}.`);
         if (touched.has(item.id)) return refuse('INVALID_INPUT', `steps.${index}: problem ${item.problem.questionFrontendId} is already changed by an earlier step.`);
         if (step.action === 'replace' && item.completed) {
           return refuse('ITEM_ALREADY_COMPLETED', `steps.${index}: problem ${item.problem.questionFrontendId} is already completed and cannot be replaced.`);
@@ -279,7 +262,20 @@ export function registerBatchTools({ register }: Registrar): void {
         version = current.version;
         applied.push(label);
       }
-      return json({ status: 'applied', operationId, applied, plan: summarizePlan(current) });
+      const lang = await profileLang(application);
+      const beforeIds = new Set(base.items.map(item => item.problem.questionFrontendId));
+      const afterIds = new Set(current.items.map(item => item.problem.questionFrontendId));
+      return json({
+        status: 'applied',
+        operationId,
+        date: current.date,
+        version: current.version,
+        completedCount: current.items.filter(item => item.completed).length,
+        totalCount: current.items.length,
+        applied,
+        added: current.items.filter(item => !beforeIds.has(item.problem.questionFrontendId)).map(item => summarizePlanItem(item, lang)),
+        removed: base.items.map(item => item.problem.questionFrontendId).filter(id => !afterIds.has(id)),
+      });
     },
     'write',
     { destructive: true, idempotent: true },

@@ -16,22 +16,22 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { TrackerApplication } from '../../../packages/application/src/application.ts';
 import { isTimeZone, localDate } from '../../../packages/contracts/src/time.ts';
-import { rulePatchSchema, type RulePatch } from '../../../packages/contracts/src/recommendations.ts';
+import type { RulePatch } from '../../../packages/contracts/src/recommendations.ts';
 import { percentagesForCounts, reviewPercentForCount } from '../../web/src/strategy-counts.ts';
 import { ProfileError } from './profile.ts';
 import { setTimeZone, TIMEZONE_HINT } from './operations.ts';
 import { json, refuse, type Registrar } from './registrar.ts';
-import { summarizePlan } from './views.ts';
+import { profileLang, summarizePlan } from './views.ts';
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const requiredOperationIdSchema = z.string().uuid()
-  .describe('Generate a UUID before the first call and reuse it for every retry, including when a response is lost.');
+  .describe('Client UUID; reuse on every retry.');
 /**
  * Only plan creation leaves the ID optional: retrying it without one returns the
  * day's existing plan, so a lost response cannot create a second plan.
  */
 const operationIdSchema = requiredOperationIdSchema.optional()
-  .describe('UUID that makes retries safe: repeating a call with the same operationId returns the first result instead of applying twice. Generated when omitted; reuse the returned value to retry.');
+  .describe('Optional UUID for safe retries (generated if omitted).');
 const outcomeSchema = z.enum(['independent', 'assisted', 'unsolved']);
 
 async function configuredZone(application: TrackerApplication): Promise<string> {
@@ -125,18 +125,16 @@ export function registerWriteTools({ register }: Registrar): void {
   register(
     'tracker_get_strategies',
     {
-      description: 'List study strategies (rules such as daily count, difficulty mix, tags, review share) and which strategy applies on each weekday.',
+      description: 'List study strategies (rules, daily counts, difficulty mix, tags, review share, and weekdays) and active weekday.',
       inputSchema: z.object({}),
     },
     async (application) => {
       const { items } = await application.planning.strategies();
-      const { schedule } = await application.planning.schedule();
       const { timezone } = await application.settings.get();
       const zone = timezone && isTimeZone(timezone) ? timezone : null;
       const activeDate = zone ? localDate(Date.now(), zone) : null;
       return json({
         strategies: items,
-        weeklySchedule: schedule.map(entry => ({ weekday: entry.weekday, strategyId: entry.strategy?.id ?? null, strategyName: entry.strategy?.name ?? null })),
         timezone: zone,
         activeDate,
         todayWeekday: activeDate ? new Date(`${activeDate}T12:00:00Z`).getUTCDay() : null,
@@ -146,40 +144,33 @@ export function registerWriteTools({ register }: Registrar): void {
   );
 
   register(
-    'tracker_create_strategy',
+    'tracker_save_strategy',
     {
-      description: 'Create a study strategy and assign it to weekdays, so tracker_create_today can plan those days. Example: 3 a day (1 Easy, 2 Medium, 1 of them a review) on weekdays.',
-      inputSchema: strategyCountsSchema.extend({
-        name: z.string().trim().min(1).max(100),
-        weekdays: weekdaysSchema,
-        tags: z.array(z.string().min(1)).max(100).optional().describe('Limit picks to these topic tags (slugs, e.g. "dynamic-programming")'),
-        premium: z.boolean().optional().describe('Allow paid-only problems (default false)'),
-      }),
-    },
-    async (application, { name, weekdays, tags = [], premium = false, ...counts }) => {
-      const strategy = await application.planning.createStrategy({
-        name, weekdays, rules: { ...rulesFromCounts(counts), tags, premium, preference: '' },
-      });
-      return json({ status: 'applied', strategy });
-    },
-    'write',
-    { destructive: false, idempotent: false },
-  );
-
-  register(
-    'tracker_update_strategy',
-    {
-      description: "Change a strategy's name, weekdays, tags or counts. Requires its version from tracker_get_strategies. To change counts, give dailyCount, difficultyCounts and review together.",
+      description: 'Create or update a study strategy and its weekdays (0=Sun..6=Sat). Omit strategyId to create (requires name, weekdays, dailyCount, difficultyCounts, review). Pass strategyId and expectedVersion from tracker_get_strategies to update (give dailyCount, difficultyCounts and review together when changing counts).',
       inputSchema: strategyCountsSchema.partial().extend({
-        strategyId: z.string().min(1),
-        expectedVersion: z.number().int().positive(),
+        strategyId: z.string().min(1).optional().describe('Strategy ID to update; omit to create'),
+        expectedVersion: z.number().int().positive().optional().describe('Required when updating'),
         name: z.string().trim().min(1).max(100).optional(),
         weekdays: weekdaysSchema.optional(),
-        tags: z.array(z.string().min(1)).max(100).optional(),
+        tags: z.array(z.string().min(1)).max(100).optional().describe('Topic tag slugs'),
         premium: z.boolean().optional(),
       }),
     },
     async (application, { strategyId, expectedVersion, name, weekdays, tags, premium, dailyCount, difficultyCounts, review }) => {
+      if (strategyId === undefined && expectedVersion === undefined) {
+        if (!name || !weekdays || dailyCount === undefined || !difficultyCounts || !review) {
+          return refuse('INVALID_INPUT', 'Creating a strategy requires name, weekdays, dailyCount, difficultyCounts and review.');
+        }
+        const strategy = await application.planning.createStrategy({
+          name,
+          weekdays,
+          rules: { ...rulesFromCounts({ dailyCount, difficultyCounts, review }), tags: tags ?? [], premium: premium ?? false, preference: '' },
+        });
+        return json({ status: 'applied', strategy });
+      }
+      if (!strategyId || expectedVersion === undefined) {
+        return refuse('INVALID_INPUT', 'Updating a strategy requires both strategyId and expectedVersion.');
+      }
       const countFields = [dailyCount, difficultyCounts, review].filter(value => value !== undefined).length;
       if (countFields !== 0 && countFields !== 3) {
         return refuse('INVALID_INPUT', 'Give dailyCount, difficultyCounts and review together, or none of them.');
@@ -249,7 +240,7 @@ export function registerWriteTools({ register }: Registrar): void {
   register(
     'tracker_create_today',
     {
-      description: 'Generate the study plan for today (or a date) from the strategy scheduled for that weekday, or return it if it already exists. status "rest" means no strategy is scheduled that day; "setup" means the profile needs a catalog or strategy first.',
+      description: 'Generate the study plan for today (or a date) from the scheduled strategy, or return the existing one. status "rest" means no strategy for that weekday; "setup" means catalog or strategy is missing.',
       inputSchema: z.object({
         date: dateSchema.optional().describe('YYYY-MM-DD; defaults to today in the configured timezone'),
         operationId: operationIdSchema,
@@ -258,23 +249,29 @@ export function registerWriteTools({ register }: Registrar): void {
     async (application, { date, operationId = randomUUID() }) => {
       const zone = await configuredZone(application);
       const result = await application.planning.ensure({ date, timezone: zone, operationId });
-      return json({ status: result.status, operationId, plan: result.plan ? summarizePlan(result.plan) : null });
+      return json({ status: result.status, operationId, plan: result.plan ? summarizePlan(result.plan, await profileLang(application)) : null });
     },
     'write',
     { destructive: false, idempotent: true },
   );
 
-  const rulesInput = rulePatchSchema.describe(
-    'Rule changes for this day only, e.g. {"dailyCount": 3, "difficulty": {"Easy": 0, "Medium": 70, "Hard": 30}, "tags": ["dynamic-programming"]}. Free-text preference needs an AI provider and is ignored here.',
-  );
+  const todayRulesSchema = z.object({
+    dailyCount: z.number().int().min(1).max(50).optional(),
+    difficulty: z.object({ Easy: z.number().min(0).max(100), Medium: z.number().min(0).max(100), Hard: z.number().min(0).max(100) }).strict().optional(),
+    tags: z.array(z.string().min(1).max(200)).max(100).optional(),
+    premium: z.boolean().optional(),
+    reviewEnabled: z.boolean().optional(),
+    reviewPercent: z.number().min(0).max(100).nullable().optional(),
+    focusWeakTags: z.boolean().optional(),
+  }).strict().describe('One-day rule overrides; difficulty percentages must sum to 100.');
 
   register(
     'tracker_apply_today_rules',
     {
-      description: 'Rebuild a day\'s plan with one-day rule changes. Pass the plan version from tracker_get_today as expectedVersion, or null when that day has no plan yet. Completed items are kept. Set dryRun to see what the rules would do (candidate count, difficulty counts, issues) without changing the plan.',
+      description: 'Rebuild a day\'s plan with one-day rule changes (keeping completed items). Pass expectedVersion from tracker_get_today, or null if no plan exists yet. Set dryRun to preview candidate counts and issues.',
       inputSchema: z.object({
         date: dateSchema.optional(),
-        rules: rulesInput,
+        rules: todayRulesSchema,
         expectedVersion: z.number().int().positive().nullable(),
         operationId: requiredOperationIdSchema,
         dryRun: z.boolean().optional().default(false).describe('Check the rule change without applying it (default false)'),
@@ -295,7 +292,7 @@ export function registerWriteTools({ register }: Registrar): void {
         });
       }
       const { plan, changed } = await application.planning.applyRules({ rules, date, expectedVersion, operationId });
-      return json({ status: 'applied', operationId, changed, plan: summarizePlan(plan) });
+      return json({ status: 'applied', operationId, changed, plan: summarizePlan(plan, await profileLang(application)) });
     },
     ({ dryRun }) => (dryRun ? 'read' : 'write'),
     { destructive: true, idempotent: true },

@@ -16,7 +16,7 @@ import type { TrackerProfile } from './profile.ts';
 import { importCatalog, TIMEZONE_HINT } from './operations.ts';
 import { MCP_SERVER_VERSION } from './version.ts';
 import { createRegistrar, json } from './registrar.ts';
-import { practiceView, profileZone, summarizePlan, weakTopicsView } from './views.ts';
+import { practiceView, profileLang, profileZone, summarizePlan, weakTopicsView } from './views.ts';
 import { registerWriteTools } from './write-tools.ts';
 import { registerNoteTools } from './note-tools.ts';
 import { registerBatchTools } from './batch-tools.ts';
@@ -132,7 +132,6 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
         title: it.title,
         difficulty: it.difficulty,
         tags: it.topicTags.map((t) => t.name),
-        url: it.url,
         isPaidOnly: it.isPaidOnly,
       }));
 
@@ -150,7 +149,7 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
   server.registerTool(
     'tracker_get_today',
     {
-      description: "Get the stored study plan for today (or a date): items with itemId and frontendId, completion, review reasons, and the plan version that plan-changing tools need as expectedVersion. Does not generate plans; use tracker_create_today for that.",
+      description: 'Get the stored study plan for today (or a date): items with frontendId, completion, review reasons, and the plan version that plan-changing tools need as expectedVersion. Use tracker_create_today to generate a plan.',
       inputSchema: z.object({
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Explicit date in YYYY-MM-DD format (defaults to current date in configured timezone)'),
       }),
@@ -182,7 +181,7 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
         });
       }
 
-      return json(summarizePlan(plan));
+      return json(summarizePlan(plan, await profileLang(application)));
     },
   );
 
@@ -241,19 +240,19 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
   server.registerTool(
     'tracker_list_notes',
     {
-      description: 'List problem note summaries with filters. Find problems that still need a note with noteState "empty" or "stub" (only the unedited template), narrowed by tag or difficulty. scope "all" (default) covers the whole catalog; "practiced" only problems with practice history.',
+      description: 'List problem note summaries with filters. Find problems that still need a note with noteState "empty" or "stub" (only the unedited template), narrowed by tag or difficulty. scope "practiced" (default) lists practiced problems; "all" covers the whole catalog.',
       inputSchema: z.object({
         hasNote: z.enum(['all', 'true', 'false']).optional().default('all').describe('Filter by whether a written note exists (true) or not (false: empty or template only)'),
         noteState: z.enum(['empty', 'stub', 'written']).optional().describe('Finer filter: empty (no text), stub (unedited template only), written. Overrides hasNote.'),
         search: z.string().optional().describe('Search keyword in problem title or ID'),
         difficulty: z.enum(['all', 'Easy', 'Medium', 'Hard']).optional().default('all').describe('Difficulty filter'),
         tag: z.string().optional().describe('Topic tag slug, e.g. "dynamic-programming"'),
-        scope: z.enum(['all', 'practiced']).optional().default('all').describe('all includes saved notes on unpracticed problems; practiced limits to active practice or progress evidence'),
+        scope: z.enum(['practiced', 'all']).optional().default('practiced').describe('practiced (default): problems with practice history; all: whole catalog'),
         page: z.number().int().min(1).optional().default(1).describe('Page number, 1-indexed (default 1)'),
         limit: z.number().int().min(1).max(100).optional().default(20).describe('Items per page, max 100 (default 20)'),
       }),
     },
-    async (application, { hasNote = 'all', noteState, search, difficulty = 'all', tag, scope = 'all', page = 1, limit = 20 }) => {
+    async (application, { hasNote = 'all', noteState, search, difficulty = 'all', tag, scope = 'practiced', page = 1, limit = 20 }) => {
 
       const result = await application.notes.list({
         hasNote: noteState ? 'all' : hasNote,
@@ -271,7 +270,7 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
         page,
         limit,
         returned: result.items.length,
-        notes: result.items,
+        notes: result.items.map(({ questionId: _q, titleSlug: _s, url: _u, ...rest }) => rest),
       });
     },
   );
@@ -280,13 +279,14 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
   server.registerTool(
     'tracker_get_progress',
     {
-      description: 'Get comprehensive learning progress statistics, streak metrics, difficulty distribution, top tags, and activity trends. Set weakTopics to also get the topics that need reinforcement over the last 30 days, with the evidence behind each (the same analysis the planner uses to pick focus problems).',
+      description: 'Get progress statistics, streak metrics, difficulty distribution, top tags, and active-day trends. Set weakTopics to include topics needing reinforcement over the last 30 days with evidence.',
       inputSchema: z.object({
         year: z.number().int().min(2000).max(2100).optional().describe('Target calendar year for heatmap data (defaults to current year)'),
         weakTopics: z.boolean().optional().default(false).describe('Include topics that need reinforcement (default false)'),
+        recentActiveDays: z.boolean().optional().default(false).describe('Include the last 14 active calendar days (default false)'),
       }),
     },
-    async (application, { year, weakTopics = false }) => {
+    async (application, { year, weakTopics = false, recentActiveDays = false }) => {
       const settings = await application.settings.get();
       if (!settings.timezone || !isTimeZone(settings.timezone)) return { isError: true, content: [{ type: 'text', text: `TIMEZONE_REQUIRED: ${TIMEZONE_HINT}` }] };
       const dashboard = await application.dashboard.summary({ year });
@@ -300,9 +300,9 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
         difficultyDistribution: dashboard.difficultyDistribution,
         topTags: dashboard.topTags,
         todaySummary: dashboard.todaySummary,
-        trend30Days: dashboard.trend30Days,
+        trend30Days: dashboard.trend30Days.filter(point => point.activeCount > 0 || point.completedCount > 0),
         yearlyActiveDaysCount: dashboard.yearlyActivity.days.length,
-        recentActiveDays: dashboard.yearlyActivity.days.slice(-14),
+        ...(recentActiveDays ? { recentActiveDays: dashboard.yearlyActivity.days.slice(-14) } : {}),
         dataStatus: dashboard.dataStatus,
         ...(weakTopics ? { weakTopics: weakTopicsView(await application.knowledgeProfile.report()) } : {}),
       };

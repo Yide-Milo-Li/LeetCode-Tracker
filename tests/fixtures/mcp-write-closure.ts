@@ -19,7 +19,7 @@ export async function verifyWriteClosure(initialClient: StdioClient, restart: ()
   assert.ok(omittedId.error || omittedId.result?.isError);
   assert.equal((await call('tracker_list_practices')).total, 0);
 
-  await call('tracker_create_strategy', {
+  await call('tracker_save_strategy', {
     name: 'Bundle closure', weekdays: [0, 1, 2, 3, 4, 5, 6], dailyCount: 3,
     difficultyCounts: { Easy: 1, Medium: 2, Hard: 0 }, review: { mode: 'none' },
   });
@@ -27,13 +27,13 @@ export async function verifyWriteClosure(initialClient: StdioClient, restart: ()
   const appendArgs = { expectedVersion: created.version, operationId: randomUUID(), steps: [{ action: 'append' }] };
   const appended = await call('tracker_edit_today', appendArgs);
   assert.deepEqual(await call('tracker_edit_today', appendArgs), appended);
-  const replaceArgs = { expectedVersion: appended.plan.version, operationId: randomUUID(), steps: [{ action: 'replace', frontendId: appended.plan.items[0].frontendId }] };
+  const replaceArgs = { expectedVersion: appended.version, operationId: randomUUID(), steps: [{ action: 'replace', frontendId: created.items[0].frontendId }] };
   const replaced = await call('tracker_edit_today', replaceArgs);
   assert.deepEqual(await call('tracker_edit_today', replaceArgs), replaced);
-  const removeArgs = { expectedVersion: replaced.plan.version, operationId: randomUUID(), steps: [{ action: 'remove', frontendId: replaced.plan.items[0].frontendId }] };
+  const removeArgs = { expectedVersion: replaced.version, operationId: randomUUID(), steps: [{ action: 'remove', frontendId: created.items[1].frontendId }] };
   const removed = await call('tracker_edit_today', removeArgs);
   assert.deepEqual(await call('tracker_edit_today', removeArgs), removed);
-  const ruleArgs = { expectedVersion: removed.plan.version, operationId: randomUUID(), rules: { dailyCount: 3, difficulty: { Easy: 0, Medium: 0, Hard: 100 } } };
+  const ruleArgs = { expectedVersion: removed.version, operationId: randomUUID(), rules: { dailyCount: 3, difficulty: { Easy: 0, Medium: 0, Hard: 100 } } };
   const applied = await call('tracker_apply_today_rules', ruleArgs);
   assert.deepEqual(await call('tracker_apply_today_rules', ruleArgs), applied);
   assert.ok(applied.plan.items.every((item: any) => item.difficulty === 'Hard'));
@@ -72,7 +72,7 @@ export async function verifyWriteClosure(initialClient: StdioClient, restart: ()
     offset = part.nextOffset;
   }
   assert.equal(combined, content);
-  assert.equal((await call('tracker_list_notes', { hasNote: 'true' })).notes[0].questionFrontendId, '3');
+  assert.equal((await call('tracker_list_notes', { hasNote: 'true', scope: 'all' })).notes[0].questionFrontendId, '3');
   const whitespace = await saveNote('3', ' \n\t', saved.contentHash);
   const readWhitespace = await readNote('3');
   assert.equal(readWhitespace.contentHash, whitespace.contentHash);
@@ -87,5 +87,5 @@ export async function verifyWriteClosure(initialClient: StdioClient, restart: ()
   assert.equal((await call('tracker_get_today')).version, applied.plan.version);
   assert.equal((await call('tracker_get_today')).completedCount, 0);
   assert.equal((await readNote('3')).contentHash, saved.contentHash);
-  assert.equal((await call('tracker_list_notes', { hasNote: 'true' })).notes[0].questionFrontendId, '3');
+  assert.equal((await call('tracker_list_notes', { hasNote: 'true', scope: 'all' })).notes[0].questionFrontendId, '3');
 }

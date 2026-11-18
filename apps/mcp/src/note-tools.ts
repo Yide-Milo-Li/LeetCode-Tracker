@@ -154,7 +154,7 @@ export function registerNoteTools({ register }: Registrar): void {
   register(
     'tracker_get_note_context',
     {
-      description: 'Everything needed to write or improve one problem\'s solution note in a single call: problem details, every practice attempt (localDate is the calendar day in the profile timezone; practicedAt is UTC), review stage, the current note with its contentHash and section headings, the note template, and related problems (shared tags) that already have written notes. Then save with tracker_save_notes or edit one section with tracker_patch_note.',
+      description: 'Get everything to write one note: problem details, attempts (localDate in profile timezone, practicedAt in UTC), review stage, current note with contentHash and headings, template, and related written notes.',
       inputSchema: z.object({
         frontendId: z.string().trim().min(1).describe('Problem frontend ID, e.g. "42"'),
         lang: langSchema,
@@ -216,7 +216,7 @@ export function registerNoteTools({ register }: Registrar): void {
   register(
     'tracker_get_notes',
     {
-      description: `Read the Markdown notes of 1 to ${MAX_NOTE_BATCH} problems, each with its state (empty, stub = unedited template, written) and the contentHash that tracker_save_notes and tracker_patch_note need. Each note returns up to maxChars characters from offset; read the rest of a long note by calling again with nextOffset. contentHash always covers the whole note.`,
+      description: `Read Markdown notes for 1 to ${MAX_NOTE_BATCH} problems with state (empty/stub/written) and full-note contentHash. Paginate long notes using offset and maxChars.`,
       inputSchema: z.object({
         frontendIds: frontendIdsSchema(MAX_NOTE_BATCH),
         maxChars: z.number().int().min(200).max(20000).optional().default(4000).describe('Characters returned per note (default 4000)'),
@@ -253,7 +253,7 @@ export function registerNoteTools({ register }: Registrar): void {
   register(
     'tracker_patch_note',
     {
-      description: 'Edit one section of a problem\'s Markdown note without resending the rest. mode "append" adds content to the end of the section (dropping empty template bullets); "replace" swaps the section body. The heading is matched without its emoji or case, e.g. "Edge Cases & Traps"; a missing section is created at the end. Pass expectedContentHash from tracker_get_notes or tracker_get_note_context. A blank note can start from the template.',
+      description: 'Edit one note section without resending the whole note. mode "append" adds to the section end; "replace" swaps the body. Matches headings without emoji/case, creates missing sections at end, and needs expectedContentHash.',
       inputSchema: z.object({
         frontendId: z.string().trim().min(1),
         heading: z.string().trim().min(1).max(200).describe('Section heading text, e.g. "Complexity Analysis" or "复杂度分析"'),
@@ -299,7 +299,7 @@ export function registerNoteTools({ register }: Registrar): void {
   register(
     'tracker_save_notes',
     {
-      description: `Create or replace 1 to ${MAX_NOTE_BATCH} complete Markdown notes in one transaction. Each entry needs the expectedContentHash from tracker_get_notes or tracker_get_note_context (for a problem with no note, the hash they return for the empty note); if any note changed since, nothing is saved and every conflict is listed. Set dryRun to compare the new content with the current notes without saving. To change one section of a note, tracker_patch_note is safer.`,
+      description: `Create or replace 1 to ${MAX_NOTE_BATCH} complete notes in one transaction, guarded by expectedContentHash (aborts all on any conflict). Set dryRun to preview line diffs.`,
       inputSchema: z.object({
         notes: z.array(z.object({
           frontendId: z.string().trim().min(1),
@@ -374,7 +374,7 @@ export function registerNoteTools({ register }: Registrar): void {
   register(
     'tracker_export_notes',
     {
-      description: 'Write the notes knowledge base into a local directory as Markdown: one file per problem under problems/ (frontmatter, practice timeline, your note), a README index with Obsidian Dataview queries, Notion CSVs, and mistakes.md listing unsolved, assisted and unfinished attempts. Point it at an Obsidian vault folder to browse the notes there. Existing files are only replaced with overwrite: true.',
+      description: 'Export the notes knowledge base (problems/*.md, README, Notion CSVs, optional mistakes.md) to a local directory. Refuses to overwrite existing files unless overwrite is true.',
       inputSchema: z.object({
         directory: z.string().min(1).describe('Absolute path of the target directory; created when missing'),
         scope: z.enum(['practiced', 'all']).optional().default('practiced').describe('practiced: only problems with practice history (default); all: the whole catalog'),

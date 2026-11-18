@@ -59,7 +59,7 @@ export function registerCatalogTools({ register, profile }: Registrar): void {
   register(
     'tracker_catalog_coverage',
     {
-      description: 'Show how complete the problem catalog is: total problems, counts by difficulty, the highest frontend ID and the frontend ID ranges below it that are missing. Use it before and while building a catalog with tracker_import_problems to know where to continue. Works before any profile exists.',
+      description: 'Report catalog size, counts by difficulty, highest frontendId and missing ID ranges below it. Works before a profile exists.',
       inputSchema: z.object({}),
     },
     async (application) => json({ profileExists: profile.exists(), ...(await catalogCoverage(application)) }),
@@ -69,7 +69,7 @@ export function registerCatalogTools({ register, profile }: Registrar): void {
   register(
     'tracker_import_problems',
     {
-      description: `Add or update up to ${MAX_IMPORT_BATCH} problems in the catalog per call, sent directly as data, for example from your own knowledge of LeetCode when the user asks you to set up or fill in their question bank. Creates the profile if there is none (the first import also sets the timezone from this machine). Problems are matched by frontend ID: new ones are added, existing ones updated, nothing is deleted, and practice records and notes are kept, so send a large catalog in several calls in ascending ID order and resend corrected entries to fix mistakes. Only send problems you are confident about; a gap is better than an invented title. The result includes coverage so you can continue from the next missing ID. Set dryRun to validate without saving. Fails with PROFILE_IN_USE while the desktop app is running.`,
+      description: `Upsert up to ${MAX_IMPORT_BATCH} catalog problems per call (creates the profile and initializes timezone when missing; keeps practices and notes). Only send problems you know reliably; never invent titles. Returns updated coverage. Set dryRun to validate only.`,
       inputSchema: z.object({
         problems: z.array(problemSchema).min(1).max(MAX_IMPORT_BATCH),
         dryRun: z.boolean().optional().default(false).describe('Validate and count changes without saving (default false)'),

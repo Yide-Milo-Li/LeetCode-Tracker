@@ -244,7 +244,7 @@ test('plan edits validate every step first, apply in order and replay on retry',
   const p = profile();
   const { client } = await StdioClient.start(entry, p.dbPath);
   try {
-    await client.call('tracker_create_strategy', {
+    await client.call('tracker_save_strategy', {
       name: 'Daily', weekdays: [0, 1, 2, 3, 4, 5, 6], dailyCount: 3, difficultyCounts: { Easy: 1, Medium: 2, Hard: 0 }, review: { mode: 'none' },
     });
     const plan = (await client.call('tracker_create_today')).structuredContent.plan;
@@ -260,13 +260,16 @@ test('plan edits validate every step first, apply in order and replay on retry',
     const steps = [{ action: 'remove', frontendId: a, feedbackReason: 'already_familiar' }, { action: 'replace', frontendId: b }, { action: 'append' }];
     const edited = (await client.call('tracker_edit_today', { expectedVersion: plan.version, steps, operationId })).structuredContent;
     assert.deepEqual(edited.applied, [`remove ${a}`, `replace ${b}`, 'append']);
-    const ids = edited.plan.items.map((item: any) => item.frontendId);
+    assert.equal(edited.totalCount, 3);
+    assert.deepEqual(edited.removed.sort(), [a, b].sort());
+    assert.equal(edited.added.length, 2);
+    const ids = (await client.call('tracker_get_today')).structuredContent.items.map((item: any) => item.frontendId);
     assert.equal(ids.length, 3);
     assert.equal(ids.includes(a) || ids.includes(b), false);
 
     const replay = (await client.call('tracker_edit_today', { expectedVersion: plan.version, steps, operationId })).structuredContent;
-    assert.equal(replay.plan.version, edited.plan.version, 'retrying the batch replays instead of editing again');
-    assert.deepEqual(replay.plan.items.map((item: any) => item.frontendId), ids);
+    assert.equal(replay.version, edited.version, 'retrying the batch replays instead of editing again');
+    assert.deepEqual(replay, edited);
     assert.equal(errorCode(await client.call('tracker_edit_today', { expectedVersion: plan.version, operationId: randomUUID(), steps: [{ action: 'append' }] })), 'STALE_PLAN');
   } finally { await client.close(); p.cleanup(); }
 });
@@ -276,7 +279,7 @@ test('a plan edit that fails part way reports the steps that were applied', asyn
   const p = profile(4, 'Easy');
   const { client } = await StdioClient.start(entry, p.dbPath);
   try {
-    await client.call('tracker_create_strategy', {
+    await client.call('tracker_save_strategy', {
       name: 'Daily', weekdays: [0, 1, 2, 3, 4, 5, 6], dailyCount: 3, difficultyCounts: { Easy: 3, Medium: 0, Hard: 0 }, review: { mode: 'none' },
     });
     const plan = (await client.call('tracker_create_today')).structuredContent.plan;

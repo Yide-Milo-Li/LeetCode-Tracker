@@ -1,6 +1,6 @@
 /** Compact, model-facing shapes shared by read and write tools. */
 import { createHash } from 'node:crypto';
-import type { DailyPlan } from '../../../packages/contracts/src/recommendations.ts';
+import type { DailyPlan, PlanItem } from '../../../packages/contracts/src/recommendations.ts';
 import type { PracticeRecord } from '../../../packages/contracts/src/practice.ts';
 import type { KnowledgeProfileReport } from '../../../packages/contracts/src/knowledge-profile.ts';
 import { hasMeaningfulNoteContent } from '../../../packages/contracts/src/notes.ts';
@@ -36,24 +36,30 @@ export function stepOperationId(batchOperationId: string, index: number): string
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-8${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
 
-export function summarizePlan(plan: DailyPlan) {
-  const items = plan.items.map(item => ({
-    itemId: item.id,
-    questionId: item.problem.questionId,
+export async function profileLang(application: { settings: { get(): Promise<{ language?: string | null }> } }): Promise<'en' | 'zh'> {
+  const { language } = await application.settings.get();
+  return language === 'zh' ? 'zh' : 'en';
+}
+
+export function summarizePlanItem(item: PlanItem, lang: 'en' | 'zh' = 'en') {
+  return {
     frontendId: item.problem.questionFrontendId,
     title: item.problem.title,
     difficulty: item.problem.difficulty,
     kind: item.kind,
-    reason: item.reason,
+    reason: item.reason[lang] || item.reason.en,
     completed: Boolean(item.completed),
-  }));
+  };
+}
+
+export function summarizePlan(plan: DailyPlan, lang: 'en' | 'zh' = 'en') {
+  const items = plan.items.map(item => summarizePlanItem(item, lang));
   return {
     hasPlan: true,
     planId: plan.id,
     date: plan.date,
     version: plan.version,
     strategyId: plan.strategyId,
-    rules: plan.rules,
     completedCount: items.filter(item => item.completed).length,
     totalCount: items.length,
     items,
@@ -83,7 +89,6 @@ export async function profileZone(application: { settings: { get(): Promise<{ ti
 export function practiceView(record: PracticeRecord, zone: string | null) {
   return {
     id: record.id,
-    questionId: record.questionId,
     questionFrontendId: record.questionFrontendId,
     problemTitle: record.problemTitle,
     completed: record.completed,
@@ -93,7 +98,7 @@ export function practiceView(record: PracticeRecord, zone: string | null) {
     durationMinutes: record.durationMinutes,
     notes: record.notes,
     outcome: record.outcome,
-    status: record.status,
+    ...(record.status !== 'active' ? { status: record.status } : {}),
     revision: record.revision,
   };
 }

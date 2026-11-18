@@ -83,11 +83,11 @@ Tools that work on several items take one item too; there are no separate single
 | `tracker_catalog_coverage` | read | Catalog size, counts by difficulty and missing frontend ID ranges; works before a profile exists |
 | `tracker_get_today` | read | The stored plan for today or a given date, with its `version` (never generates one) |
 | `tracker_list_practices` | read | Paginated practice records with `revision`, newest or oldest first, optionally for one problem, or specific records by `ids` |
-| `tracker_list_notes` | read | Note summaries across the catalog, filtered by `tag`, `noteState` or `scope` |
+| `tracker_list_notes` | read | Note summaries (`scope: "practiced"` by default, or `"all"`), filtered by `tag` or `noteState` |
 | `tracker_get_notes` | read | 1 to 20 notes with state and `contentHash`; long notes are read in parts with `offset` |
 | `tracker_get_note_context` | read | Everything for writing one note: problem, all attempts, review stage, current note and headings, template, related written notes |
-| `tracker_get_progress` | read | Streaks, difficulty distribution, top tags, trends; `weakTopics: true` adds the topics that need reinforcement and why, and names the ones still developing |
-| `tracker_get_strategies` | read | Strategies and the weekday schedule |
+| `tracker_get_progress` | read | Streaks, difficulty distribution, top tags, active-day trends; `weakTopics: true` adds reinforcement topics, `recentActiveDays: true` adds recent calendar days |
+| `tracker_get_strategies` | read | Study strategies (each with its assigned weekdays) |
 | `tracker_import_catalog` | write | Import a local `.jsonl` catalog file; `dryRun` |
 | `tracker_import_problems` | write | Add or update up to 200 problems sent as data; creates the profile when missing; `dryRun` |
 | `tracker_create_practices` | write | Record 1 to 50 attempts in one transaction, all or nothing (requires a client-generated `operationId`); `dryRun` |
@@ -95,12 +95,11 @@ Tools that work on several items take one item too; there are no separate single
 | `tracker_revoke_practice` | write, removes | Revoke a practice record (needs `expectedRevision`) |
 | `tracker_save_notes` | write, overwrites | Replace 1 to 20 notes in one transaction (each needs `expectedContentHash`); `dryRun` shows where each note would change |
 | `tracker_patch_note` | write, overwrites | Append to or replace one section of a note (needs `expectedContentHash`) |
-| `tracker_create_strategy` | write | Create a strategy from counts and assign weekdays |
-| `tracker_update_strategy` | write, overwrites | Change a strategy (needs `expectedVersion`) |
+| `tracker_save_strategy` | write, overwrites | Create a strategy from counts and assign weekdays, or update an existing one (needs `strategyId` and `expectedVersion`) |
 | `tracker_delete_strategy` | write, removes | Delete a strategy; its weekdays become rest days and generated plans stay (needs `expectedVersion`) |
 | `tracker_set_timezone` | write | Set the IANA timezone that decides "today"; creates the profile when missing |
 | `tracker_create_today` | write | Generate the day's plan, or return the existing one |
-| `tracker_edit_today` | write, removes | Remove, replace or append plan items, or replace every unfinished one, in up to 10 ordered steps (needs `expectedVersion`) |
+| `tracker_edit_today` | write, removes | Remove, replace or append plan items, or replace every unfinished one, in up to 10 ordered steps (needs `expectedVersion`); returns the new version, counts and added/removed items |
 | `tracker_apply_today_rules` | write, overwrites | Rebuild the day's plan with one-day rule changes (needs `expectedVersion`); `dryRun` |
 | `tracker_export_notes` | writes files | Write the notes knowledge base and a mistake log to a local directory |
 
@@ -146,6 +145,6 @@ On top of that, every write states what it expects to change:
 - Practice edits carry the record's `expectedRevision`, plan and strategy changes carry the `expectedVersion`, and note saves carry the `expectedContentHash` from the last read. If someone changed the data in between, the write is refused and nothing is saved.
 - Practice creation, plan edits and rule changes require an `operationId`: generate a UUID before the first call and keep it for every retry, including when the first response is lost. `tracker_create_today` alone accepts calls without one, because a retry returns the day's existing plan. Reusing an ID with different content is refused.
 - Plan retries return the saved result even after the target item was removed or replaced, rules were applied, or the MCP process restarted. Rule application preserves both the plan and its `changed` fields in the receipt. Practice retries recover their original timestamp, precision and timezone from the immutable creation request, so later edits do not duplicate or revert a record; the returned record reflects its current state.
-- Note reads return the hash of the exact stored content, including whitespace-only notes. Note lists default to `scope: "all"`, so notes on unpracticed problems remain discoverable.
+- Note reads return the hash of the exact stored content, including whitespace-only notes. Note lists default to `scope: "practiced"`; pass `scope: "all"` to discover notes on unpracticed problems.
 
 Free-text plan preferences and AI note formatting need an AI provider and are not available here. The profile schema is unchanged, so the desktop app keeps working with data written by this server.

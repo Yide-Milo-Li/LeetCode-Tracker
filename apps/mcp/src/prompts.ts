@@ -57,7 +57,7 @@ export function reviewWeakTopicsText(focus?: string): string {
     '1. Call tracker_get_progress with weakTopics: true. Each weak topic lists the difficulties that need reinforcement and why: a high share of assisted or unsolved attempts, or attempts that take long.',
     '2. For each topic, find the problems I practiced with tracker_list_notes (tag set to the topic slug, scope "practiced"), then check their recent outcomes with tracker_get_problems. Read my notes with tracker_get_notes where they explain a mistake.',
     '3. For each topic, tell me what the evidence says is going wrong, two or three problems from my history worth redoing, and one new problem type to try.',
-    '4. Do not change anything yet. If I agree, you can focus a day on these topics with tracker_apply_today_rules (run it with dryRun first) or adjust a strategy with tracker_update_strategy.',
+    '4. Do not change anything yet. If I agree, you can focus a day on these topics with tracker_apply_today_rules (run it with dryRun first) or adjust a strategy with tracker_save_strategy.',
     '',
     'If no topic needs reinforcement, say so and name the topics that are still developing.',
   ].join('\n');

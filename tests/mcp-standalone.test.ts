@@ -77,6 +77,8 @@ test('stdio server lists annotated tools and answers reads from the profile', as
   const { client } = await StdioClient.start(sourceEntry, w.dbPath);
   try {
     const { tools } = (await client.request('tools/list')).result;
+    assert.equal(tools.length, 25);
+    assert.ok(JSON.stringify(tools).length < 23500, `tools/list too large: ${JSON.stringify(tools).length}`);
     assert.deepEqual(tools.map((tool: { name: string }) => tool.name).sort(), [...TOOL_NAMES].sort());
     for (const tool of tools) {
       assert.equal(tool.annotations.readOnlyHint, (READ_TOOL_NAMES as readonly string[]).includes(tool.name), tool.name);
@@ -84,6 +86,9 @@ test('stdio server lists annotated tools and answers reads from the profile', as
 
     const status = await client.call('tracker_status');
     assert.equal(status.isError, undefined);
+    assert.equal(status.content[0].text.includes('\n'), false, 'tool text output is compact JSON');
+    assert.equal(status.structuredContent.tools, undefined);
+    assert.equal(status.structuredContent.writeTools, undefined);
     assert.equal(status.structuredContent.database.totalProblems, 3);
     assert.equal(status.structuredContent.timezone.configured, true);
     assert.equal(status.structuredContent.profile, w.dbPath);

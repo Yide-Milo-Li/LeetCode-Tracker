@@ -108,7 +108,8 @@ test('practice records can be fetched by id, revoked ones included', async () =>
     await client.call('tracker_revoke_practice', { practiceId: created[1].id, expectedRevision: 1 });
     const missing = randomUUID();
     const fetched = (await client.call('tracker_list_practices', { ids: [created[0].id, created[1].id, missing] })).structuredContent;
-    assert.deepEqual(fetched.records.map((record: any) => [record.questionFrontendId, record.status]), [['1', 'active'], ['2', 'revoked']]);
+    assert.equal(fetched.records[0].status, undefined, 'active status is omitted');
+    assert.deepEqual(fetched.records.map((record: any) => [record.questionFrontendId, record.status ?? 'active']), [['1', 'active'], ['2', 'revoked']]);
     assert.deepEqual(fetched.notFound, [missing]);
     assert.equal(fetched.records[1].revision, 2);
   } finally { await client.close(); p.cleanup(); }
@@ -170,18 +171,19 @@ test('strategy and today plan: create, append with replay, replace, remove and a
   const { client } = await StdioClient.start(entry, p.dbPath);
   try {
     assert.equal((await client.call('tracker_create_today')).structuredContent.status, 'rest', 'no strategy yet');
-    const badCounts = await client.call('tracker_create_strategy', {
+    const badCounts = await client.call('tracker_save_strategy', {
       name: 'Bad', weekdays: [0], dailyCount: 3, difficultyCounts: { Easy: 1, Medium: 1, Hard: 0 }, review: { mode: 'none' },
     });
     assert.equal(errorCode(badCounts), 'INVALID_INPUT');
 
-    const strategy = (await client.call('tracker_create_strategy', {
+    const strategy = (await client.call('tracker_save_strategy', {
       name: 'Every day', weekdays: [0, 1, 2, 3, 4, 5, 6], dailyCount: 3,
       difficultyCounts: { Easy: 1, Medium: 2, Hard: 0 }, review: { mode: 'none' },
     })).structuredContent.strategy;
     assert.deepEqual(strategy.weekdays, [0, 1, 2, 3, 4, 5, 6]);
     const strategies = (await client.call('tracker_get_strategies')).structuredContent;
-    assert.equal(strategies.weeklySchedule.every((entry: any) => entry.strategyId === strategy.id), true);
+    assert.deepEqual(strategies.strategies[0].weekdays, [0, 1, 2, 3, 4, 5, 6]);
+    assert.equal(strategies.weeklySchedule, undefined);
 
     const created = (await client.call('tracker_create_today')).structuredContent;
     assert.equal(created.status, 'ready');
@@ -191,40 +193,44 @@ test('strategy and today plan: create, append with replay, replace, remove and a
 
     const operationId = randomUUID();
     const appended = (await editToday(client, created.plan.version, [{ action: 'append' }], operationId)).structuredContent;
-    assert.equal(appended.plan.totalCount, 4);
+    assert.equal(appended.totalCount, 4);
+    assert.equal(appended.added.length, 1);
     const replayed = (await editToday(client, created.plan.version, [{ action: 'append' }], operationId)).structuredContent;
-    assert.equal(replayed.plan.totalCount, 4, 'replay does not add a second problem');
+    assert.equal(replayed.totalCount, 4, 'replay does not add a second problem');
     assert.ok(errorCode(await editToday(client, created.plan.version, [{ action: 'append' }])), 'stale version is refused');
 
-    const target = appended.plan.items[0].frontendId;
-    const replaced = (await editToday(client, appended.plan.version, [{ action: 'replace', frontendId: target }])).structuredContent;
-    assert.equal(replaced.plan.items.some((item: any) => item.frontendId === target), false);
-    assert.equal(replaced.plan.totalCount, 4);
+    const target = created.plan.items[0].frontendId;
+    const replaced = (await editToday(client, appended.version, [{ action: 'replace', frontendId: target }])).structuredContent;
+    assert.deepEqual(replaced.removed, [target]);
+    assert.equal(replaced.added.length, 1);
+    assert.equal(replaced.totalCount, 4);
 
-    const removeTarget = replaced.plan.items[1].frontendId;
-    const removed = (await editToday(client, replaced.plan.version, [{ action: 'remove', frontendId: removeTarget, feedbackReason: 'already_familiar' }])).structuredContent;
+    const removeTarget = created.plan.items[1].frontendId;
+    const removed = (await editToday(client, replaced.version, [{ action: 'remove', frontendId: removeTarget, feedbackReason: 'already_familiar' }])).structuredContent;
     assert.deepEqual(removed.applied, [`remove ${removeTarget}`]);
-    assert.equal(removed.plan.totalCount, 3);
-    assert.equal(errorCode(await editToday(client, removed.plan.version, [{ action: 'remove', frontendId: '999' }])), 'PLAN_ITEM_NOT_FOUND');
+    assert.deepEqual(removed.removed, [removeTarget]);
+    assert.equal(removed.totalCount, 3);
+    assert.equal(errorCode(await editToday(client, removed.version, [{ action: 'remove', frontendId: '999' }])), 'PLAN_ITEM_NOT_FOUND');
 
     // Solving a plan item through the practice tool completes it, and rule changes must keep it.
-    const solved = removed.plan.items.find((item: any) => item.difficulty === 'Easy') ?? removed.plan.items[0];
+    const currentPlan = (await client.call('tracker_get_today')).structuredContent;
+    const solved = currentPlan.items.find((item: any) => item.difficulty === 'Easy') ?? currentPlan.items[0];
     await createPractice(client, { questionFrontendId: solved.frontendId, completed: true, outcome: 'assisted' });
     const afterPractice = (await client.call('tracker_get_today')).structuredContent;
     assert.equal(afterPractice.items.find((item: any) => item.frontendId === solved.frontendId).completed, true);
     assert.equal(afterPractice.completedCount, 1);
     const conflicting = { dailyCount: 2, difficulty: { Easy: 0, Medium: 0, Hard: 100 }, reviewEnabled: false, reviewPercent: null };
     if (solved.difficulty !== 'Hard') {
-      assert.equal(errorCode(await client.call('tracker_apply_today_rules', { rules: conflicting, expectedVersion: removed.plan.version, operationId: randomUUID() })), 'RULES_NOT_APPLICABLE');
+      assert.equal(errorCode(await client.call('tracker_apply_today_rules', { rules: conflicting, expectedVersion: removed.version, operationId: randomUUID() })), 'RULES_NOT_APPLICABLE');
     }
 
     const rules = { dailyCount: 3, difficulty: { Easy: 0, Medium: 0, Hard: 100 }, reviewEnabled: false, reviewPercent: null };
     rules.difficulty = { Easy: solved.difficulty === 'Easy' ? 100 / 3 : 0, Medium: solved.difficulty === 'Medium' ? 100 / 3 : 0, Hard: solved.difficulty === 'Hard' ? 100 : 200 / 3 };
-    const preview = (await client.call('tracker_apply_today_rules', { rules, expectedVersion: removed.plan.version, operationId: randomUUID(), dryRun: true })).structuredContent;
+    const preview = (await client.call('tracker_apply_today_rules', { rules, expectedVersion: removed.version, operationId: randomUUID(), dryRun: true })).structuredContent;
     assert.equal(preview.dryRun, true);
     assert.deepEqual(preview.issues, []);
-    assert.equal((await client.call('tracker_get_today')).structuredContent.version, removed.plan.version, 'a dry run leaves the plan alone');
-    const applied = (await client.call('tracker_apply_today_rules', { rules, expectedVersion: removed.plan.version, operationId: randomUUID() })).structuredContent;
+    assert.equal((await client.call('tracker_get_today')).structuredContent.version, removed.version, 'a dry run leaves the plan alone');
+    const applied = (await client.call('tracker_apply_today_rules', { rules, expectedVersion: removed.version, operationId: randomUUID() })).structuredContent;
     assert.equal(applied.plan.totalCount, 3);
     assert.ok(applied.plan.items.some((item: any) => item.frontendId === solved.frontendId && item.completed), 'completed item is kept');
     assert.equal(applied.plan.items.filter((item: any) => item.difficulty === 'Hard').length, solved.difficulty === 'Hard' ? 3 : 2);
@@ -235,10 +241,10 @@ test('strategy and today plan: create, append with replay, replace, remove and a
     const today = (await client.call('tracker_get_today')).structuredContent;
     assert.equal(today.version, applied.plan.version);
 
-    const renamed = (await client.call('tracker_update_strategy', { strategyId: strategy.id, expectedVersion: strategy.version, name: 'Daily' })).structuredContent;
+    const renamed = (await client.call('tracker_save_strategy', { strategyId: strategy.id, expectedVersion: strategy.version, name: 'Daily' })).structuredContent;
     assert.equal(renamed.strategy.name, 'Daily');
-    assert.ok(errorCode(await client.call('tracker_update_strategy', { strategyId: strategy.id, expectedVersion: strategy.version, name: 'Stale' })));
-    assert.equal(errorCode(await client.call('tracker_update_strategy', { strategyId: strategy.id, expectedVersion: renamed.strategy.version, dailyCount: 4 })), 'INVALID_INPUT');
+    assert.ok(errorCode(await client.call('tracker_save_strategy', { strategyId: strategy.id, expectedVersion: strategy.version, name: 'Stale' })));
+    assert.equal(errorCode(await client.call('tracker_save_strategy', { strategyId: strategy.id, expectedVersion: renamed.strategy.version, dailyCount: 4 })), 'INVALID_INPUT');
   } finally { await client.close(); p.cleanup(); }
 });
 
@@ -252,9 +258,12 @@ test('replace_unfinished swaps every unfinished item and must be the last step',
     assert.equal(errorCode(await editToday(client, plan.version, [{ action: 'replace_unfinished' }, { action: 'append' }])), 'INVALID_INPUT');
     const result = (await editToday(client, plan.version, [{ action: 'replace_unfinished' }])).structuredContent;
     const before = new Set(plan.items.slice(1).map((item: any) => item.frontendId));
-    assert.equal(result.plan.totalCount, 3);
-    assert.ok(result.plan.items.some((item: any) => item.frontendId === solved.frontendId && item.completed), 'the completed item stays');
-    assert.equal(result.plan.items.filter((item: any) => before.has(item.frontendId)).length, 0, 'every unfinished item is new');
+    assert.equal(result.totalCount, 3);
+    assert.equal(result.removed.length, 2);
+    assert.equal(result.added.length, 2);
+    const updatedPlan = (await client.call('tracker_get_today')).structuredContent;
+    assert.ok(updatedPlan.items.some((item: any) => item.frontendId === solved.frontendId && item.completed), 'the completed item stays');
+    assert.equal(updatedPlan.items.filter((item: any) => before.has(item.frontendId)).length, 0, 'every unfinished item is new');
   } finally { await client.close(); p.cleanup(); }
 });
 
@@ -278,7 +287,7 @@ test('writes report PROFILE_IN_USE while the desktop holds the lease; previews s
 });
 
 async function createDailyPlan(client: StdioClient) {
-  const strategy = await client.call('tracker_create_strategy', {
+  const strategy = await client.call('tracker_save_strategy', {
     name: 'Replay regression', weekdays: [0, 1, 2, 3, 4, 5, 6], dailyCount: 3,
     difficultyCounts: { Easy: 1, Medium: 2, Hard: 0 }, review: { mode: 'none' },
   });
@@ -335,11 +344,11 @@ test('remove and single replacement replay original targets and snapshots after 
     const initial = await createDailyPlan(client);
     const replaceArgs = { expectedVersion: initial.version, operationId: randomUUID(), steps: [{ action: 'replace', frontendId: initial.items[0].frontendId, feedbackReason: 'topic_mismatch' }] };
     const replaced = (await client.call('tracker_edit_today', replaceArgs)).structuredContent;
-    const removeArgs = { expectedVersion: replaced.plan.version, operationId: randomUUID(), steps: [{ action: 'remove', itemId: replaced.plan.items[0].itemId, feedbackReason: 'already_familiar' }] };
+    const removeArgs = { expectedVersion: replaced.version, operationId: randomUUID(), steps: [{ action: 'remove', frontendId: replaced.added[0].frontendId, feedbackReason: 'already_familiar' }] };
     const removed = (await client.call('tracker_edit_today', removeArgs)).structuredContent;
-    const frontendArgs = { expectedVersion: removed.plan.version, operationId: randomUUID(), steps: [{ action: 'remove', frontendId: removed.plan.items[0].frontendId }] };
+    const frontendArgs = { expectedVersion: removed.version, operationId: randomUUID(), steps: [{ action: 'remove', frontendId: initial.items[1].frontendId }] };
     const frontendRemoved = (await client.call('tracker_edit_today', frontendArgs)).structuredContent;
-    const appended = (await editToday(client, frontendRemoved.plan.version, [{ action: 'append' }])).structuredContent.plan;
+    const appended = (await editToday(client, frontendRemoved.version, [{ action: 'append' }])).structuredContent;
     await client.close();
     client = (await StdioClient.start(entry, p.dbPath)).client;
     assert.deepEqual((await client.call('tracker_edit_today', replaceArgs)).structuredContent, replaced);
@@ -363,7 +372,7 @@ test('rules apply replays the full result across new previews, later plan change
     const applied = (await client.call('tracker_apply_today_rules', request)).structuredContent;
     assert.equal(applied.plan.totalCount, 4);
     assert.deepEqual((await client.call('tracker_apply_today_rules', request)).structuredContent, applied);
-    const appended = (await editToday(client, applied.plan.version, [{ action: 'append' }])).structuredContent.plan;
+    const appended = (await editToday(client, applied.plan.version, [{ action: 'append' }])).structuredContent;
     await client.close();
     client = (await StdioClient.start(entry, p.dbPath)).client;
     const reordered = { ...request, rules: { difficulty: { Hard: 100, Medium: 0, Easy: 0 }, dailyCount: 4 } };
@@ -371,7 +380,7 @@ test('rules apply replays the full result across new previews, later plan change
     assert.equal((await client.call('tracker_get_today')).structuredContent.version, appended.version);
     assert.equal(errorCode(await client.call('tracker_apply_today_rules', { ...request, rules: { tags: ['unknown-tag'] } })), 'OPERATION_REUSED');
     assert.equal(errorCode(await client.call('tracker_apply_today_rules', { ...request, operationId: randomUUID() })), 'STALE_PLAN');
-    const noChange = { rules: { dailyCount: appended.rules.dailyCount }, expectedVersion: appended.version, operationId: randomUUID() };
+    const noChange = { rules: { dailyCount: appended.totalCount }, expectedVersion: appended.version, operationId: randomUUID() };
     const unchanged = (await client.call('tracker_apply_today_rules', noChange)).structuredContent;
     assert.deepEqual(unchanged.changed, []);
     assert.deepEqual((await client.call('tracker_apply_today_rules', noChange)).structuredContent, unchanged);
@@ -392,20 +401,22 @@ test('rules can create a missing plan and replay expectedVersion null without cr
   } finally { await client.close(); p.cleanup(); }
 });
 
-test('notes on unpracticed problems are discoverable with default and explicit all scope', async () => {
+test('notes on unpracticed problems require explicit all scope; practiced is the default', async () => {
   const p = profileWithCatalog();
   const { client } = await StdioClient.start(entry, p.dbPath);
   try {
     const empty = await readNote(client, '3');
     await saveNote(client, '3', '# Approach\n\nUse two pointers to find the answer in linear time.', empty.contentHash);
-    for (const scope of [undefined, 'all']) {
-      const listed = (await client.call('tracker_list_notes', { hasNote: 'true', search: '3', ...(scope ? { scope } : {}) })).structuredContent;
-      assert.equal(listed.total, 1);
-      assert.equal(listed.notes[0].questionFrontendId, '3');
-    }
+    assert.equal((await client.call('tracker_list_notes', { hasNote: 'true', search: '3' })).structuredContent.total, 0);
+    const listed = (await client.call('tracker_list_notes', { hasNote: 'true', search: '3', scope: 'all' })).structuredContent;
+    assert.equal(listed.total, 1);
+    assert.equal(listed.notes[0].questionFrontendId, '3');
+    assert.equal(listed.notes[0].url, undefined);
+    assert.equal(listed.notes[0].titleSlug, undefined);
+    assert.equal(listed.notes[0].questionId, undefined);
     assert.equal((await client.call('tracker_list_notes', { hasNote: 'true', scope: 'practiced' })).structuredContent.total, 0);
     await createPractice(client, { questionFrontendId: '3', completed: false });
-    assert.equal((await client.call('tracker_list_notes', { hasNote: 'true', scope: 'practiced' })).structuredContent.total, 1);
+    assert.equal((await client.call('tracker_list_notes', { hasNote: 'true' })).structuredContent.total, 1);
   } finally { await client.close(); p.cleanup(); }
 });
 
@@ -482,6 +493,10 @@ test('progress lists weak topics with the evidence behind them', async () => {
 
     const plain = (await client.call('tracker_get_progress')).structuredContent;
     assert.equal(plain.weakTopics, undefined, 'only on request');
+    assert.equal(plain.recentActiveDays, undefined, 'recentActiveDays omitted unless requested');
+    assert.ok(plain.trend30Days.every((d: any) => d.activeCount > 0 || d.completedCount > 0), 'zero-value days omitted');
+    const withDays = (await client.call('tracker_get_progress', { recentActiveDays: true })).structuredContent;
+    assert.ok(Array.isArray(withDays.recentActiveDays) && withDays.recentActiveDays.length > 0);
     const { weakTopics } = (await client.call('tracker_get_progress', { weakTopics: true })).structuredContent;
     assert.equal(weakTopics.windowDays, 30);
     assert.deepEqual(weakTopics.topics.map((topic: any) => topic.tag), ['Dynamic Programming']);
@@ -523,10 +538,10 @@ test('deleting a strategy frees its weekdays and keeps existing plans', async ()
     assert.deepEqual(deleted.freedWeekdays, [0, 1, 2, 3, 4, 5, 6]);
     const after = (await client.call('tracker_get_strategies')).structuredContent;
     assert.equal(after.strategies.length, 0);
-    assert.ok(after.weeklySchedule.every((entry: any) => entry.strategyId === null));
+    assert.equal(after.weeklySchedule, undefined);
     assert.equal((await client.call('tracker_get_today')).structuredContent.planId, plan.planId, 'the generated plan stays');
     assert.equal(errorCode(await client.call('tracker_delete_strategy', { strategyId: strategy.id, expectedVersion: strategy.version })), 'STRATEGY_NOT_FOUND');
-    const replacement = await client.call('tracker_create_strategy', {
+    const replacement = await client.call('tracker_save_strategy', {
       name: 'Weekdays', weekdays: [1, 2, 3, 4, 5], dailyCount: 2, difficultyCounts: { Easy: 1, Medium: 1, Hard: 0 }, review: { mode: 'none' },
     });
     assert.equal(replacement.isError, undefined, 'freed weekdays can be assigned again');
