@@ -56,7 +56,7 @@ The matrix verifies persisted language/theme after a full document reload, check
 
 ## README showcase
 
-`npm run assets:screenshots` uses the same fictional 4,046-problem catalog as the social capture script, isolated SQLite and Chrome profiles, and empty provider keys. Run `npm run build` first. It refreshes all eight images under `docs/assets/screenshots/`; it does not read private backups or call providers. Temporary synthetic profiles stay under ignored `.local/` for inspection. These screenshots demonstrate browser UI, not native acceptance.
+`npm run assets:screenshots` uses the same fictional 4,046-problem catalog as the social capture script, isolated SQLite and Chrome profiles, and empty provider keys. Run `npm run build` first. It refreshes all eight images under `docs/assets/screenshots/` in light mode with the default palette and English text; set `README_SCREENSHOT_THEME=dark`, `README_SCREENSHOT_LANG=zh` or `README_SCREENSHOT_DIR=<dir>` to capture other variants elsewhere; it does not read private backups or call providers. Temporary synthetic profiles stay under ignored `.local/` for inspection. These screenshots demonstrate browser UI, not native acceptance.
 
 
 ## Phase 39 offline comparison
