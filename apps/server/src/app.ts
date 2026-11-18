@@ -12,17 +12,16 @@ import type { CatalogStore } from '../../../packages/database/src/store.ts';
 import { resolveAssistantSettings } from './llm/settings.ts';
 import { GeminiAssistant, type IGeminiAssistant } from './gemini.ts';
 import { createDiagnosticSink } from './llm/diagnostics.ts';
-import { PlanningService } from './planning-service.ts';
 import { AsyncLock } from './async-lock.ts';
 import { registerMigrationGate } from './migration-gate.ts';
-import {
-  registerAllRoutes,
-  type ActivePreview,
-  type ActiveProgressPreview,
-} from './routes/index.ts';
+import { registerAllRoutes } from './routes/index.ts';
 import { GOOGLE_CALLBACK_PATH } from './routes/sync.ts';
 import { DeviceSyncService, type DeviceSyncOptions } from './sync/sync-service.ts';
-import { refreshAfterProfileReplace } from './profile-refresh.ts';
+import { reloadModelConfiguration } from './profile-refresh.ts';
+import { DESKTOP_AGENT_HEADER, DESKTOP_AGENT_PATH } from '../../../packages/contracts/src/desktop-agent.ts';
+import { registerDesktopAgentRoutes, type DesktopAgent } from './desktop-agent.ts';
+import { createTrackerApplication } from '../../../packages/application/src/application.ts';
+import { localModelService } from '../../mcp/src/profile.ts';
 
 /** Version reported by health checks and written into sync snapshots. */
 export const APP_VERSION = '1.3.1';
@@ -34,6 +33,7 @@ export interface AppOptions {
   staticRoot?: string;
   disableStatic?: boolean;
   sessionSecret?: string;
+  desktopAgent?: DesktopAgent;
   profileDirectory?: string;
   /** Test seams for device sync (fetch, Google endpoints, clock); defaults use real Google. */
   deviceSync?: Partial<DeviceSyncOptions>;
@@ -50,15 +50,19 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const diagnosticSink = options.profileDirectory ? createDiagnosticSink(options.profileDirectory) : undefined;
   const gemini = options.geminiAssistant ?? new GeminiAssistant({ ...resolveAssistantSettings(store), diagnosticSink });
   const writeLock = new AsyncLock();
-  const planningService = new PlanningService(store, gemini, 60000, diagnosticSink);
-
-  // Only uncommitted previews live in memory; committed results survive restarts.
-  const activePreviews = new Map<string, ActivePreview>();
-  const activeProgressPreviews = new Map<string, ActiveProgressPreview>();
+  const refreshModelConfiguration = () => reloadModelConfiguration(store, gemini);
+  const application = createTrackerApplication({ store, modelService: gemini, writeLock, diagnosticSink, refreshModelConfiguration });
+  // The two transports share business code and commit order. MCP planning uses local rules.
+  const agentApplication = options.desktopAgent && options.sessionSecret
+    ? createTrackerApplication({ store, modelService: localModelService, writeLock })
+    : undefined;
 
   const app = Fastify({
     bodyLimit: 15 * 1024 * 1024, // 15 MiB limit for bulk JSONL files
     logger: false, // Local-only: avoid emitting raw payloads into logs
+  });
+  app.addHook('onClose', async () => {
+    await Promise.all([application.close(), agentApplication?.close()]);
   });
 
   // Enable CORS restricted to localhost/loopback
@@ -76,6 +80,10 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   if (options.sessionSecret) {
     const requiredSecret = options.sessionSecret;
     app.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
+      if (options.desktopAgent && request.method === 'POST' && request.url.split('?')[0] === DESKTOP_AGENT_PATH) {
+        if (!request.headers.origin && options.desktopAgent.authenticate(request.headers[DESKTOP_AGENT_HEADER])) return;
+        return reply.code(401).send({ error: 'UNAUTHORIZED_AGENT', message: 'Invalid or missing desktop agent token.' });
+      }
       // The system browser delivers the OAuth redirect without the session header; that route
       // only accepts a single-use state created by an authenticated connect request.
       if (request.method === 'GET' && request.url.split('?')[0] === GOOGLE_CALLBACK_PATH) return;
@@ -123,9 +131,13 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   // Register all modular API v1 routes
   registerMigrationGate(app);
-  const routeState = { store, gemini, planningService, activePreviews, activeProgressPreviews };
   const deviceSync = new DeviceSyncService(
-    { store, writeLock, refreshAfterReplace: () => refreshAfterProfileReplace(routeState) },
+    { store, writeLock, refreshAfterReplace: () => {
+      application.resetTransientState();
+      agentApplication?.resetTransientState();
+      try { refreshModelConfiguration(); }
+      catch { return 'Profile restored; AI settings will be reloaded on the next restart.'; }
+    } },
     {
       appVersion: APP_VERSION,
       googleClient: {
@@ -136,14 +148,19 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     }
   );
   registerAllRoutes(app, {
-    store,
-    gemini,
-    writeLock,
-    planningService,
-    activePreviews,
-    activeProgressPreviews,
+    application,
     deviceSync,
+    afterBundleRestore: () => agentApplication?.resetTransientState(),
   });
+  if (options.desktopAgent && agentApplication) {
+    registerDesktopAgentRoutes(app, options.desktopAgent, {
+      store,
+      writeLock,
+      application: agentApplication,
+      invalidateRecommendations: application.invalidateRecommendations,
+      remoteWarning: () => deviceSync.agentWriteWarning(),
+    });
+  }
 
   // Static Assets Serving (Production Web UI)
   const defaultStaticRoot = path.resolve(import.meta.dirname, '../../web/dist');

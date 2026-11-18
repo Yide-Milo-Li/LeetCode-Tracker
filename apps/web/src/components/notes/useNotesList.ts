@@ -15,6 +15,7 @@ export const NOTES_LIST_LIMIT = 25;
 interface UseNotesListOptions {
   /** Currently selected problem, owned by the workspace selection guard. */
   selectedId: string | null;
+  externalRevision?: number;
   /** Used to auto-select the first loaded problem when nothing is selected yet. */
   setSelectedId: Dispatch<SetStateAction<string | null>>;
 }
@@ -26,7 +27,7 @@ interface UseNotesListOptions {
  * page) and for the list itself whenever a filter, the page or `listRevision` changes.
  * Superseded responses are ignored through per-request `active` flags; failures empty the list.
  */
-export function useNotesList({ selectedId, setSelectedId }: UseNotesListOptions) {
+export function useNotesList({ selectedId, setSelectedId, externalRevision }: UseNotesListOptions) {
   // Filters state
   const [scope, setScope] = useState<NotesScope>('practiced');
   const [search, setSearch] = useState('');
@@ -108,7 +109,7 @@ export function useNotesList({ selectedId, setSelectedId }: UseNotesListOptions)
 
   useEffect(() => {
     return loadList();
-  }, [loadList, listRevision]);
+  }, [loadList, listRevision, externalRevision]);
 
   return {
     scope,

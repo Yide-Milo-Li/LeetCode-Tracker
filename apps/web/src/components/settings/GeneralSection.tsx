@@ -2,6 +2,9 @@
 import { translations, type Language } from '../../i18n.ts';
 import { useWorkspace } from '../../workspace.tsx';
 import { TimezoneField } from '../TimezoneField.tsx';
+import { DesktopAgentPanel } from './DesktopAgentPanel.tsx';
+import { isTauri } from '../../platform/index.ts';
+import type { DesktopAgentStatus } from '../../../../../packages/contracts/src/desktop-agent.ts';
 
 interface GeneralSectionProps {
   lang: Language;
@@ -11,6 +14,7 @@ interface GeneralSectionProps {
   onPromptSwapFeedbackChange: (enabled: boolean) => void;
   notesFormatOnSave: boolean;
   onNotesFormatOnSaveChange: (enabled: boolean) => void;
+  desktopAgent?: DesktopAgentStatus;
 }
 
 /** Render the General tab panel; preference values and their persistence stay with the parent. */
@@ -22,6 +26,7 @@ export function GeneralSection({
   onPromptSwapFeedbackChange,
   notesFormatOnSave,
   onNotesFormatOnSaveChange,
+  desktopAgent,
 }: GeneralSectionProps) {
   const t = translations[lang];
   const workspace = useWorkspace();
@@ -111,6 +116,7 @@ export function GeneralSection({
           </button>
         </div>
       </section>
+      {isTauri() && <DesktopAgentPanel lang={lang} status={desktopAgent} />}
     </div>
   );
 }

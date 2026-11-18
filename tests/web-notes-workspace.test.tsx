@@ -41,11 +41,12 @@ Object.defineProperty(globalThis, 'navigator', { configurable: true, value: dom.
 
 const React = await import('react');
 const { render, fireEvent, screen, act, cleanup } = await import('@testing-library/react');
-const { api } = await import('../apps/web/src/api.ts');
+const { api, ApiError } = await import('../apps/web/src/api.ts');
 const { NotesWorkspace } = await import('../apps/web/src/components/NotesWorkspace.tsx');
 const { QuickCopyButtons } = await import('../apps/web/src/components/QuickCopyButtons.tsx');
 const { QuickNoteDrawer } = await import('../apps/web/src/components/QuickNoteDrawer.tsx');
 const { TodayProblemRow } = await import('../apps/web/src/components/TodayProblemRow.tsx');
+const { WorkspaceContext } = await import('../apps/web/src/workspace.tsx');
 
 beforeEach(() => {
   mock.method(api, 'getSettings', async () => ({ language: 'en', theme: 'light', timezone: null, updatedAt: 0 }));
@@ -92,6 +93,36 @@ function noteEditor() {
 }
 
 describe('NotesWorkspace request ownership', () => {
+  it('keeps a dirty draft after an AI client update and overwrites only the version shown', async () => {
+    mockEditorProblems();
+    let remote = { note: editorNote('1', 'Original'), contentHash: 'original' };
+    mock.method(api, 'getNote', async () => remote);
+    const save = mock.method(api, 'upsertNote', async (id: string, content: string, expected?: string) => {
+      assert.equal(expected, remote.contentHash);
+      remote = { note: editorNote(id, content), contentHash: 'saved' };
+      return remote;
+    });
+    const view = (desktopAgentRevision: number) => (
+      <WorkspaceContext.Provider value={{ revision: 0, desktopAgentRevision, timezone: null, navigate() {}, openPractice() {}, notifyMutation() {} }}>
+        <NotesWorkspace lang="en" notesFormatOnSave={false} />
+      </WorkspaceContext.Provider>
+    );
+    let rerender!: ReturnType<typeof render>['rerender'];
+    await act(async () => { ({ rerender } = render(view(0))); });
+    remote = { note: editorNote('1', 'First AI note'), contentHash: 'first' };
+    await act(async () => { rerender(view(1)); });
+    assert.equal(noteEditor().value, 'First AI note', 'a clean editor takes the latest copy');
+    await act(async () => { fireEvent.change(noteEditor(), { target: { value: 'My draft' } }); });
+    remote = { note: editorNote('1', 'Second AI note'), contentHash: 'second' };
+    await act(async () => { rerender(view(2)); });
+    assert.equal(noteEditor().value, 'My draft');
+    assert.equal((screen.getByRole('button', { name: /save note/i }) as HTMLButtonElement).disabled, true);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Overwrite with my draft' })); });
+    assert.equal(save.mock.callCount(), 1);
+    assert.equal(remote.note.content, 'My draft');
+    assert.equal(screen.queryByRole('button', { name: 'Load saved version' }), null);
+  });
+
   for (const fails of [false, true]) {
     it(`ignores stale retry ${fails ? 'failure' : 'success'} after switching and editing another problem`, async () => {
       mockEditorProblems();
@@ -169,6 +200,33 @@ describe('NotesWorkspace request ownership', () => {
     await act(async () => { pending.resolve({ note: editorNote('1', 'shared draft') }); });
     assert.equal((screen.getByRole('button', { name: /save note/i }) as HTMLButtonElement).disabled, false);
   });
+
+  for (const returnBeforeFailure of [false, true]) {
+    it(`recovers a conflicted submission when returning ${returnBeforeFailure ? 'before' : 'after'} its failure`, async () => {
+      mockEditorProblems();
+      const pending = deferred<{ note: ReturnType<typeof editorNote> }>();
+      let currentA = 'Original A';
+      mock.method(api, 'getNote', async (id: string) => {
+        const content = id === '1' ? currentA : 'Original B';
+        return { note: editorNote(id, content), contentHash: content };
+      });
+      mock.method(api, 'upsertNote', () => pending.promise);
+      await act(async () => { render(<NotesWorkspace lang="en" notesFormatOnSave={false} />); });
+      await act(async () => { fireEvent.change(noteEditor(), { target: { value: 'Submitted draft' } }); });
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: /save note/i })); });
+      await act(async () => { fireEvent.click(screen.getByText('Problem B')); });
+      currentA = 'MCP update';
+      if (returnBeforeFailure) await act(async () => { fireEvent.click(screen.getByText('Problem A')); });
+      await act(async () => { pending.reject(new ApiError(409, 'NOTE_CHANGED', 'Conflict')); });
+      if (!returnBeforeFailure) {
+        assert.equal(noteEditor().value, 'Original B');
+        await act(async () => { fireEvent.click(screen.getByText('Problem A')); });
+      }
+      assert.equal(noteEditor().value, 'Submitted draft');
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Load saved version' })); });
+      assert.equal(noteEditor().value, 'MCP update');
+    });
+  }
 
   it('does not refresh or write again when a save finishes after unmount', async () => {
     const list = mockEditorProblems();
@@ -1252,6 +1310,38 @@ describe('QuickCopyButtons Component', () => {
 });
 
 describe('QuickNoteDrawer Component', () => {
+  it('refreshes the open drawer after MCP edits and copies only the latest note', async () => {
+    const initial = { note: editorNote('1', 'Original note') };
+    const slow = deferred<typeof initial>();
+    let response: Promise<typeof initial> | typeof initial = initial;
+    const getNote = mock.method(api, 'getNote', async (_id: string, _options?: { signal?: AbortSignal }) => response);
+    const drawer = (desktopAgentRevision: number) => (
+      <WorkspaceContext.Provider value={{ revision: 0, desktopAgentRevision, timezone: null, navigate() {}, openPractice() {}, notifyMutation() {} }}>
+        <QuickNoteDrawer
+          lang="en"
+          problem={{ frontendId: '1', title: 'Problem A', url: 'https://example.com/1', difficulty: 'Easy', tags: [], slug: 'problem-a' }}
+          onClose={() => {}}
+          onOpenWorkspace={() => {}}
+        />
+      </WorkspaceContext.Provider>
+    );
+    let rerender!: ReturnType<typeof render>['rerender'];
+    await act(async () => { ({ rerender } = render(drawer(0))); });
+    assert.ok(screen.getByText('Original note'));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy' })); });
+    response = slow.promise;
+    await act(async () => { rerender(drawer(1)); });
+    assert.equal((screen.getByRole('button', { name: /Copy for Notion/ }) as HTMLButtonElement).disabled, true);
+    response = { note: editorNote('1', 'Latest MCP note') };
+    await act(async () => { rerender(drawer(2)); });
+    assert.equal(getNote.mock.calls[1].arguments[1]?.signal?.aborted, true);
+    await act(async () => { slow.resolve({ note: editorNote('1', 'Older MCP note') }); });
+    assert.ok(screen.getByText('Latest MCP note'));
+    assert.equal(screen.queryByText('Older MCP note'), null);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Copy for Notion/ })); });
+    assert.ok(lastCopiedText.includes('Latest MCP note'));
+  });
+
   it('loads and displays problem note, and navigates to workspace when requested', async () => {
     mock.method(api, 'getNote', async () => ({
       note: {

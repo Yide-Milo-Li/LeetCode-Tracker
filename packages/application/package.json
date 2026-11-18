@@ -1,0 +1,17 @@
+{
+  "name": "@leetcode-tracker/application",
+  "version": "1.2.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./runtime": "./src/runtime.ts"
+  },
+  "dependencies": {
+    "@leetcode-tracker/contracts": "file:../contracts",
+    "@leetcode-tracker/database": "file:../database",
+    "@leetcode-tracker/domain": "file:../domain",
+    "@leetcode-tracker/markdown": "file:../markdown",
+    "zod": "^4.1.0"
+  }
+}

@@ -6,6 +6,12 @@ import { strategyInputSchema, PlanningError, type Strategy, type StrategyInput, 
 import { evidenceAfter, projectReviewStates, calculateTagMastery, calculateKnowledgeProfile } from '../../domain/src/index.ts';
 import type { CatalogProblem } from '../../contracts/src/sync.ts';
 
+/** Optional response facts belong to the receipt, never to the saved plan or its history. */
+export interface PlanningReceipt {
+  plan: DailyPlan;
+  changed?: string[];
+}
+
 /** Persist strategy revisions and plan snapshots while computing completion from valid sources. */
 export class PlanningStore {
   private db: DatabaseSync;
@@ -226,14 +232,20 @@ export class PlanningStore {
 
   /** Bind durable retries to their original request rather than only to a caller-supplied UUID. */
   replay(operationId: string, fingerprint: string): DailyPlan | null {
+    return this.replayResult(operationId, fingerprint)?.plan ?? null;
+  }
+
+  /** Read both legacy plan-only receipts and newer receipts with response metadata. */
+  replayResult(operationId: string, fingerprint: string): PlanningReceipt | null {
     const row = this.db.prepare('SELECT * FROM planning_operations WHERE id=?').get(operationId) as { fingerprint: string; result_json: string } | undefined;
     if (!row) return null;
     if (row.fingerprint !== fingerprint) throw new PlanningError('OPERATION_REUSED', 'Operation ID belongs to another request');
-    return JSON.parse(row.result_json);
+    const result = JSON.parse(row.result_json) as DailyPlan | PlanningReceipt;
+    return 'plan' in result ? result : { plan: result };
   }
 
   /** Commit a plan version and retry result together after all provider work has finished. */
-  commit(plan: DailyPlan, stamp: RevisionStamp, expectedVersion: number | null, operationId: string, fingerprint: string, changed = true, validate?: () => void): Promise<DailyPlan> {
+  commit(plan: DailyPlan, stamp: RevisionStamp, expectedVersion: number | null, operationId: string, fingerprint: string, changed = true, validate?: () => void, metadata?: Pick<PlanningReceipt, 'changed'>): Promise<DailyPlan> {
     return this.write(() => {
       const replay = this.replay(operationId, fingerprint); if (replay) return replay;
       validate?.(); // Recheck request lifetime after waiting for the shared backup/write queue.
@@ -248,7 +260,8 @@ export class PlanningStore {
         // must invalidate each other's snapshots just like a strategy mutation does.
         this.db.prepare("UPDATE catalog_meta SET value=CAST(value AS INTEGER)+1 WHERE key='planning_revision'").run();
       }
-      this.db.prepare('INSERT INTO planning_operations VALUES(?,?,?)').run(operationId, fingerprint, json);
+      const receipt = metadata ? JSON.stringify({ plan, ...metadata }) : json;
+      this.db.prepare('INSERT INTO planning_operations VALUES(?,?,?)').run(operationId, fingerprint, receipt);
       for (const state of this.reviewStates(plan.timezone, plan.updatedAt)) this.db.prepare('INSERT OR REPLACE INTO problem_review_state VALUES(?,?,?)').run(state.questionId, JSON.stringify(state), stamp.practice);
       this.db.prepare('DELETE FROM problem_review_state WHERE question_id NOT IN (SELECT question_id FROM practice_records WHERE status=\'active\' AND completed=1 UNION SELECT question_id FROM progress_snapshots WHERE status=\'active\' AND has_accepted=1)').run();
       return plan;

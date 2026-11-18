@@ -25,6 +25,7 @@ export interface QuickCopyButtonsProps {
   };
   customNote?: string | null;
   compact?: boolean;
+  disabled?: boolean;
   /** Alignment of the dropdown menu relative to the trigger button ('left' | 'right'). Defaults to 'left'. */
   align?: 'left' | 'right';
 }
@@ -35,6 +36,7 @@ export function QuickCopyButtons({
   record,
   customNote,
   compact = false,
+  disabled = false,
   align = 'left',
 }: QuickCopyButtonsProps) {
   const t = translations[lang];
@@ -74,6 +76,7 @@ export function QuickCopyButtons({
           title={copiedType === 'obsidian' ? t.cardCopied : t.copyObsidianCard}
           aria-label={t.copyObsidianCard}
           onClick={handleCopyObsidian}
+          disabled={disabled}
         >
           {copiedType === 'obsidian' ? <Check size={14} style={{ color: 'var(--success)' }} /> : <Copy size={14} />}
         </button>
@@ -87,6 +90,7 @@ export function QuickCopyButtons({
         type="button"
         className="btn btn-secondary btn-sm notes-dropdown-trigger"
         {...menu.triggerProps}
+        disabled={disabled}
         title={copiedType ? t.cardCopied : (lang === 'zh' ? '复制题目卡片' : 'Copy Problem Card')}
         style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}
       >
@@ -114,6 +118,7 @@ export function QuickCopyButtons({
             type="button"
             className="notes-dropdown-item"
             onClick={handleCopyObsidian}
+            disabled={disabled}
             title={t.copyObsidianCard}
             aria-label={t.copyObsidianCard}
           >
@@ -128,6 +133,7 @@ export function QuickCopyButtons({
             type="button"
             className="notes-dropdown-item"
             onClick={handleCopyNotion}
+            disabled={disabled}
             title={t.copyNotionCard}
             aria-label={t.copyNotionCard}
           >

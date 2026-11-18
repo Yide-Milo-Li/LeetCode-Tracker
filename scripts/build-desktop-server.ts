@@ -8,6 +8,7 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { build } from 'esbuild';
+import { bundleMcp } from './build-mcp.ts';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
 const entryPoint = path.join(repoRoot, 'apps/server/src/desktop-entry.ts');
@@ -60,6 +61,7 @@ async function bundleDesktopServer(): Promise<void> {
   const stats = fs.statSync(outfile);
   const sizeMb = (stats.size / (1024 * 1024)).toFixed(2);
   console.log(`✓ Desktop server bundled successfully in ${duration}ms: ${outfile} (${sizeMb} MB)`);
+  await bundleMcp(true);
 }
 
 bundleDesktopServer().catch((err) => {

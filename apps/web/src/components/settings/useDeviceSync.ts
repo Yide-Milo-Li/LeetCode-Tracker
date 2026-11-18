@@ -22,6 +22,7 @@ const SYNC_ERROR_COPY: Record<string, { en: string; zh: string }> = {
   SYNC_INVALID_DATA: { en: 'The snapshot is intact but its data failed validation. Update all devices to the same app version.', zh: '快照完整，但其中的数据未通过校验。请把所有设备更新到同一应用版本。' },
   SYNC_NOT_READY: { en: 'The snapshot has not finished downloading to this device yet.', zh: '快照尚未完整下载到本机。' },
   SYNC_PREVIEW_EXPIRED: { en: 'The preview expired. Preview the snapshot again.', zh: '预览已过期，请重新预览。' },
+  SYNC_PREVIEW_STALE: { en: 'Local data changed after you opened the preview. Preview the snapshot again.', zh: '打开预览后，本机数据已更改。请重新预览此快照。' },
   SYNC_RECONNECT_REQUIRED: { en: 'Google Drive access expired or was revoked. Connect again.', zh: 'Google Drive 授权已过期或被撤销，请重新连接。' },
   SYNC_INVALID_FOLDER: { en: 'Enter an existing folder with an absolute path.', zh: '请填写一个已存在文件夹的绝对路径。' },
   SYNC_FOLDER_REQUIRED: { en: 'Choose a sync folder first.', zh: '请先选择同步文件夹。' },
@@ -158,7 +159,18 @@ export function useDeviceSync(lang: Language, active: boolean) {
 
   async function confirmReceive(localChanges?: 'fork' | 'discard') {
     if (!preview) return;
-    const result = await run('receive', () => api.receiveSync({ previewId: preview.previewId, ...(localChanges ? { localChanges } : {}) }), zh ? '接收失败，本机数据未更改。' : 'Receive failed; this device was not changed.');
+    const result = await run('receive', async () => {
+      try {
+        return await api.receiveSync({ previewId: preview.previewId, ...(localChanges ? { localChanges } : {}) });
+      } catch (cause) {
+        if ((cause as { code?: string })?.code === 'SYNC_PREVIEW_STALE') {
+          setPreview(current => current?.previewId === preview.previewId ? null : current);
+          const next = await api.getSyncStatus().catch(() => null);
+          if (next) applyStatus(next);
+        }
+        throw cause;
+      }
+    }, zh ? '接收失败，本机数据未更改。' : 'Receive failed; this device was not changed.');
     if (!result) return;
     setPreview(null);
     setNotice(zh ? `已接收。安全备份：${result.safetyBackupPath}` : `Received. Safety backup: ${result.safetyBackupPath}`);

@@ -469,6 +469,18 @@ export function generateKnowledgeZip(
   scope: 'all' | 'practiced' = 'all',
   lang: 'en' | 'zh' = 'en'
 ): Buffer {
+  return buildZipArchive(generateKnowledgeEntries(db, scope, lang));
+}
+
+/**
+ * Build the knowledge base files (Markdown problems, README Dataview index and
+ * Notion CSVs) as relative paths with contents, for a ZIP or a directory.
+ */
+export function generateKnowledgeEntries(
+  db: DatabaseSync,
+  scope: 'all' | 'practiced' = 'all',
+  lang: 'en' | 'zh' = 'en'
+): Array<{ name: string; content: string }> {
   let whereSql = '';
   if (scope === 'practiced') {
     whereSql = `WHERE (
@@ -626,5 +638,5 @@ export function generateKnowledgeZip(
     content: practiceHistoryCsv,
   });
 
-  return buildZipArchive(entries);
+  return entries;
 }

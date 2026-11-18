@@ -8,7 +8,7 @@ use rand::RngCore;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -122,6 +122,18 @@ fn resources(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
     Ok((node, script))
 }
 
+/// Resolve the stdio entrypoint from the same resource root used to start the sidecar.
+fn mcp_launch(node: &Path, sidecar: &Path) -> Option<serde_json::Value> {
+    let entry = sidecar.parent()?.join("mcp/leetcode-tracker-mcp.mjs");
+    if !entry.is_file() {
+        return None;
+    }
+    Some(serde_json::json!({
+        "command": dunce::simplified(node),
+        "entry": dunce::simplified(&entry)
+    }))
+}
+
 /// Own the process before waiting for ready, allowing close to stop a slow startup.
 fn start_service(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<DesktopState>();
@@ -156,7 +168,8 @@ fn start_service(app: &AppHandle) -> Result<(), String> {
         let (mut child, receiver) = process::ManagedChild::spawn(&mut command)?;
         child.send(&serde_json::json!({
             "protocolVersion": 1, "port": 0, "dbPath": data_dir.join("tracker.sqlite"),
-            "backupDir": data_dir.join("backups"), "sessionSecret": token, "nonce": nonce
+            "backupDir": data_dir.join("backups"), "sessionSecret": token, "nonce": nonce,
+            "mcpLaunch": mcp_launch(&node, &script)
         }))?;
         *owner = Some(child);
         receiver

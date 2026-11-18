@@ -38,8 +38,41 @@ const { App } = await import('../apps/web/src/App.tsx');
 const { Tooltip, InfoPopover, Dialog } = await import('../apps/web/src/components/ui.tsx');
 const { TodayPlanView } = await import('../apps/web/src/components/TodayPlanView.tsx');
 const { TodayProblemRow } = await import('../apps/web/src/components/TodayProblemRow.tsx');
+const { DesktopAgentPanel } = await import('../apps/web/src/components/settings/DesktopAgentPanel.tsx');
 const { api } = await import('../apps/web/src/api.ts');
 const { useEncouragement } = await import('../apps/web/src/hooks/useEncouragement.ts');
+
+it('offers the optional skill alongside the selected client’s MCP configuration', async () => {
+  const copied: string[] = [];
+  const clipboard = { writeText: async (text: string) => { copied.push(text); } };
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: clipboard });
+  try {
+    render(<DesktopAgentPanel lang="en" status={{
+      instance: 'test-instance', enabled: false, revision: 0, timezone: null, activity: [],
+      launch: { command: '/Applications/LCT/node', entry: '/Applications/LCT/mcp.mjs', dbPath: '/Profile/tracker.sqlite' },
+    }} />);
+    const client = screen.getByRole('combobox', { name: 'Client' });
+    const install = () => screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'LCT skill install command' });
+    assert.match(install().value, /--client claude-code$/);
+    fireEvent.change(client, { target: { value: 'Codex' } });
+    assert.ok(screen.getByText('$lct note 42'));
+    fireEvent.change(client, { target: { value: 'Antigravity' } });
+    assert.ok(screen.getByText('~/.gemini/config/mcp_config.json'));
+    assert.match(install().value, /--client antigravity$/);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy install command' })); });
+    assert.deepEqual(copied, [install().value]);
+    assert.ok(screen.getByText('Copied.'));
+    mock.method(clipboard, 'writeText', async () => { throw new Error('Denied'); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy install command' })); });
+    assert.ok(screen.getByText(/Clipboard unavailable/));
+    assert.equal(install().selectionEnd, install().value.length);
+    fireEvent.change(client, { target: { value: 'Claude Desktop' } });
+    assert.equal(screen.queryByRole('button', { name: 'Copy install command' }), null);
+  } finally {
+    cleanup();
+    Reflect.deleteProperty(navigator, 'clipboard');
+  }
+});
 
 describe('Minimal Desktop UI - Phase 10', () => {
   beforeEach(() => {

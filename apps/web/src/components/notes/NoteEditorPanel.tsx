@@ -1,5 +1,6 @@
 /** Long-form note editor: status/actions header, load error, toolbar, edit/preview canvas and footer. */
 import { BookOpen, Check, Save } from 'lucide-react';
+import { useId } from 'react';
 import { NOTE_TEMPLATES, hasMeaningfulNoteContent } from '../../api.ts';
 import { translations, type Language } from '../../i18n.ts';
 import type { ActionPopover } from '../ui.tsx';
@@ -20,6 +21,8 @@ interface NoteEditorPanelProps {
 /** Render the editor for the selected note; all state and actions come from `useNoteEditor`. */
 export function NoteEditorPanel({ lang, editor, isMac, codeMenu, viewMode, onViewModeChange }: NoteEditorPanelProps) {
   const t = translations[lang];
+  const conflictMessageId = useId();
+  const zh = lang === 'zh';
   const {
     noteContent, setNoteContent, textareaRef, wrapTextareaSelection,
     loadingNote, noteLoadError, handleRetryLoad, savingNote, saveSuccess, saveError, formatNotice,
@@ -48,7 +51,7 @@ export function NoteEditorPanel({ lang, editor, isMac, codeMenu, viewMode, onVie
               <span>{noteContent.trim().length === 0 ? t.noteClearedSuccess : t.noteSaved}</span>
             </span>
           )}
-          {saveError && <span className="nw-save-error">{saveError}</span>}
+          {saveError && <span className="nw-save-error" role="alert">{saveError}</span>}
           {formatNotice && <span role="status" className="nw-format-notice">{formatNotice}</span>}
           {canUndoFormat && (
             <button type="button" className="btn btn-secondary btn-sm" onClick={handleUndoFormat}>
@@ -89,6 +92,19 @@ export function NoteEditorPanel({ lang, editor, isMac, codeMenu, viewMode, onVie
         </div>
       </div>
 
+      {editor.hasConflict && (
+        <div className="nw-load-error">
+          <span role="status" id={conflictMessageId}>
+            {zh ? '已保存的笔记有更新。你的草稿仍在编辑器中。' : 'The saved note changed. Your draft is still in the editor.'}
+          </span>
+          <button type="button" className="btn btn-secondary btn-sm" disabled={savingNote || loadingNote} onClick={editor.reloadSavedVersion}>
+            {zh ? '加载已保存版本' : 'Load saved version'}
+          </button>
+          <button type="button" className="btn btn-secondary btn-sm" disabled={!editor.canOverwrite} onClick={editor.keepMyDraft}>
+            {zh ? '用我的草稿覆盖' : 'Overwrite with my draft'}
+          </button>
+        </div>
+      )}
       {noteLoadError && (
         <div className="nw-load-error">
           <span>{t.loadNoteError}</span>
@@ -118,6 +134,7 @@ export function NoteEditorPanel({ lang, editor, isMac, codeMenu, viewMode, onVie
       <div className={`notes-canvas-grid ${viewMode === 'edit' ? 'edit-only' : viewMode === 'preview' ? 'preview-only' : ''}`}>
         <div className="notes-editor-pane">
           <textarea
+            aria-describedby={editor.hasConflict ? conflictMessageId : undefined}
             ref={textareaRef}
             rows={16}
             className="nw-editor-textarea"

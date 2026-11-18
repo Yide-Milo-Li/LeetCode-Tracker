@@ -79,6 +79,32 @@ export function upsertProblemNote(
 }
 
 /**
+ * Write several notes atomically. `guard` receives the current content of
+ * every targeted note (empty string when none) inside the transaction and may
+ * throw to abort the batch before anything is written.
+ */
+export function upsertProblemNotesTransaction(
+  db: DatabaseSync,
+  entries: Array<{ questionFrontendId: string; content: string }>,
+  guard?: (current: Map<string, string>) => void
+): ProblemNote[] {
+  db.exec('BEGIN IMMEDIATE;');
+  try {
+    const current = new Map<string, string>();
+    for (const { questionFrontendId } of entries) {
+      current.set(questionFrontendId, getProblemNote(db, questionFrontendId)?.content ?? '');
+    }
+    guard?.(current);
+    const saved = entries.map(({ questionFrontendId, content }) => upsertProblemNote(db, questionFrontendId, content));
+    db.exec('COMMIT;');
+    return saved;
+  } catch (err) {
+    db.exec('ROLLBACK;');
+    throw err;
+  }
+}
+
+/**
  * List problem note summaries with practice activity, difficulty, tags, and search filters.
  */
 export function listProblemNoteSummaries(
@@ -123,6 +149,16 @@ export function listProblemNoteSummaries(
     whereClauses.push('has_meaningful_note(n.content) = 1');
   } else if (query.hasNote === 'false') {
     whereClauses.push('has_meaningful_note(n.content) = 0');
+  }
+
+  // Separate notes with no text from unedited template skeletons
+  const blankNote = `(n.content IS NULL OR TRIM(n.content, ' ' || char(9) || char(10) || char(13)) = '')`;
+  if (query.noteState === 'empty') {
+    whereClauses.push(blankNote);
+  } else if (query.noteState === 'stub') {
+    whereClauses.push(`(NOT ${blankNote} AND has_meaningful_note(n.content) = 0)`);
+  } else if (query.noteState === 'written') {
+    whereClauses.push('has_meaningful_note(n.content) = 1');
   }
 
   // Filter by topic tag
