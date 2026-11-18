@@ -134,7 +134,6 @@ export function registerDesktopAgentRoutes(
           return toolError(new ProfileError('PROFILE_IN_USE', 'AI client writes are disabled in desktop Settings.'));
         }
         const before = agentDataRevision(store);
-        const warning = remoteWarning();
         let result: AgentResult | undefined;
         try { result = await tool.invoke(application, args); }
         finally {
@@ -151,6 +150,9 @@ export function registerDesktopAgentRoutes(
             invalidateRecommendations();
           }
         }
+        let warning;
+        try { warning = remoteWarning(); }
+        catch { return result; } // A local advisory lookup cannot invalidate an already committed result.
         if (!warning) return result;
         const structuredContent = { ...result.structuredContent, warnings: [warning] };
         const content = result.isError

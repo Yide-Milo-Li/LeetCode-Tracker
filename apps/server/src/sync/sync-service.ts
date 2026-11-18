@@ -119,6 +119,8 @@ interface PendingPreview {
   snapshot: RemoteSnapshot;
   bundle: SnapshotBundleV5;
   createdAt: number;
+  localContentHash: string;
+  baseSnapshotId: string | null;
 }
 
 /** Envelope fields readable from future versions, so newer snapshots still appear (as incompatible). */
@@ -205,8 +207,9 @@ export class DeviceSyncService {
 
   /** Advisory from the last listing. Bridge writes never contact the sync transport. */
   agentWriteWarning(): import('../../../../packages/contracts/src/desktop-agent.ts').AgentWriteWarning | undefined {
-    if (!this.listing) return;
-    const { classification } = classifySyncState(this.listing.snapshots, this.setting(K.baseSnapshotId), false);
+    if (!this.listing?.snapshots.length) return;
+    const local = this.localState();
+    const { classification } = classifySyncState(this.listing.snapshots, local.baseId, local.dirty);
     if (classification === 'remote-ahead') {
       return { code: 'SYNC_REMOTE_AHEAD', message: 'Device sync has a newer snapshot. Review it under Settings → Data → Device sync before making more changes.' };
     }
@@ -373,11 +376,12 @@ export class DeviceSyncService {
     } catch (error) {
       throw new DeviceSyncError(422, 'SYNC_INVALID_DATA', `Snapshot data failed validation: ${summarizeValidationError(error)}`);
     }
-    const local = this.localState();
+    const localContentHash = computeContentHash(this.exportBundle().tables);
+    const local = this.localState(localContentHash);
     const db = this.ctx.store.db;
     const count = (table: string) => (db.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get() as { n: number }).n;
     const pair = (table: keyof SnapshotBundleV5['tables']) => ({ incoming: bundle.tables[table].length, local: count(table) });
-    this.preview = { previewId: randomUUID(), snapshot, bundle, createdAt: this.now() };
+    this.preview = { previewId: randomUUID(), snapshot, bundle, createdAt: this.now(), localContentHash, baseSnapshotId: local.baseId };
     return {
       previewId: this.preview.previewId,
       snapshot: this.summarize(snapshot, findHeads(listing.snapshots)),
@@ -410,6 +414,11 @@ export class DeviceSyncService {
       const before = this.exportBundle();
       const beforeHash = computeContentHash(before.tables);
       const local = this.localState(beforeHash);
+      // Archive/discard consent applies to the profile version the user previewed.
+      if (beforeHash !== preview.localContentHash || local.baseId !== preview.baseSnapshotId) {
+        this.preview = null;
+        throw new DeviceSyncError(409, 'SYNC_PREVIEW_STALE', 'Local data changed after the preview. Preview the snapshot again.');
+      }
       if (local.dirty && !input.localChanges) {
         throw new DeviceSyncError(409, 'SYNC_LOCAL_CHANGES', 'This device has unpublished changes; choose to archive or discard them');
       }

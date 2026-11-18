@@ -122,7 +122,7 @@ it('retries a failed publish with the same operation ID', async () => {
   assert.ok(screen.getByText(/Snapshot uploaded/));
 });
 
-it('requires an explicit choice before receiving over local changes in a fork', async () => {
+for (const code of ['SYNC_PREVIEW_EXPIRED', 'SYNC_PREVIEW_STALE']) it(`requires an explicit choice before receiving over a fork (${code})`, async () => {
   stubSettings();
   const forked = status({ classification: 'fork', localDirty: true });
   mock.method(api, 'getSyncStatus', async () => forked);
@@ -140,7 +140,7 @@ it('requires an explicit choice before receiving over local changes in a fork', 
       dailyPlans: { incoming: 4, local: 4 },
     },
   }));
-  const receive = mock.method(api, 'receiveSync', async () => { throw Object.assign(new Error('stop'), { code: 'SYNC_PREVIEW_EXPIRED' }); });
+  const receive = mock.method(api, 'receiveSync', async () => { throw Object.assign(new Error('stop'), { code }); });
   await renderData();
   assert.ok(screen.getByText(/More than one version changed/));
   assert.ok(screen.getByRole('button', { name: /Keep this device/ }));
@@ -148,7 +148,13 @@ it('requires an explicit choice before receiving over local changes in a fork', 
   assert.equal(screen.queryByRole('button', { name: 'Confirm & receive' }), null, 'no silent replace over local changes');
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Archive mine and receive' })); });
   assert.deepEqual(receive.mock.calls[0].arguments[0], { previewId: '44444444-4444-4444-8444-444444444444', localChanges: 'fork' });
-  assert.ok(screen.getByText(/The preview expired/));
+  if (code === 'SYNC_PREVIEW_STALE') {
+    assert.ok(screen.getByText(/Local data changed after you opened the preview/));
+    assert.equal(screen.queryByRole('button', { name: 'Archive mine and receive' }), null);
+    assert.ok(screen.getByRole('button', { name: /Receive MacBook/ }));
+  } else {
+    assert.ok(screen.getByText(/The preview expired/));
+  }
 });
 
 it('offers every competing version when several devices published', async () => {

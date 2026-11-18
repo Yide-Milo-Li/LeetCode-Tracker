@@ -145,9 +145,9 @@ test('desktop MCP writes report known remote changes and remain publishable loca
   const agent = new DesktopAgent({ dbPath, backupDir: join(target.dir, 'backups') });
   const sessionSecret = 'synthetic-device-sync-session-secret';
   const app = await buildApp({ store: target.store, disableStatic: true, sessionSecret, desktopAgent: agent });
-  const call = async (method: 'GET' | 'POST' | 'PUT', url: string, payload?: object) => {
+  const call = async (method: 'GET' | 'POST' | 'PUT', url: string, payload?: object, expectedStatus = 200) => {
     const reply = await app.inject({ method, url, payload, headers: { 'x-desktop-session-token': sessionSecret } });
-    assert.equal(reply.statusCode, 200, reply.body);
+    assert.equal(reply.statusCode, expectedStatus, reply.body);
     return reply.json();
   };
   try {
@@ -180,11 +180,19 @@ test('desktop MCP writes report known remote changes and remain publishable loca
     }
     const forwarded = await importProblem('991');
     assert.equal(forwarded.insertCount, 1);
-    assert.equal(forwarded.warnings[0].code, 'SYNC_REMOTE_AHEAD');
-    assert.equal((await call('GET', '/api/v1/sync/status')).localDirty, true);
+    assert.equal(forwarded.warnings[0].code, 'SYNC_FORK');
+    const status = await call('GET', '/api/v1/sync/status');
+    assert.equal(status.localDirty, true);
+    assert.equal(status.classification, 'fork');
     const { previewId } = await call('POST', '/api/v1/sync/receive/preview', { snapshotId: published.body.snapshot.snapshotId });
-    await call('POST', '/api/v1/sync/receive', { previewId, localChanges: 'discard' });
-    assert.equal((await importProblem('992')).warnings, undefined);
+    assert.equal((await importProblem('992')).warnings[0].code, 'SYNC_FORK');
+    const stale = await call('POST', '/api/v1/sync/receive', { previewId, localChanges: 'discard' }, 409);
+    assert.equal(stale.error, 'SYNC_PREVIEW_STALE');
+    assert.ok(target.store.getProblem('991', 'frontendId'));
+    assert.ok(target.store.getProblem('992', 'frontendId'));
+    const refreshed = await call('POST', '/api/v1/sync/receive/preview', { snapshotId: published.body.snapshot.snapshotId });
+    await call('POST', '/api/v1/sync/receive', { previewId: refreshed.previewId, localChanges: 'discard' });
+    assert.equal((await importProblem('993')).warnings, undefined);
     assert.equal((await call('POST', '/api/v1/sync/publish', {})).published, true);
   } finally {
     agent.stop();
