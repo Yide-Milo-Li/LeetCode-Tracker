@@ -41,4 +41,7 @@ export interface DesktopAgentStatus {
   revision: number;
   timezone: string | null;
   activity: DesktopAgentActivity[];
+  launch?: DesktopMcpLaunch;
 }
+
+export interface DesktopMcpLaunch { command: string; entry: string; dbPath: string }

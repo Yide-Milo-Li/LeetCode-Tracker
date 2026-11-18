@@ -1,6 +1,7 @@
 /** Application preferences, grouped into four tabs; catalog and progress imports live in their own workspaces. */
 import { useEffect, useState } from 'react';
 import type { ThemePalette } from '../../../../packages/contracts/src/sync.ts';
+import type { DesktopAgentStatus } from '../../../../packages/contracts/src/desktop-agent.ts';
 import { api } from '../api.ts';
 import type { Language } from '../i18n.ts';
 import { localizeApiError } from '../error-i18n.ts';
@@ -39,6 +40,7 @@ interface SettingsViewProps {
   /** Controlled tab; omit to let the view manage its own. */
   section?: SettingsSection;
   onSectionChange?: (section: SettingsSection) => void;
+  desktopAgent?: DesktopAgentStatus;
 }
 
 export { PALETTE_OPTIONS, type PaletteOption } from '../palettes.ts';
@@ -63,6 +65,7 @@ export function SettingsView({
   onTimezoneSaved,
   section: controlledSection,
   onSectionChange,
+  desktopAgent,
 }: SettingsViewProps) {
   const zh = lang === 'zh';
 
@@ -171,6 +174,7 @@ export function SettingsView({
           onPromptSwapFeedbackChange={updatePromptSwapFeedback}
           notesFormatOnSave={notesFormatOnSave}
           onNotesFormatOnSaveChange={updateNotesFormatOnSave}
+          desktopAgent={desktopAgent}
         />
       )}
 

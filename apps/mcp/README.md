@@ -1,12 +1,12 @@
 # leetcode-tracker-mcp
 
-A standalone [Model Context Protocol](https://modelcontextprotocol.io) server for LeetCode Tracker. It lets an MCP client such as Claude Code, Claude Desktop or Codex read and update your local problem catalog, study plans, practice history, notes and progress. It runs over stdio, makes no network requests and needs no desktop app.
+A [Model Context Protocol](https://modelcontextprotocol.io) server for LeetCode Tracker. It lets an MCP client such as Claude Code, Claude Desktop or Codex read and update your local problem catalog, study plans, practice history, notes and progress. It runs over stdio and works independently or through the desktop app's loopback service.
 
 Status: unreleased 0.1.0.
 
 ## Requirements
 
-Node.js 26.13 or later in the 26.x line. The server uses the built-in `node:sqlite` module.
+Standalone installs require Node.js 26.13 or later in the 26.x line. The desktop installer includes the required runtime.
 
 ## Profile location
 
@@ -20,7 +20,11 @@ By default the server uses the desktop app's profile, so if you already use Leet
 
 Override it with `--db <path>` or the `LEETCODE_TRACKER_DB` environment variable. Run `leetcode-tracker-mcp where` to print the path in use.
 
-Reads and previews open a short-lived read-only connection per call, so they work while the desktop app is running. Writes take the same exclusive lock as the desktop app for the length of one call and fail with `PROFILE_IN_USE` while it is open; quit the desktop app (tray > Quit) to write from an MCP client.
+Reads and previews open a short-lived read-only connection per call. Writes acquire the profile lease when the desktop app is closed. To write while it is running, open **Settings → General → Connect an AI client** and enable **Allow AI client writes**. The setting is off by default and applies to this device. While the app owns the profile, a disabled or unavailable bridge returns `PROFILE_IN_USE`.
+
+Choose Claude Code, Claude Desktop, or Codex in the same panel and copy the configuration entry. The generated entry points to the bundled Node executable, MCP script, and current profile. Merge it into the client's configuration file and restart the client. Recent activity is available for the current desktop session.
+
+If a tool reports `AGENT_WRITE_UNCERTAIN`, read the affected data to check whether the change was applied before retrying. Reuse the original operation ID when the tool accepts one.
 
 ## Getting started without the desktop app
 

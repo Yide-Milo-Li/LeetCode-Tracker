@@ -98,6 +98,10 @@
 .preference-label h2 {
   margin: 0;
 }
+.agent-config-snippet {
+  width: 100%;
+  font-family: var(--font-mono, monospace);
+}
 /* The legacy row rule caps paragraphs at 340px, which kept flex-basis from forcing a wrap. */
 .preference-label > p {
   flex-basis: 100%;

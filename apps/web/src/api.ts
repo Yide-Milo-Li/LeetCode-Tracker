@@ -591,6 +591,9 @@ export const syncApi = {
 /** Unified API client instance aggregating all endpoint domains. */
 export const api = {
   getDesktopAgentStatus: () => request<DesktopAgentStatus>('/desktop-agent'),
+  setDesktopAgentEnabled: (enabled: boolean) => request<DesktopAgentStatus>('/desktop-agent', {
+    method: 'PUT', body: JSON.stringify({ enabled }),
+  }),
   ...catalogApi,
   ...settingsApi,
   ...practiceApi,

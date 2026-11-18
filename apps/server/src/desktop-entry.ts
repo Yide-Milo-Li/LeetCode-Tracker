@@ -17,6 +17,7 @@ import { buildApp } from './app.ts';
 import { acquireDatabaseLease, DatabaseLeaseBusyError } from '../../../packages/database/src/lease.ts';
 import { setTimeout as delay } from 'node:timers/promises';
 import { DesktopAgent } from './desktop-agent.ts';
+import type { DesktopMcpLaunch } from '../../../packages/contracts/src/desktop-agent.ts';
 
 async function acquireDesktopLease(dbPath: string): Promise<() => void> {
   const deadline = Date.now() + 2000;
@@ -45,6 +46,7 @@ export interface DesktopConfig {
   sessionSecret: string;
   /** Handshake token matched by the desktop host upon startup. */
   nonce: string;
+  mcpLaunch?: Pick<DesktopMcpLaunch, 'command' | 'entry'> | null;
 }
 
 /**
@@ -59,6 +61,7 @@ export async function startDesktopServer(): Promise<void> {
     backupDir: z.string().refine(path.isAbsolute),
     sessionSecret: z.string().min(32).max(256),
     nonce: z.string().min(16).max(256),
+    mcpLaunch: z.object({ command: z.string().refine(path.isAbsolute), entry: z.string().refine(path.isAbsolute) }).nullish(),
   }).strict();
   const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
   let stopRequested = false;
@@ -100,7 +103,10 @@ export async function startDesktopServer(): Promise<void> {
   }
 
   const release = await acquireDesktopLease(config.dbPath);
-  const agent = new DesktopAgent({ dbPath: config.dbPath, backupDir: config.backupDir });
+  const agent = new DesktopAgent(
+    { dbPath: config.dbPath, backupDir: config.backupDir },
+    config.mcpLaunch ? { ...config.mcpLaunch, dbPath: config.dbPath } : undefined,
+  );
   let openedDb: DatabaseSync | undefined;
   let openedApp: Awaited<ReturnType<typeof buildApp>> | undefined;
   let isShuttingDown = false;

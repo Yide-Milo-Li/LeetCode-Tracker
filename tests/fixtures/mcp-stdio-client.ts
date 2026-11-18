@@ -21,8 +21,8 @@ export class StdioClient {
     });
     child.stderr.setEncoding('utf8').on('data', chunk => this.stderr.push(chunk));
   }
-  static async start(entry: string, dbPath: string, protocolVersion = '2025-06-18') {
-    const child = spawn(process.execPath, [entry, '--db', dbPath], { cwd: repoRoot });
+  static async start(entry: string, dbPath: string, protocolVersion = '2025-06-18', executable = process.execPath) {
+    const child = spawn(executable, [entry, '--db', dbPath], { cwd: repoRoot });
     const client = new StdioClient(child);
     const init = await client.request('initialize', { protocolVersion, capabilities: {}, clientInfo: { name: 'test', version: '0' } });
     assert.equal(init.result.serverInfo.name, 'leetcode-tracker');

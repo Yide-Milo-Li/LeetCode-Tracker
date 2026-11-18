@@ -5,7 +5,7 @@ import { readLiveDatabaseLease } from '../../../packages/database/src/lease.ts';
 import {
   agentCallSchema, DESKTOP_AGENT_HEADER, DESKTOP_AGENT_PATH, DESKTOP_AGENT_PROTOCOL,
   MAX_AGENT_REQUEST_BYTES, type AgentEndpoint, type AgentResult,
-  type DesktopAgentStatus, type DesktopAgentActivity,
+  type DesktopAgentStatus, type DesktopAgentActivity, type DesktopMcpLaunch,
 } from '../../../packages/contracts/src/desktop-agent.ts';
 import { createTrackerToolRegistry } from '../../mcp/src/tools.ts';
 import { toolError } from '../../mcp/src/registrar.ts';
@@ -24,9 +24,11 @@ export class DesktopAgent {
   private readonly instance = randomUUID();
   private revision = 0;
   private readonly activity: DesktopAgentActivity[] = [];
+  private readonly launch?: DesktopMcpLaunch;
 
-  constructor(location: ProfileLocation) {
+  constructor(location: ProfileLocation, launch?: DesktopMcpLaunch) {
     this.location = location;
+    this.launch = launch;
     this.endpointPath = `${location.dbPath}.agent.json`;
     this.enabledPath = `${location.dbPath}.agent-enabled`;
   }
@@ -40,7 +42,7 @@ export class DesktopAgent {
   enabled(): boolean { return this.endpoint !== undefined; }
 
   status(timezone: string | null): DesktopAgentStatus {
-    return { enabled: this.enabled(), instance: this.instance, revision: this.revision, timezone, activity: [...this.activity] };
+    return { enabled: this.enabled(), instance: this.instance, revision: this.revision, timezone, activity: [...this.activity], launch: this.launch };
   }
 
   record(tool: string, count?: number): void {

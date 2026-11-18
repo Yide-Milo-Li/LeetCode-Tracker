@@ -584,6 +584,7 @@ export function App() {
               <div hidden={view !== 'settings'} id="view-settings">
                 <SettingsView
                   lang={lang}
+                  desktopAgent={desktopAgent}
                   onLanguageChange={(language) => persistPreference({ language })}
                   onThemeChange={(theme) => persistPreference({ theme })}
                   currentTheme={theme}

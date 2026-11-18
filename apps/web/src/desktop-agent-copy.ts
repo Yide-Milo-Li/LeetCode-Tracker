@@ -1,11 +1,23 @@
-import type { DesktopAgentActivity } from '../../../packages/contracts/src/desktop-agent.ts';
+import type { DesktopAgentActivity, DesktopMcpLaunch } from '../../../packages/contracts/src/desktop-agent.ts';
 import type { Language } from './i18n.ts';
+
+export const AI_CLIENTS = ['Claude Code', 'Claude Desktop', 'Codex'] as const;
+export type AiClient = (typeof AI_CLIENTS)[number];
+
+export function clientConfig(client: AiClient, { command, entry, dbPath }: DesktopMcpLaunch): string {
+  const args = [entry, '--db', dbPath];
+  if (client === 'Codex') {
+    return `[mcp_servers.leetcode-tracker]\ncommand = ${JSON.stringify(command)}\nargs = ${JSON.stringify(args)}\n`;
+  }
+  const server = client === 'Claude Code' ? { type: 'stdio', command, args } : { command, args };
+  return JSON.stringify({ mcpServers: { 'leetcode-tracker': server } }, null, 2);
+}
 
 export function activityLabel({ tool, count }: DesktopAgentActivity, lang: Language): string {
   const zh = lang === 'zh';
   switch (tool) {
     case 'tracker_create_practices':
-      return zh ? `AI 客户端记录了 ${count ?? 1} 条练习。` : `An AI client recorded ${count ?? 1} practice ${count === 1 ? 'attempt' : 'attempts'}.`;
+      return zh ? `AI 客户端记录了 ${count ?? 1} 条练习。` : `An AI client recorded ${count ?? 1} practice ${(count ?? 1) === 1 ? 'attempt' : 'attempts'}.`;
     case 'tracker_save_notes':
     case 'tracker_patch_note':
       return zh ? 'AI 客户端更新了题解笔记。' : 'An AI client updated problem notes.';

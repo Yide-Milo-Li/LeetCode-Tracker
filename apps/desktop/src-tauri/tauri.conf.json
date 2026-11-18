@@ -39,7 +39,8 @@
       "binaries/node"
     ],
     "resources": {
-      "../../server/dist/desktop-server.mjs": "desktop-server.mjs"
+      "../../server/dist/desktop-server.mjs": "desktop-server.mjs",
+      "../../server/dist/mcp/": "mcp/"
     }
   }
 }
