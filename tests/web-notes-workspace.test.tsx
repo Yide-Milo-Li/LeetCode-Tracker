@@ -1310,6 +1310,38 @@ describe('QuickCopyButtons Component', () => {
 });
 
 describe('QuickNoteDrawer Component', () => {
+  it('refreshes the open drawer after MCP edits and copies only the latest note', async () => {
+    const initial = { note: editorNote('1', 'Original note') };
+    const slow = deferred<typeof initial>();
+    let response: Promise<typeof initial> | typeof initial = initial;
+    const getNote = mock.method(api, 'getNote', async (_id: string, _options?: { signal?: AbortSignal }) => response);
+    const drawer = (desktopAgentRevision: number) => (
+      <WorkspaceContext.Provider value={{ revision: 0, desktopAgentRevision, timezone: null, navigate() {}, openPractice() {}, notifyMutation() {} }}>
+        <QuickNoteDrawer
+          lang="en"
+          problem={{ frontendId: '1', title: 'Problem A', url: 'https://example.com/1', difficulty: 'Easy', tags: [], slug: 'problem-a' }}
+          onClose={() => {}}
+          onOpenWorkspace={() => {}}
+        />
+      </WorkspaceContext.Provider>
+    );
+    let rerender!: ReturnType<typeof render>['rerender'];
+    await act(async () => { ({ rerender } = render(drawer(0))); });
+    assert.ok(screen.getByText('Original note'));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy' })); });
+    response = slow.promise;
+    await act(async () => { rerender(drawer(1)); });
+    assert.equal((screen.getByRole('button', { name: /Copy for Notion/ }) as HTMLButtonElement).disabled, true);
+    response = { note: editorNote('1', 'Latest MCP note') };
+    await act(async () => { rerender(drawer(2)); });
+    assert.equal(getNote.mock.calls[1].arguments[1]?.signal?.aborted, true);
+    await act(async () => { slow.resolve({ note: editorNote('1', 'Older MCP note') }); });
+    assert.ok(screen.getByText('Latest MCP note'));
+    assert.equal(screen.queryByText('Older MCP note'), null);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Copy for Notion/ })); });
+    assert.ok(lastCopiedText.includes('Latest MCP note'));
+  });
+
   it('loads and displays problem note, and navigates to workspace when requested', async () => {
     mock.method(api, 'getNote', async () => ({
       note: {

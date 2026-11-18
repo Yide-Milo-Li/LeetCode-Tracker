@@ -10,6 +10,7 @@ import { formatDifficulty, translations, type Language } from '../i18n.ts';
 import { QuickCopyButtons } from './QuickCopyButtons.tsx';
 import { Dialog } from './ui.tsx';
 import { useAsyncResource } from '../hooks/useAsyncResource.ts';
+import { useWorkspace } from '../workspace.tsx';
 
 export interface QuickNoteDrawerProps {
   lang: Language;
@@ -34,7 +35,8 @@ export function QuickNoteDrawer({
   onOpenWorkspace,
 }: QuickNoteDrawerProps) {
   const t = translations[lang];
-  const saved = useAsyncResource((signal) => api.getNote(problem.frontendId, { signal }), [problem.frontendId]);
+  const { desktopAgentRevision } = useWorkspace();
+  const saved = useAsyncResource((signal) => api.getNote(problem.frontendId, { signal }), [problem.frontendId, desktopAgentRevision]);
   // A failed load shows the empty state rather than another problem's note.
   const note: ProblemNote | null = saved.error ? null : (saved.data?.note ?? null);
   const loading = saved.loading;
@@ -83,6 +85,7 @@ export function QuickNoteDrawer({
           problem={problem}
           record={{ durationMinutes: null, notes: latestPracticeNotes ?? null }}
           customNote={note?.content}
+          disabled={loading}
         />
       </div>
 
