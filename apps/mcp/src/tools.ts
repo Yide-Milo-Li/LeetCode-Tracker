@@ -15,7 +15,7 @@ import { ApplicationError } from '../../../packages/application/src/errors.ts';
 import type { TrackerProfile } from './profile.ts';
 import { importCatalog, TIMEZONE_HINT } from './operations.ts';
 import { MCP_SERVER_VERSION } from './version.ts';
-import { createRegistrar, json, TOOL_NAMES, WRITE_TOOL_NAMES } from './registrar.ts';
+import { createRegistrar, json } from './registrar.ts';
 import { practiceView, profileZone, summarizePlan, weakTopicsView } from './views.ts';
 import { registerWriteTools } from './write-tools.ts';
 import { registerNoteTools } from './note-tools.ts';
@@ -39,7 +39,7 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
   server.registerTool(
     'tracker_status',
     {
-      description: 'Get server version, profile location, catalog problem counts, streak metrics, configured timezone and available tools. Call this first.',
+      description: 'Get server version, profile location, catalog problem counts, streak metrics, configured timezone and today\'s plan summary. Call only when asked for an overview or to diagnose setup issues.',
       inputSchema: z.object({}),
     },
     async (application) => {
@@ -77,7 +77,6 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
       const data = {
         serverVersion: MCP_SERVER_VERSION,
         profile: profile.location.dbPath,
-        writeTools: WRITE_TOOL_NAMES,
         database: {
           totalProblems: stats.totalProblems,
           easy: stats.easy,
@@ -98,12 +97,9 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
           totalManualPractices: dashboard.overview.totalManualPractices,
         },
         today: todayPlanSummary,
-        tools: TOOL_NAMES,
       };
 
-      return {
-        content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
-      };
+      return json(data);
     },
   );
 
@@ -140,18 +136,13 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
         isPaidOnly: it.isPaidOnly,
       }));
 
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            total: catalogResult.total,
-            page,
-            limit,
-            returned: simplified.length,
-            problems: simplified,
-          }, null, 2),
-        }],
-      };
+      return json({
+        total: catalogResult.total,
+        page,
+        limit,
+        returned: simplified.length,
+        problems: simplified,
+      });
     },
   );
 
@@ -171,16 +162,11 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
         const settings = await application.settings.get();
         const tz = settings.timezone;
         if (!tz || !isTimeZone(tz)) {
-          return {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                hasPlan: false,
-                error: 'TIMEZONE_NOT_CONFIGURED',
-                message: TIMEZONE_HINT,
-              }, null, 2),
-            }],
-          };
+          return json({
+            hasPlan: false,
+            error: 'TIMEZONE_NOT_CONFIGURED',
+            message: TIMEZONE_HINT,
+          });
         }
         targetDate = localDate(Date.now(), tz);
       }
@@ -189,19 +175,14 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
       const plan = plansResult.items[0] ?? null;
 
       if (!plan) {
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
-              hasPlan: false,
-              date: targetDate,
-              message: `No study plan has been generated for date "${targetDate}" yet.`,
-            }, null, 2),
-          }],
-        };
+        return json({
+          hasPlan: false,
+          date: targetDate,
+          message: `No study plan has been generated for date "${targetDate}" yet.`,
+        });
       }
 
-      return { content: [{ type: 'text', text: JSON.stringify(summarizePlan(plan), null, 2) }] };
+      return json(summarizePlan(plan));
     },
   );
 
@@ -285,18 +266,13 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
         limit,
       });
 
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            total: result.total,
-            page,
-            limit,
-            returned: result.items.length,
-            notes: result.items,
-          }, null, 2),
-        }],
-      };
+      return json({
+        total: result.total,
+        page,
+        limit,
+        returned: result.items.length,
+        notes: result.items,
+      });
     },
   );
 
@@ -331,9 +307,7 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
         ...(weakTopics ? { weakTopics: weakTopicsView(await application.knowledgeProfile.report()) } : {}),
       };
 
-      return {
-        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-      };
+      return json(result);
     },
   );
 
@@ -357,7 +331,7 @@ export function registerTrackerTools(rawServer: McpServer, profile: TrackerProfi
       }
       const content = await readFile(filePath, 'utf8');
       const result = await importCatalog(application, content, { dryRun });
-      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      return json(result);
     },
     ({ dryRun }) => (dryRun ? 'preview' : 'write'),
   );

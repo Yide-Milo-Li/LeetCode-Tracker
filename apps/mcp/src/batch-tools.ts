@@ -131,7 +131,7 @@ export function registerBatchTools({ register }: Registrar): void {
   register(
     'tracker_create_practices',
     {
-      description: `Record up to ${MAX_PRACTICE_BATCH} practice attempts in one transaction: either all are saved or none is. Use it when the user reports several problems at once. Set dryRun to validate and show what would be recorded. Requires a client-generated operationId; retrying with it is safe.`,
+      description: `Record up to ${MAX_PRACTICE_BATCH} practice attempts in one transaction: either all are saved or none is. Pass questionFrontendId (e.g. "1") directly without calling tracker_get_problems first. Use it when the user reports several problems at once. Set dryRun to validate and show what would be recorded. Requires a client-generated operationId; retrying with it is safe.`,
       inputSchema: z.object({
         operationId: batchOperationIdSchema,
         records: z.array(practiceInputSchema).min(1).max(MAX_PRACTICE_BATCH),

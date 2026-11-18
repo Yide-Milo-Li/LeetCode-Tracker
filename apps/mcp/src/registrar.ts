@@ -63,7 +63,7 @@ export interface WriteHints {
 
 /** Success payload; structuredContent is derived from the JSON text. */
 export function json(value: unknown): ToolResult {
-  return { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] };
+  return { content: [{ type: 'text', text: JSON.stringify(value) }] };
 }
 
 /** A tool-level refusal that is not an exception, e.g. bad input the schema cannot express. */
