@@ -26,10 +26,11 @@ Usage:
   leetcode-tracker-mcp import <file.jsonl> [--dry-run]    Import a JSON Lines problem catalog
   leetcode-tracker-mcp set-timezone <IANA zone>           Set the timezone used for "today"
   leetcode-tracker-mcp where                              Print the profile path
-  leetcode-tracker-mcp install-skill --client <${SKILL_CLIENTS.join('|')}> [--force]
+  leetcode-tracker-mcp install-skill --client <${SKILL_CLIENTS.join('|')}> [--workspace <directory>] [--force]
 
 Options:
   --db <path>     Profile database (default: the desktop app profile, or LEETCODE_TRACKER_DB)
+  --workspace <directory>   Install the skill in this client workspace (default: current user)
   --force        Replace an existing, different copy of the LCT skill
   -h, --help      Show this help
   -v, --version   Show the version
@@ -42,6 +43,7 @@ async function main(argv: string[]): Promise<number> {
     options: {
       db: { type: 'string' },
       client: { type: 'string' },
+      workspace: { type: 'string' },
       force: { type: 'boolean' },
       'dry-run': { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h', default: false },
@@ -54,7 +56,7 @@ async function main(argv: string[]): Promise<number> {
   const [command, argument] = positionals;
   if (command === 'install-skill') {
     const client = SKILL_CLIENTS.find(name => name === values.client);
-    if (!client || argument !== undefined || values.db !== undefined || values['dry-run']) {
+    if (!client || argument !== undefined || values.workspace?.trim() === '' || values.db !== undefined || values['dry-run']) {
       process.stderr.write(USAGE);
       return 2;
     }
@@ -62,13 +64,13 @@ async function main(argv: string[]): Promise<number> {
       import.meta.url.endsWith('.ts') ? '../../../skills/lct/SKILL.md' : './skills/lct/SKILL.md',
       import.meta.url,
     );
-    const { status, target } = installSkill(client, source, values.force);
+    const { status, target } = installSkill(client, source, values.force, values.workspace);
     process.stdout.write(status === 'unchanged' ? `LCT skill is already up to date at ${target}\n`
       : `LCT skill ${status} at ${target}\n`);
     return 0;
   }
-  if (values.client !== undefined || values.force) {
-    process.stderr.write('--client and --force apply to install-skill only.\n');
+  if (values.client !== undefined || values.workspace !== undefined || values.force) {
+    process.stderr.write('--client, --workspace and --force apply to install-skill only.\n');
     return 2;
   }
 

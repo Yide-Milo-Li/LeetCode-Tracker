@@ -91,6 +91,16 @@ From a standalone install, use `leetcode-tracker-mcp install-skill --client <cli
 
 The installer copies `SKILL.md` into that directory. For Claude Code, it uses the configured `CLAUDE_CONFIG_DIR` when set. Re-running is safe. If the installed file differs, review it before using `--force` to replace it. Configure MCP separately and keep the client's tool approvals enabled. Claude Desktop can use the MCP tools and prompts.
 
+If the terminal and the agent use different home directories, install into the workspace the agent opens. For example, from the project root run `leetcode-tracker-mcp install-skill --client codex --workspace .`. Codex and Antigravity discover `.agents/skills/lct/SKILL.md` in that workspace. Claude Code uses `.claude/skills/lct/SKILL.md`.
+
+In Codex, start a new session in the same workspace, type `$`, select **lct**, and submit the selection alone to see today's saved plan and the shortcut menu. Clients built on the Codex app-server can submit the selected skill as a `type: "skill"` input using the path from `skills/list`. [Codex app-server skills](https://developers.openai.com/codex/app-server)
+
+In Antigravity CLI, enter `/lct` and approve the request to read today's plan. For unattended use, see the CLI's permission rules. A run of the bare shortcut needs only `mcp(leetcode-tracker/tracker_get_today)` in `permissions.allow`. Save the following JSON as a session settings file and run `agy --settings <file> --print "/lct"` on CLI versions with `--settings`. Other operations keep their usual approvals. [Antigravity CLI permissions](https://antigravity.google/docs/permissions?tab=cli)
+
+```json
+{ "permissions": { "allow": ["mcp(leetcode-tracker/tracker_get_today)"] } }
+```
+
 | Shortcut | Action |
 | --- | --- |
 | `lct` | Read today's saved plan and show the command menu |

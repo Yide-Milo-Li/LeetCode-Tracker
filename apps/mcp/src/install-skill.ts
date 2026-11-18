@@ -6,7 +6,10 @@ import { dirname, join, resolve } from 'node:path';
 export const SKILL_CLIENTS = ['claude-code', 'codex', 'antigravity'] as const;
 export type SkillClient = (typeof SKILL_CLIENTS)[number];
 
-function skillRoot(client: SkillClient): string {
+function skillRoot(client: SkillClient, workspace?: string): string {
+  if (workspace !== undefined) {
+    return resolve(workspace, client === 'claude-code' ? '.claude' : '.agents', 'skills');
+  }
   const home = homedir();
   switch (client) {
     case 'claude-code':
@@ -18,8 +21,8 @@ function skillRoot(client: SkillClient): string {
   }
 }
 
-export function installSkill(client: SkillClient, source: URL, force = false) {
-  const target = join(skillRoot(client), 'lct', 'SKILL.md');
+export function installSkill(client: SkillClient, source: URL, force = false, workspace?: string) {
+  const target = join(skillRoot(client, workspace), 'lct', 'SKILL.md');
   mkdirSync(dirname(target), { recursive: true });
   try {
     copyFileSync(source, target, constants.COPYFILE_EXCL);

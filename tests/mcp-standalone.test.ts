@@ -80,6 +80,7 @@ test('install-skill writes to the selected client only and protects existing ski
     assert.equal(cli(sourceEntry, ['install-skill'], env).status, 2);
     assert.equal(cli(sourceEntry, ['install-skill', '--client', 'invalid'], env).status, 2);
     assert.equal(cli(sourceEntry, ['where', '--client', 'codex'], env).status, 2);
+    assert.equal(cli(sourceEntry, ['where', '--workspace', w.dir], env).status, 2);
     assert.equal(existsSync(claudeDir), false);
     for (const [client, dir] of [
       ['claude-code', join(claudeDir, 'skills')],
@@ -87,7 +88,12 @@ test('install-skill writes to the selected client only and protects existing ski
       ['antigravity', join(w.dir, '.gemini', 'config', 'skills')],
     ]) {
       const args = ['install-skill', '--client', client!];
+      const project = join(w.dir, 'isolated project', client!);
+      const installedInProject = cli(sourceEntry, [...args, '--workspace', project], env);
+      assert.equal(installedInProject.status, 0, installedInProject.stderr);
+      assert.equal(readFileSync(join(project, client === 'claude-code' ? '.claude' : '.agents', 'skills/lct/SKILL.md'), 'utf8'), text);
       const target = join(dir!, 'lct', 'SKILL.md');
+      assert.equal(existsSync(target), false);
       const installed = cli(sourceEntry, args, env);
       assert.equal(installed.status, 0, installed.stderr);
       assert.equal(readFileSync(target, 'utf8'), text);
