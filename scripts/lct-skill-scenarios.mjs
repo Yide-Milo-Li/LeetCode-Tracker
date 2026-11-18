@@ -73,6 +73,13 @@ export async function verifyScenario(scenario, call, ask, followUp) {
     const initial = await plan();
     assert.equal(initial.items.length, 2);
     for (const item of initial.items) assert.ok(created.answer.includes(item.frontendId));
+    const replacedId = initial.items[1].frontendId;
+    const replaced = await ask(`today replace #${replacedId}`);
+    used(replaced, 'edit_today');
+    const swapped = await plan();
+    assert.equal(swapped.items.length, 2);
+    assert.ok(swapped.items.some(item => item.frontendId === initial.items[0].frontendId));
+    assert.ok(swapped.items.every(item => item.frontendId !== replacedId));
     const appended = await ask('today add one more problem');
     used(appended, 'edit_today');
     const expanded = await plan();
@@ -117,6 +124,7 @@ export async function verifyScenario(scenario, call, ask, followUp) {
     const addition = 'Test the empty array before the first iteration.';
     const preview = await ask(`note ${a} Add this sentence to a new "Boundary check" section: "${addition}"`);
     used(preview, 'get_note_context');
+    assert.ok(preview.calls.every(c => c.name.startsWith('tracker_get_')), 'Preview turn attempted a write');
     assert.ok(preview.answer.includes(addition));
     assert.deepEqual(await note(), original);
     const accepted = await followUp('Confirmed. Append exactly the proposed sentence under the new section.');

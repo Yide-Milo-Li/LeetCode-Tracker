@@ -190,7 +190,8 @@ try {
   mkdirSync(workspace);
   execFileSync(runtime, [entry, 'install-skill', '--client', host, '--workspace', workspace]);
   const skillPath = join(workspace, '.agents/skills/lct/SKILL.md');
-  assert.deepEqual(readFileSync(skillPath), readFileSync(join(root, 'skills/lct/SKILL.md')));
+  assert.ok(readFileSync(skillPath).equals(readFileSync(join(root, 'skills/lct/SKILL.md'))),
+    'Installed Skill differs from the source. Rebuild the tested bundle.');
   const { client } = await StdioClient.start(entry, launch.dbPath, undefined, runtime);
   const call = async (name, args = {}) => {
     const reply = await client.call('tracker_' + name, args);
