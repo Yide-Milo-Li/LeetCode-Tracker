@@ -37,7 +37,7 @@ export function writeNoteText(frontendId: string, lang?: 'en' | 'zh'): string {
     'Steps:',
     `1. Call tracker_get_note_context with frontendId "${frontendId}"${language}. It returns the problem, every attempt I made, the current note with its contentHash and headings, the note template, and related problems that already have notes.`,
     '2. If the note state is "empty" or "stub", write a complete note that follows the template\'s sections, in the template\'s language, and save it with tracker_save_notes using the contentHash from step 1.',
-    '3. If the note state is "written", keep my text. Show the proposed additions and wait for my confirmation. Then use tracker_patch_note in append mode, one section per call, using the latest contentHash.',
+    '3. If the note state is "written", keep my text. Show the proposed additions and wait for my confirmation in a later message. End the preview turn without writing, even if I gave the exact text. Once confirmed, use tracker_patch_note in append mode, one section per call, starting with the hash of the previewed note.',
     '4. Ground the note in my attempts: where I needed help or failed (assisted or unsolved attempts and their remarks) belongs in the pitfalls section, and a dated line can go under a review log heading. General algorithm knowledge is fine; do not invent details about my attempts.',
     '5. Mention related problems from relatedNotes where the technique carries over.',
     '',

@@ -125,7 +125,8 @@ test('note and weak-topic prompts name the tools and guard existing text', async
     assert.match(note, /keep my text/);
     assert.match(note, /wait for my confirmation/);
     assert.match(note, /tracker_patch_note/);
-    assert.match(skill, /preview additions and confirm before using `tracker_patch_note` in append mode/);
+    assert.match(skill, /later user message confirms that preview/);
+    assert.match(skill, /use `tracker_patch_note` in append mode/);
     const missing = await client.request('prompts/get', { name: 'write_note', arguments: {} });
     assert.ok(missing.error, 'frontendId is required');
 
