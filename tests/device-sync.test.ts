@@ -1364,6 +1364,105 @@ test('Drive falls back from unusable deltas and preserves preview consent and fu
   } finally { await A.app.close(); await B.app.close(); a.close(); b.close(); }
 });
 
+test('Drive catches up through at most eight verified changes and downloads only the target on fallback', async () => {
+  const google = fakeGoogle();
+  const a = await profile('chain-a'), b = await profile('chain-b');
+  selectDrive(a); selectDrive(b);
+  const options = { fetch: google.fetchImpl, googleEndpoints: google.endpoints };
+  const A = await device(a, options), B = await device(b, options);
+  async function publish(note: string) {
+    a.store.upsertProblemNote('1', note);
+    const result = await A.call('POST', '/api/v1/sync/publish', {});
+    assert.equal(result.status, 200, JSON.stringify(result.body));
+    const { snapshotId, createdAt } = result.body.snapshot;
+    const names = snapshotBlobNames(createdAt, snapshotId);
+    const files = [...google.files.values()];
+    return { snapshotId, data: files.find(f => f.name === names.data)!, meta: files.find(f => f.name === names.meta)! };
+  }
+  async function preview(target: Awaited<ReturnType<typeof publish>>, download: boolean) {
+    google.state.listCalls = 0;
+    google.state.mediaGets = [];
+    const result = await B.call('POST', '/api/v1/sync/receive/preview', { snapshotId: target.snapshotId });
+    assert.equal(result.status, 200, JSON.stringify(result.body));
+    assert.equal(google.state.listCalls, 1);
+    assert.deepEqual(google.state.mediaGets, download ? [target.data.id] : []);
+    return result.body;
+  }
+  async function confirm(previewId: string) {
+    const result = await B.call('POST', '/api/v1/sync/receive', { previewId });
+    assert.equal(result.status, 200, JSON.stringify(result.body));
+    assert.equal(result.body.resolutionSnapshotId, null);
+    assert.ok(result.body.safetyBackupPath);
+    assert.equal(result.body.warning, undefined);
+    return result.body.snapshotId;
+  }
+  try {
+    await seedMigrationProfile(a.store);
+    const base = await publish('baseline');
+    await confirm((await preview(base, true)).previewId);
+    const changes = [];
+    for (let version = 1; version <= 8; version++) {
+      if (version === 4) {
+        await a.store.createPracticeRecord({
+          questionFrontendId: '1', practicedAt: '2026-09-02', timePrecision: 'date',
+          completed: true, durationMinutes: 14, operationId: randomUUID(),
+        });
+      }
+      changes.push(await publish('revision ' + version));
+    }
+    const middle = changes[3], target = changes[7];
+    const earlier = await preview(changes[1], false);
+    assert.deepEqual(earlier.counts.practiceRecords, { incoming: 1, local: 1 });
+
+    // A broken middle link never fetches intermediate payloads or applies a partial profile.
+    const hint = middle.data.description!;
+    middle.data.description = undefined;
+    await preview(target, true);
+    middle.data.description = JSON.stringify({ ...JSON.parse(hint), baseHash: '0'.repeat(64) });
+    middle.data.appProperties = { lctDeltaSha256: createHash('sha256').update(middle.data.description).digest('hex') };
+    await preview(target, true);
+    middle.data.description = hint;
+    middle.data.appProperties = { lctDeltaSha256: createHash('sha256').update(hint).digest('hex') };
+    google.files.delete(middle.meta.id);
+    await preview(target, true);
+    google.files.set(middle.meta.id, middle.meta);
+
+    // A concurrent publisher committed a sibling of the middle snapshot.
+    const sibling = { ...JSON.parse(middle.meta.description!), snapshotId: randomUUID() };
+    const siblingFile = { ...middle.meta, id: randomUUID(), name: snapshotBlobNames(sibling.createdAt, sibling.snapshotId).meta,
+      data: Buffer.from(JSON.stringify(sibling)), description: JSON.stringify(sibling) };
+    google.files.set(siblingFile.id, siblingFile);
+    await preview(target, true);
+    google.files.delete(siblingFile.id);
+
+    const ready = await preview(target, false);
+    assert.deepEqual(ready.counts.practiceRecords, { incoming: 2, local: 1 });
+    assert.equal(b.store.getProblemNote('1')?.content, 'baseline');
+    assert.equal(readSyncSetting(b.db, 'sync_base_snapshot_id'), base.snapshotId);
+    assert.equal(await confirm(ready.previewId), target.snapshotId);
+    assert.equal(b.store.getProblemNote('1')?.content, 'revision 8');
+    assert.equal(b.db.prepare('SELECT COUNT(*) AS total FROM practice_records').get()?.total, 2);
+    assert.equal(readSyncSetting(b.db, 'sync_last_received'), target.snapshotId);
+
+    const next = [];
+    for (let version = 9; version <= 17; version++) next.push(await publish('revision ' + version));
+    const overflow = next[8];
+    const full = await preview(overflow, true);
+    assert.equal(b.store.getProblemNote('1')?.content, 'revision 8');
+    assert.equal(await confirm(full.previewId), overflow.snapshotId);
+    assert.equal(b.store.getProblemNote('1')?.content, 'revision 17');
+
+    await publish('revision 18');
+    const latest = await publish('revision 19');
+    const beforeEdit = await preview(latest, false);
+    b.store.upsertProblemNote('1', 'unpublished edit');
+    const stale = await B.call('POST', '/api/v1/sync/receive', { previewId: beforeEdit.previewId });
+    assert.equal(stale.body.error, 'SYNC_PREVIEW_STALE');
+    assert.equal((await preview(latest, true)).localDirty, true);
+    assert.equal(b.store.getProblemNote('1')?.content, 'unpublished edit');
+  } finally { await A.app.close(); await B.app.close(); a.close(); b.close(); }
+});
+
 test('resumed Drive uploads describe the frozen snapshot even after local edits and a restart', async () => {
   const google = fakeGoogle();
   const a = await profile('delta-resume-a'), b = await profile('delta-resume-b');

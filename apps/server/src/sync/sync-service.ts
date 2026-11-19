@@ -123,7 +123,12 @@ interface Listing {
   checkedAt: number;
   /** The selected payload ID for reads or a unique device-file ID for writes. */
   fileIds: Map<string, string>;
-  deltas: Map<string, ListedDelta>;
+  deltaChain: DeltaStep[];
+}
+
+interface DeltaStep {
+  envelope: SyncEnvelope;
+  hint: ListedDelta;
 }
 
 interface PendingPreview {
@@ -154,6 +159,38 @@ type SyncSettingsPatch = Partial<Record<SyncSettingKey, string | null>>;
 type SelectedGoogleClient = GoogleClientConfig & { source: 'bundled' | 'custom' };
 
 const PREVIEW_TTL_MS = 30 * 60 * 1000;
+const MAX_DELTA_STEPS = 8;
+
+/** Keep only the uninterrupted sequence of hints reachable from this device's base. */
+function collectDeltaChain(baseId: string, snapshots: RemoteSnapshot[], entries: SyncBlobEntry[]): DeltaStep[] {
+  const childByParent = new Map<string, RemoteSnapshot | null>();
+  const snapshotIds = new Set<string>();
+  for (const snapshot of snapshots) {
+    if (snapshotIds.has(snapshot.snapshotId)) return [];
+    snapshotIds.add(snapshot.snapshotId);
+    if (snapshot.kind === 'publish' && snapshot.parentId) {
+      const parent = snapshot.parentId;
+      childByParent.set(parent, childByParent.has(parent) ? null : snapshot);
+    }
+  }
+  if (!childByParent.get(baseId) || !snapshotIds.has(baseId) || findHeads(snapshots).length !== 1) return [];
+
+  const files = new Map(entries.map(file => [file.name, file]));
+  const chain: DeltaStep[] = [];
+  let parentId = baseId;
+  while (chain.length < MAX_DELTA_STEPS) {
+    const child = childByParent.get(parentId);
+    if (!child?.compatible || !child.envelope || child.supersedes.length) break;
+    snapshotIds.delete(parentId);
+    if (!snapshotIds.has(child.snapshotId)) return []; // A parent link loops back into this chain.
+    const names = snapshotBlobNames(child.createdAt, child.snapshotId);
+    const hint = files.get(names.data)?.delta;
+    if (!hint || files.get(names.meta)?.hasDuplicates) break;
+    chain.push({ envelope: child.envelope, hint });
+    parentId = child.snapshotId;
+  }
+  return chain;
+}
 
 /** Short, path-bearing description of a bundle validation failure (Zod issues or a plain error). */
 function summarizeValidationError(error: unknown): string {
@@ -434,7 +471,7 @@ export class DeviceSyncService {
     if (!snapshot.compatible || !snapshot.envelope) throw new DeviceSyncError(409, 'SYNC_INCOMPATIBLE', 'This snapshot needs a newer app version');
     this.requireCurrentRemote(cache);
     const name = snapshotBlobNames(snapshot.createdAt, snapshot.snapshotId).data;
-    const rebuilt = this.previewDelta(listing.deltas.get(name), snapshot.envelope);
+    const rebuilt = this.previewDelta(listing.deltaChain, snapshotId);
     const bundle = rebuilt?.bundle ?? await this.downloadBundle(blobs, name, listing.fileIds.get(name), snapshot.envelope, cache);
     this.requireCurrentRemote(cache);
     // A full download yields to local edits. Capture the consent baseline after it completes.
@@ -459,14 +496,20 @@ export class DeviceSyncService {
     };
   }
 
-  private previewDelta(hint: ListedDelta | undefined, envelope: SyncEnvelope) {
-    if (!hint || envelope.kind !== 'publish' || envelope.supersedes.length ||
-        !envelope.parentId || envelope.parentId !== this.setting(K.baseSnapshotId)) return;
-    const base = this.exportBundle();
-    const baseHash = computeContentHash(base.tables);
+  private previewDelta(chain: readonly DeltaStep[], snapshotId: string) {
+    const target = chain.findIndex(step => step.envelope.snapshotId === snapshotId);
+    if (target < 0 || chain[0].envelope.parentId !== this.setting(K.baseSnapshotId)) return;
+    let bundle = this.exportBundle();
+    const baseHash = computeContentHash(bundle.tables);
     if (baseHash !== this.setting(K.baseContentHash)) return;
-    const bundle = reconstructSnapshot(hint, base, baseHash, envelope);
-    if (bundle) return { bundle, baseHash };
+    let hash = baseHash;
+    for (const { hint, envelope } of chain.slice(0, target + 1)) {
+      const next = reconstructSnapshot(hint, bundle, hash, envelope);
+      if (!next) return;
+      bundle = next;
+      hash = envelope.contentHash;
+    }
+    return { bundle, baseHash };
   }
 
   private async downloadBundle(
@@ -839,16 +882,9 @@ export class DeviceSyncService {
         this.requireCurrentRemote(cache);
       }
       if (revision !== this.listingRevision) return this.readListing(blobs, shareLegacyHistory);
-      // Only direct children of the local base can use a delta. Release older descriptions with this listing.
-      const deltas = new Map<string, ListedDelta>();
       const baseId = this.setting(K.baseSnapshotId);
-      if (baseId && scope) {
-        const children = new Set(snapshots
-          .filter(snapshot => snapshot.parentId === baseId)
-          .map(snapshot => snapshotBlobNames(snapshot.createdAt, snapshot.snapshotId).data));
-        for (const file of entries) if (file.delta && children.has(file.name)) deltas.set(file.name, file.delta);
-      }
-      this.listing = { snapshots, devices, unreadable, fileIds, deltas, checkedAt: this.now() };
+      const deltaChain = baseId && scope && !unreadable ? collectDeltaChain(baseId, snapshots, entries) : [];
+      this.listing = { snapshots, devices, unreadable, fileIds, deltaChain, checkedAt: this.now() };
       this.lastError = null;
       this.reconnectRequired = false;
       return this.listing;
