@@ -76,6 +76,73 @@ async function renderSync() {
   });
 }
 
+function driveSender(overrides: Partial<SyncStatus> = {}): SyncStatus {
+  return status({
+    transport: 'gdrive', google: { ...status().google, clientConfigured: true, connected: true },
+    baseSnapshotId: head.snapshotId, localDirty: true, classification: 'local-ahead', ...overrides,
+  });
+}
+
+it('checks on publish after a restart and shows a newly discovered fork without another Drive check', async () => {
+  stubSettings();
+  let current = driveSender({ classification: null, heads: [], checkedAt: null });
+  mock.method(api, 'getSyncStatus', async () => current);
+  const check = mock.method(api, 'checkSync', async () => current);
+  const publish = mock.method(api, 'publishSync', async () => {
+    current = driveSender({ classification: 'fork', heads: [{ ...head, snapshotId: 'remote-update', deviceName: 'Desktop' }] });
+    throw Object.assign(new Error('conflict'), { code: 'SYNC_FORK' });
+  });
+  await renderSync();
+  assert.ok(screen.getByText('This device has changes that are not published yet.'));
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Check and publish' })); });
+  assert.equal(publish.mock.callCount(), 1);
+  assert.equal(publish.mock.calls[0].arguments[0]?.allowFork, false);
+  assert.equal(check.mock.callCount(), 0);
+  assert.ok(screen.getByRole('button', { name: /Receive Desktop/ }));
+  assert.ok(screen.getByRole('button', { name: /Keep this device/ }));
+  assert.equal(screen.queryByRole('button', { name: 'Check and publish' }), null);
+});
+
+it('can check manually before publishing and keeps cached device acknowledgements out of the initial view', async () => {
+  stubSettings();
+  const sender = driveSender({ devices: [{
+    deviceId: head.deviceId, deviceName: 'MacBook', appVersion: head.appVersion, lastReceived: head.snapshotId,
+    lastPublished: null, currentSnapshotId: head.snapshotId, updatedAt: 1,
+  }] });
+  mock.method(api, 'getSyncStatus', async () => sender);
+  const check = mock.method(api, 'checkSync', async () => sender);
+  const publish = mock.method(api, 'publishSync', async () => ({ published: true, snapshot: head }));
+  await renderSync();
+  assert.ok(screen.getByRole('button', { name: 'Check and publish' }));
+  assert.equal(screen.queryByRole('list', { name: 'Other devices' }), null);
+  assert.equal(check.mock.callCount(), 0);
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Check' })); });
+  assert.equal(check.mock.callCount(), 1);
+  assert.equal(publish.mock.callCount(), 0);
+  assert.ok(screen.getByRole('list', { name: 'Other devices' }));
+  assert.ok(screen.getByRole('button', { name: 'Publish this device' }));
+});
+
+it('keeps checking on open for receivers, first syncs, sync folders and Drive states needing attention', async () => {
+  stubSettings();
+  let current: SyncStatus;
+  mock.method(api, 'getSyncStatus', async () => current);
+  const check = mock.method(api, 'checkSync', async () => current);
+  for (const scenario of [
+    { localDirty: false, classification: 'up-to-date' }, { baseSnapshotId: null, classification: null },
+    { transport: 'folder' }, { classification: 'fork' }, { unreadableFiles: 1 },
+    { heads: [{ ...head, compatible: false }] }, { google: { ...driveSender().google, reconnectRequired: true } },
+    { pendingPublish: { operationId: 'pending', allowFork: false } },
+  ] satisfies Partial<SyncStatus>[]) {
+    current = driveSender(scenario);
+    const previous = check.mock.callCount();
+    await renderSync();
+    assert.equal(check.mock.callCount(), previous + 1, JSON.stringify(scenario));
+    assert.equal(screen.queryByRole('button', { name: 'Check and publish' }), null);
+    cleanup();
+  }
+});
+
 it('loads sync status only when the Sync tab is open', async () => {
   stubSettings();
   const load = mock.method(api, 'getSyncStatus', async () => status({ configured: false, transport: 'none', classification: null, heads: [] }));
@@ -176,22 +243,28 @@ it('lets source users save their own Desktop OAuth client', async () => {
   assert.equal((screen.getByLabelText(/OAuth client secret/) as HTMLInputElement).value, '');
 });
 
-it('retries a failed publish with the same operation ID', async () => {
+for (const transport of ['folder', 'gdrive'] as const) it(`retries a failed ${transport} publish with the same operation ID`, async () => {
   stubSettings();
-  mock.method(api, 'getSyncStatus', async () => status({ classification: 'local-ahead', localDirty: true }));
-  mock.method(api, 'checkSync', async () => status({ classification: 'local-ahead', localDirty: true }));
+  let current = transport === 'gdrive'
+    ? driveSender({ classification: null, checkedAt: null, heads: [] })
+    : status({ classification: 'local-ahead', localDirty: true });
+  mock.method(api, 'getSyncStatus', async () => current);
+  const check = mock.method(api, 'checkSync', async () => current);
   let attempt = 0;
   const publish = mock.method(api, 'publishSync', async () => {
     if (attempt++ === 0) throw new Error('network');
+    current = { ...current, classification: 'up-to-date', localDirty: false, heads: [head] };
     return { published: true, snapshot: head };
   });
   await renderSync();
-  const button = screen.getByRole('button', { name: /Publish this device/ });
-  await act(async () => { fireEvent.click(button); });
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Publish this device/ })); });
+  const name = transport === 'gdrive' ? 'Check and publish' : 'Publish this device';
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name })); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name })); });
   const ids = publish.mock.calls.map(call => (call.arguments[0] as { operationId: string }).operationId);
   assert.equal(ids.length, 2);
   assert.equal(ids[0], ids[1]);
+  assert.equal(check.mock.callCount(), transport === 'gdrive' ? 0 : 1);
+  assert.ok(screen.getByText('Up to date with the latest snapshot.'));
   assert.ok(screen.getByText(/Snapshot uploaded/));
 });
 

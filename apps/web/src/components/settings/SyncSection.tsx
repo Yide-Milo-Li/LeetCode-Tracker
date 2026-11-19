@@ -32,10 +32,14 @@ function formatBytes(bytes: number): string {
 /** Render the sync setup row, then (once configured) the status row with publish/receive actions. */
 export function SyncSection({ lang, sync }: SyncSectionProps) {
   const zh = lang === 'zh';
-  const { status, busy, error, notice, preview, history } = sync;
+  const { status, busy, error, notice, preview, history, checkOnPublish } = sync;
   const pendingPublish = status?.pendingPublish;
   const disabled = busy !== null;
   const classification = status?.classification ?? null;
+  const stateCopy = checkOnPublish ? STATE_COPY['local-ahead'] : classification && STATE_COPY[classification];
+  const publishLabel = checkOnPublish
+    ? (zh ? '检查并发布' : 'Check and publish')
+    : (zh ? '发布本机数据' : 'Publish this device');
   const head: SyncSnapshotSummary | undefined = status?.heads.find(h => h.compatible) ?? status?.heads[0];
   // Competing versions (several heads) are all offered; none is preferred by time.
   const receivable = status?.heads.filter(h => h.compatible) ?? [];
@@ -192,9 +196,9 @@ export function SyncSection({ lang, sync }: SyncSectionProps) {
           <div className="settings-stack">
             {status?.configured && (
               <>
-                {classification && (
-                  <Feedback tone={STATE_COPY[classification].tone}>
-                    {zh ? STATE_COPY[classification].zh : STATE_COPY[classification].en}
+                {stateCopy && (
+                  <Feedback tone={stateCopy.tone}>
+                    {zh ? stateCopy.zh : stateCopy.en}
                     {status.heads.length > 1 ? (
                       <> {zh ? `当前有 ${status.heads.length} 个并列版本。` : `${status.heads.length} competing versions.`}</>
                     ) : head && classification !== 'up-to-date' && (
@@ -220,10 +224,10 @@ export function SyncSection({ lang, sync }: SyncSectionProps) {
                       <span>{busy === 'publish' ? '…' : zh ? '继续上次的发布' : 'Resume previous publish'}</span>
                     </button>
                   )}
-                  {!pendingPublish && (classification === 'empty-remote' || classification === 'local-ahead') && (
+                  {!pendingPublish && (checkOnPublish || classification === 'empty-remote' || classification === 'local-ahead') && (
                     <button type="button" className="btn btn-primary btn-sm" onClick={() => void sync.publish()} disabled={disabled}>
                       <Upload size={14} />
-                      <span>{busy === 'publish' ? '…' : zh ? '发布本机数据' : 'Publish this device'}</span>
+                      <span>{busy === 'publish' ? '…' : publishLabel}</span>
                     </button>
                   )}
                   {(classification === 'remote-ahead' || classification === 'fork') && receivable.length === 1 && (

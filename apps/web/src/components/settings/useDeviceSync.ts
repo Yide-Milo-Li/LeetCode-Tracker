@@ -1,5 +1,5 @@
 /**
- * Device sync state for the Settings "Data" tab: configuration drafts, status, publish,
+ * Device sync state for the Settings "Sync" tab: configuration drafts, status, publish,
  * preview-then-receive and Google Drive connection.
  *
  * Owned by `SettingsView` so a pending receive preview survives switching Settings tabs.
@@ -35,6 +35,14 @@ const SYNC_ERROR_COPY: Record<string, { en: string; zh: string }> = {
 // Match the loopback authorization window and check promptly when returning from the browser.
 const GOOGLE_AUTH_TIMEOUT_MS = 10 * 60 * 1000;
 const GOOGLE_AUTH_CHECK_MS = 3_000;
+
+/** An established Drive sender can use the fresh listing already required by a normal publish. */
+function canCheckOnPublish(status: SyncStatus): boolean {
+  return status.transport === 'gdrive' && status.configured && status.google.connected && !status.google.reconnectRequired
+    && status.baseSnapshotId !== null && status.localDirty && !status.pendingPublish
+    && (status.classification === null || status.classification === 'local-ahead')
+    && status.unreadableFiles === 0 && status.heads.every(head => head.compatible);
+}
 
 /**
  * Load sync status the first time `active` turns true (the Sync tab opens) and expose the actions
@@ -98,20 +106,20 @@ export function useDeviceSync(lang: Language, active: boolean) {
   const loaded = useRef(false);
   useEffect(() => {
     if (!active || loaded.current) return;
-    loaded.current = true;
     let current = true;
     api.getSyncStatus()
       .then(async (initial) => {
         if (!current) return;
-        applyStatus(initial, true);
-        // Configured devices check the remote on open so "update available" shows without a click.
-        if (initial.configured) {
+        const deferCheck = canCheckOnPublish(initial);
+        // Until the sender checks Drive, show its local edits and the time of its last check.
+        applyStatus(deferCheck ? { ...initial, classification: null, heads: [], devices: [] } : initial, true);
+        if (initial.configured && !deferCheck) {
           const checked = await api.checkSync().catch(() => null);
           if (current && checked) applyStatus(checked);
         }
+        if (current) loaded.current = true;
       })
       .catch((err) => {
-        loaded.current = false;
         if (current) setError(describe(err, zh ? '无法读取同步状态。' : 'Could not load sync status.'));
       });
     return () => { current = false; };
@@ -303,6 +311,7 @@ export function useDeviceSync(lang: Language, active: boolean) {
 
   return {
     status,
+    checkOnPublish: status?.classification === null && canCheckOnPublish(status),
     busy,
     error,
     notice,

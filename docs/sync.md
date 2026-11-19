@@ -8,8 +8,8 @@ Device sync is unreleased. Automated tests cover the sync folder and a simulated
 
 Sync is **one active device at a time** with **complete, immutable snapshots**:
 
-1. On the device you used last, click **Publish this device** (Settings → Sync).
-2. On whichever device you switch to next, open Settings → Sync. It checks the remote store and offers **Receive _device_'s version**.
+1. Open Settings → Sync on the device you edited. An established Google Drive device with unpublished changes can show **Check and publish**. It reads Drive when you click and offers conflict choices if another device published first. Choose **Check** to inspect Drive without uploading. For a first publish, choose **Publish this device**.
+2. Open Settings → Sync on the device you switch to next. A device with no unpublished changes checks automatically and offers **Receive _device_'s version** when an update is available.
 3. Preview the counts, confirm, and the app replaces local data after a safety backup, then reloads.
 
 Each device also writes a small status file recording the snapshot it currently holds, so every device lists the others as "up to date" or "not on the latest version". Uploading is not reported as a completed handoff.
@@ -93,7 +93,7 @@ When a Drive check finds one newer version that it can reconstruct from verified
 
 Confirming an update acknowledges exactly the version shown. If another device publishes a newer version in the meantime, that version stays available for the next check. A detected fork asks you to choose again. **History → Restore** still lets you deliberately make an older version current.
 
-In the simulated Drive test, an established two-device handoff with a small edit uses two single-page listings, four writes and one ID reservation, with zero media downloads. When both devices open settings before syncing and the receiver opens its prepared update within a minute, the total is three listings. If the receiver needs the full snapshot in that flow, it makes the fourth listing and downloads the selected payload. The sender still checks for conflicts when publishing.
+In the simulated Drive test, both established devices open settings, the sender chooses **Check and publish**, and the receiver opens its prepared update within a minute. A small edit takes two single-page listings (one per device), four writes, one ID reservation and zero media downloads. If the receiver needs the full snapshot, it makes a third listing and downloads the selected payload. Choosing **Check** separately on the sender adds one listing. Devices with a pending publish, a known fork or unreadable metadata still check on open.
 
 ### Configure the bundled client for distribution
 

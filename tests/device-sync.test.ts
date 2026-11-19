@@ -1242,7 +1242,7 @@ test('Drive publish and receive see fresh acknowledgements in one-page listings 
     assert.equal(google.state.mediaGets.length, 1, 'a new device downloads the complete snapshot');
     assert.equal(google.state.nameQueries, 2, 'each new device locates its acknowledgement before creating it');
     for (const [openSettings, fullDownload, expectedListings] of [
-      [false, false, 2], [true, false, 3], [true, true, 4],
+      [false, false, 2], [true, false, 2], [true, true, 3],
     ] as const) {
       for (const d of [A, B]) assert.equal((await d.call('POST', '/api/v1/sync/check')).status, 200);
       const note = fullDownload ? '笔'.repeat(MAX_DELTA_BYTES) : '同步 ' + openSettings;
@@ -1251,8 +1251,15 @@ test('Drive publish and receive see fresh acknowledgements in one-page listings 
       google.state.nameQueries = 0;
       google.state.mediaGets = [];
 
-      if (openSettings) assert.equal((await A.call('POST', '/api/v1/sync/check')).status, 200);
+      if (openSettings) {
+        const sender = await A.call('GET', '/api/v1/sync/status');
+        assert.equal(sender.body.classification, 'local-ahead');
+        assert.equal(sender.body.localDirty, true);
+        assert.ok(sender.body.baseSnapshotId);
+        assert.equal(google.state.listCalls, 0, 'opening the sender reads only local status');
+      }
       const snapshotId = await publish();
+      assert.equal(google.state.listCalls, 1, 'publish checks Drive once before uploading');
       if (openSettings) assert.equal((await B.call('POST', '/api/v1/sync/check')).status, 200);
       await receive(snapshotId);
       assert.equal(google.state.listCalls, expectedListings);
@@ -1274,6 +1281,24 @@ test('Drive publish and receive see fresh acknowledgements in one-page listings 
       assert.equal(google.state.listCalls, 1);
       assert.deepEqual(google.state.mediaGets, []);
     }
+
+    // A opens with local changes. B publishes before A clicks Check and publish.
+    a.store.upsertProblemNote('1', 'unpublished on A');
+    assert.equal((await A.call('GET', '/api/v1/sync/status')).body.classification, 'local-ahead');
+    b.store.upsertProblemNote('1', 'published on B');
+    const competing = await B.call('POST', '/api/v1/sync/publish', {});
+    assert.equal(competing.body.published, true);
+    google.state.listCalls = google.state.writeCalls = google.state.generatedIdsCalls = 0;
+    const conflict = await A.call('POST', '/api/v1/sync/publish', { allowFork: false });
+    assert.equal(conflict.status, 409);
+    assert.equal(conflict.body.error, 'SYNC_FORK');
+    const refreshed = (await A.call('GET', '/api/v1/sync/status')).body;
+    assert.equal(refreshed.classification, 'fork');
+    assert.equal(refreshed.heads[0].snapshotId, competing.body.snapshot.snapshotId);
+    assert.equal(a.store.getProblemNote('1')?.content, 'unpublished on A');
+    assert.equal(google.state.listCalls, 1);
+    assert.equal(google.state.generatedIdsCalls, 0);
+    assert.equal(google.state.writeCalls, 0);
   } finally { await A.app.close(); await B.app.close(); a.close(); b.close(); }
 });
 
