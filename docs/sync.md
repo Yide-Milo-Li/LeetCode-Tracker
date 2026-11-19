@@ -89,7 +89,11 @@ A device with no unpublished edits can catch up on as many as eight consecutive 
 
 New devices and devices with unpublished edits download the selected full snapshot. The receiver also downloads that snapshot if it is more than eight versions away, the history forks, or any required file or hint is missing or fails validation. Older clients can continue reading the same full snapshots.
 
-In the simulated Drive test, an established two-device handoff with a small edit uses two single-page listings, four writes and one ID reservation, with zero media downloads. The full-download path adds one media request. Opening sync settings on both devices adds two listings.
+When a Drive check finds one newer version that it can reconstruct from verified changes on a clean device, it holds that version in memory for up to one minute. Clicking **Receive** during that minute opens the preview without another listing. The app verifies the local data again when opening the preview and when confirming it. Expired checks, changed sync settings and local edits trigger a fresh lookup. If reconstruction requires a download, the app waits until you click **Receive**.
+
+Confirming an update acknowledges exactly the version shown. If another device publishes a newer version in the meantime, that version stays available for the next check. A detected fork asks you to choose again. **History → Restore** still lets you deliberately make an older version current.
+
+In the simulated Drive test, an established two-device handoff with a small edit uses two single-page listings, four writes and one ID reservation, with zero media downloads. When both devices open settings before syncing and the receiver opens its prepared update within a minute, the total is three listings. If the receiver needs the full snapshot in that flow, it makes the fourth listing and downloads the selected payload. The sender still checks for conflicts when publishing.
 
 ### Configure the bundled client for distribution
 

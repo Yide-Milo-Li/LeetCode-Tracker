@@ -227,7 +227,9 @@ export function SyncSection({ lang, sync }: SyncSectionProps) {
                     </button>
                   )}
                   {(classification === 'remote-ahead' || classification === 'fork') && receivable.length === 1 && (
-                    <button type="button" className="btn btn-primary btn-sm" onClick={() => void sync.startPreview(receivable[0].snapshotId)} disabled={disabled}>
+                    <button type="button" className="btn btn-primary btn-sm" onClick={() => void sync.startPreview(
+                      receivable[0].snapshotId, status.transport === 'gdrive' && classification === 'remote-ahead',
+                    )} disabled={disabled}>
                       <Download size={14} />
                       <span>{busy === 'preview' ? '…' : zh ? `接收 ${receivable[0].deviceName} 的版本` : `Receive ${receivable[0].deviceName}’s version`}</span>
                     </button>

@@ -22,6 +22,7 @@ const SYNC_ERROR_COPY: Record<string, { en: string; zh: string }> = {
   SYNC_INVALID_DATA: { en: 'The snapshot is intact but its data failed validation. Update all devices to the same app version.', zh: '快照完整，但其中的数据未通过校验。请把所有设备更新到同一应用版本。' },
   SYNC_NOT_READY: { en: 'The snapshot has not finished downloading to this device yet.', zh: '快照尚未完整下载到本机。' },
   SYNC_PREVIEW_EXPIRED: { en: 'The preview expired. Preview the snapshot again.', zh: '预览已过期，请重新预览。' },
+  SYNC_UPDATE_CHANGED: { en: 'The available update changed. Choose a version from the refreshed list.', zh: '可接收的更新已变化，请从刷新后的列表选择版本。' },
   SYNC_PREVIEW_STALE: { en: 'Local data changed after you opened the preview. Preview the snapshot again.', zh: '打开预览后，本机数据已更改。请重新预览此快照。' },
   SYNC_RECONNECT_REQUIRED: { en: 'Google Drive access expired or was revoked. Connect again.', zh: 'Google Drive 授权已过期或被撤销，请重新连接。' },
   SYNC_INVALID_FOLDER: { en: 'Enter an existing folder with an absolute path.', zh: '请填写一个已存在文件夹的绝对路径。' },
@@ -202,8 +203,19 @@ export function useDeviceSync(lang: Language, active: boolean) {
     if (next) applyStatus(next);
   }
 
-  async function startPreview(snapshotId: string) {
-    const result = await run('preview', () => api.previewSyncReceive(snapshotId), zh ? '读取快照失败。' : 'Could not read the snapshot.');
+  async function startPreview(snapshotId: string, updateOnly?: boolean) {
+    const result = await run('preview', async () => {
+      try {
+        return await api.previewSyncReceive(snapshotId, updateOnly);
+      } catch (cause) {
+        if ((cause as { code?: string })?.code === 'SYNC_UPDATE_CHANGED') {
+          setPreview(null);
+          const next = await api.getSyncStatus().catch(() => null);
+          if (next) applyStatus(next);
+        }
+        throw cause;
+      }
+    }, zh ? '读取快照失败。' : 'Could not read the snapshot.');
     if (result) setPreview(result);
   }
 
@@ -213,7 +225,8 @@ export function useDeviceSync(lang: Language, active: boolean) {
       try {
         return await api.receiveSync({ previewId: preview.previewId, ...(localChanges ? { localChanges } : {}) });
       } catch (cause) {
-        if ((cause as { code?: string })?.code === 'SYNC_PREVIEW_STALE') {
+        const code = (cause as { code?: string })?.code;
+        if (code === 'SYNC_PREVIEW_STALE' || code === 'SYNC_PREVIEW_EXPIRED' || code === 'SYNC_UPDATE_CHANGED') {
           setPreview(current => current?.previewId === preview.previewId ? null : current);
           const next = await api.getSyncStatus().catch(() => null);
           if (next) applyStatus(next);

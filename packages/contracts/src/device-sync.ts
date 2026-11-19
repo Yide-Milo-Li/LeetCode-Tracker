@@ -93,7 +93,11 @@ export const syncPublishInputSchema = z.object({
 }).strict();
 
 /** Body of `POST /api/v1/sync/receive/preview`. */
-export const syncReceivePreviewInputSchema = z.object({ snapshotId: uuid }).strict();
+export const syncReceivePreviewInputSchema = z.object({
+  snapshotId: uuid,
+  /** Receive this update without promoting it over a later publish. */
+  updateOnly: z.boolean().optional(),
+}).strict();
 
 /** Body of `POST /api/v1/sync/receive`. */
 export const syncReceiveInputSchema = z.object({

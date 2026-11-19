@@ -230,6 +230,28 @@ for (const code of ['SYNC_PREVIEW_EXPIRED', 'SYNC_PREVIEW_STALE']) it(`requires 
   }
 });
 
+it('pins a Drive update, refreshes a changed choice, and keeps history restores explicit', async () => {
+  stubSettings();
+  const drive = status({ transport: 'gdrive' });
+  const newer = { ...head, snapshotId: '55555555-5555-4555-8555-555555555555', deviceName: 'Desktop' };
+  let current = drive;
+  mock.method(api, 'getSyncStatus', async () => current);
+  mock.method(api, 'checkSync', async () => drive);
+  mock.method(api, 'getSyncHistory', async () => ({ items: [head] }));
+  const previews = mock.method(api, 'previewSyncReceive', async () => {
+    current = { ...drive, heads: [newer] };
+    throw Object.assign(new Error('update changed'), { code: 'SYNC_UPDATE_CHANGED' });
+  });
+  await renderSync();
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Receive MacBook/ })); });
+  assert.deepEqual(previews.mock.calls[0].arguments, [head.snapshotId, true]);
+  assert.ok(screen.getByRole('button', { name: /Receive Desktop/ }));
+  assert.ok(screen.getByText(/available update changed/i));
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'History' })); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Restore' })); });
+  assert.deepEqual(previews.mock.calls[1].arguments, [head.snapshotId, undefined]);
+});
+
 it('offers every competing version when several devices published', async () => {
   stubSettings();
   const second = { ...head, snapshotId: '55555555-5555-4555-8555-555555555555', deviceId: '66666666-6666-4666-8666-666666666666', deviceName: 'Desktop' };

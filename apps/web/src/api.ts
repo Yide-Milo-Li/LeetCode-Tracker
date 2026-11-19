@@ -571,8 +571,8 @@ export const syncApi = {
     return request<SyncPublishResult>('/sync/publish', { method: 'POST', body: JSON.stringify(input) });
   },
 
-  previewSyncReceive(snapshotId: string): Promise<SyncReceivePreview> {
-    return request<SyncReceivePreview>('/sync/receive/preview', { method: 'POST', body: JSON.stringify({ snapshotId }) });
+  previewSyncReceive(snapshotId: string, updateOnly?: boolean): Promise<SyncReceivePreview> {
+    return request<SyncReceivePreview>('/sync/receive/preview', { method: 'POST', body: JSON.stringify({ snapshotId, updateOnly }) });
   },
 
   receiveSync(input: { previewId: string; localChanges?: 'fork' | 'discard' }): Promise<SyncReceiveResult> {

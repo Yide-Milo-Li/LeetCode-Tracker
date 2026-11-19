@@ -75,7 +75,10 @@ export function registerSyncRoutes(app: FastifyInstance, context: RouteContext):
   });
 
   app.post('/api/v1/sync/receive/preview', async (request, reply) => {
-    try { return reply.send(await sync.previewReceive(syncReceivePreviewInputSchema.parse(request.body).snapshotId)); }
+    try {
+      const { snapshotId, updateOnly } = syncReceivePreviewInputSchema.parse(request.body);
+      return reply.send(await sync.previewReceive(snapshotId, updateOnly));
+    }
     catch (error) { return sendError(reply, error); }
   });
 
