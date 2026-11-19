@@ -1,6 +1,6 @@
 # Testing boundaries
 
-## 1.4.0 verification
+## 1.4.1 verification
 
 Branch CI runs the application suite, Windows desktop checks and installer build, Apple Silicon packaging and migration checks, and a separate WKWebView migration job. Tag builds also verify the updater package signatures before staging a draft. The README gallery was refreshed with synthetic data for 1.4.0. Installed-app results for earlier builds are recorded in [implementation status](../docs/status.md). [CI runs](https://github.com/Yide-Milo-Li/LeetCode-Tracker/actions/workflows/ci.yml)
 

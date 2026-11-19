@@ -1,6 +1,6 @@
 [package]
 name = "leetcode-tracker-desktop"
-version = "1.4.0"
+version = "1.4.1"
 description = "LeetCode Tracker Desktop Application"
 authors = ["LeetCode Tracker Team"]
 edition = "2021"
@@ -34,7 +34,7 @@ desktop-e2e = ["dep:tauri-plugin-wdio", "dep:tauri-plugin-wdio-webdriver"]
 # Runtime Dock icon updates and the persisted bundle icon (palette-tinted app icon).
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSBundle", "NSData", "NSString"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSBundle", "NSData", "NSDictionary", "NSDistributedNotificationCenter", "NSNotification", "NSString"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSImage", "NSResponder", "NSWorkspace"] }
 
 [target.'cfg(windows)'.dependencies]

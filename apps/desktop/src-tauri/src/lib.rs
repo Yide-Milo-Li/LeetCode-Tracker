@@ -421,8 +421,8 @@ fn get_icon_target_sizes(app: AppHandle) -> icon::IconTargetSizes {
 ///
 /// Windows selects exact target-size variants for `ICON_SMALL` (titlebar) and `ICON_BIG` (taskbar
 /// and Alt+Tab) via Win32 `WM_SETICON`; macOS updates the live Dock icon.
-/// The same icon is then persisted in the background (Windows shortcuts, macOS bundle icon) so it
-/// survives quitting; `bundled: true` means the artwork matches the shipped icon and removes that
+/// The same artwork supplies Windows shortcuts, the Finder icon and the idle macOS Dock tile
+/// after quit; `bundled: true` means the artwork matches the shipped icon and removes that
 /// customization instead. Persistence failures are logged and never fail the command.
 /// Empty, oversized or undecodable payloads are rejected and leave the current icon unchanged.
 #[tauri::command]
@@ -436,15 +436,7 @@ fn set_app_icon(
     #[cfg(target_os = "macos")]
     {
         let bytes = icon::pick_macos_png(png, variants)?;
-        let persisted = if bundled {
-            persistent_icon::PersistRequest::Bundled
-        } else {
-            persistent_icon::PersistRequest::Custom(bytes.clone())
-        };
-        app.run_on_main_thread(move || set_dock_icon(&bytes))
-            .map_err(|_| "Could not update the Dock icon")?;
-        persistent_icon::persist(&app, persisted);
-        Ok(())
+        persistent_icon::update_macos_icon(&app, bytes, bundled)
     }
     #[cfg(windows)]
     {
@@ -472,25 +464,6 @@ fn set_app_icon(
                 .map_err(|_| "Could not update the window icon")?;
         }
         Ok(())
-    }
-}
-
-/// Set the Dock icon from PNG bytes; must run on the main thread. Undecodable data is ignored.
-#[cfg(target_os = "macos")]
-fn set_dock_icon(png: &[u8]) {
-    use objc2::{AnyThread, MainThreadMarker};
-    use objc2_app_kit::{NSApplication, NSImage};
-    use objc2_foundation::NSData;
-
-    let Some(mtm) = MainThreadMarker::new() else {
-        return;
-    };
-    let data = NSData::with_bytes(png);
-    if let Some(image) = NSImage::initWithData(NSImage::alloc(), &data) {
-        #[allow(unused_unsafe)]
-        unsafe {
-            NSApplication::sharedApplication(mtm).setApplicationIconImage(Some(&image));
-        }
     }
 }
 

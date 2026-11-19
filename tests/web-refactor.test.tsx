@@ -34,8 +34,10 @@ Object.defineProperty(window, 'matchMedia', {
   }),
 });
 const React = await import('react');
-const { render, fireEvent, screen, act, cleanup, within } = await import('@testing-library/react');
+const { render, renderHook, fireEvent, screen, act, cleanup, within } = await import('@testing-library/react');
 const { api } = await import('../apps/web/src/api.ts');
+const { brandIconUrl } = await import('../apps/web/src/brand-icons.ts');
+const { usePreferences } = await import('../apps/web/src/hooks/usePreferences.ts');
 const { App } = await import('../apps/web/src/App.tsx');
 const { PracticeWorkspace } = await import('../apps/web/src/components/PracticeWorkspace.tsx');
 const { ProgressWorkbench } = await import('../apps/web/src/components/ProgressWorkbench.tsx');
@@ -290,6 +292,26 @@ afterEach(() => {
   cleanup();
   mock.restoreAll();
   window.sessionStorage.clear();
+});
+
+it('waits for saved appearance before applying the first icon', async () => {
+  const settings = deferred<typeof preferences>();
+  mock.method(api, 'getSettings', () => settings.promise);
+  const icon = document.createElement('link');
+  icon.rel = 'icon';
+  icon.href = '/installed.svg';
+  document.head.querySelector('link[rel="icon"]')?.remove();
+  document.head.appendChild(icon);
+  const { result } = renderHook(() => usePreferences());
+  try {
+    await act(async () => { result.current.persistPreference({ language: 'zh' }); });
+    assert.equal(icon.getAttribute('href'), '/installed.svg');
+    await act(async () => { settings.resolve({ ...preferences, theme: 'dark' }); });
+    assert.equal(icon.href, brandIconUrl('default', true));
+    assert.equal(result.current.lang, 'zh');
+  } finally {
+    icon.remove();
+  }
 });
 
 it('signals automatic sync on startup and when returning to the app', async (t) => {

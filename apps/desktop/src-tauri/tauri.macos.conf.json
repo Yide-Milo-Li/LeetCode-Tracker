@@ -1,6 +1,12 @@
 {
+  "build": { "beforeBundleCommand": "sh src-tauri/macos/dock-tile/build.sh" },
   "bundle": {
     "targets": ["app", "dmg"],
-    "macOS": { "minimumSystemVersion": "14.0", "signingIdentity": "-", "hardenedRuntime": false }
+    "macOS": {
+      "minimumSystemVersion": "14.0",
+      "signingIdentity": "-",
+      "hardenedRuntime": false,
+      "files": { "PlugIns/TrackerDockTile.docktileplugin": "target/dock-tile/TrackerDockTile.docktileplugin" }
+    }
   }
 }

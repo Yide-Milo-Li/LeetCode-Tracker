@@ -7,8 +7,8 @@
 //! - **Windows**: writes a multi-size `.ico` into the app's local data directory and points the
 //!   per-user Start menu, Desktop and pinned-taskbar shortcuts that target this executable at it.
 //!   The executable's embedded icon is never modified.
-//! - **macOS**: sets a Finder custom icon on the running `.app` bundle through
-//!   `NSWorkspace.setIcon(_:forFile:options:)`, which Finder, Launchpad and the Dock read.
+//! - **macOS**: publishes a PNG for the idle Dock tile plug-in and sets a Finder custom icon
+//!   on the running `.app` bundle through `NSWorkspace.setIcon(_:forFile:options:)`.
 //!
 //! Requests are best-effort: failures leave the bundled icon in place and never fail the
 //! `set_app_icon` command. Each request carries a generation number so a burst of palette changes
@@ -16,15 +16,15 @@
 
 #[cfg(any(windows, target_os = "macos"))]
 use std::sync::atomic::{AtomicU64, Ordering};
-#[cfg(any(windows, target_os = "macos"))]
+#[cfg(windows)]
 use std::sync::Mutex;
 use tauri::AppHandle;
 
 /// Monotonic id of the most recent persistence request; older queued requests are skipped.
 #[cfg(any(windows, target_os = "macos"))]
 static LATEST_REQUEST: AtomicU64 = AtomicU64::new(0);
-/// Serializes shortcut/bundle writes so two requests never interleave file updates.
-#[cfg(any(windows, target_os = "macos"))]
+/// Serializes shortcut writes so two requests never interleave file updates.
+#[cfg(windows)]
 static PERSIST_LOCK: Mutex<()> = Mutex::new(());
 
 /// Register a new request and return its generation number.
@@ -163,16 +163,13 @@ fn encode_dib(variant: &crate::icon::DecodedIconVariant) -> Vec<u8> {
     out
 }
 
-/// What the persisted icon should become.
+/// What the Windows shortcuts should show.
+#[cfg(windows)]
 pub enum PersistRequest {
     /// Remove the customization so the OS shows the bundled artwork again.
     Bundled,
     /// Decoded variants used to build the Windows `.ico`.
-    #[cfg(windows)]
     Custom(Vec<crate::icon::DecodedIconVariant>),
-    /// PNG bytes handed to `NSImage` for the macOS bundle icon.
-    #[cfg(target_os = "macos")]
-    Custom(Vec<u8>),
 }
 
 /// Persist `request` in the background; the latest request wins and errors are logged only.
@@ -202,33 +199,20 @@ pub fn persist(app: &AppHandle, request: PersistRequest) {
     }
 }
 
-/// Persist `request` on the main thread (AppKit), skipping writes when nothing changed.
+/// Update the bundle and live tile in one AppKit callback. Once the new live icon is
+/// visible, quitting cannot interrupt the write that supplies the idle Dock tile.
 #[cfg(target_os = "macos")]
-pub fn persist(app: &AppHandle, request: PersistRequest) {
+pub fn update_macos_icon(app: &AppHandle, png: Vec<u8>, bundled: bool) -> Result<(), String> {
     use tauri::Manager;
     let generation = next_generation();
-    let Ok(data_dir) = app.path().app_local_data_dir() else {
-        return;
-    };
-    let result = app.run_on_main_thread(move || {
-        let Ok(_guard) = PERSIST_LOCK.lock() else {
-            return;
-        };
-        if !is_latest(generation) {
-            return;
+    let data_dir = app.path().app_local_data_dir();
+    app.run_on_main_thread(move || {
+        if is_latest(generation) {
+            macos_bundle::apply(data_dir.as_deref().ok(), &png, bundled);
         }
-        if let Err(error) = macos_bundle::apply(&data_dir, request) {
-            eprintln!("Could not persist the app icon: {error}");
-        }
-    });
-    if result.is_err() {
-        eprintln!("Could not schedule icon persistence on the main thread");
-    }
+    })
+    .map_err(|_| "Could not update the Dock icon".into())
 }
-
-/// Other platforms have no persistent icon surface to update.
-#[cfg(not(any(windows, target_os = "macos")))]
-pub fn persist(_app: &AppHandle, _request: PersistRequest) {}
 
 #[cfg(windows)]
 mod windows_shell {
@@ -609,10 +593,10 @@ mod windows_shell {
 
 #[cfg(target_os = "macos")]
 mod macos_bundle {
-    use super::{fingerprint, PersistRequest};
-    use objc2::AnyThread;
-    use objc2_app_kit::{NSImage, NSWorkspace, NSWorkspaceIconCreationOptions};
-    use objc2_foundation::{NSBundle, NSData, NSString};
+    use super::fingerprint;
+    use objc2::{AnyThread, MainThreadMarker};
+    use objc2_app_kit::{NSApplication, NSImage, NSWorkspace, NSWorkspaceIconCreationOptions};
+    use objc2_foundation::{NSBundle, NSData, NSDistributedNotificationCenter, NSString};
     use std::path::{Path, PathBuf};
 
     /// Records which icon was last written so unchanged launches skip the bundle write.
@@ -638,47 +622,96 @@ mod macos_bundle {
                 NSWorkspaceIconCreationOptions(0),
             )
         };
-        if applied {
-            Ok(())
-        } else {
-            Err(format!(
+        if !applied {
+            return Err(format!(
                 "NSWorkspace refused to update {}",
                 bundle.display()
-            ))
+            ));
         }
+        Ok(())
     }
 
-    /// Apply `request` to the running bundle; must run on the main thread.
-    pub fn apply(data_dir: &Path, request: PersistRequest) -> Result<(), String> {
-        let Some(bundle) = bundle_path() else {
-            return Ok(());
-        };
+    /// Publish a complete image before telling the Dock's separate plug-in process to read it.
+    fn publish_dock_icon(
+        bundle: &Path,
+        data_dir: &Path,
+        png: &[u8],
+        bundled: bool,
+    ) -> std::io::Result<()> {
+        use std::io::{ErrorKind, Write};
+        let file = data_dir.join("dock-icon.png");
+        if bundled {
+            match std::fs::remove_file(&file) {
+                Ok(()) => {}
+                Err(e) if e.kind() == ErrorKind::NotFound => return Ok(()),
+                Err(e) => return Err(e),
+            }
+        } else {
+            if std::fs::read(&file).is_ok_and(|saved| saved == png) {
+                return Ok(());
+            }
+            std::fs::create_dir_all(data_dir)?;
+            let mut temporary = tempfile::NamedTempFile::new_in(data_dir)?;
+            temporary.write_all(png)?;
+            temporary.persist(file)?;
+        }
+        let name = NSString::from_str("LeetCodeTrackerDockIconChanged");
+        unsafe {
+            NSDistributedNotificationCenter::defaultCenter()
+                .postNotificationName_object_userInfo_deliverImmediately(
+                    &name,
+                    Some(&NSString::from_str(&bundle.to_string_lossy())),
+                    None,
+                    true,
+                );
+        }
+        Ok(())
+    }
+
+    fn persist(
+        bundle: &Path,
+        data_dir: &Path,
+        png: &[u8],
+        image: &NSImage,
+        bundled: bool,
+    ) -> Result<(), String> {
         let marker = data_dir.join(MARKER_FILE);
         let has_custom_icon = bundle.join(CUSTOM_ICON_FILE).exists();
-        match request {
-            PersistRequest::Bundled => {
-                if has_custom_icon {
-                    set_bundle_icon(&bundle, None)?;
-                }
-                let _ = std::fs::remove_file(&marker);
-                Ok(())
+        if bundled {
+            if has_custom_icon {
+                set_bundle_icon(bundle, None)?;
             }
-            PersistRequest::Custom(png) => {
-                let stamp = format!("{:016x}", fingerprint(&[&png]));
-                // An app update replaces the bundle and drops `Icon\r`, so both must still match.
-                if has_custom_icon
-                    && std::fs::read_to_string(&marker).is_ok_and(|saved| saved.trim() == stamp)
-                {
-                    return Ok(());
-                }
-                let data = NSData::with_bytes(&png);
-                let image = NSImage::initWithData(NSImage::alloc(), &data)
-                    .ok_or("Could not decode the icon PNG")?;
-                set_bundle_icon(&bundle, Some(&image))?;
-                std::fs::create_dir_all(data_dir).map_err(|e| e.to_string())?;
-                std::fs::write(&marker, stamp).map_err(|e| e.to_string())
+            let _ = std::fs::remove_file(marker);
+            return Ok(());
+        }
+        let stamp = format!("{:016x}", fingerprint(&[png]));
+        if has_custom_icon
+            && std::fs::read_to_string(&marker).is_ok_and(|saved| saved.trim() == stamp)
+        {
+            return Ok(());
+        }
+        set_bundle_icon(bundle, Some(image))?;
+        std::fs::create_dir_all(data_dir).map_err(|e| e.to_string())?;
+        std::fs::write(marker, stamp).map_err(|e| e.to_string())
+    }
+
+    pub fn apply(data_dir: Option<&Path>, png: &[u8], bundled: bool) {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
+        let Some(image) = NSImage::initWithData(NSImage::alloc(), &NSData::with_bytes(png)) else {
+            return;
+        };
+        if let (Some(bundle), Some(dir)) = (bundle_path(), data_dir) {
+            if let Err(error) = publish_dock_icon(&bundle, dir, png, bundled) {
+                eprintln!("Could not publish the idle Dock icon: {error}");
+            }
+            if let Err(error) = persist(&bundle, dir, png, &image, bundled) {
+                eprintln!("Could not persist the app icon: {error}");
             }
         }
+        // Also works for an unbundled dev build or a read-only installation.
+        unsafe { NSApplication::sharedApplication(mtm).setApplicationIconImage(Some(&image)) };
     }
 }
 

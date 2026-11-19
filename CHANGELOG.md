@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.1] - 2026-11-18
+
+- Keep the selected macOS Dock icon after the first quit and restore the shipped icon when returning to the default light palette.
+- Run automatic device sync on a quota-aware schedule. Improve sync folder selection and feedback in Settings.
+- Resolve relative time labels in LeetCode progress imports against the capture time and timezone.
+
+See the [1.4.1 release notes and upgrade instructions](docs/releases/1.4.1.md).
+
 ## [1.4.0] - 2026-11-18
 
 - Sync profiles between devices through a folder or Google Drive. Receive previews, safety backups, per-device acknowledgements and fork resolution protect edits when switching computers. Official candidate installers include the Google OAuth client. Direct Drive sync supports resumable uploads and can fetch consecutive small changes in one check.

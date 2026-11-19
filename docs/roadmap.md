@@ -1,6 +1,6 @@
 # Roadmap
 
-Release 1.4.0 adds device sync, AI client access through MCP and signed in-app updates for Windows x64 and Apple Silicon macOS. [Release notes](releases/1.4.0.md) · [Verification](status.md)
+Release 1.4.0 adds device sync, AI client access through MCP and signed in-app updates for Windows x64 and Apple Silicon macOS. [Current release notes](releases/1.4.1.md) · [Verification](status.md)
 
 ## Desktop distribution: implemented and remaining
 

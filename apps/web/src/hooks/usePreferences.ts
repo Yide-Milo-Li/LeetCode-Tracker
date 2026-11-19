@@ -41,8 +41,10 @@ export interface Preferences {
 
 export function usePreferences(): Preferences {
   const [lang, setLang] = useState<Language>('en');
-  const [theme, setTheme] = useState<ThemeMode>('system');
-  const [palette, setPalette] = useState<ThemePalette>('default');
+  const [appearance, setAppearance] = useState<Pick<PreferenceChange, 'theme' | 'palette'> | null>(null);
+  const theme = appearance?.theme ?? 'system';
+  const palette = appearance?.palette ?? 'default';
+  const appearanceReady = appearance !== null;
   const [promptSwapFeedback, setPromptSwapFeedback] = useState<boolean>(true);
   const [notesFormatOnSave, setNotesFormatOnSave] = useState<boolean | null>(null);
   const [resolvedDark, setResolvedDark] = useState(false);
@@ -59,11 +61,11 @@ export function usePreferences(): Preferences {
       .then((settings) => {
         if (!active) return;
         const formatOnSave = settings.notesFormatOnSave ?? true;
+        // Preserve individual appearance choices made while the settings request was in flight.
+        setAppearance((chosen) => ({ theme: settings.theme, palette: settings.palette ?? 'default', ...chosen }));
         // A change made while loading wins over the loaded values.
         if (version === preferenceRevision.current) {
           setLang(settings.language);
-          setTheme(settings.theme);
-          setPalette(settings.palette ?? 'default');
           setPromptSwapFeedback(settings.promptSwapFeedback ?? true);
           setNotesFormatOnSave(formatOnSave);
           setTimezone(settings.timezone);
@@ -86,6 +88,8 @@ export function usePreferences(): Preferences {
       document.documentElement.classList.toggle('dark', dark);
       document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
       setResolvedDark(dark);
+      // The initial UI defaults must never clear the installed app's custom icon.
+      if (appearanceReady) void applyAppIcon(palette, dark);
     };
     apply();
     media.addEventListener('change', apply);
@@ -95,12 +99,7 @@ export function usePreferences(): Preferences {
       document.documentElement.removeAttribute('data-palette');
     }
     return () => media.removeEventListener('change', apply);
-  }, [theme, palette]);
-
-  // The favicon and the native window/Dock icon follow the palette and the effective mode.
-  useEffect(() => {
-    void applyAppIcon(palette, resolvedDark);
-  }, [palette, resolvedDark]);
+  }, [theme, palette, appearanceReady]);
 
   useEffect(() => {
     document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
@@ -111,8 +110,13 @@ export function usePreferences(): Preferences {
     preferenceRevision.current++;
     setErrorCause(null);
     if (value.language) setLang(value.language);
-    if (value.theme) setTheme(value.theme);
-    if (value.palette) setPalette(value.palette);
+    if (value.theme || value.palette) {
+      setAppearance((current) => ({
+        ...current,
+        ...(value.theme && { theme: value.theme }),
+        ...(value.palette && { palette: value.palette }),
+      }));
+    }
     if (value.promptSwapFeedback !== undefined) setPromptSwapFeedback(value.promptSwapFeedback);
     if (value.notesFormatOnSave !== undefined) setNotesFormatOnSave(value.notesFormatOnSave);
     preferenceQueue.current = preferenceQueue.current.then(async () => {

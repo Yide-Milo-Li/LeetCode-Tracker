@@ -1,5 +1,11 @@
 # Implementation status
 
+## Release 1.4.1
+
+The macOS Dock keeps the selected palette after the first quit. This release also adds automatic sync for devices with a configured target and repairs relative dates in LeetCode progress imports. [Release notes](releases/1.4.1.md)
+
+A local Apple Silicon test started with a fresh app pinned to the Dock, selected Catppuccin Latte and confirmed that the icon stayed purple after the process exited. Switching back to the default light palette restored the shipped icon after quit. Tagged CI verifies and stages the Windows and macOS release packages. [CI by revision](https://github.com/Yide-Milo-Li/LeetCode-Tracker/actions/workflows/ci.yml)
+
 ## Release 1.4.0
 
 Release 1.4.0 adds device sync, the bundled MCP server and LCT skill, reorganized Settings and signed desktop updates. It uses SQLite schema v12 and Snapshot Bundle v5. [Release notes](releases/1.4.0.md)
