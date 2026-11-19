@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-- Allow desktop installers to bundle an LCT Google OAuth client for direct Drive sync. Users can connect from Settings, keep an existing custom client, or switch clients under Advanced OAuth settings.
+- Official desktop installers connect to Google Drive with LCT's production OAuth client. Developers running from source can configure their own Desktop OAuth client in Settings or `.env`.
 
 - Let MCP clients write while the desktop app is running: turn on **Allow AI client writes** under Settings → General → Connect an AI client, and the bundled `leetcode-tracker-mcp` forwards writes to the app through an authenticated loopback bridge. The app refreshes open views after AI client writes, keeps unsaved note drafts, lists recent AI client activity and generates client configuration for the bundled MCP runtime.
 - Add an optional `lct` Skill for Claude Code, Codex and Antigravity. Install it from the bundled MCP CLI or copy the install command in desktop settings, which now also generates Antigravity MCP configuration.

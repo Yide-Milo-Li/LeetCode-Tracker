@@ -77,7 +77,8 @@ jobs:
         run: cargo clippy --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets -- -D warnings
       - name: Build unsigned Windows installer
         env:
-          LCT_GOOGLE_DESKTOP_CLIENT_ID: ${{ github.event_name == 'push' && vars.LCT_GOOGLE_DESKTOP_CLIENT_ID || '' }}
+          LCT_DESKTOP_DISTRIBUTION: ${{ github.event_name == 'push' && 'official' || 'development' }}
+          LCT_GOOGLE_DESKTOP_CLIENT_ID: ${{ github.event_name == 'push' && secrets.LCT_GOOGLE_DESKTOP_CLIENT_ID || '' }}
           LCT_GOOGLE_DESKTOP_CLIENT_SECRET: ${{ github.event_name == 'push' && secrets.LCT_GOOGLE_DESKTOP_CLIENT_SECRET || '' }}
         run: npm run desktop:build
       - name: Record Windows build identity and checksum
@@ -137,7 +138,8 @@ jobs:
           cargo clippy --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets -- -D warnings
       - name: Build unsigned internal app and DMG
         env:
-          LCT_GOOGLE_DESKTOP_CLIENT_ID: ${{ github.event_name == 'push' && vars.LCT_GOOGLE_DESKTOP_CLIENT_ID || '' }}
+          LCT_DESKTOP_DISTRIBUTION: ${{ github.event_name == 'push' && 'official' || 'development' }}
+          LCT_GOOGLE_DESKTOP_CLIENT_ID: ${{ github.event_name == 'push' && secrets.LCT_GOOGLE_DESKTOP_CLIENT_ID || '' }}
           LCT_GOOGLE_DESKTOP_CLIENT_SECRET: ${{ github.event_name == 'push' && secrets.LCT_GOOGLE_DESKTOP_CLIENT_SECRET || '' }}
         run: npm run desktop:build:mac -- --ci
       - name: Generate synthetic migration fixture and checksums

@@ -27,7 +27,7 @@ const SYNC_ERROR_COPY: Record<string, { en: string; zh: string }> = {
   SYNC_INVALID_FOLDER: { en: 'Enter an existing folder with an absolute path.', zh: '请填写一个已存在文件夹的绝对路径。' },
   SYNC_FOLDER_REQUIRED: { en: 'Choose a sync folder first.', zh: '请先选择同步文件夹。' },
   SYNC_CONFIG_CHANGED: { en: 'Sync settings changed. Try again.', zh: '同步设置已更改，请重试。' },
-  SYNC_GOOGLE_BUNDLED_CLIENT_UNAVAILABLE: { en: 'This build does not include an LCT OAuth client.', zh: '此版本未内置 LCT OAuth 客户端。' },
+  SYNC_GOOGLE_CLIENT_MANAGED: { en: 'This installation uses the LCT OAuth client.', zh: '此安装版使用 LCT 官方 OAuth 客户端。' },
   SYNC_GOOGLE_CLIENT_REQUIRED: { en: 'Enter your Google OAuth client ID first.', zh: '请先填写 Google OAuth 客户端 ID。' },
 };
 
@@ -231,22 +231,18 @@ export function useDeviceSync(lang: Language, active: boolean) {
     if (result) setHistory(result.items);
   }
 
-  async function saveGoogleClient(useBundledClient?: boolean) {
+  async function saveGoogleClient() {
     const clientId = clientIdDraft.trim();
     const clientSecret = clientSecretDraft.trim();
     const next = await run('config', () => api.configureSync({
       transport: 'gdrive',
-      ...(useBundledClient === undefined ? {
-        ...(clientId ? { googleClientId: clientId } : {}),
-        ...(clientSecret ? { googleClientSecret: clientSecret } : {}),
-      } : { googleUseBundledClient: useBundledClient }),
+      ...(clientId ? { googleClientId: clientId } : {}),
+      ...(clientSecret ? { googleClientSecret: clientSecret } : {}),
     }), zh ? '无法保存 OAuth 客户端。' : 'Could not save the OAuth client.');
     if (!next) return;
     applyStatus(next);
-    if (useBundledClient === undefined) {
-      setClientIdDraft('');
-      setClientSecretDraft('');
-    }
+    setClientIdDraft('');
+    setClientSecretDraft('');
     setGoogleAuthDeadline(null);
     setPreview(null);
     setHistory(null);

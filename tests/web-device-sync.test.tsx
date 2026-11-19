@@ -132,8 +132,10 @@ it('refreshes Google Drive when returning to the app after consent', async (t) =
 
   await renderData();
   fireEvent.click(screen.getByRole('button', { name: 'Google Drive' }));
-  const advanced = screen.getByText('Advanced OAuth settings').closest('details');
-  assert.equal(advanced?.open, false, 'custom credential fields are initially collapsed');
+  assert.ok(screen.getByText('Using the LCT OAuth client'));
+  assert.equal(screen.queryByLabelText(/OAuth client ID/), null);
+  assert.equal(screen.queryByLabelText(/OAuth client secret/), null);
+  assert.equal(screen.queryByText('Developer OAuth settings'), null);
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Connect Google Drive' })); });
   assert.deepEqual(configure.mock.calls[0].arguments[0], { transport: 'gdrive' });
   assert.equal(connect.mock.callCount(), 1);
@@ -154,6 +156,24 @@ it('refreshes Google Drive when returning to the app after consent', async (t) =
   assert.equal((screen.getByLabelText(/This device’s name/) as HTMLInputElement).value, 'Edited name');
   await act(async () => { fireEvent.focus(window); });
   assert.equal(check.mock.callCount(), 1);
+});
+
+it('lets source users save their own Desktop OAuth client', async () => {
+  stubSettings();
+  const source = status({ transport: 'gdrive', configured: false, classification: null, heads: [] });
+  mock.method(api, 'getSyncStatus', async () => source);
+  const save = mock.method(api, 'configureSync', async () => ({
+    ...source, google: { ...source.google, clientConfigured: true, customClientAvailable: true, clientSource: 'custom' as const },
+  }));
+  await renderData();
+  assert.ok(screen.getByText('Developer OAuth settings').closest('details')?.open);
+  assert.equal(screen.queryByRole('button', { name: 'Connect Google Drive' }), null);
+  fireEvent.change(screen.getByLabelText(/OAuth client ID/), { target: { value: 'dev.apps.example' } });
+  fireEvent.change(screen.getByLabelText(/OAuth client secret/), { target: { value: 'dev-secret' } });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save and use custom client' })); });
+  assert.deepEqual(save.mock.calls[0].arguments[0], { transport: 'gdrive', googleClientId: 'dev.apps.example', googleClientSecret: 'dev-secret' });
+  assert.ok(screen.getByRole('button', { name: 'Connect Google Drive' }));
+  assert.equal((screen.getByLabelText(/OAuth client secret/) as HTMLInputElement).value, '');
 });
 
 it('retries a failed publish with the same operation ID', async () => {

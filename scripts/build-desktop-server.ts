@@ -21,10 +21,14 @@ async function bundleDesktopServer(): Promise<void> {
     fs.mkdirSync(outdir, { recursive: true });
   }
 
-  const clientId = process.env.LCT_GOOGLE_DESKTOP_CLIENT_ID?.trim();
-  const clientSecret = process.env.LCT_GOOGLE_DESKTOP_CLIENT_SECRET?.trim();
-  if (clientSecret && !clientId) throw new Error('LCT_GOOGLE_DESKTOP_CLIENT_ID is required when bundling a Google Desktop client secret');
-  const bundledGoogleClient = clientId ? { clientId, clientSecret } : undefined;
+  // Only the hosted distribution jobs opt in. Source builds never embed inherited credentials.
+  let bundledGoogleClient;
+  if (process.env.LCT_DESKTOP_DISTRIBUTION === 'official') {
+    const clientId = process.env.LCT_GOOGLE_DESKTOP_CLIENT_ID?.trim();
+    const clientSecret = process.env.LCT_GOOGLE_DESKTOP_CLIENT_SECRET?.trim();
+    if (!clientId || !clientSecret) throw new Error('Official desktop builds require both Google Desktop OAuth settings');
+    bundledGoogleClient = { clientId, clientSecret };
+  }
 
   const startTime = Date.now();
   await build({

@@ -129,53 +129,35 @@ export function SyncSection({ lang, sync }: SyncSectionProps) {
                 )}
               </div>
             )}
-            <details className="sync-oauth-settings" open={!google.clientConfigured}>
-              <summary>{zh ? '高级设置 · OAuth 客户端' : 'Advanced OAuth settings'}</summary>
-              <div className="settings-stack">
-                {google.clientSource && (
-                  <span className="field-status">
-                    {google.clientSource === 'bundled'
-                      ? (zh ? '正在使用 LCT 官方客户端' : 'Using the LCT OAuth client')
-                      : (zh ? '正在使用自建 OAuth 客户端' : 'Using a custom OAuth client')}
-                  </span>
-                )}
-                {google.bundledClientAvailable && (
-                  <p className="restore-confirm-note">{zh
-                    ? '切换客户端后请重新授权。不同 Google Cloud 项目的快照历史分别保存在各自的 Drive 目录。'
-                    : 'Reconnect after switching clients. Different Google Cloud projects have separate snapshot histories.'}</p>
-                )}
-                {google.clientSource !== 'bundled' && google.bundledClientAvailable && (
+            {google.bundledClientAvailable ? (
+              <p className="field-status">
+                {google.reconnectRequired && !google.connected
+                  ? (zh ? '请使用 LCT 官方客户端重新授权。原 Google Cloud 项目的快照仍保存在原项目中。' : 'Reconnect with the LCT OAuth client. Snapshots from your previous Google Cloud project stay in that project.')
+                  : (zh ? '正在使用 LCT 官方客户端' : 'Using the LCT OAuth client')}
+              </p>
+            ) : (
+              <details className="sync-oauth-settings" open={!google.clientConfigured}>
+                <summary>{zh ? '开发者 OAuth 设置' : 'Developer OAuth settings'}</summary>
+                <div className="settings-stack">
+                  <Field
+                    label={zh ? 'OAuth 客户端 ID' : 'OAuth client ID'}
+                    hint={google.customClientAvailable
+                      ? (zh ? '自建客户端已配置。留空可保留其 ID。' : 'A custom client is configured. Leave blank to keep its ID.')
+                      : (zh ? '在 Google Cloud 中创建「桌面应用」类型的 OAuth 客户端。' : 'Create a Desktop app OAuth client in Google Cloud.')}
+                  >
+                    <input type="text" value={sync.clientIdDraft} onChange={(e) => sync.setClientIdDraft(e.target.value)} autoComplete="off" spellCheck={false} placeholder="….apps.googleusercontent.com" disabled={disabled} />
+                  </Field>
+                  <Field label={zh ? 'OAuth 客户端密钥（如有）' : 'OAuth client secret (if provided)'}>
+                    <input type="password" value={sync.clientSecretDraft} onChange={(e) => sync.setClientSecretDraft(e.target.value)} autoComplete="off" spellCheck={false} disabled={disabled} />
+                  </Field>
                   <div className="action-row">
-                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => void sync.saveGoogleClient(true)} disabled={disabled}>
-                      {zh ? '使用 LCT 官方客户端' : 'Use the LCT OAuth client'}
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => void sync.saveGoogleClient()} disabled={disabled || !canSaveCustomClient}>
+                      {zh ? '保存并使用自建客户端' : 'Save and use custom client'}
                     </button>
                   </div>
-                )}
-                {google.clientSource !== 'custom' && google.customClientAvailable && (
-                  <div className="action-row">
-                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => void sync.saveGoogleClient(false)} disabled={disabled}>
-                      {zh ? '使用已配置的自建客户端' : 'Use the configured custom client'}
-                    </button>
-                  </div>
-                )}
-                <Field
-                  label={zh ? 'OAuth 客户端 ID' : 'OAuth client ID'}
-                  hint={google.customClientAvailable
-                    ? (zh ? '自建客户端已配置。留空可保留其 ID。' : 'A custom client is configured. Leave blank to keep its ID.')
-                    : (zh ? '在 Google Cloud 中创建「桌面应用」类型的 OAuth 客户端。' : 'Create a Desktop app OAuth client in Google Cloud.')}
-                >
-                  <input type="text" value={sync.clientIdDraft} onChange={(e) => sync.setClientIdDraft(e.target.value)} autoComplete="off" spellCheck={false} placeholder="….apps.googleusercontent.com" disabled={disabled} />
-                </Field>
-                <Field label={zh ? 'OAuth 客户端密钥（如有）' : 'OAuth client secret (if provided)'}>
-                  <input type="password" value={sync.clientSecretDraft} onChange={(e) => sync.setClientSecretDraft(e.target.value)} autoComplete="off" spellCheck={false} disabled={disabled} />
-                </Field>
-                <div className="action-row">
-                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => void sync.saveGoogleClient()} disabled={disabled || !canSaveCustomClient}>
-                    {zh ? '保存并使用自建客户端' : 'Save and use custom client'}
-                  </button>
                 </div>
-              </div>
-            </details>
+              </details>
+            )}
           </>
         )}
 

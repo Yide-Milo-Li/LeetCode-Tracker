@@ -80,7 +80,6 @@ export const syncConfigInputSchema = z.object({
   transport: syncTransportKindSchema,
   folderPath: z.string().trim().min(1).max(1024).optional(),
   deviceName: deviceName.optional(),
-  googleUseBundledClient: z.boolean().optional(),
   googleClientId: z.string().trim().max(300).optional(),
   googleClientSecret: z.string().trim().max(300).optional(),
 }).strict();

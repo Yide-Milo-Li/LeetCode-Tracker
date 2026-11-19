@@ -2,7 +2,7 @@
 
 Device sync moves your whole profile between any number of your own computers: catalog, practice records, progress snapshots, notes, strategies, daily plans, review state and portable settings. It is built on the same Snapshot Bundle v5 used by **Export migration file**, so the same guarantees apply: references are validated before writing, a safety backup is created before replacing data, and provider API keys never leave the device.
 
-Device sync is unreleased. Automated tests cover the sync folder and a simulated Drive API. On macOS, live testing verified Google Drive with both a custom client and the bundled production client. See [implementation status](status.md) for the acceptance results.
+Device sync is unreleased. Automated tests cover the sync folder and a simulated Drive API. See [implementation status](status.md) for the macOS and Windows live acceptance results and candidate revisions.
 
 ## How it works
 
@@ -50,20 +50,18 @@ The app creates `LeetCodeTrackerSync/` inside the folder. Files are written to a
 
 LCT stores snapshots in the hidden **app data folder** of your Google Drive using the non-sensitive `https://www.googleapis.com/auth/drive.appdata` scope. The app can access its own app data folder. The folder is hidden in the Drive web interface. [Google Drive app data](https://developers.google.com/workspace/drive/api/guides/appdata)
 
-### Connect with the bundled client
+### Official installer
 
-In Settings → Data → Device sync, choose **Google Drive** and click **Connect Google Drive**. Select your account and grant access in the system browser. Return to LCT after the browser confirms the connection. LCT updates the status and checks for snapshots automatically. Repeat on each device with the same Google account and OAuth project. Publishing and receiving are separate actions.
+In Settings → Data → Device sync, choose **Google Drive** and click **Connect Google Drive**. The installer uses LCT's production Desktop OAuth client. Select your own Google account and grant access in the system browser. Return to LCT after the browser confirms the connection. LCT updates the status and checks for snapshots automatically. Repeat on each device with the same Google account. Publishing and receiving are separate actions.
 
-### Use your own OAuth client
+If you previously used a custom client, the installer asks you to reconnect when it cannot associate your grant with LCT's client. Different Google Cloud projects have separate Drive snapshot histories, even for the same account. To bring an old project's data across, receive the desired snapshot with the old client before upgrading. If the data is in a separate source profile, export it there and preview and import the bundle in the installer. Verify the local data before publishing it to the new project. Connecting alone leaves both histories intact.
 
-An existing custom client stays active after upgrading. Builds without a bundled client also support this setup.
+### Source checkout
 
 1. Create a project in [Google Cloud Console](https://console.cloud.google.com/) and enable the **Google Drive API**.
 2. In Google Auth Platform, configure **Branding**, choose **External** under **Audience** for personal Google accounts, and add `https://www.googleapis.com/auth/drive.appdata` under **Data Access**. In **Testing**, add your account as a test user. Use **In production** for ongoing use. Testing grants for Drive expire after seven days. [Google publishing status](https://support.google.com/cloud/answer/15549945?hl=en)
 3. Under **Clients**, create an OAuth client of type **Desktop app**. LCT uses Google's loopback redirect on an automatically chosen local port. [Google desktop OAuth](https://developers.google.com/identity/protocols/oauth2/native-app)
-4. In **Advanced OAuth settings**, enter the client ID and its desktop client secret if supplied, then **Save and use custom client** and connect. Use the same Google Cloud project on all devices. Source runs also accept `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` in `.env`. An ID saved in Settings takes precedence.
-
-To switch to the bundled client, use **Use the LCT OAuth client** in Advanced OAuth settings. The custom client settings remain saved so you can switch back. Switching to a different client ID requires consent again. Drive keeps separate histories for different Google Cloud projects. To start with your existing data under a new project, first receive the latest snapshot using your old client, then switch, authorize, and publish that device to the new app data folder.
+4. Under **Settings → Data → Device sync → Google Drive → Developer OAuth settings**, enter the client ID and its desktop client secret if supplied, then **Save and use custom client** and connect. Alternatively, set `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` in the checkout's `.env` and restart the source server. An ID saved in Settings takes precedence. Use the same Google Cloud project on devices that share snapshots.
 
 LCT uses an installed-app loopback callback with PKCE and an expiring, single-use state. The refresh token stays in local SQLite settings, unencrypted and excluded from exports. **Disconnect** clears the local token and attempts to revoke the Google grant. Revoking the grant can require other devices on the same account and project to reconnect. [Google token revocation](https://developers.google.com/identity/protocols/oauth2/native-app#tokenrevoke)
 
@@ -71,7 +69,7 @@ LCT uses an installed-app loopback callback with PKCE and an expiring, single-us
 
 Use a dedicated LCT production Google Cloud project with Drive API enabled and a **Desktop app** client. In Google Auth Platform, configure **External / In production** with the `drive.appdata` scope. Use a verified domain you own for the app homepage and privacy policy, and complete brand verification to display LCT's name and logo during consent. Google classifies `drive.appdata` as non-sensitive. [Production requirements](https://developers.google.com/identity/protocols/oauth2/production-readiness/policy-compliance) · [Brand verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/brand-verification)
 
-For both installer builds, set `LCT_GOOGLE_DESKTOP_CLIENT_ID` and, if supplied, `LCT_GOOGLE_DESKTOP_CLIENT_SECRET` at build time. For the GitHub installer jobs triggered by pushes to `main` or `release/**`, set the ID as an Actions repository variable and the desktop client secret as an Actions repository secret. The settings are bundled into the sidecar, so the desktop client secret is extractable from the installer. Google treats installed apps as public OAuth clients. Use separate credentials for test builds. With no build-time ID, the installer offers custom client setup. [Google desktop OAuth](https://developers.google.com/identity/protocols/oauth2/native-app)
+Store `LCT_GOOGLE_DESKTOP_CLIENT_ID` and `LCT_GOOGLE_DESKTOP_CLIENT_SECRET` as GitHub Actions repository secrets. The hosted Windows and macOS packaging steps select `LCT_DESKTOP_DISTRIBUTION=official` on pushes to `main`, `release/**` and version tags. Both credentials are required before those jobs can produce an installer. Source runs and pull-request checks use developer mode. Google treats installed apps as public OAuth clients, and the bundled desktop client secret is extractable from the installer. [Google desktop OAuth](https://developers.google.com/identity/protocols/oauth2/native-app)
 
 All installations using the bundled client share the project's Drive API quota. Google Workspace administrators can restrict access to the app. Users authorize their own account on each device and can be asked to reconnect if access is revoked or expires. [Drive API limits](https://developers.google.com/workspace/drive/api/guides/limits) · [Workspace app access](https://support.google.com/a/answer/7281227)
 

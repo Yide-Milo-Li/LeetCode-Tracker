@@ -10,7 +10,7 @@ All maintained documentation is English. The implemented desktop interface suppo
 
 - [Architecture](architecture.md): Component structure, write ownership, persistence boundaries, and storage engine.
 - [Interactive visual architecture](diagrams/architecture.html): Standalone explorable HTML architecture diagram with dark/light themes, search, and guided views.
-- [Device sync](sync.md): Moving your profile between your own computers through a sync folder or the Google Drive app data folder, with bundled and custom OAuth setup, fork handling and limits.
+- [Device sync](sync.md): Transfer your profile through a sync folder or the Google Drive app data folder. Includes setup for official installers and source runs, fork handling and limits.
 - [AI provider configuration](llm-providers.md): Supported Gemini (`gemini-3.8-flash`, `gemini-4-hydrogen`), OpenAI (`gpt-6-luna`, `gpt-6.1-terra`), and DeepSeek (`deepseek-flash`) models, per-model reasoning effort controls, credential isolation, and fallback policies.
 
 ## Product & Desktop Workflows

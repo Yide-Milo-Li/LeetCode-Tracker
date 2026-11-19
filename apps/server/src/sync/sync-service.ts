@@ -80,7 +80,7 @@ export interface DeviceSyncOptions {
   googleEndpoints?: Partial<GoogleEndpoints>;
   /** Custom OAuth client from the environment (source runs). Settings values take precedence. */
   googleClient?: Partial<GoogleClientConfig>;
-  /** Default OAuth client supplied when building an official desktop package. */
+  /** Official packages use this client exclusively, including when opening an older profile. */
   bundledGoogleClient?: GoogleClientConfig;
   now?: () => number;
   /** Max preview age before receive requires a fresh preview. */
@@ -202,7 +202,7 @@ export class DeviceSyncService {
         clientConfigured: client !== null,
         clientSource: client?.source ?? null,
         bundledClientAvailable: this.options.bundledGoogleClient !== undefined,
-        customClientAvailable: Boolean(this.setting(K.googleClientId) ?? this.options.googleClient?.clientId),
+        customClientAvailable: client?.source === 'custom',
         connected,
         reconnectRequired: this.reconnectRequired || (!connected && this.setting(K.googleRefreshToken) !== null),
       },
@@ -249,8 +249,8 @@ export class DeviceSyncService {
       if (input.transport === 'folder' && !(values[K.folderPath] ?? this.setting(K.folderPath))) {
         throw new DeviceSyncError(400, 'SYNC_FOLDER_REQUIRED', 'Choose a sync folder first');
       }
-      if (input.googleUseBundledClient && !this.options.bundledGoogleClient) {
-        throw new DeviceSyncError(400, 'SYNC_GOOGLE_BUNDLED_CLIENT_UNAVAILABLE', 'This build does not include a Google OAuth client');
+      if (this.options.bundledGoogleClient && (input.googleClientId !== undefined || input.googleClientSecret !== undefined)) {
+        throw new DeviceSyncError(400, 'SYNC_GOOGLE_CLIENT_MANAGED', 'This installation uses the LCT OAuth client');
       }
       if (input.googleClientId !== undefined) {
         const nextId = input.googleClientId || null;
@@ -258,9 +258,6 @@ export class DeviceSyncService {
         values[K.googleClientId] = nextId;
       }
       if (input.googleClientSecret !== undefined) values[K.googleClientSecret] = input.googleClientSecret || null;
-      if (input.googleUseBundledClient !== undefined || input.googleClientId !== undefined || input.googleClientSecret !== undefined) {
-        values[K.googleClientMode] = input.googleUseBundledClient ? 'bundled' : null;
-      }
 
       const previousClient = this.googleClient();
       const nextClient = this.googleClient(values);
@@ -608,14 +605,13 @@ export class DeviceSyncService {
   }
 
   private googleClient(overrides: SyncSettingsPatch = {}): SelectedGoogleClient | null {
-    const read = (key: SyncSettingKey) => key in overrides ? overrides[key] ?? null : this.setting(key);
     const bundled = this.options.bundledGoogleClient;
-    const bundledClient = bundled ? { ...bundled, source: 'bundled' as const } : null;
-    if (read(K.googleClientMode) === 'bundled') return bundledClient;
+    if (bundled) return { ...bundled, source: 'bundled' };
 
+    const read = (key: SyncSettingKey) => key in overrides ? overrides[key] ?? null : this.setting(key);
     const env = this.options.googleClient;
     const clientId = read(K.googleClientId) ?? env?.clientId;
-    if (!clientId) return bundledClient;
+    if (!clientId) return null;
     const clientSecret = read(K.googleClientSecret) ?? (clientId === env?.clientId ? env.clientSecret : undefined);
     return { clientId, clientSecret, source: 'custom' };
   }
