@@ -155,32 +155,32 @@ export function queryCatalogProblems(
     source: string;
   }>;
 
-  const items: CatalogProblem[] = [];
-  for (const r of rows) {
-    const tags = db
-      .prepare(
-        `
-      SELECT t.id, t.name, t.slug
-      FROM problem_tags pt
+  const tagsById = new Map<string, TopicTag[]>();
+  if (rows.length) {
+    const ids = rows.map(row => row.question_id);
+    const tags = db.prepare(`
+      SELECT pt.question_id, t.id, t.name, t.slug FROM problem_tags pt
       JOIN tags t ON pt.tag_slug = t.slug
-      WHERE pt.question_id = ?
-      ORDER BY t.slug ASC
-    `
-      )
-      .all(r.question_id) as TopicTag[];
-
-    items.push({
-      questionId: r.question_id,
-      questionFrontendId: r.frontend_question_id,
-      title: r.title,
-      titleSlug: r.title_slug,
-      url: r.url,
-      difficulty: r.difficulty,
-      isPaidOnly: Boolean(r.is_paid_only),
-      topicTags: tags,
-      source: r.source,
-    });
+      WHERE pt.question_id IN (${ids.map(() => '?').join(',')})
+      ORDER BY pt.question_id, t.slug
+    `).all(...ids) as Array<TopicTag & { question_id: string }>;
+    for (const {question_id, id, name, slug} of tags) {
+      const list = tagsById.get(question_id) ?? [];
+      list.push({id, name, slug});
+      tagsById.set(question_id, list);
+    }
   }
+  const items: CatalogProblem[] = rows.map(r => ({
+    questionId: r.question_id,
+    questionFrontendId: r.frontend_question_id,
+    title: r.title,
+    titleSlug: r.title_slug,
+    url: r.url,
+    difficulty: r.difficulty,
+    isPaidOnly: Boolean(r.is_paid_only),
+    topicTags: tagsById.get(r.question_id) ?? [],
+    source: r.source,
+  }));
 
   return { total, page: q.page, limit: q.limit, items };
 }
@@ -643,7 +643,7 @@ export function getDashboardRawDataRecords(
 ): {
   problems: CatalogProblem[];
   manualRecords: PracticeRecord[];
-  snapshots: ProgressSnapshot[];
+  snapshots: (ProgressSnapshot & { sourceTimezone: string | null })[];
   snapshotSuccesses: DashboardSnapshotSuccess[];
   catalogUpdatedAt: number | null;
   practiceUpdatedAt: number | null;

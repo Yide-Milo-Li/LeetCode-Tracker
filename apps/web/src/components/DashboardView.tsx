@@ -80,48 +80,52 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ lang, active = tru
   const [masteryReport, setMasteryReport] = useState<TagMasteryReport | null>(null);
   const [profileReport, setProfileReport] = useState<KnowledgeProfileReport | null>(null);
 
-  useEffect(() => {
-    let active = true;
-    api
-      .getPracticeStats()
-      .then((value) => {
-        if (active) {
-          setSourceStats(value);
-          setSourceError(null);
-        }
-      })
-      .catch((err) => {
-        if (active) setSourceError(err);
-      });
+  const loadedSource = useRef<string | null>(null);
+  const loadedInsights = useRef<string | null>(null);
 
+  useEffect(() => {
+    const key = JSON.stringify([workspace.revision, workspace.timezone, sourceRetry]);
+    if (!active || loadedSource.current === key) return;
+    let current = true;
+    void api.getPracticeStats().then(value => {
+      if (current) {
+        setSourceStats(value);
+        setSourceError(null);
+      }
+    }).catch(err => {
+      if (current) setSourceError(err);
+    }).finally(() => {
+      if (current) loadedSource.current = key;
+    });
+    return () => { current = false; };
+  }, [active, workspace.revision, workspace.timezone, sourceRetry]);
+
+  useEffect(() => {
+    const key = JSON.stringify([workspace.revision, workspace.timezone]);
+    if (!active || loadedInsights.current === key) return;
+    loadedInsights.current = null;
+    let current = true;
     setMasteryReport(null);
     setProfileReport(null);
     setMasteryError(false);
     setMasteryLoading(true);
 
-    api
-      .getMasteryReport()
-      .then((report) => {
-        if (active) setMasteryReport(report);
-      })
-      .catch(() => {
-        if (active) setMasteryError(true);
-      })
-      .finally(() => {
-        if (active) setMasteryLoading(false);
-      });
+    const mastery = api.getMasteryReport().then(report => {
+      if (current) setMasteryReport(report);
+    }).catch(() => {
+      if (current) setMasteryError(true);
+    }).finally(() => {
+      if (current) setMasteryLoading(false);
+    });
+    const profile = api.getKnowledgeProfile().then(report => {
+      if (current) setProfileReport(report);
+    }).catch(() => {});
+    void Promise.all([mastery, profile]).then(() => {
+      if (current) loadedInsights.current = key;
+    });
 
-    api
-      .getKnowledgeProfile()
-      .then((profile) => {
-        if (active) setProfileReport(profile);
-      })
-      .catch(() => {});
-
-    return () => {
-      active = false;
-    };
-  }, [workspace.revision, workspace.timezone, sourceRetry]);
+    return () => { current = false; };
+  }, [active, workspace.revision, workspace.timezone]);
 
   // Keyboard navigation & roving tabIndex for heatmap
   const [focusedDate, setFocusedDate] = useState<string | null>(null);
@@ -133,6 +137,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ lang, active = tru
     y: number;
   } | null>(null);
 
+  const requestedDashboard = useRef<string | null>(null);
   const dashboardSeqRef = useRef(0);
 
   const fetchDashboard = useCallback(async (year?: number) => {
@@ -157,8 +162,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ lang, active = tru
   }, []);
 
   useEffect(() => {
-    fetchDashboard(selectedYear);
-  }, [selectedYear, fetchDashboard, workspace.revision]);
+    const key = JSON.stringify([selectedYear, workspace.revision, workspace.timezone]);
+    if (!active || requestedDashboard.current === key) return;
+    requestedDashboard.current = key;
+    void fetchDashboard(selectedYear);
+  }, [active, selectedYear, fetchDashboard, workspace.revision, workspace.timezone]);
 
   // 30-day trend: label only the first, middle and last day so the axis stays quiet.
   const trendDays = data?.trend30Days ?? [];

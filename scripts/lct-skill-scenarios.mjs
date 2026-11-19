@@ -143,7 +143,7 @@ export async function verifyScenario(scenario, call, ask, followUp) {
     const before = await progress();
     assert.deepEqual(before.weakTopics.topics.map(t => t.tag), ['Array']);
     const turn = await ask('review Which weak topic should I revisit? Include the IDs of two problems I actually practiced.');
-    assert.ok(used(turn, 'get_progress').some(c => c.args.weakTopics === true));
+    assert.ok(used(turn, 'get_progress').some(c => c.args.weakTopics === "top5"));
     assert.match(turn.answer, /Array|数组/i);
     assert.ok([a, b, c].filter(id => turn.answer.includes(id)).length >= 2);
     assert.deepEqual(await progress(), before);

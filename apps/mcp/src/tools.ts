@@ -144,7 +144,7 @@ export function createTrackerToolRegistry(profile: Pick<TrackerProfile, 'exists'
   server.registerTool(
     'tracker_get_today',
     {
-      description: 'Get the stored study plan for today (or a date): items with frontendId, completion, review reasons, and the plan version that plan-changing tools need as expectedVersion. Use tracker_create_today to generate a plan.',
+      description: 'Read a stored daily plan with frontend IDs, reasons, completion and version for edits. Generate one with tracker_create_today.',
       inputSchema: z.object({
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Explicit date in YYYY-MM-DD format (defaults to current date in configured timezone)'),
       }),
@@ -274,16 +274,17 @@ export function createTrackerToolRegistry(profile: Pick<TrackerProfile, 'exists'
   server.registerTool(
     'tracker_get_progress',
     {
-      description: 'Get progress statistics, streak metrics, difficulty distribution, top tags, and active-day trends. Set weakTopics to include topics needing reinforcement over the last 30 days with evidence.',
+      description: 'Get progress, streaks, difficulty distribution, top tags and activity trends. Use weakTopics="top5" for a focused review.',
       inputSchema: z.object({
         year: z.number().int().min(2000).max(2100).optional().describe('Target calendar year for heatmap data (defaults to current year)'),
-        weakTopics: z.boolean().optional().default(false).describe('Include topics that need reinforcement (default false)'),
+        weakTopics: z.union([z.boolean(), z.literal('top5')]).optional().default(false).describe('true adds all weak topics; top5 returns only the five weakest with evidence'),
         recentActiveDays: z.boolean().optional().default(false).describe('Include the last 14 active calendar days (default false)'),
       }),
     },
     async (application, { year, weakTopics = false, recentActiveDays = false }) => {
       const settings = await application.settings.get();
       if (!settings.timezone || !isTimeZone(settings.timezone)) return { isError: true, content: [{ type: 'text', text: `TIMEZONE_REQUIRED: ${TIMEZONE_HINT}` }] };
+      if (weakTopics === 'top5') return json({ weakTopics: weakTopicsView(await application.knowledgeProfile.report(), 5) });
       const dashboard = await application.dashboard.summary({ year });
 
       const result = {

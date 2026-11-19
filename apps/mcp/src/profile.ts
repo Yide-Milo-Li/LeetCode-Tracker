@@ -11,7 +11,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import * as path from 'node:path';
 import { CatalogStore } from '../../../packages/database/src/store.ts';
-import { CURRENT_SCHEMA_VERSION, inspectCatalogSchema } from '../../../packages/database/src/schema.ts';
+import { CURRENT_SCHEMA_VERSION } from '../../../packages/database/src/schema.ts';
 import { createTrackerApplication, type TrackerApplication } from '../../../packages/application/src/application.ts';
 import { openTrackerRuntime } from '../../../packages/application/src/runtime.ts';
 import type { ModelService } from '../../../packages/application/src/types.ts';
@@ -92,17 +92,17 @@ export class TrackerProfile {
     const db = new DatabaseSync(this.location.dbPath, { readOnly: true });
     try {
       // A read-only connection cannot migrate, so any other version must be handled by a writer.
-      const version = inspectCatalogSchema(db, true);
-      if (version === null) {
-        throw new ProfileError('PROFILE_EMPTY', 'The profile has not been initialized yet. Import a problem catalog first with tracker_import_problems or tracker_import_catalog.');
-      }
-      if (version !== CURRENT_SCHEMA_VERSION) {
-        throw new ProfileError(
-          'PROFILE_SCHEMA_MISMATCH',
-          `Profile schema v${version} does not match this server (v${CURRENT_SCHEMA_VERSION}). Update the desktop app or this server so both use the same version.`,
-        );
-      }
-      const store = new CatalogStore(db, { skipBackup: true });
+      const store = new CatalogStore(db, { skipBackup: true, validateVersion(version) {
+        if (version === null) {
+          throw new ProfileError('PROFILE_EMPTY', 'The profile has not been initialized yet. Import a problem catalog first with tracker_import_problems or tracker_import_catalog.');
+        }
+        if (version !== CURRENT_SCHEMA_VERSION) {
+          throw new ProfileError(
+            'PROFILE_SCHEMA_MISMATCH',
+            `Profile schema v${version} does not match this server (v${CURRENT_SCHEMA_VERSION}). Update the desktop app or this server so both use the same version.`,
+          );
+        }
+      } });
       const application = createTrackerApplication({ store, modelService: this.modelService });
       try {
         return await operation(application);

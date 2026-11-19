@@ -200,6 +200,11 @@ beforeEach(() => {
     lastActivityAt: null,
     practiceRevision: records.length,
   }));
+  const dailyTrend = (length: number) => Array.from({ length }, (_, i) => ({
+    date: new Date(Date.now() - (length - 1 - i) * 86400000).toISOString().slice(0, 10),
+    activeCount: i === length - 1 ? records.length : 0,
+    completedCount: i === length - 1 ? records.length : 0,
+  }));
   mock.method(
     api,
     'getDashboard',
@@ -222,11 +227,7 @@ beforeEach(() => {
         errorMessage: null,
       },
       yearlyActivity: { year: 2026, days: [] },
-      trend30Days: Array.from({ length: 30 }, (_, i) => ({
-        date: new Date(Date.now() - (29 - i) * 86400000).toISOString().slice(0, 10),
-        activeCount: i === 29 ? records.length : 0,
-        completedCount: i === 29 ? records.length : 0,
-      })),
+      trend30Days: dailyTrend(30),
       difficultyDistribution: {
         Easy: { solved: 0, total: 1 },
         Medium: { solved: 0, total: 0 },
@@ -243,6 +244,7 @@ beforeEach(() => {
       revision: { catalog: 1, practice: records.length, planning: 1, timezone: 'UTC' },
     }),
   );
+  mock.method(api, 'getRecentDashboard', async () => ({ timezone: preferences.timezone, days: dailyTrend(7) }));
   mock.method(api, 'getDashboardActivities', async () => ({
     items: [],
     total: 0,
@@ -354,9 +356,10 @@ it('refreshes date-based statistics on a local day change without writing a prac
   mock.timers.enable({ apis: ['Date'], now: clock });
   const intervals: Array<() => void> = [];
   mock.method(globalThis, 'setInterval', (callback: () => void) => { intervals.push(callback); return 1 as any; });
-  const dashboard = api.getDashboard as typeof api.getDashboard & { mock: { callCount(): number } };
+  const dashboard = api.getRecentDashboard as typeof api.getRecentDashboard & { mock: { callCount(): number } };
   await act(async () => { render(<App />); });
   const calls = dashboard.mock.callCount();
+  assert.equal((api.getDashboard as typeof api.getDashboard & { mock: { callCount(): number } }).mock.callCount(), 0, 'Today only requests its seven-day projection');
   mock.timers.setTime(clock + 2000);
   await act(async () => { intervals.forEach((callback) => callback()); });
   assert.ok(dashboard.mock.callCount() > calls);
@@ -397,13 +400,17 @@ it('source totals can retry independently while hidden statistics suspends its c
     if (++attempts === 1) throw new Error('Source totals unavailable');
     return getStats();
   });
-  await act(async () => { render(<DashboardView lang="en" active={false} />); });
+  let view!: ReturnType<typeof render>;
+  await act(async () => { view = render(<DashboardView lang="en" active={false} />); });
+  assert.equal(attempts, 0);
+  await act(async () => { view.rerender(<DashboardView lang="en" active />); });
   const details = document.querySelector<HTMLDetailsElement>('.workspace-details')!;
   details.open = true;
   assert.ok(screen.getByText('Source totals unavailable'));
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Retry source totals' })); });
   assert.equal(attempts, 2);
   assert.ok(!screen.queryByText('Source totals unavailable'));
+  await act(async () => { view.rerender(<DashboardView lang="en" active={false} />); });
   assert.ok(!document.querySelector('.recharts-responsive-container'));
 });
 

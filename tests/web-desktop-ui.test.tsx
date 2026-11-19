@@ -153,6 +153,7 @@ describe('Minimal Desktop UI - Phase 10', () => {
       timezone: 'UTC',
       plan: null,
     }));
+    mock.method(api, 'getRecentDashboard', async () => ({ timezone: 'UTC', days: [] }));
     mock.method(api, 'getDashboard', async () => ({
       overview: {
         uniqueSolvedProblems: 0,

@@ -6,7 +6,7 @@ import type { LLMUsage } from './usage.ts';
 
 export interface LLMTrace {
   version: 1; at: number; operationId: string; purpose: string; attempt: number; provider: string;
-  model: string; elapsedMs: number; status: 'ok' | 'failed' | 'timeout'; usage: LLMUsage; operationUsage?: LLMUsage;
+  model: string; elapsedMs: number; status: 'ok' | 'failed' | 'timeout'; usage: LLMUsage; operationUsage?: LLMUsage; outputIssue?: 'truncated' | 'invalid';
 }
 export interface SelectionTrace {
   version: 1; at: number; purpose: 'selection_decision'; reason: string; candidateCount: number;
@@ -30,7 +30,7 @@ export function createDiagnosticSink(profileDirectory: string, maxBytes = DIAGNO
     // Construct a new object: extra fields supplied by a caller can never reach disk.
     const safe = 'usage' in trace ? { ...common, operationId: trace.operationId, attempt: trace.attempt,
       provider: trace.provider, model: trace.model.slice(0, 128), status: trace.status,
-      usage: safeUsage(trace.usage), ...(trace.operationUsage ? { operationUsage: safeUsage(trace.operationUsage) } : {}) }
+      usage: safeUsage(trace.usage), ...(trace.outputIssue === 'truncated' || trace.outputIssue === 'invalid' ? { outputIssue: trace.outputIssue } : {}), ...(trace.operationUsage ? { operationUsage: safeUsage(trace.operationUsage) } : {}) }
       : { ...common, reason: trace.reason, candidateCount: trace.candidateCount, choiceGroups: trace.choiceGroups,
         membershipChanged: trace.membershipChanged, orderChanged: trace.orderChanged };
     queue = queue.then(async () => {

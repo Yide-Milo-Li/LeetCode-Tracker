@@ -10,6 +10,9 @@ import { CatalogStore } from '../packages/database/src/store.ts';
 import { buildApp } from '../apps/server/src/app.ts';
 import type { DashboardResponse, DashboardActivityListResponse } from '../packages/contracts/src/dashboard.ts';
 
+import { getActivityItems, filterAndPaginateActivities } from '../packages/domain/src/dashboard.ts';
+import { dashboardActivityQuerySchema } from '../packages/contracts/src/dashboard.ts';
+
 describe('Fastify Dashboard & Activity API Endpoints', () => {
   /** Helper to initialize an in-memory database and Fastify app seeded with problems, tags, and activities. */
   async function setupDashboardApp() {
@@ -46,6 +49,45 @@ describe('Fastify Dashboard & Activity API Endpoints', () => {
     const app = await buildApp({ store, disableStatic: true });
     return { db, store, app };
   }
+
+  it('matches full analytics across DST, offsets, tied page boundaries and duplicate snapshot successes', async (t) => {
+    const now = Date.parse('2026-03-10T12:00:00Z');
+    t.mock.method(Date, 'now', () => now);
+    const { db, store, app } = await setupDashboardApp();
+    try {
+      const zone = 'America/Los_Angeles';
+      await store.updateSettings({ timezone: zone });
+      const add = db.prepare(`INSERT INTO practice_records
+        (id,question_id,completed,practiced_at,time_precision,source_timezone,created_at,updated_at)
+        VALUES (?,'q1',1,?,?,?,?,?)`);
+      for (const [id, at, precision, source] of [
+        ['a', '2026-03-08T09:00:00Z', 'datetime', zone],
+        ['A', '2026-03-08T09:00:00Z', 'datetime', zone],
+        ['offset', '2026-03-08T01:00:00-08:00', 'datetime', zone],
+        ['past', '2026-02-10', 'date', zone], ['DST', '2026-03-08', 'date', zone],
+        ['pending', '2026-03-08', 'date', 'Asia/Tokyo'], ['future', '2026-03-11', 'date', zone],
+      ]) add.run(id, at, precision, source, now, now);
+      const preview = store.previewProgressImport({candidates: [
+        {frontendId:'3', lastSubmitted:'2026-03-09T09:00:00Z', lastResult:'Accepted', submissions:3},
+      ]});
+      await store.commitProgressImport(preview.previewId, preview);
+      for (const version of [10, 11]) db.prepare('INSERT INTO snapshot_successes VALUES (?,?,?,?,?,?)')
+        .run('q3', version, '2026-03-08T09:00:00Z', 'datetime', zone, now);
+      const raw = store.getDashboardRawData();
+      const all = getActivityItems(raw.manualRecords, raw.snapshots, raw.problems, zone, now, raw.snapshotSuccesses);
+      for (const filter of ['', '&source=snapshot', '&pendingDate=true', '&date=2026-03-08']) {
+        for (const page of [1,2,3,4,20]) {
+          const params = new URLSearchParams('limit=2&page=' + page + filter);
+          const expected = filterAndPaginateActivities(all, dashboardActivityQuerySchema.parse(Object.fromEntries(params)), zone, now, raw.revision);
+          const response = await app.inject({url:'/api/v1/dashboard/activity?' + params});
+          assert.deepEqual(response.json(), expected);
+        }
+      }
+      const summary = (await app.inject({url:'/api/v1/dashboard'})).json();
+      const recent = (await app.inject({url:'/api/v1/dashboard/recent'})).json();
+      assert.deepEqual(recent, {timezone: zone, days: summary.trend30Days.slice(-7)});
+    } finally { await app.close(); db.close(); }
+  });
 
   describe('GET /api/v1/dashboard', () => {
     it('returns valid dashboard structure and handles setup status when timezone is unset', async () => {

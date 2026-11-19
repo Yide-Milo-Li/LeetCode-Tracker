@@ -1757,3 +1757,28 @@ test('resumed Drive uploads describe the frozen snapshot even after local edits 
     assert.equal((await A.call('GET', '/api/v1/sync/status')).body.localDirty, true);
   } finally { await A.app.close(); await B.app.close(); a.close(); b.close(); }
 });
+
+test('unchanged sync status reuses its hash and invalidates for writes from either SQLite connection', async () => {
+  const shared = mkdtempSync(join(tmpdir(), 'sync hash '));
+  const p = await profile('hash');
+  const d = await device(p);
+  const external = new DatabaseSync(join(p.dir, 'tracker.sqlite'));
+  try {
+    await seedMigrationProfile(p.store);
+    await d.call('PUT', '/api/v1/sync/config', {transport: 'folder', folderPath: shared});
+    assert.equal((await d.call('POST', '/api/v1/sync/publish', {})).body.published, true);
+    const status = async () => (await d.call('GET', '/api/v1/sync/status')).body.localDirty;
+    assert.equal(await status(), false);
+    const original = p.store.exportMigrationBundle.bind(p.store);
+    let exports = 0;
+    p.store.exportMigrationBundle = (...args) => { exports++; return original(...args); };
+    assert.equal(await status(), false);
+    assert.equal(exports, 0);
+    const note = external.prepare('SELECT question_id, content FROM problem_notes LIMIT 1').get() as {question_id: string; content: string};
+    external.prepare('UPDATE problem_notes SET content=? WHERE question_id=?').run(note.content + '!', note.question_id);
+    assert.equal(await status(), true);
+    p.db.prepare('UPDATE problem_notes SET content=? WHERE question_id=?').run(note.content, note.question_id);
+    assert.equal(await status(), false);
+    assert.equal(exports, 2);
+  } finally { external.close(); await d.app.close(); p.close(); rmSync(shared, {recursive:true,force:true}); }
+});

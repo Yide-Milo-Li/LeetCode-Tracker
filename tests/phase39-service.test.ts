@@ -137,17 +137,18 @@ it('bounds repeated source-zone validation by distinct zones rather than practic
   for (const recordCount of [1, 80]) {
     const fixtureState = await fixture();
     try {
-      for (let index = 0; index < recordCount; index++) {
-        await fixtureState.store.createPracticeRecord({ questionFrontendId: '1', completed: false,
-          practicedAt: '2026-10-01', sourceTimezone: 'America/New_York', outcome: 'unsolved' });
-      }
+      const zone = recordCount === 1 ? 'America/Indiana/Vevay' : 'America/Indiana/Knox';
       let validations = 0;
       const NativeDateTimeFormat = Intl.DateTimeFormat;
       const formatter = mock.method(Intl, 'DateTimeFormat', function (locales, options) {
-        if (options?.timeZone === 'America/New_York' && Object.keys(options).length === 1) validations++;
+        if (options?.timeZone === zone) validations++;
         return new NativeDateTimeFormat(locales, options);
       } as typeof Intl.DateTimeFormat);
       try {
+        for (let index = 0; index < recordCount; index++) {
+          await fixtureState.store.createPracticeRecord({ questionFrontendId: '1', completed: false,
+            practicedAt: '2026-10-01', sourceTimezone: zone, outcome: 'unsolved' });
+        }
         assert.equal((await fixtureState.service.ensureDailyPlan()).plan?.items.length, 2);
         counts.push(validations);
       } finally { formatter.mock.restore(); }
@@ -155,6 +156,28 @@ it('bounds repeated source-zone validation by distinct zones rather than practic
   }
   assert.ok(counts[0] > 0);
   assert.equal(counts[1], counts[0]);
+});
+
+it('persists the fixed review projection from plan generation without recalculating it on commit', async () => {
+  const clock = mock.method(Date, 'now', () => Date.parse('2026-11-15T12:00:00Z'));
+  const f = await fixture({}, { ...base, reviewEnabled: true, reviewPercent: 50, reviewPolicy: 'outcome-v2', focusWeakTags: true });
+  try {
+    await f.store.createPracticeRecord({ questionFrontendId: '1', completed: true, practicedAt: '2026-11-11',
+      sourceTimezone: 'UTC', outcome: 'assisted', durationMinutes: 42 });
+    await f.store.createPracticeRecord({ questionFrontendId: '2', completed: true, practicedAt: '2026-11-12T12:00:00Z', outcome: 'independent' });
+    const preview = f.store.previewProgressImport({ candidates: [
+      { frontendId: '3', lastSubmitted: '2026-11-10', lastResult: 'Accepted', submissions: 1 },
+    ], sourceTimezone: 'UTC' });
+    await f.store.commitProgressImport(preview.previewId, preview, []);
+    const expected = f.store.planning.reviewStates('UTC', Date.now()).sort((a, b) => a.questionId.localeCompare(b.questionId));
+    const recalculate = mock.method(f.store.planning, 'reviewStates');
+    try {
+      assert.equal((await f.service.ensureDailyPlan()).plan?.items.length, 2);
+      assert.equal(recalculate.mock.callCount(), 0);
+      const stored = f.db.prepare('SELECT payload_json FROM problem_review_state ORDER BY question_id').all();
+      assert.deepEqual(stored.map(row => JSON.parse(String(row.payload_json))), expected);
+    } finally { recalculate.mock.restore(); }
+  } finally { clock.mock.restore(); f.db.close(); }
 });
 
 it('shares frozen derived snapshots without cloning while keeping default caches copy-isolated', async () => {

@@ -133,6 +133,12 @@ export interface DashboardDataStatus {
   pendingDateCount: number;
 }
 
+/** Seven profile-calendar days for the Today workspace. */
+export interface RecentDashboardResponse {
+  timezone: string | null;
+  days: DailyTrendPoint[];
+}
+
 /** Full payload returned by GET /api/v1/dashboard. */
 export interface DashboardResponse {
   overview: DashboardOverview;

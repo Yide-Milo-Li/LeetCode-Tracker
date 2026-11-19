@@ -103,7 +103,7 @@ export function practiceView(record: PracticeRecord, zone: string | null) {
  * counts, durations and the rule that fired. Topics with the most assisted or
  * unsolved attempts come first.
  */
-export function weakTopicsView(report: KnowledgeProfileReport) {
+export function weakTopicsView(report: KnowledgeProfileReport, limit?: number) {
   const struggles = (topic: KnowledgeProfileReport['topics'][number]) => topic.reinforcementDifficulties
     .reduce((sum, difficulty) => sum + topic.difficulties[difficulty].outcomeCounts.assisted + topic.difficulties[difficulty].outcomeCounts.unsolved, 0);
   const evaluations = { needsReinforcement: 0, developing: 0, recentlyStable: 0 };
@@ -112,16 +112,16 @@ export function weakTopicsView(report: KnowledgeProfileReport) {
     else if (topic.overallEvaluation === 'developing') evaluations.developing++;
     else if (topic.overallEvaluation === 'recently_stable') evaluations.recentlyStable++;
   }
+  const weak = report.topics.filter(topic => topic.isWeak)
+    .sort((a, b) => struggles(b) - struggles(a) || a.tagName.localeCompare(b.tagName));
   return {
     asOfDate: report.asOfDate,
     windowDays: report.windowDays,
     evaluations,
     // Names only: enough to say what is still being learned without the full evidence.
     developingTopics: report.topics.filter(topic => topic.overallEvaluation === 'developing').map(topic => topic.tagName).slice(0, 30),
-    topics: report.topics
-      .filter(topic => topic.isWeak)
-      .sort((a, b) => struggles(b) - struggles(a) || a.tagName.localeCompare(b.tagName))
-      .map(topic => ({
+    ...(limit === undefined ? {} : { totalWeakTopics: weak.length }),
+    topics: weak.slice(0, limit).map(topic => ({
         tag: topic.tagName,
         slug: topic.tagSlug,
         solved: topic.solvedCount,

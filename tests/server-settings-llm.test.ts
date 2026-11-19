@@ -485,7 +485,7 @@ describe('Native HTTP LLM Providers (OpenAI & DeepSeek)', () => {
               {
                 message: {
                   content: JSON.stringify({
-                    candidates: [{ frontendId: '42', result: 'Accepted' }],
+                    candidates: [{ frontendId: '42', lastSubmitted: '2026-11-01', lastResult: 'Accepted', submissions: 1, sourceLine: 1 }],
                     unparsedSnippets: [],
                   }),
                 },

@@ -168,3 +168,34 @@ it('DeepSeek balance errors remain quota failures rather than authentication fai
     return true;
   });
 });
+
+it('records reported usage and stops identical progress retries on truncation or unusable output', async () => {
+  for (const [reason, content, issue] of [['length', '{"candi', 'truncated'], ['stop', '{}', 'invalid']]) {
+    const traces: import('../apps/server/src/llm/diagnostics.ts').DiagnosticTrace[] = [];
+    const transport = mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify({
+      choices: [{finish_reason: reason, message: {content}}],
+      usage: {prompt_tokens: 90, completion_tokens: 10, total_tokens: 100},
+    })));
+    try {
+      const assistant = new LLMAssistant({provider: 'openai', apiKey: 'synthetic', diagnosticSink: trace => { traces.push(trace); }});
+      await assert.rejects(assistant.formatProgressText('1. Example'), LLMError);
+      assert.equal(transport.mock.callCount(), 1);
+      assert.equal(traces.length, 1);
+      const trace = traces[0];
+      assert.ok('usage' in trace);
+      assert.deepEqual([trace.status, trace.outputIssue, trace.operationUsage?.totalTokens], ['failed', issue, 100]);
+    } finally { transport.mock.restore(); }
+  }
+});
+
+it('reconstructs multiline progress evidence and retains the original unparsed lines', async () => {
+  const candidate = { frontendId: '42', lastResult: 'Accepted', lastSubmitted: '2026-11-01', submissions: 3, sourceLine: 2, endLine: 3 };
+  const assistant = new LLMAssistant({ provider: 'openai', apiKey: 'synthetic', customGenerateFn: async () => ({
+    text: JSON.stringify({ candidates: [candidate] }),
+  }) });
+  const result = await assistant.formatProgressText('Heading\r\n42. Example\r\n  Accepted 3\r\nUnrecognized row');
+  assert.equal(result.candidates[0].rawSnippet, '42. Example\r\n  Accepted 3');
+  assert.deepEqual(result.unparsedSnippets, ['Heading', 'Unrecognized row']);
+  candidate.endLine = 99;
+  await assert.rejects(assistant.formatProgressText('one line'), LLMError);
+});

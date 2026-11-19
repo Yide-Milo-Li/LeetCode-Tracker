@@ -131,9 +131,9 @@ test('note and weak-topic prompts name the tools and guard existing text', async
     assert.ok(missing.error, 'frontendId is required');
 
     const review = (await get('review_weak_topics', {})).messages[0].content.text;
-    assert.match(review, /weakTopics: true/);
+    assert.match(review, /weakTopics: "top5"/);
     assert.match(review, /Do not change anything yet/);
-    assert.match(skill, /tracker_get_progress` with `weakTopics: true`/);
+    assert.match(skill, /tracker_get_progress` with `weakTopics: "top5"`/);
     assert.match(review, /weakTopics\.topics is empty/);
     assert.match((await get('review_weak_topics', { focus: 'Dynamic Programming' })).messages[0].content.text, /Focus on: Dynamic Programming\./);
   } finally { await client.close(); w.cleanup(); }

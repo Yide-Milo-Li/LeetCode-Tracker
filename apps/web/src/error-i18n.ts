@@ -11,6 +11,18 @@ interface BilingualMessage {
 }
 
 const API_ERROR_MESSAGES: Record<string, BilingualMessage> = {
+  LLM_OUTPUT_TRUNCATED: {
+    en: 'The provider truncated its response. Paste fewer progress rows at a time.',
+    zh: '模型输出已截断。请减少每次粘贴的进度行数，分批整理。',
+  },
+  LLM_INVALID_OUTPUT: {
+    en: 'The provider returned unusable progress data. Check the pasted rows before trying again.',
+    zh: '模型返回的进度数据格式有误。请检查粘贴的行后重试。',
+  },
+  LLM_REQUEST_REJECTED: {
+    en: 'The provider rejected the formatting request. Check the model and endpoint settings.',
+    zh: '服务商拒绝了整理请求。请检查模型和服务端点设置。',
+  },
   NO_CANDIDATES: {
     en: 'No eligible candidates found for target difficulty and type; adjust rules to continue.',
     zh: '没有符合当前难度与题型条件的候选题目，请调整规则后再试。',

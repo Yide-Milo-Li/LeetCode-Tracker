@@ -14,7 +14,7 @@ import type { ThemePalette } from '../../../../packages/contracts/src/sync.ts';
 import { strategyInputSchema, type StrategyInput } from '../../../../packages/contracts/src/recommendations.ts';
 import { percentagesForCounts, reviewPercentForCount } from '../strategy-counts.ts';
 import { useWorkspace } from '../workspace.tsx';
-import { paletteForMode, type ThemeMode } from './SettingsView.tsx';
+import { paletteForMode, type ThemeMode } from './settings/settings-model.ts';
 import { TimezoneField } from './TimezoneField.tsx';
 import { Feedback } from './ui.tsx';
 

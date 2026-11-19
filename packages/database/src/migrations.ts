@@ -301,8 +301,9 @@ export function migrateV5ToV6(db: DatabaseSync): void {
 }
 
 /** Verify schema compatibility, initialize if empty, or perform sequential migrations. */
-export function initOrMigrateSchema(db: DatabaseSync): void {
+export function initOrMigrateSchema(db: DatabaseSync, validateVersion?: (version: number | null) => void): void {
   const version = inspectCatalogSchema(db, true);
+  validateVersion?.(version);
   configurePragmas(db);
   if (version === CURRENT_SCHEMA_VERSION) return;
 

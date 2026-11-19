@@ -6,6 +6,7 @@
 import { randomUUID } from 'node:crypto';
 import type { CatalogStore } from '../../database/src/store.ts';
 import type { PlanningStore } from '../../database/src/planning-store.ts';
+import type { CatalogProblem } from '../../contracts/src/sync.ts';
 import {
   ALGORITHM_VERSION,
   candidates,
@@ -19,7 +20,7 @@ import {
   selectAdaptiveSlots,
 } from '../../domain/src/index.ts';
 import { selectCandidateSlots, buildSelectionSlate } from '../../domain/src/selection.ts';
-import { attemptDays, projectOutcomeReviewStates, longWindowFeatures, estimatePlanTime, type AttemptDay } from '../../domain/src/outcome-review.ts';
+import { attemptDays, projectOutcomeReviewStates, longWindowFeatures, estimatePlanTime } from '../../domain/src/outcome-review.ts';
 import { compilePreference } from '../../domain/src/preference.ts';
 import { RecommendationCache, cacheKey } from './recommendation-cache.ts';
 import { emitDiagnostic, type DiagnosticSink } from './telemetry.ts';
@@ -38,6 +39,7 @@ import {
   type Candidate,
   type Difficulty,
   type RecommendationFeedbackReason,
+  type ReviewState,
   type DailyPlan,
   type EnsureResult,
   type OverridePreview,
@@ -71,8 +73,14 @@ export class PlanningService {
   private readonly intentCache = new RecommendationCache<import('./types.ts').OverridePromptResult>(64);
   private readonly rankingCache = new RecommendationCache<{ ids: string[]; model: string; provider?: 'gemini' | 'openai' | 'deepseek' }>(64);
   private readonly featureCache = new RecommendationCache<{
-    context: ReturnType<PlanningStore['analysisContext']>; days: readonly AttemptDay[]; long: ReturnType<typeof longWindowFeatures>;
-    profile: ReturnType<typeof calculateKnowledgeProfile>; validUntil: number; sourceDates: [string, string][];
+    problems: CatalogProblem[];
+    states: ReviewState[];
+    fixed: ReviewState[];
+    long: ReturnType<typeof longWindowFeatures>;
+    profile?: ReturnType<typeof calculateKnowledgeProfile>;
+    computedAt: number;
+    validUntil: number;
+    sourceDates: [string, string][];
   }>(8, { shareFrozen: true });
   private readonly diagnosticSink?: DiagnosticSink;
 
@@ -233,27 +241,41 @@ export class PlanningService {
     excluded: Set<string>, strategyId: string | null = null) {
     const key = cacheKey([this.planning.stamp(), date, zone, rules, ALGORITHM_VERSION]);
     let feature = this.featureCache.get(key);
-    if (!feature || feature.validUntil <= now || feature.sourceDates.some(([source, day]) => localDate(now, source) !== day)) {
+    if (!feature || now < feature.computedAt || feature.validUntil <= now ||
+      feature.sourceDates.some(([source, day]) => localDate(now, source) !== day)) {
       const context = this.planning.analysisContext(zone, now);
-      const future = context.reviewEvents.filter(e => e.precision === 'datetime').map(e => Date.parse(e.at)).filter(t => t > now);
-      const sourceZones = [...new Set(context.reviewEvents.map(event => event.zone))]
-        .filter((sourceZone): sourceZone is string => !!sourceZone && isTimeZone(sourceZone));
-      // Resolve attempt days once; both the long-window summary and outcome-v2 projection read them.
-      const days = attemptDays(context.reviewEvents, zone, now);
-      feature = { context, days, long: longWindowFeatures(context.raw.problems, context.reviewEvents, zone, now, days),
-        profile: calculateKnowledgeProfile({ ...context.raw, now, userZone: zone, reviewStates: context.fixed }),
-        validUntil: future.reduce((earliest, time) => Math.min(earliest, time), Infinity), sourceDates: sourceZones.map(z => [z, localDate(now, z)]) };
+      const { raw, reviewEvents, resolveDate, fixed } = context;
+      let validUntil = Infinity;
+      const sourceZones = new Set([zone]);
+      const trackBoundary = (at: string, precision: string, sourceZone: string | null) => {
+        if (sourceZone) sourceZones.add(sourceZone);
+        if (precision !== 'datetime') return;
+        const instant = Date.parse(at);
+        if (instant > now && instant < validUntil) validUntil = instant;
+      };
+      for (const event of reviewEvents) trackBoundary(event.at, event.precision, event.zone ?? null);
+      for (const snapshot of raw.snapshots) trackBoundary(snapshot.lastSubmittedAt, snapshot.timePrecision, snapshot.sourceTimezone ?? null);
+      const days = attemptDays(reviewEvents, zone, now, resolveDate);
+      const states = rules.reviewPolicy === 'outcome-v2'
+        ? projectOutcomeReviewStates(raw.problems, reviewEvents, context.solved, zone, context.baseline, now, days, resolveDate)
+        : rules.adaptiveReviewEnabled
+          ? projectReviewStates(raw.problems, context.events, context.solved, zone, context.baseline, now, true, resolveDate)
+          : fixed;
+      feature = {
+        problems: raw.problems,
+        states,
+        fixed,
+        long: longWindowFeatures(raw.problems, reviewEvents, zone, now, days),
+        profile: rules.focusWeakTags ? calculateKnowledgeProfile({ ...raw, now, userZone: zone, reviewStates: fixed }, resolveDate) : undefined,
+        computedAt: now,
+        validUntil,
+        sourceDates: [...sourceZones].filter(isTimeZone).map(source => [source, localDate(now, source)]),
+      };
       this.featureCache.set(key, feature);
     }
-    const context = feature.context;
-    const states = rules.reviewPolicy === 'outcome-v2'
-      ? projectOutcomeReviewStates(context.raw.problems, context.reviewEvents, context.solved, zone, context.baseline, now, feature.days)
-      : rules.adaptiveReviewEnabled
-        ? projectReviewStates(context.raw.problems, context.events, context.solved, zone, context.baseline, now, true)
-        : context.fixed;
     const history = this.planning.adaptiveHistory(strategyId, date);
-    let pool = candidates(context.raw.problems, states, rules, date, seed, excluded);
-    if (rules.focusWeakTags) pool = rankAdaptiveTopics(pool, feature.profile, rules, history.recentExposure);
+    let pool = candidates(feature.problems, feature.states, rules, date, seed, excluded);
+    if (feature.profile) pool = rankAdaptiveTopics(pool, feature.profile, rules, history.recentExposure);
     pool = pool.map(p => {
       const target = p.explanation?.targetTopic ?? [...p.topicTags].sort((a, b) =>
         (history.recentExposure.get(a.slug + ':' + p.difficulty) ?? 0) - (history.recentExposure.get(b.slug + ':' + p.difficulty) ?? 0) || a.slug.localeCompare(b.slug))[0];
@@ -267,7 +289,7 @@ export class PlanningService {
           sampleCount: duration.sampleCount, thresholdMinutes: duration.thresholdMinutes, staticThresholdMinutes: duration.staticThresholdMinutes } } : {}) } };
     });
     const focusTagNames = [...new Set(pool.filter(p => p.isFocusTopic).map(p => p.explanation!.targetTopic!.name))];
-    return { pool, nextOrdinal: history.nextOrdinal, focusTagNames,
+    return { pool, nextOrdinal: history.nextOrdinal, focusTagNames, fixedReviewStates: feature.fixed,
       notices: rules.focusWeakTags && !focusTagNames.length
         ? [{ en: 'Insufficient evidence for reinforcement; selecting for coverage within current constraints.',
              zh: '暂无足够巩固证据；在当前约束内选择题目以补充覆盖。' }] : [] };
@@ -430,7 +452,8 @@ export class PlanningService {
       () => {
         if (this.transientEpoch !== epoch) throw new PlanningError('STALE_DATA', 'Profile changed during generation; retry', 409);
         if (localDate(Date.now(), userTimezone) !== localDate(now, userTimezone)) throw new PlanningError('STALE_PLAN', 'Calendar date changed during generation; retry', 409);
-      }
+      },
+      { fixedReviewStates: context.fixedReviewStates },
     );
 
     return { status: 'ready', plan: committed };

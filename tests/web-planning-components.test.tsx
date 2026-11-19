@@ -772,11 +772,7 @@ describe('Phase 24: Add-one UI Loading, Feedback, and Concurrency Mutex', () => 
   }
 
   beforeEach(() => {
-    mock.method(api, 'getDashboard', async () => ({
-      dataStatus: { userTimezone: 'UTC' },
-      trend30Days: [],
-      overview: { currentStreak: 0, totalSolved: 0, distinctDays: 0 },
-    } as any));
+    mock.method(api, 'getRecentDashboard', async () => ({ timezone: 'UTC', days: [] }));
   });
 
   it('displays bilingual loading state (Adding… / 加题中…), spinner, aria-busy and restores on completion', async () => {
@@ -1060,11 +1056,7 @@ describe('Phase 26: Today remove plan item UI', () => {
   }
 
   beforeEach(() => {
-    mock.method(api, 'getDashboard', async () => ({
-      dataStatus: { userTimezone: 'UTC' },
-      trend30Days: [],
-      overview: { currentStreak: 0, totalSolved: 0, distinctDays: 0 },
-    } as any));
+    mock.method(api, 'getRecentDashboard', async () => ({ timezone: 'UTC', days: [] }));
   });
 
   it('removes uncompleted problem immediately without confirmation dialog and updates progress', async () => {

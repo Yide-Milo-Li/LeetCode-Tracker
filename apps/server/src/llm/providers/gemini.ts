@@ -8,7 +8,7 @@ import {
   resolveModelReasoningEffort,
   type ReasoningEffort,
 } from '../../../../../packages/contracts/src/sync.ts';
-import { BaseLLMProvider } from './base.ts';
+import { BaseLLMProvider, ProviderOutputError } from './base.ts';
 import { normalizeUsage } from '../usage.ts';
 import type {
   GenerateContentParams,
@@ -106,7 +106,9 @@ export class GeminiProvider extends BaseLLMProvider {
       },
     });
 
-    return { text: response.text, model: params.model, provider: 'gemini', usage: normalizeUsage('gemini', response.usageMetadata) };
+    const usage = normalizeUsage('gemini', response.usageMetadata);
+    if (response.candidates?.[0]?.finishReason === 'MAX_TOKENS') throw new ProviderOutputError('truncated', usage);
+    return { text: response.text, model: params.model, provider: 'gemini', usage };
   }
 
   /** Probe the selected credentials with a bounded request; never persist draft values. */

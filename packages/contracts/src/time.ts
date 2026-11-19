@@ -1,10 +1,33 @@
 /** Strict event-time validation; legacy ambiguous values remain readable but are not proof. */
 import { z } from 'zod';
 
+// Formatter configuration is immutable. Bound the cache because zones may come from imports.
+const dates = new Map<string, Intl.DateTimeFormat>();
+const invalidZones = new Set<string>();
+const clocks = new Map<string, Intl.DateTimeFormat>();
+
+export function zonedFormatter(zone: string, includeClock = false): Intl.DateTimeFormat {
+  const cache = includeClock ? clocks : dates;
+  const known = cache.get(zone);
+  if (known) return known;
+  const formatter = new Intl.DateTimeFormat(includeClock ? 'en-US' : 'en-CA', {
+    timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit',
+    ...(includeClock ? { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false } as const : {}),
+  });
+  if (cache.size >= 64) cache.delete(cache.keys().next().value!);
+  cache.set(zone, formatter);
+  return formatter;
+}
+
 /** Accept supported named time zones without guessing from the host environment. */
 export function isTimeZone(value: string): boolean {
-  try { new Intl.DateTimeFormat('en', { timeZone: value }).format(0); return value.trim() === value && value.length > 0; }
-  catch { return false; }
+  if (typeof value !== 'string' || !value || value.trim() !== value || invalidZones.has(value)) return false;
+  try { zonedFormatter(value); return true; }
+  catch {
+    if (invalidZones.size >= 64) invalidZones.delete(invalidZones.values().next().value!);
+    if (value.length <= 100) invalidZones.add(value);
+    return false;
+  }
 }
 export const timeZoneSchema = z.string().max(100).refine(isTimeZone, 'A valid IANA time zone is required');
 
@@ -25,7 +48,7 @@ export function isEventTime(value: string, precision: 'date' | 'datetime'): bool
 
 /** Return the user's calendar date, independent of the machine time zone. */
 export function localDate(instant: number, zone: string): string {
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(instant);
+  const parts = zonedFormatter(zone).formatToParts(instant);
   return ['year', 'month', 'day'].map(type => parts.find(p => p.type === type)!.value).join('-');
 }
 

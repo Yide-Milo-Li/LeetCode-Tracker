@@ -147,14 +147,16 @@ test('note context, section patches and note-state filters support filling in mi
     })).structuredContent;
     assert.equal(patched.status, 'applied');
     assert.equal(patched.state, 'written');
+    assert.equal(patched.section, undefined);
     const note = (await client.call('tracker_get_notes', { frontendIds: ['3'] })).structuredContent.notes[0];
     assert.match(note.content, /^## 💡 核心思路\n- 双指针从两端收缩。\n\n---/);
     assert.equal(note.contentHash, patched.contentHash);
 
     const stale = await client.call('tracker_patch_note', { frontendId: '3', heading: '复杂度分析', mode: 'replace', content: '- O(n)', expectedContentHash: context.note.contentHash });
     assert.equal(errorCode(stale), 'NOTE_CHANGED');
-    const log = (await client.call('tracker_patch_note', { frontendId: '3', heading: 'Review Log', mode: 'append', content: `- 2026-11-17 fluent; ${'recalled the invariant quickly. '.repeat(8)}`, expectedContentHash: note.contentHash })).structuredContent;
+    const log = (await client.call('tracker_patch_note', { frontendId: '3', heading: 'Review Log', mode: 'append', returnSection: true, content: `- 2026-11-17 fluent; ${'recalled the invariant quickly. '.repeat(8)}`, expectedContentHash: note.contentHash })).structuredContent;
     assert.equal(log.sectionCreated, true);
+    assert.match(log.section, /fluent/);
 
     const batchRead = (await client.call('tracker_get_notes', { frontendIds: ['3', '5', '7', '999'], maxChars: 200 })).structuredContent;
     assert.deepEqual(batchRead.notes.map((entry: any) => [entry.frontendId, entry.state]), [['3', 'written'], ['5', 'written'], ['7', 'stub']]);
@@ -356,5 +358,26 @@ test('note export writes the knowledge base and a mistake log without clobbering
     await client.call('tracker_export_notes', { directory, overwrite: true, includeMistakes: false, scope: 'all' });
     assert.notEqual(readFileSync(join(directory, 'README.md'), 'utf8'), 'mine');
     assert.ok(existsSync(join(directory, 'problems', '0030-synthetic-30.md')));
+  } finally { await client.close(); p.cleanup(); }
+});
+
+test('note context keeps full counts, returns the latest five and leaves older attempts pageable', async () => {
+  const p = profile(1);
+  const {client} = await StdioClient.start(entry, p.dbPath);
+  try {
+    const records = Array.from({length: 8}, (_, i) => ({
+      questionFrontendId: '1', completed: i % 2 === 0, outcome: i % 2 === 0 ? 'independent' : 'unsolved',
+      practicedAt: '2026-01-0' + (i + 1), timePrecision: 'date',
+    }));
+    const written = await client.call('tracker_create_practices', {operationId: randomUUID(), records});
+    assert.ok(!written.isError, written.content[0].text);
+    const result = (await client.call('tracker_get_note_context', {frontendId: '1'})).structuredContent;
+    assert.equal(result.practiceSummary.attempts, 8);
+    assert.equal(result.practiceSummary.solved, 4);
+    assert.equal(result.practiceSummary.firstPracticedAt, '2026-01-01');
+    assert.deepEqual(result.practices.map((r: {practicedAt: string}) => r.practicedAt), records.slice(-5).map(r => r.practicedAt));
+    assert.deepEqual(result.practiceHistory, {returned: 5, total: 8, hasMore: true});
+    const older = (await client.call('tracker_list_practices', {frontendId: '1', page: 2, limit: 5})).structuredContent;
+    assert.deepEqual(older.records.map((r: {practicedAt: string}) => r.practicedAt), records.slice(0, 3).reverse().map(r => r.practicedAt));
   } finally { await client.close(); p.cleanup(); }
 });

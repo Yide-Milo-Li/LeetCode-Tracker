@@ -154,7 +154,7 @@ export function registerNoteTools({ register }: Registrar): void {
   register(
     'tracker_get_note_context',
     {
-      description: 'Get everything to write one note: problem details, attempts (localDate in profile timezone, practicedAt in UTC), review stage, current note with contentHash and headings, template, and related written notes.',
+      description: 'Get the note, hash, template, all-time counts and latest five attempts. Page older attempts with tracker_list_practices.',
       inputSchema: z.object({
         frontendId: z.string().trim().min(1).describe('Problem frontend ID, e.g. "42"'),
         lang: langSchema,
@@ -166,9 +166,8 @@ export function registerNoteTools({ register }: Registrar): void {
       const id = problem.questionFrontendId;
       const language = await profileLang(application, lang);
       const note = await currentNote(application, id);
-      const practices = await activePractices(application, id, 'asc');
+      const { practices, summary } = await application.practice.noteHistory(problem.questionId);
       const zone = await profileZone(application);
-      const solved = practices.filter(record => record.completed);
       return json({
         problem: {
           questionId: problem.questionId,
@@ -180,15 +179,12 @@ export function registerNoteTools({ register }: Registrar): void {
           isPaidOnly: problem.isPaidOnly,
         },
         practiceSummary: {
-          attempts: practices.length,
-          solved: solved.length,
-          independent: practices.filter(record => record.outcome === 'independent').length,
-          assisted: practices.filter(record => record.outcome === 'assisted').length,
-          unsolved: practices.filter(record => !record.completed).length,
-          firstPracticedAt: practices[0]?.practicedAt ?? null,
-          lastPracticedAt: practices.at(-1)?.practicedAt ?? null,
+          ...summary,
           reviewStage: await reviewStage(application, id),
         },
+        ...(summary.attempts > practices.length ? {
+          practiceHistory: { returned: practices.length, total: summary.attempts, hasMore: true },
+        } : {}),
         practices: practices.map(record => ({
           practicedAt: record.practicedAt,
           localDate: practiceLocalDate(record, zone),
@@ -253,9 +249,10 @@ export function registerNoteTools({ register }: Registrar): void {
   register(
     'tracker_patch_note',
     {
-      description: 'Edit one note section without resending the whole note. mode "append" adds to the section end; "replace" swaps the body. Matches headings without emoji/case, creates missing sections at end, and needs expectedContentHash.',
+      description: 'Append to or replace one heading, guarded by expectedContentHash. Matching ignores emoji and case. Missing headings are created.',
       inputSchema: z.object({
         frontendId: z.string().trim().min(1),
+        returnSection: z.boolean().optional().describe('Include the edited section in the receipt'),
         heading: z.string().trim().min(1).max(200).describe('Section heading text, e.g. "Complexity Analysis" or "复杂度分析"'),
         mode: z.enum(['append', 'replace']),
         content: z.string().min(1).max(50000).describe('Markdown to add (append) or the new section body (replace), without the heading'),
@@ -264,7 +261,7 @@ export function registerNoteTools({ register }: Registrar): void {
         startFromTemplate: z.enum(['en', 'zh']).optional().describe('When the note is empty, start from this language\'s template before patching'),
       }),
     },
-    async (application, { frontendId, heading, mode, content, expectedContentHash, level, startFromTemplate }) => {
+    async (application, { frontendId, heading, mode, content, expectedContentHash, level, startFromTemplate, returnSection }) => {
       const problem = await requireProblem(application, frontendId);
       const id = problem.questionFrontendId;
       const current = await currentNote(application, id);
@@ -285,7 +282,7 @@ export function registerNoteTools({ register }: Registrar): void {
         frontendId: id,
         heading: patched.heading,
         sectionCreated: patched.created,
-        section: patched.section,
+        ...(returnSection ? { section: patched.section } : {}),
         contentHash: contentHash(note.content),
         length: note.content.length,
         state: noteState(note.content),

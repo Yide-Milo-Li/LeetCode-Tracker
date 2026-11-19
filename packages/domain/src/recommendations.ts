@@ -186,11 +186,11 @@ export function reviewState(
 
 /** Index once; fixed and adaptive projections never share mutable state. */
 export function projectReviewStates(
-  problems:CatalogProblem[],events:Evidence[],solved:Set<string>,zone:string,baseline:number,now:number,adaptive=false
-):ReviewState[] {
+  problems: CatalogProblem[], events: Evidence[], solved: Set<string>, zone: string, baseline: number, now: number, adaptive = false,
+  resolveDate = createEvidenceDateResolver(zone, now)
+): ReviewState[] {
   const grouped=new Map<string,Evidence[]>(),byId=new Map(problems.map(p=>[p.questionId,p]));
   for(const event of events){const group=grouped.get(event.questionId);if(group)group.push(event);else grouped.set(event.questionId,[event]);}
-  const resolveDate=createEvidenceDateResolver(zone,now);
   return [...solved].map(id=>reviewState(id,true,grouped.get(id)??[],zone,baseline,now,
     {adaptive,difficulty:byId.get(id)?.difficulty,resolveDate}));
 }

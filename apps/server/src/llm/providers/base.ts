@@ -10,6 +10,17 @@ import type {
   ConnectionTestResult,
 } from '../types.ts';
 
+export class ProviderOutputError extends Error {
+  readonly reason: 'truncated' | 'invalid';
+  readonly usage?: GenerateContentOutput['usage'];
+
+  constructor(reason: 'truncated' | 'invalid', usage?: GenerateContentOutput['usage']) {
+    super(reason === 'truncated' ? 'The provider truncated its response. Paste a smaller batch.' : 'The provider returned an invalid task response.');
+    this.reason = reason;
+    this.usage = usage;
+  }
+}
+
 /** Transport contract for provider requests and retry classification. */
 export abstract class BaseLLMProvider implements ILLMProvider {
   public abstract readonly providerId: LLMProviderType;

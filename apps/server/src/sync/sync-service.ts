@@ -226,6 +226,7 @@ export class DeviceSyncService {
   private readonly publishReplays = new Map<string, { fingerprint: string; result: SyncPublishResult }>();
   private tokenSource: { key: string; connection: DriveConnection } | null = null;
   private driveJournal?: DriveSyncJournal;
+  private hashCache?: { stamp: string; hash: string };
   private listingFlight: Promise<Listing> | null = null;
   private listingRevision = 0;
 
@@ -377,7 +378,7 @@ export class DeviceSyncService {
 
     const rebuilt = this.previewDelta(listing.deltaChain, head.snapshotId);
     if (!rebuilt && listing.ambiguousSnapshotFiles) return this.status();
-    const localHash = rebuilt?.baseHash ?? computeContentHash(this.exportBundle().tables);
+    const localHash = rebuilt?.baseHash ?? this.currentContentHash();
     const status = this.status(localHash);
     if (status.classification === 'remote-ahead') {
       this.checkedUpdate = {
@@ -506,7 +507,7 @@ export class DeviceSyncService {
     if (updateOnly && checked?.snapshot.snapshotId === snapshotId && this.listing && this.now() < checked.expiresAt &&
         checked.baseId === this.setting(K.baseSnapshotId) &&
         (!checked.baseId || checked.localHash === this.setting(K.baseContentHash)) &&
-        checked.localHash === computeContentHash(this.exportBundle().tables)) {
+        checked.localHash === this.currentContentHash()) {
       this.clearCheckedUpdate();
       if (checked.bundle) {
         return this.stagePreview(this.listing, checked.snapshot, checked.bundle, checked.localHash, true);
@@ -587,7 +588,7 @@ export class DeviceSyncService {
     const current = this.listing ?? listing;
     if (updateOnly && (baseId !== this.setting(K.baseSnapshotId) ||
         (current !== listing && !this.canReceiveCheckedVersion(current, snapshot.snapshotId)))) throw changedUpdate();
-    return this.stagePreview(current, snapshot, bundle, computeContentHash(this.exportBundle().tables), updateOnly);
+    return this.stagePreview(current, snapshot, bundle, this.currentContentHash(), updateOnly);
   }
 
   private async downloadBundle(
@@ -903,6 +904,16 @@ export class DeviceSyncService {
     this.lastError = null;
   }
 
+  /** total_changes covers this connection; data_version covers commits from other connections.
+   * Read the stamp before exporting so a concurrent write can only cause an extra refresh. */
+  private currentContentHash(): string {
+    const stamp = this.ctx.store.dataStamp();
+    if (this.hashCache?.stamp === stamp) return this.hashCache.hash;
+    const hash = computeContentHash(this.exportBundle().tables);
+    this.hashCache = { stamp, hash };
+    return hash;
+  }
+
   private exportBundle(): SnapshotBundleV5 {
     return this.ctx.store.exportMigrationBundle(DEVICE_SYNC_BUNDLE_VERSION) as SnapshotBundleV5;
   }
@@ -921,7 +932,7 @@ export class DeviceSyncService {
       ).get() as { n: number };
       return { baseId: null, dirty: row.n > 0 };
     }
-    const hash = contentHash ?? computeContentHash(this.exportBundle().tables);
+    const hash = contentHash ?? this.currentContentHash();
     return { baseId, dirty: hash !== baseHash };
   }
 

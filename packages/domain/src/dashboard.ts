@@ -3,7 +3,7 @@
  * Computes streaks, distributions, 30-day trends, yearly heatmap calendar,
  * and paginated activity logs. Zero database or network dependencies.
  */
-import { isEventTime, localDate, addDays, isTimeZone } from '../../contracts/src/time.ts';
+import { isEventTime, localDate, addDays, isTimeZone, zonedFormatter } from '../../contracts/src/time.ts';
 import type { CatalogProblem } from '../../contracts/src/sync.ts';
 import type { PracticeRecord, ProgressSnapshot } from '../../contracts/src/practice.ts';
 import type { Difficulty, RevisionStamp } from '../../contracts/src/recommendations.ts';
@@ -28,16 +28,7 @@ export function getZonedDayInterval(dateStr: string, zone: string): { start: num
   const approxUtc = Date.UTC(y, m - 1, d, 0, 0, 0);
 
   const getOffset = (epoch: number) => {
-    const parts = new Intl.DateTimeFormat('en-US', {
-      timeZone: zone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    }).formatToParts(epoch);
+    const parts = zonedFormatter(zone, true).formatToParts(epoch);
     const map: Record<string, string> = {};
     for (const p of parts) map[p.type] = p.value;
     const hour = +map.hour % 24;

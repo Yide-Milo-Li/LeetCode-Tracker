@@ -34,6 +34,7 @@ struct DesktopStatus {
 
 /// Blocking process work is kept off the window event thread.
 struct DesktopState {
+    http: tokio::sync::OnceCell<reqwest::Client>,
     child: Mutex<Option<process::ManagedChild>>,
     connection: Mutex<Option<Connection>>,
     status: Mutex<DesktopStatus>,
@@ -49,6 +50,7 @@ impl Default for DesktopState {
     /// Start without a process; setup dispatches initialization in a worker.
     fn default() -> Self {
         Self {
+            http: tokio::sync::OnceCell::new(),
             child: Mutex::new(None),
             connection: Mutex::new(None),
             status: Mutex::new(DesktopStatus { state: "starting" }),
@@ -63,6 +65,10 @@ impl Default for DesktopState {
 }
 
 impl DesktopState {
+    async fn http(&self) -> Result<&reqwest::Client, String> {
+        self.http.get_or_try_init(|| async { client() }).await
+    }
+
     /// Reject new requests during initialization and shutdown.
     fn connection(&self) -> Result<Connection, String> {
         if self.exiting.load(Ordering::SeqCst) {
@@ -305,7 +311,9 @@ async fn api_request(
     if body.as_ref().is_some_and(|b| b.len() > limit) {
         return Err("Request exceeds endpoint size limit".into());
     }
-    let mut request = client()?
+    let mut request = state
+        .http()
+        .await?
         .request(method, url)
         .header("x-desktop-session-token", &connection.token);
     for (name, value) in headers.unwrap_or_default() {
@@ -362,7 +370,9 @@ async fn export_data_file(
     let destination = selected.into_path().map_err(|_| "Select a local file")?;
     // Existing-file confirmation belongs to the native dialog, before any destination is opened.
     let mut output = security::AuthorizedSave::new(destination)?;
-    let mut response = client()?
+    let mut response = state
+        .http()
+        .await?
         .get(url)
         .header("x-desktop-session-token", connection.token)
         .send()

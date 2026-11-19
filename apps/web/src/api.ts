@@ -13,6 +13,7 @@ import type {
   DailyPlan,
   DashboardActivityListResponse,
   DashboardResponse,
+  RecentDashboardResponse,
   EnsureResult,
   ImportHistoryItem,
   ImportPreview,
@@ -424,6 +425,10 @@ const dashboardApi = {
   getDashboard(year?: number, { signal }: ReadOptions = {}): Promise<DashboardResponse> {
     const query = year ? `?year=${encodeURIComponent(year)}` : '';
     return request<DashboardResponse>(`/dashboard${query}`, { signal });
+  },
+
+  getRecentDashboard({ signal }: ReadOptions = {}) {
+    return request<RecentDashboardResponse>('/dashboard/recent', { signal });
   },
 
   getDashboardActivities(query: {

@@ -8,7 +8,8 @@ import { randomUUID } from 'node:crypto';
 import { normalizeUsage, sumUsage, type LLMUsage } from './usage.ts';
 import { emitDiagnostic, type DiagnosticSink } from './diagnostics.ts';
 import { quotas } from '../../../../packages/domain/src/index.ts';
-import type { ProgressCandidateInput } from '../../../../packages/contracts/src/practice.ts';
+import { decodeProgressOutput } from './progress-output.ts';
+import { ProviderOutputError } from './providers/base.ts';
 import { noteLayoutSchema } from '../../../../packages/contracts/src/notes.ts';
 import type { AiFragment, LayoutGroup } from '../../../../packages/markdown/src/index.ts';
 import type { Bilingual, Rules, RulePatch, Candidate } from '../../../../packages/contracts/src/recommendations.ts';
@@ -111,20 +112,34 @@ export class LLMAssistant implements ILLMAssistant {
   public getConfigurationGeneration(): number { return this.configurationGeneration; }
 
   /** Measure every transport attempt, including timeouts; never store provider payloads. */
-  private async request(provider: ILLMProvider, params: import('./types.ts').GenerateContentParams, operation: { id: string; attempt: number; usages: LLMUsage[] }) {
+  private async request<T = undefined>(provider: ILLMProvider, params: import('./types.ts').GenerateContentParams, operation: { id: string; attempt: number; usages: LLMUsage[] }, decode?: (text: string) => T) {
     const start = Date.now();
     let status: 'ok' | 'failed' | 'timeout' = 'failed';
     let usage = normalizeUsage(provider.providerId);
+    let outputIssue: ProviderOutputError['reason'] | undefined;
     try {
       const result = await generateWithAbort(provider, { ...params, maxOutputTokens: withReasoningAllowance(params.maxOutputTokens, params.reasoningEffort) });
       usage = result.usage ?? usage;
-      if (result.text && result.text.length > 256 * 1024) throw new Error('Provider output exceeded the task limit');
-      status = 'ok'; return result;
-    } catch (error) { status = params.abortSignal.aborted ? 'timeout' : 'failed'; throw error; }
+      if (result.text && result.text.length > 256 * 1024) throw new ProviderOutputError('truncated', usage);
+      let decoded: T | undefined;
+      if (decode) {
+        try { decoded = decode(result.text ?? ''); }
+        catch { throw new ProviderOutputError('invalid', usage); }
+      }
+      status = 'ok';
+      return { ...result, decoded };
+    } catch (error) {
+      if (error instanceof ProviderOutputError) {
+        outputIssue = error.reason;
+        usage = error.usage ?? usage;
+      }
+      status = params.abortSignal.aborted ? 'timeout' : 'failed';
+      throw error;
+    }
     finally {
       operation.usages.push(usage);
       emitDiagnostic(this.diagnosticSink, { version: 1, at: start, operationId: operation.id, purpose: params.purpose ?? 'progress_import',
-        attempt: ++operation.attempt, provider: provider.providerId, model: params.model, elapsedMs: Date.now() - start, status, usage,
+        attempt: ++operation.attempt, provider: provider.providerId, model: params.model, elapsedMs: Date.now() - start, status, usage, ...(outputIssue ? { outputIssue } : {}),
         operationUsage: sumUsage(operation.usages) });
     }
   }
@@ -381,7 +396,7 @@ export class LLMAssistant implements ILLMAssistant {
     }
 
     // Mutex serialization
-    const run = this.formattingLock.then(() => this.executeFormatWithFallback(trimmed, batchYear));
+    const run = this.formattingLock.then(() => this.executeFormatWithFallback(rawText, batchYear));
     this.formattingLock = run.then(() => {}, () => {});
     return run;
   }
@@ -440,6 +455,8 @@ export class LLMAssistant implements ILLMAssistant {
     const attemptErrors: Array<{ model: string; attempt: number; error: Error }> = [];
     const overallDeadline = Date.now() + this.timeoutMs;
 
+    // Keep line endings attached so multiline evidence is an exact excerpt of the paste.
+    const lines = rawText.split(/(?<=\n)|(?<=\r)(?!\n)/);
     const systemInstruction = `You are a structured data formatting assistant. Your ONLY job is to parse tabular LeetCode progress text into structured records.
 The user pasted text copied from their personal LeetCode Progress page, which typically contains:
 - Last Submitted (e.g. "Aug 26, 2026", "Sep 8", "2026-08-26")
@@ -453,9 +470,9 @@ For each identifiable problem row:
 - lastSubmitted: The exact submission date or timestamp string from the text.
 - lastResult: The submission result string.
 - submissions: The total submissions count as an integer. If missing or invalid, use -1.
-- rawSnippet: The excerpt or line corresponding to this entry.
+- sourceLine: 1-based starting line in the pasted text. For a multiline entry, also give endLine (inclusive).
 
-Do not invent or hallucinate problems not in the input. If lines cannot be parsed, put them in unparsedSnippets. Limit to at most 200 candidates.`;
+Do not invent or hallucinate problems not in the input. Leave unparsed lines unreferenced so the app can recover the original text. Limit to at most 200 candidates.`;
 
     const prompt = batchYear !== undefined
       ? `Batch year context: ${batchYear}\n\nParse the following progress text:\n${rawText}`
@@ -480,41 +497,15 @@ Do not invent or hallucinate problems not in the input. If lines cannot be parse
             abortSignal: abortController.signal,
             reasoningEffort: resolveModelReasoningEffort(providerType, currentModel, activeCfg.reasoningEffort),
             timeoutMs: attemptTimeout, maxOutputTokens: 8192, purpose: 'progress_import',
-          }, operation);
-
+          }, operation, text => decodeProgressOutput(text, lines));
           clearTimeout(timeoutHandle);
-          const parsed = JSON.parse(res.text?.trim() || '{}') as {
-            candidates?: Array<{
-              frontendId: string;
-              title?: string;
-              lastSubmitted: string;
-              lastResult: string;
-              submissions: number;
-              rawSnippet?: string;
-            }>;
-            unparsedSnippets?: string[];
-          };
-
-          if (!Array.isArray(parsed.candidates)) throw new Error('Missing progress candidates array');
-          const rawCandidates = parsed.candidates.slice(0, 200);
-          const candidates: ProgressCandidateInput[] = rawCandidates.map(c => ({
-            frontendId: String(c.frontendId || '').trim(),
-            title: c.title?.trim(),
-            lastSubmitted: String(c.lastSubmitted || '').trim(),
-            lastResult: String(c.lastResult || '').trim(),
-            submissions: typeof c.submissions === 'number' ? c.submissions : parseInt(String(c.submissions), 10) || 0,
-            rawSnippet: c.rawSnippet,
-          }));
-
-          return {
-            candidates,
-            unparsedSnippets: parsed.unparsedSnippets ?? [],
-            model: currentModel,
-            provider: providerType,
-          };
+          return { ...res.decoded!, model: currentModel, provider: providerType };
         } catch (err) {
           clearTimeout(timeoutHandle);
           const error = err instanceof Error ? err : new Error(String(err));
+          if (error instanceof ProviderOutputError) {
+            throw new LLMError(error.reason === 'truncated' ? 'LLM_OUTPUT_TRUNCATED' : 'LLM_INVALID_OUTPUT', error.message, 422, providerType);
+          }
           attemptErrors.push({ model: currentModel, attempt, error });
 
           if (providerType === 'deepseek' && /402|insufficient balance/i.test(error.message)) {
@@ -534,6 +525,10 @@ Do not invent or hallucinate problems not in the input. If lines cannot be parse
             break;
           }
 
+          const httpStatus = /^\[(4\d\d)\]/.exec(error.message)?.[1];
+          if (httpStatus && !['408', '409', '429'].includes(httpStatus)) {
+            throw new LLMError('LLM_REQUEST_REJECTED', 'The provider rejected the progress formatting request.', Number(httpStatus), providerType);
+          }
           if (attempt < this.maxRetriesPerModel) {
             const backoffMs = Math.round(this.initialBackoffMs * Math.pow(1.5, attempt));
             if (backoffMs > 0) await sleep(Math.min(backoffMs, Math.max(0, overallDeadline - Date.now())));

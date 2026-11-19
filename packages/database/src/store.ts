@@ -132,6 +132,7 @@ import {
 
 /** Configuration options for CatalogStore. */
 export interface CatalogStoreOptions {
+  validateVersion?: (version: number | null) => void;
   backupDir?: string;
   skipBackup?: boolean;
 }
@@ -172,7 +173,7 @@ export class CatalogStore {
 
   /** Verify compatibility, initialize tables, or perform sequential version upgrades. */
   public initOrMigrateSchema(): void {
-    initOrMigrateSchema(this.db);
+    initOrMigrateSchema(this.db, this.options.validateVersion);
   }
 
   /** Serialize a protected write; the callback owns its synchronous transaction. */
@@ -663,11 +664,36 @@ export class CatalogStore {
     return row ? parseInt(row.value, 10) : 0;
   }
 
+  /** Same-connection mutations and external commits both invalidate derived read models. */
+  public dataStamp(): string {
+    const row = this.db.prepare(
+      "SELECT total_changes() || ':' || data_version AS stamp FROM pragma_data_version"
+    ).get() as { stamp: string };
+    return row.stamp;
+  }
+
+  private analyticsSnapshot?: { stamp: string; raw: ReturnType<typeof getDashboardRawDataRecords> };
+
+  /** Shared by pure dashboard, mastery and knowledge calculations. Date projections stay per request. */
+  public dashboardSnapshot() {
+    if (this.db.isTransaction) return this.getDashboardRawData();
+    this.db.exec('BEGIN');
+    try {
+      const stamp = this.dataStamp();
+      if (this.analyticsSnapshot?.stamp !== stamp) {
+        this.analyticsSnapshot = { stamp, raw: this.getDashboardRawData() };
+      }
+      return this.analyticsSnapshot.raw;
+    } finally {
+      this.db.exec('COMMIT');
+    }
+  }
+
   /** Fetch all raw data required for pure dashboard statistical aggregation. */
   public getDashboardRawData(): {
     problems: CatalogProblem[];
     manualRecords: PracticeRecord[];
-    snapshots: ProgressSnapshot[];
+    snapshots: (ProgressSnapshot & { sourceTimezone: string | null })[];
     snapshotSuccesses: DashboardSnapshotSuccess[];
     catalogUpdatedAt: number | null;
     practiceUpdatedAt: number | null;

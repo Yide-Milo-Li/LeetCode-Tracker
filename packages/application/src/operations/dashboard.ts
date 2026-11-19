@@ -9,9 +9,8 @@ import {
 import { isTimeZone, localDate } from '../../../contracts/src/time.ts';
 import {
   calculateDashboardStats,
-  filterAndPaginateActivities,
-  getActivityItems,
 } from '../../../domain/src/index.ts';
+import { dashboardActivityPage, recentDashboardDays } from '../../../database/src/dashboard-query.ts';
 import type { CatalogStore } from '../../../database/src/store.ts';
 import type { PlanningService } from '../planning.ts';
 import type { ApplicationContext } from '../context.ts';
@@ -108,7 +107,7 @@ export function createDashboardOperations(context: ApplicationContext) {
       });
     }
 
-    const rawData = store.getDashboardRawData();
+    const rawData = store.dashboardSnapshot();
     const userTimezone = rawData.userTimezone;
     const now = Date.now();
 
@@ -139,19 +138,8 @@ export function createDashboardOperations(context: ApplicationContext) {
       });
     }
 
-    const rawData = store.getDashboardRawData();
-    const now = Date.now();
-    const allActivities = getActivityItems(
-      rawData.manualRecords,
-      rawData.snapshots,
-      rawData.problems,
-      rawData.userTimezone,
-      now,
-      rawData.snapshotSuccesses
-    );
-
-    const result = filterAndPaginateActivities(allActivities, parseRes.data, rawData.userTimezone, now, rawData.revision);
-    return result;
+    return dashboardActivityPage(store.db, parseRes.data, store.planning.stamp(), Date.now());
   };
-  return { summary, activity };
+  const recent = async () => recentDashboardDays(store.db, store.getSettings().timezone, Date.now());
+  return { summary, activity, recent };
 }

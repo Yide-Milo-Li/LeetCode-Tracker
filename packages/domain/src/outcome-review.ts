@@ -37,23 +37,27 @@ export function attemptDays(events: ReviewEvent[], zone: string, now: number,
  * pass it to share one date-resolution pass with `longWindowFeatures`. It is read, never mutated.
  */
 export function projectOutcomeReviewStates(problems: CatalogProblem[], events: ReviewEvent[], solved: Set<string>, zone: string, baseline: number, now: number,
-  precomputedDays?: readonly AttemptDay[]): ReviewState[] {
+  precomputedDays?: readonly AttemptDay[], resolveDate = createEvidenceDateResolver(zone, now)): ReviewState[] {
   const grouped = new Map<string, AttemptDay[]>();
-  // One resolver per projection keeps Intl formatter construction and date caching out of the per-question loop.
-  const resolveDate = createEvidenceDateResolver(zone, now);
   for (const day of precomputedDays ?? attemptDays(events, zone, now, resolveDate)) {
     const group = grouped.get(day.questionId) ?? []; group.push(day); grouped.set(day.questionId, group);
   }
   const byId = new Map(problems.map(p => [p.questionId, p]));
   return [...new Set([...solved, ...grouped.keys()])].map(questionId => {
-    const days = grouped.get(questionId) ?? [], all = days.flatMap(d => d.events);
-    const legacy = reviewState(questionId, solved.has(questionId), all.filter(e => e.completed && e.recordedAt <= baseline), zone, baseline, now, { resolveDate });
+    const days = grouped.get(questionId) ?? [];
+    const baselineSuccesses: ReviewEvent[] = [];
+    for (const day of days) {
+      for (const event of day.events) {
+        if (event.completed && event.recordedAt <= baseline) baselineSuccesses.push(event);
+      }
+    }
+    const legacy = reviewState(questionId, solved.has(questionId), baselineSuccesses, zone, baseline, now, { resolveDate });
     const anchor = legacy.dueDate ? addDays(legacy.dueDate, -1) : null;
     let due = legacy.dueDate, stage = 0, intervalDays = 1, established = due !== null;
     const undatedSolved = solved.has(questionId) && !days.some(day => day.completed);
     let decision: ReviewDecision | undefined = anchor ? {
       policyVersion: 'outcome-v2', reason: 'baseline', stage, intervalDays, dueDate: due,
-      eventIds: all.filter(e => e.completed && e.recordedAt <= baseline).map(e => e.id).sort(),
+      eventIds: baselineSuccesses.map(e => e.id).sort(),
       thresholdMinutes: null, baselineVersion: 'static-v1',
     } : undefined;
     const threshold = byId.has(questionId) ? DURATION_THRESHOLDS[byId.get(questionId)!.difficulty] : null;

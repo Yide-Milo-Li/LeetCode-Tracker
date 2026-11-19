@@ -1,3 +1,4 @@
+import { notePracticeHistory } from '../../../database/src/practice-store.ts';
 /**
  * Business operations for manual practice record logging, query, updates, revocations, and stats.
  */
@@ -163,5 +164,6 @@ export function createPracticeOperations(context: ApplicationContext) {
     });
   };
 
-  return { create, createMany, query, read, update, revoke, stats, byOperation, fingerprintForOperation };
+  const noteHistory = async (questionId: string) => notePracticeHistory(store.db, questionId);
+  return { noteHistory, create, createMany, query, read, update, revoke, stats, byOperation, fingerprintForOperation };
 }

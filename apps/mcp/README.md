@@ -124,8 +124,8 @@ Tools that work on several items take one item too; there are no separate single
 | `tracker_list_practices` | read | Paginated practice records with `revision`, newest or oldest first, optionally for one problem, or specific records by `ids` |
 | `tracker_list_notes` | read | Note summaries (`scope: "practiced"` by default, or `"all"`), filtered by `tag` or `noteState` |
 | `tracker_get_notes` | read | 1 to 20 notes with state and `contentHash`; long notes are read in parts with `offset` |
-| `tracker_get_note_context` | read | Everything for writing one note: problem, all attempts, review stage, current note and headings, template, related written notes |
-| `tracker_get_progress` | read | Streaks, difficulty distribution, top tags, active-day trends; `weakTopics: true` adds reinforcement topics, `recentActiveDays: true` adds recent calendar days |
+| `tracker_get_note_context` | read | Everything for writing one note: problem, all-time counts, latest five attempts, review stage, current note and headings, template, related written notes |
+| `tracker_get_progress` | read | Streaks, difficulty distribution, top tags, active-day trends; `weakTopics: true` adds reinforcement topics, `recentActiveDays: true` adds recent calendar days. Use `weakTopics: "top5"` for a focused review |
 | `tracker_get_strategies` | read | Study strategies (each with its assigned weekdays) |
 | `tracker_import_catalog` | write | Import a local `.jsonl` catalog file; `dryRun` |
 | `tracker_import_problems` | write | Add or update up to 200 problems sent as data; creates the profile when missing; `dryRun` |
@@ -133,7 +133,7 @@ Tools that work on several items take one item too; there are no separate single
 | `tracker_update_practice` | write, overwrites | Change a practice record (needs `expectedRevision`) |
 | `tracker_revoke_practice` | write, removes | Revoke a practice record (needs `expectedRevision`) |
 | `tracker_save_notes` | write, overwrites | Replace 1 to 20 notes in one transaction (each needs `expectedContentHash`); `dryRun` shows where each note would change |
-| `tracker_patch_note` | write, overwrites | Append to or replace one section of a note (needs `expectedContentHash`) |
+| `tracker_patch_note` | write, overwrites | Append to or replace one section of a note (needs `expectedContentHash`; `returnSection: true` includes the edited text) |
 | `tracker_save_strategy` | write, overwrites | Create a strategy from counts and assign weekdays, or update an existing one (needs `strategyId` and `expectedVersion`) |
 | `tracker_delete_strategy` | write, removes | Delete a strategy; its weekdays become rest days and generated plans stay (needs `expectedVersion`) |
 | `tracker_set_timezone` | write | Set the IANA timezone that decides "today"; creates the profile when missing |
@@ -161,7 +161,7 @@ Prompts add no tool definitions to the model's context; the client loads one onl
 The server has no AI provider; the model in your MCP client writes the notes. A typical flow for filling in missing notes:
 
 1. `tracker_list_notes` with `noteState: "empty"` (or `"stub"`) and a `tag` to find problems that still need a note.
-2. `tracker_get_note_context` for each one: problem details, every attempt with outcome, duration and remark, the review stage, the current note with its section headings, the template in your language, and problems with shared tags that already have notes.
+2. `tracker_get_note_context` for each one: problem details, all-time counts and the latest five attempts with outcome, duration and remark, the review stage, the current note with its section headings, the template in your language, and problems with shared tags that already have notes.
 3. Save complete notes with `tracker_save_notes`, or add to one section with `tracker_patch_note`, for example a dated entry under a "Review Log" heading. Patch headings match without emoji or case, so `"Edge Cases & Traps"` finds `## ⚠️ Edge Cases & Traps`; a missing section is created at the end, and an empty note can start from the template.
 
 `tracker_export_notes` writes the knowledge base to a directory, for example an Obsidian vault folder: one Markdown file per problem under `problems/`, a README with Dataview queries, Notion CSVs and `mistakes.md`, which lists unsolved, assisted and unfinished attempts with their remarks, most recent first. It reads the profile without the lease, so it works while the desktop app is running. It refuses to replace existing files unless you pass `overwrite: true`.

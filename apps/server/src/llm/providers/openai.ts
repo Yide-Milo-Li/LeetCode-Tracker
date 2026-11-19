@@ -9,7 +9,7 @@ import {
   resolveModelReasoningEffort,
   type ReasoningEffort,
 } from '../../../../../packages/contracts/src/sync.ts';
-import { BaseLLMProvider } from './base.ts';
+import { BaseLLMProvider, ProviderOutputError } from './base.ts';
 import { normalizeUsage } from '../usage.ts';
 import type {
   LLMProviderType,
@@ -157,15 +157,20 @@ export class OpenAIProvider extends BaseLLMProvider {
     }
 
     const data = await response.json() as {
-      choices?: Array<{ message?: { content?: string } }>;
+      choices?: Array<{ finish_reason?: string; message?: { content?: string } }>;
       model?: string;
       usage?: unknown;
     };
 
-    const text = data.choices?.[0]?.message?.content;
-    if (typeof text !== 'string' || !text.trim()) throw new Error('Missing assistant JSON content');
-    JSON.parse(text);
-    return { text, model: data.model || params.model, provider: this.providerId, usage: normalizeUsage(this.providerId, data.usage) };
+    const choice = data.choices?.[0];
+    const usage = normalizeUsage(this.providerId, data.usage);
+    if (choice?.finish_reason === 'length') throw new ProviderOutputError('truncated', usage);
+    const text = choice?.message?.content;
+    if (!text?.trim()) throw new ProviderOutputError('invalid', usage);
+    if (params.purpose !== 'progress_import') {
+      try { JSON.parse(text); } catch { throw new ProviderOutputError('invalid', usage); }
+    }
+    return { text, model: data.model || params.model, provider: this.providerId, usage };
   }
 
   /** Probe the selected credentials with a bounded request; never persist draft values. */

@@ -61,12 +61,13 @@ function calendarDaysDiff(startDate: string, endDate: string): number {
  * @param input Aggregated problems, active records, snapshots, and user context.
  * @returns Comprehensive report detailing topic × difficulty evaluations and weakness detection.
  */
-export function calculateKnowledgeProfile(input: KnowledgeProfileInput): KnowledgeProfileReport {
+export function calculateKnowledgeProfile(input: KnowledgeProfileInput,
+  resolveDate?: ReturnType<typeof createEvidenceDateResolver>): KnowledgeProfileReport {
   const { problems, manualRecords, snapshots, now } = input;
   const zone = input.userZone && isTimeZone(input.userZone) ? input.userZone : 'UTC';
   const today = localDate(now, zone);
   const start = addDays(today, -29);
-  const resolve = createEvidenceDateResolver(zone, now);
+  const resolve = resolveDate ?? createEvidenceDateResolver(zone, now);
 
   const byId = new Map(problems.map((p) => [p.questionId, p]));
   const solved = new Set<string>();

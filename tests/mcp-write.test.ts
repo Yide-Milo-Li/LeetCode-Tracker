@@ -514,6 +514,10 @@ test('progress lists weak topics with the evidence behind them', async () => {
     const { weakTopics } = (await client.call('tracker_get_progress', { weakTopics: true })).structuredContent;
     assert.equal(weakTopics.windowDays, 30);
     assert.deepEqual(weakTopics.topics.map((topic: any) => topic.tag), ['Dynamic Programming']);
+    const focused = (await client.call('tracker_get_progress', {weakTopics: 'top5'})).structuredContent;
+    assert.deepEqual(Object.keys(focused), ['weakTopics']);
+    assert.deepEqual(focused.weakTopics.topics, weakTopics.topics.slice(0, 5));
+    assert.equal(focused.weakTopics.totalWeakTopics, weakTopics.topics.length);
     const [medium] = weakTopics.topics[0].difficulties;
     assert.equal(medium.difficulty, 'Medium');
     assert.deepEqual(medium.reasons, ['feedback_assistance']);

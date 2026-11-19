@@ -4,7 +4,7 @@
  */
 import React, { useState } from 'react';
 import { Activity } from 'lucide-react';
-import { api, type DashboardResponse } from '../api.ts';
+import { api } from '../api.ts';
 import { localizeApiError } from '../error-i18n.ts';
 import type { Language } from '../i18n.ts';
 import { formatCalendarDate } from '../date-format.ts';
@@ -25,11 +25,11 @@ export function TodayRecentOverview({ lang, embedded = false }: TodayRecentOverv
   const zh = lang === 'zh';
   const workspace = useWorkspace();
   const [retry, setRetry] = useState(0);
-  const dashboard = useAsyncResource((signal) => api.getDashboard(undefined, { signal }), [workspace.revision, retry]);
-  const data: DashboardResponse | null = dashboard.data ?? null;
+  const dashboard = useAsyncResource((signal) => api.getRecentDashboard({ signal }), [workspace.revision, retry]);
+  const data = dashboard.data ?? null;
   const error = dashboard.error ? localizeApiError(dashboard.error, lang) : '';
 
-  const days = data?.dataStatus.userTimezone ? data.trend30Days.slice(-7) : [];
+  const days = data?.days ?? [];
   const max = Math.max(1, ...days.map((day) => day.completedCount));
   const activeDays = days.filter((day) => day.completedCount > 0).length;
   // Series dates are already local calendar days, so format them in UTC to avoid shifting a day.
@@ -56,7 +56,7 @@ export function TodayRecentOverview({ lang, embedded = false }: TodayRecentOverv
               }
             />
           </span>
-          {data?.dataStatus.userTimezone && days.length > 0 && (
+          {data?.timezone && days.length > 0 && (
             <span className="rhythm-summary num-tabular">
               {zh
                 ? `近 ${days.length} 天有 ${activeDays} 天有记录`
@@ -113,7 +113,7 @@ export function TodayRecentOverview({ lang, embedded = false }: TodayRecentOverv
               : zh
                 ? '正在读取近期记录…'
                 : 'Loading recent records…'
-            : !data.dataStatus.userTimezone
+            : !data.timezone
               ? zh
                 ? '设置时区后显示每日分布'
                 : 'Set a timezone to assign daily activity'

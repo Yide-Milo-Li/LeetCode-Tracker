@@ -476,3 +476,31 @@ it('supports heatmap keyboard roving tabIndex and navigation (Arrow keys and Ent
 
   assert.deepEqual(requests, [{ date: nextDateStr }], 'Enter should open Records for the keyboard-focused date');
 });
+
+it('refreshes hidden statistics once when next shown, and keeps clean visits cached', async () => {
+  const requests = {
+    dashboard: mock.method(api, 'getDashboard', async () => createMockDashboardData()),
+    mastery: mock.method(api, 'getMasteryReport', async () => createMockMasteryReport()),
+    profile: mock.method(api, 'getKnowledgeProfile', async () => { throw new Error('test unavailable'); }),
+    practiceStats: mock.method(api, 'getPracticeStats', async () => { throw new Error('test unavailable'); }),
+  };
+  const counts = () => Object.fromEntries(Object.entries(requests).map(([key, f]) => [key, f.mock.callCount()]));
+  const tree = (visible: boolean, revision: number) => (
+    <WorkspaceContext.Provider value={{ timezone: 'UTC', revision, navigate() {}, notifyMutation() {}, openPractice() {} }}>
+      <div hidden={!visible}><DashboardView lang="en" active={visible} /></div>
+    </WorkspaceContext.Provider>
+  );
+  let rendered: ReturnType<typeof render>;
+  await act(async () => {rendered = render(tree(true, 0));});
+  await act(async () => {rendered.rerender(tree(false, 0));});
+  const before = counts();
+  await act(async () => {rendered.rerender(tree(false, 1));});
+  assert.deepEqual(counts(), before);
+  await act(async () => {rendered.rerender(tree(false, 2));});
+  await act(async () => {rendered.rerender(tree(true, 2));});
+  const refreshed = counts();
+  for (const key of Object.keys(before)) assert.equal(refreshed[key], before[key] + 1);
+  await act(async () => {rendered.rerender(tree(false, 2));});
+  await act(async () => {rendered.rerender(tree(true, 2));});
+  assert.deepEqual(counts(), refreshed);
+});

@@ -39,15 +39,13 @@ export const progressFormatResponseSchema = {
           lastSubmitted: { type: Type.STRING },
           lastResult: { type: Type.STRING },
           submissions: { type: Type.INTEGER },
-          rawSnippet: { type: Type.STRING },
+          sourceLine: { type: Type.INTEGER },
+          endLine: { type: Type.INTEGER },
         },
-        required: ['frontendId', 'lastSubmitted', 'lastResult', 'submissions'],
+        required: ['frontendId', 'lastSubmitted', 'lastResult', 'submissions', 'sourceLine'],
       },
     },
-    unparsedSnippets: {
-      type: Type.ARRAY,
-      items: { type: Type.STRING },
-    },
+
   },
   required: ['candidates'],
 };

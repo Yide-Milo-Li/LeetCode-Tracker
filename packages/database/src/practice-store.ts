@@ -509,3 +509,33 @@ export function getPracticeStatistics(db: DatabaseSync): PracticeStats {
     practiceRevision: getPracticeRevision(db),
   };
 }
+
+/** Full-history counts and the latest five attempts come from one SQLite read snapshot. */
+export function notePracticeHistory(db: DatabaseSync, questionId: string) {
+  type Attempt = Pick<PracticeRecord, 'practicedAt' | 'sourceTimezone' | 'timePrecision' | 'outcome' | 'durationMinutes' | 'notes'> & { completed: number };
+  const empty = {attempts: 0, solved: 0, independent: 0, assisted: 0, unsolved: 0,
+    firstPracticedAt: null as string | null, lastPracticedAt: null as string | null};
+  const rows = db.prepare(`
+    WITH counts AS (
+      SELECT count(*) AS attempts, coalesce(sum(completed), 0) AS solved,
+        count(*) FILTER (WHERE outcome='independent') AS independent,
+        count(*) FILTER (WHERE outcome='assisted') AS assisted,
+        count(*) FILTER (WHERE completed=0) AS unsolved,
+        min(practiced_at) AS firstPracticedAt, max(practiced_at) AS lastPracticedAt
+      FROM practice_records WHERE question_id=:id AND status='active'
+    ), recent AS (
+      SELECT practiced_at AS practicedAt, created_at AS createdAt, id, source_timezone AS sourceTimezone,
+        time_precision AS timePrecision, completed, outcome, duration_minutes AS durationMinutes, notes
+      FROM practice_records WHERE question_id=:id AND status='active'
+      ORDER BY practiced_at DESC, created_at DESC, id DESC LIMIT 5
+    )
+    SELECT * FROM recent CROSS JOIN counts ORDER BY practicedAt, createdAt, id
+  `).all({ id: questionId }) as unknown as (Attempt & typeof empty)[];
+  const { attempts, solved, independent, assisted, unsolved, firstPracticedAt, lastPracticedAt } = rows[0] ?? empty;
+  return {
+    summary: { attempts, solved, independent, assisted, unsolved, firstPracticedAt, lastPracticedAt },
+    practices: rows.map(({practicedAt, sourceTimezone, timePrecision, completed, outcome, durationMinutes, notes}) => ({
+      practicedAt, sourceTimezone, timePrecision, completed: Boolean(completed), outcome, durationMinutes, notes,
+    })),
+  };
+}

@@ -5,7 +5,7 @@ export interface LLMUsage {
 }
 export interface LLMTrace {
   version: 1; at: number; operationId: string; purpose: string; attempt: number; provider: string;
-  model: string; elapsedMs: number; status: 'ok' | 'failed' | 'timeout'; usage: LLMUsage; operationUsage?: LLMUsage;
+  model: string; elapsedMs: number; status: 'ok' | 'failed' | 'timeout'; usage: LLMUsage; operationUsage?: LLMUsage; outputIssue?: 'truncated' | 'invalid';
 }
 export interface SelectionTrace {
   version: 1; at: number; purpose: 'selection_decision'; reason: string; candidateCount: number;
