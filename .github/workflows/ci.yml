@@ -75,12 +75,18 @@ jobs:
         run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
       - name: Lint native host
         run: cargo clippy --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets -- -D warnings
-      - name: Build unsigned Windows installer
+      - name: Configure desktop updater for tagged builds
+        env:
+          LCT_UPDATER_PUBLIC_KEY: ${{ vars.LCT_UPDATER_PUBLIC_KEY }}
+        run: node scripts/configure-desktop-updater.mjs
+      - name: Build Windows installer
         env:
           LCT_DESKTOP_DISTRIBUTION: ${{ github.event_name == 'push' && 'official' || 'development' }}
           LCT_GOOGLE_DESKTOP_CLIENT_ID: ${{ github.event_name == 'push' && secrets.LCT_GOOGLE_DESKTOP_CLIENT_ID || '' }}
           LCT_GOOGLE_DESKTOP_CLIENT_SECRET: ${{ github.event_name == 'push' && secrets.LCT_GOOGLE_DESKTOP_CLIENT_SECRET || '' }}
-        run: npm run desktop:build
+          TAURI_SIGNING_PRIVATE_KEY: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+        run: npm run desktop:build -- --config ../../.local/desktop-updater.json --ci
       - name: Record Windows build identity and checksum
         shell: pwsh
         run: |
@@ -93,6 +99,7 @@ jobs:
           name: windows-desktop-unsigned
           path: |
             apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
+            apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe.sig
             .local/evidence/phase21/windows-commit.txt
             .local/evidence/phase21/SHA256SUMS-windows.txt
           if-no-files-found: error
@@ -136,12 +143,18 @@ jobs:
           cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check
           cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
           cargo clippy --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets -- -D warnings
-      - name: Build unsigned internal app and DMG
+      - name: Configure desktop updater for tagged builds
+        env:
+          LCT_UPDATER_PUBLIC_KEY: ${{ vars.LCT_UPDATER_PUBLIC_KEY }}
+        run: node scripts/configure-desktop-updater.mjs
+      - name: Build macOS app and DMG
         env:
           LCT_DESKTOP_DISTRIBUTION: ${{ github.event_name == 'push' && 'official' || 'development' }}
           LCT_GOOGLE_DESKTOP_CLIENT_ID: ${{ github.event_name == 'push' && secrets.LCT_GOOGLE_DESKTOP_CLIENT_ID || '' }}
           LCT_GOOGLE_DESKTOP_CLIENT_SECRET: ${{ github.event_name == 'push' && secrets.LCT_GOOGLE_DESKTOP_CLIENT_SECRET || '' }}
-        run: npm run desktop:build:mac -- --ci
+          TAURI_SIGNING_PRIVATE_KEY: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+        run: npm run desktop:build:mac -- --config ../../.local/desktop-updater.json --ci
       - name: Generate synthetic migration fixture and checksums
         run: |
           node --import tsx scripts/verify-migration-transfer.ts export .local/evidence/phase21/windows-migration.json
@@ -156,6 +169,8 @@ jobs:
           path: |
             apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
             apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app
+            apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz
+            apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
             .local/evidence/phase21/windows-migration.json
             .local/evidence/phase21/macos-restored.json
             .local/evidence/phase21/SHA256SUMS-macos.txt
@@ -227,8 +242,11 @@ jobs:
         with:
           name: macos-arm64-desktop-internal
           path: dist/release-input/macos
-      - name: Stage Windows and macOS downloads and SHA-256 checksums
+      - name: Install Minisign for release verification
+        run: sudo apt-get update && sudo apt-get install -y minisign
+      - name: Verify and stage both installers and the update manifest
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          LCT_UPDATER_PUBLIC_KEY: ${{ vars.LCT_UPDATER_PUBLIC_KEY }}
         run: bash scripts/stage-desktop-release.sh

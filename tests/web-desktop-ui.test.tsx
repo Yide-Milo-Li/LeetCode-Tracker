@@ -33,7 +33,7 @@ Object.defineProperty(window, 'matchMedia', {
 });
 
 const React = await import('react');
-const { render, renderHook, fireEvent, screen, act, cleanup } = await import('@testing-library/react');
+const { render, renderHook, fireEvent, screen, within, act, cleanup } = await import('@testing-library/react');
 const { App } = await import('../apps/web/src/App.tsx');
 const { Tooltip, InfoPopover, Dialog } = await import('../apps/web/src/components/ui.tsx');
 const { TodayPlanView } = await import('../apps/web/src/components/TodayPlanView.tsx');
@@ -41,6 +41,60 @@ const { TodayProblemRow } = await import('../apps/web/src/components/TodayProble
 const { DesktopAgentPanel } = await import('../apps/web/src/components/settings/DesktopAgentPanel.tsx');
 const { api } = await import('../apps/web/src/api.ts');
 const { useEncouragement } = await import('../apps/web/src/hooks/useEncouragement.ts');
+
+it('checks on startup, separates download from installation, and blocks restart for an unsaved note', async () => {
+  const { DesktopUpdateNotice } = await import('../apps/web/src/components/DesktopUpdateNotice.tsx');
+  const { DesktopUpdateRow } = await import('../apps/web/src/components/settings/DesktopUpdateRow.tsx');
+  const calls: string[] = [];
+  let offeredVersion: string | null = '1.4.1';
+  let releaseDownload: () => void = () => {};
+  Object.assign(window, { __TAURI_INTERNALS__: {
+    transformCallback: () => 1,
+    invoke: async (command: string, args?: { progress: { onmessage: (percent: number) => void } }) => {
+      calls.push(command);
+      if (command === 'desktop_update_info') return { version: '1.4.0', enabled: true };
+      if (command === 'check_desktop_update') return offeredVersion;
+      if (command === 'download_desktop_update') {
+        args?.progress.onmessage(31);
+        await new Promise<void>(resolve => { releaseDownload = resolve; });
+        return;
+      }
+      if (command === 'install_desktop_update') throw new Error('Installer could not start');
+      throw new Error(`Unexpected command ${command}`);
+    },
+  } });
+  try {
+    const app = (noteNeedsSave: boolean) => <>
+      <DesktopUpdateNotice lang="en" onOpen={() => {}} />
+      <DesktopUpdateRow lang="en" noteNeedsSave={noteNeedsSave} />
+    </>;
+    const view = render(app(true));
+    await screen.findByRole('button', { name: 'View update' });
+    assert.deepEqual(calls, ['desktop_update_info', 'check_desktop_update']);
+    assert.ok(screen.getByText('Current version 1.4.0'));
+    const check = () => fireEvent.click(screen.getByRole('button', { name: 'Check for updates' }));
+    offeredVersion = null;
+    await act(async () => { check(); });
+    assert.ok(screen.getByText('You’re up to date.'));
+    offeredVersion = '1.4.1';
+    await act(async () => { check(); });
+    fireEvent.click(screen.getByRole('button', { name: 'Download update' }));
+    assert.equal(screen.getByRole<HTMLProgressElement>('progressbar', { name: 'Download progress' }).value, 31);
+    await act(async () => { releaseDownload(); });
+    assert.ok(screen.getByRole<HTMLButtonElement>('button', { name: 'Install and restart' }).disabled);
+    assert.equal(calls.includes('install_desktop_update'), false);
+    view.rerender(app(false));
+    fireEvent.click(screen.getByRole('button', { name: 'Install and restart' }));
+    const dialog = within(screen.getByRole('dialog', { name: 'Install and restart' }));
+    assert.equal(calls.includes('install_desktop_update'), false);
+    await act(async () => { fireEvent.click(dialog.getByRole('button', { name: 'Install and restart' })); });
+    assert.equal(calls.at(-1), 'install_desktop_update');
+    assert.ok(dialog.getByText(/Could not install the update/));
+  } finally {
+    cleanup();
+    Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
+  }
+});
 
 it('offers the optional skill alongside the selected client’s MCP configuration', async () => {
   const copied: string[] = [];

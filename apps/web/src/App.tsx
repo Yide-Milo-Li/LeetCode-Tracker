@@ -22,10 +22,12 @@ import { ActivityRecords } from './components/ActivityRecords.tsx';
 import { TodayPlanView } from './components/TodayPlanView.tsx';
 import { PracticeWorkspace } from './components/PracticeWorkspace.tsx';
 import { PracticeTimerPill } from './components/PracticeTimer.tsx';
+import { DesktopUpdateNotice } from './components/DesktopUpdateNotice.tsx';
 import { ShortcutHelpModal } from './components/ShortcutHelpModal.tsx';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.ts';
 import { SetupGate } from './components/SetupGuide.tsx';
 import { brandIconUrl } from './brand-icons.ts';
+import { isTauri } from './platform/index.ts';
 import type { SettingsSection } from './components/SettingsView.tsx';
 import { Feedback, IconButton, PageHeader, Tooltip } from './components/ui.tsx';
 
@@ -123,6 +125,7 @@ export function App() {
   const [selectedNoteProblem, setSelectedNoteProblem] = useState<string | null>(null);
   const [recordsFilter, setRecordsFilter] = useState<RecordsFilterRequest | null>(null);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('general');
+  const [noteNeedsSave, setNoteNeedsSave] = useState(false);
   const [practiceQueue, setPracticeQueue] = useState<PracticeRequest[]>([]);
   const practice = practiceQueue[0];
   const [outcomes, setOutcomes] = useState<PracticeOutcome[]>([]);
@@ -421,6 +424,16 @@ export function App() {
           </div>
         </aside>
         <main id="main-content" className="main-content" tabIndex={-1}>
+          {isTauri() && (
+            <DesktopUpdateNotice
+              lang={lang}
+              visible={view !== 'settings' || settingsSection !== 'general'}
+              onOpen={() => {
+                setSettingsSection('general');
+                navigate('settings');
+              }}
+            />
+          )}
           {latestActivity && activityId !== dismissedActivity && (
             <Feedback tone="info">
               {activityLabel(latestActivity, lang)}{' '}
@@ -543,6 +556,7 @@ export function App() {
                   notesFormatOnSave={notesFormatOnSave ?? undefined}
                   initialFrontendId={selectedNoteProblem}
                   onClearInitialFrontendId={() => setSelectedNoteProblem(null)}
+                  onNeedsSaveChange={setNoteNeedsSave}
                 />
               </div>
             )}
@@ -585,6 +599,7 @@ export function App() {
                 <SettingsView
                   lang={lang}
                   desktopAgent={desktopAgent}
+                  noteNeedsSave={noteNeedsSave}
                   onLanguageChange={(language) => persistPreference({ language })}
                   onThemeChange={(theme) => persistPreference({ theme })}
                   currentTheme={theme}

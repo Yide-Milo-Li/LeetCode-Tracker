@@ -45,6 +45,7 @@ interface SettingsViewProps {
   section?: SettingsSection;
   onSectionChange?: (section: SettingsSection) => void;
   desktopAgent?: DesktopAgentStatus;
+  noteNeedsSave?: boolean;
 }
 
 export { PALETTE_OPTIONS, type PaletteOption } from '../palettes.ts';
@@ -70,6 +71,7 @@ export function SettingsView({
   section: controlledSection,
   onSectionChange,
   desktopAgent,
+  noteNeedsSave,
 }: SettingsViewProps) {
   const zh = lang === 'zh';
 
@@ -186,6 +188,7 @@ export function SettingsView({
           lang={lang}
           onLanguageChange={onLanguageChange}
           onTimezoneSaved={onTimezoneSaved}
+          noteNeedsSave={noteNeedsSave}
         />
       )}
 

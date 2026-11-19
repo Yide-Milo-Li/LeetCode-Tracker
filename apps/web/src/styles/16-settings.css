@@ -78,6 +78,24 @@
   padding-top: 4px;
 }
 
+.desktop-update-controls {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+.desktop-update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.desktop-update-controls .settings-hint:empty {
+  position: absolute;
+}
+.desktop-update-controls progress {
+  accent-color: var(--primary);
+  inline-size: min(100%, 14rem);
+}
+
 /* AI clients tab: client picker wraps on narrow windows; snippets and the activity log. */
 .settings-panel .segmented-control {
   flex-wrap: wrap;

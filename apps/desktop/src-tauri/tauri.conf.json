@@ -6,6 +6,9 @@
   "build": {
     "frontendDist": "../../web/dist"
   },
+  "plugins": {
+    "updater": { "pubkey": "" }
+  },
   "app": {
     "withGlobalTauri": true,
     "windows": [

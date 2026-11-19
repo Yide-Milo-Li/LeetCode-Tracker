@@ -32,6 +32,7 @@ export interface NotesWorkspaceProps {
   initialFrontendId?: string | null;
   /** Clear external initial frontend ID once consumed to prevent deadlock on subsequent switches. */
   onClearInitialFrontendId?: () => void;
+  onNeedsSaveChange?: (needsSave: boolean) => void;
 }
 
 /** Browse and edit notes while keeping asynchronous responses owned by their selection visit. */
@@ -40,6 +41,7 @@ export function NotesWorkspace({
   notesFormatOnSave: controlledFormatOnSave,
   initialFrontendId,
   onClearInitialFrontendId,
+  onNeedsSaveChange,
 }: NotesWorkspaceProps) {
   const t = translations[lang];
   const workspace = useWorkspace();
@@ -71,6 +73,8 @@ export function NotesWorkspace({
     setListRevision: list.setListRevision,
   });
   const { canSave, handleSaveNote, hasUnsavedChanges, aiReview, closeAiReview, discardRecoveredDraft } = editor;
+  const needsSave = hasUnsavedChanges || editor.savingNote;
+  useEffect(() => { onNeedsSaveChange?.(needsSave); }, [needsSave, onNeedsSaveChange]);
 
   const [showTimeline, setShowTimeline] = useState(false);
 

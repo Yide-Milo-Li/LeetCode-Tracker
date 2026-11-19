@@ -2,11 +2,14 @@
 import { translations, type Language } from '../../i18n.ts';
 import { useWorkspace } from '../../workspace.tsx';
 import { TimezoneField } from '../TimezoneField.tsx';
+import { isTauri } from '../../platform/index.ts';
+import { DesktopUpdateRow } from './DesktopUpdateRow.tsx';
 
 interface GeneralSectionProps {
   lang: Language;
   onLanguageChange: (lang: Language) => void;
   onTimezoneSaved?: (zone: string | null) => void;
+  noteNeedsSave?: boolean;
 }
 
 /** Render the General tab panel; preference values and their persistence stay with the parent. */
@@ -14,6 +17,7 @@ export function GeneralSection({
   lang,
   onLanguageChange,
   onTimezoneSaved,
+  noteNeedsSave = false,
 }: GeneralSectionProps) {
   const t = translations[lang];
   const workspace = useWorkspace();
@@ -47,6 +51,7 @@ export function GeneralSection({
         </div>
         <TimezoneField lang={lang} value={workspace.timezone} onSaved={(zone) => onTimezoneSaved?.(zone)} hideLabel />
       </section>
+      {isTauri() && <DesktopUpdateRow lang={lang} noteNeedsSave={noteNeedsSave} />}
     </div>
   );
 }

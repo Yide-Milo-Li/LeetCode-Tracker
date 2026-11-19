@@ -3,6 +3,7 @@ mod icon;
 mod persistent_icon;
 mod process;
 mod security;
+mod updates;
 
 use rand::RngCore;
 use serde::Serialize;
@@ -38,6 +39,7 @@ struct DesktopState {
     status: Mutex<DesktopStatus>,
     starting: AtomicBool,
     exiting: AtomicBool,
+    installing_update: AtomicBool,
     exports: tokio::sync::Mutex<()>,
     #[cfg(windows)]
     win_icons: Mutex<icon::WindowsIconState>,
@@ -52,6 +54,7 @@ impl Default for DesktopState {
             status: Mutex::new(DesktopStatus { state: "starting" }),
             starting: AtomicBool::new(false),
             exiting: AtomicBool::new(false),
+            installing_update: AtomicBool::new(false),
             exports: tokio::sync::Mutex::new(()),
             #[cfg(windows)]
             win_icons: Mutex::new(icon::WindowsIconState::default()),
@@ -70,6 +73,12 @@ impl DesktopState {
             .map_err(|_| "Connection lock failed")?
             .clone()
             .ok_or_else(|| "Local service is not ready".into())
+    }
+
+    fn stop_service(&self) -> Result<bool, String> {
+        self.connection.lock().unwrap().take();
+        let child = self.child.lock().unwrap().take();
+        child.map_or(Ok(true), |mut child| child.shutdown(SHUTDOWN_TIMEOUT))
     }
 }
 
@@ -201,7 +210,10 @@ fn start_service(app: &AppHandle) -> Result<(), String> {
 /// Failed initialization reaps its process and leaves the window available for retry.
 fn begin_startup(app: AppHandle) {
     let state = app.state::<DesktopState>();
-    if state.exiting.load(Ordering::SeqCst) || state.starting.swap(true, Ordering::SeqCst) {
+    if state.exiting.load(Ordering::SeqCst)
+        || state.installing_update.load(Ordering::SeqCst)
+        || state.starting.swap(true, Ordering::SeqCst)
+    {
         return;
     }
     // A renderer retry must never replace an already healthy owner.
@@ -211,24 +223,30 @@ fn begin_startup(app: AppHandle) {
     }
     *state.status.lock().unwrap() = DesktopStatus { state: "starting" };
     tauri::async_runtime::spawn_blocking(move || {
-        let state = app.state::<DesktopState>();
-        let result = start_service(&app);
-        if result.is_err() {
-            state.child.lock().unwrap().take();
-            state.connection.lock().unwrap().take();
-        }
-        *state.status.lock().unwrap() = DesktopStatus {
-            state: if result.is_ok() { "ready" } else { "error" },
-        };
-        state.starting.store(false, Ordering::SeqCst);
+        initialize_service(&app);
+        app.state::<DesktopState>()
+            .starting
+            .store(false, Ordering::SeqCst);
     });
+}
+
+fn initialize_service(app: &AppHandle) {
+    let state = app.state::<DesktopState>();
+    let result = start_service(app);
+    if result.is_err() {
+        state.child.lock().unwrap().take();
+        state.connection.lock().unwrap().take();
+    }
+    *state.status.lock().unwrap() = DesktopStatus {
+        state: if result.is_ok() { "ready" } else { "error" },
+    };
 }
 
 /// Poll liveness without returning private paths, secrets or raw provider errors.
 #[tauri::command]
 fn get_desktop_status(state: State<'_, DesktopState>) -> DesktopStatus {
     let mut status = state.status.lock().unwrap();
-    if status.state == "ready" {
+    if status.state == "ready" && !state.installing_update.load(Ordering::SeqCst) {
         let stopped = state
             .child
             .lock()
@@ -527,7 +545,9 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(DesktopState::default())
+        .manage(updates::DesktopUpdates::default())
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_menu(tauri::menu::Menu::default(app.handle())?)?;
@@ -542,7 +562,11 @@ pub fn run() {
             get_desktop_status,
             retry_sidecar,
             get_icon_target_sizes,
-            set_app_icon
+            set_app_icon,
+            updates::desktop_update_info,
+            updates::check_desktop_update,
+            updates::download_desktop_update,
+            updates::install_desktop_update
         ])
         .build(tauri::generate_context!())
         .expect("Could not initialize the desktop window")
@@ -582,6 +606,12 @@ pub fn run() {
             }
             if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
                 let state = app.state::<DesktopState>();
+                if state.installing_update.load(Ordering::SeqCst) {
+                    if code != Some(tauri::RESTART_EXIT_CODE) {
+                        api.prevent_exit();
+                    }
+                    return;
+                }
                 // The explicit app.exit below must not re-enter graceful shutdown.
                 if code.is_some() && state.exiting.load(Ordering::SeqCst) {
                     return;
@@ -590,14 +620,10 @@ pub fn run() {
                 if state.exiting.swap(true, Ordering::SeqCst) {
                     return;
                 }
-                state.connection.lock().unwrap().take();
                 let handle = app.clone();
                 tauri::async_runtime::spawn_blocking(move || {
                     let state = handle.state::<DesktopState>();
-                    let child = state.child.lock().unwrap().take();
-                    if let Some(mut child) = child {
-                        let _ = child.shutdown(SHUTDOWN_TIMEOUT);
-                    }
+                    let _ = state.stop_service();
                     handle.exit(0);
                 });
             }

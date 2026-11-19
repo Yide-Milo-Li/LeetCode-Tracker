@@ -77,6 +77,14 @@ The palette-tinted icon also stays in place after the app quits, so the Start me
 - **Source-mode launch says port `3000` is occupied**: Run with a custom port such as `PORT=3001 npm run desktop:mac`.
 - **Upgrading an existing `.app`**: Quit with `Cmd+Q` first so the SQLite WAL/lease closes cleanly before replacing **LeetCode Tracker.app** in **Applications**; your database in `~/Library/Application Support/com.leetcodetracker.desktop/` is preserved across app replacements.
 
+### 1.4 App updates
+
+The app checks for a stable update after startup. Open **Settings → General → App updates** to see the installed version, check manually, or read the release notes. Download the update when convenient. Once the download passes signature verification, choose **Install and restart**. Save pending work before confirming. If a Notes draft is open, save or discard it before installing.
+
+On Windows the NSIS installer closes and relaunches the app. If Windows reports that `node.exe` is still in use, disconnect any AI client running the bundled LeetCode Tracker MCP server and retry. On macOS install the app in **Applications** before using the updater. Both platforms retain the profile in the data directory listed above. If a download or install fails, retry from Settings or use the manual installer link. A download stays available while the app is running.
+
+Version 1.3.1 and earlier require one manual upgrade to the first release with app updates. Development builds show the current version and a link to the manual installers.
+
 ---
 
 ## 2. Architecture & Process Lifecycle
@@ -150,7 +158,11 @@ To prevent orphan background processes:
 
 Use GitHub Actions artifacts for Windows and macOS acceptance and distribution. Push the candidate commit to a `release/**` branch. In its successful [CI run](https://github.com/Yide-Milo-Li/LeetCode-Tracker/actions/workflows/ci.yml), download `windows-desktop-unsigned` and `macos-arm64-desktop-internal` and test those installers on the target machines.
 
-For a formal release, push a version tag matching the package version, such as `v1.4.0`. After all CI jobs pass, the same run stages its two installers and a combined `SHA256SUMS.txt` in a draft GitHub Release. Review the draft and publish it when ready. Once the latest stable release has both installers and matching checksums, the retention workflow removes older installer and checksum attachments. Release notes, tags and GitHub-generated source archives stay available.
+Before tagging the first updater-enabled release, generate a Tauri updater key pair in a private location outside the checkout. For example, with the Tauri CLI installed, run `npm --prefix apps/desktop run tauri -- signer generate --write-keys /absolute/private/path/updater.key`. Keep a secure backup of the private key and its password. Every release must use the same key pair so already-installed copies can verify updates. In the GitHub repository, set the Actions variable `LCT_UPDATER_PUBLIC_KEY` to the contents of `updater.key.pub`, and set the Actions secrets `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` to the private key contents and password. The Tauri updater signature is separate from Windows Authenticode and Apple Developer ID signing and notarization.
+
+Push a version tag matching the package version, such as `v1.4.0`. After all CI jobs pass, CI verifies the signatures and stages the same Windows NSIS `.exe`, macOS `.dmg`, macOS `.app.tar.gz`, both updater signatures, `latest.json`, and `SHA256SUMS.txt` in a draft GitHub Release. Review the draft and publish it when ready. Mark only stable releases as latest so the app can fetch the stable manifest. The retention workflow verifies the complete latest release before removing older installer, updater, and checksum attachments. Release notes, tags and GitHub-generated source archives stay available.
+
+For an upgrade acceptance test, install the previous updater-enabled version on both target platforms and create a practice record and a note. Check for the new release, download it, and confirm installation. Verify that the replacement app relaunches with the new version, retains both entries, and reports that it is up to date. Use an isolated test feed and profiles when testing before public release.
 
 The commands below reproduce the builds for local development.
 
