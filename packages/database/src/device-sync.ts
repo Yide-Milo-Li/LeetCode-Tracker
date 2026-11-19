@@ -81,6 +81,7 @@ export const SYNC_SETTING_KEYS = {
   deviceId: 'sync_device_id',
   deviceName: 'sync_device_name',
   transport: 'sync_transport',
+  automaticSync: 'sync_automatic',
   folderPath: 'sync_folder_path',
   baseSnapshotId: 'sync_base_snapshot_id',
   baseContentHash: 'sync_base_content_hash',

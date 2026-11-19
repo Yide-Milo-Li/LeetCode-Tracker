@@ -80,6 +80,7 @@ export const syncConfigInputSchema = z.object({
   transport: syncTransportKindSchema,
   folderPath: z.string().trim().min(1).max(1024).optional(),
   deviceName: deviceName.optional(),
+  automaticSync: z.boolean().optional(),
   googleClientId: z.string().trim().max(300).optional(),
   googleClientSecret: z.string().trim().max(300).optional(),
 }).strict();
@@ -128,6 +129,7 @@ export interface SyncSnapshotSummary {
 export interface SyncStatus {
   transport: SyncTransportKind;
   configured: boolean;
+  automaticSync: boolean;
   deviceId: string;
   deviceName: string;
   folderPath: string | null;

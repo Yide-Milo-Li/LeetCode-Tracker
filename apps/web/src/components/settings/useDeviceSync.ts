@@ -63,6 +63,7 @@ export function useDeviceSync(lang: Language, active: boolean) {
   const [transportDraft, setTransportDraft] = useState<SyncTransportKind>('none');
   const [folderDraft, setFolderDraft] = useState('');
   const [deviceNameDraft, setDeviceNameDraft] = useState('');
+  const [automaticSyncDraft, setAutomaticSyncDraft] = useState(false);
   const [clientIdDraft, setClientIdDraft] = useState('');
   const [clientSecretDraft, setClientSecretDraft] = useState('');
   const [googleAuthDeadline, setGoogleAuthDeadline] = useState<number | null>(null);
@@ -85,6 +86,7 @@ export function useDeviceSync(lang: Language, active: boolean) {
       setTransportDraft(next.transport);
       setFolderDraft(next.folderPath ?? '');
       setDeviceNameDraft(next.deviceName);
+      setAutomaticSyncDraft(next.automaticSync);
     }
   }, []);
 
@@ -110,10 +112,10 @@ export function useDeviceSync(lang: Language, active: boolean) {
     api.getSyncStatus()
       .then(async (initial) => {
         if (!current) return;
-        const deferCheck = canCheckOnPublish(initial);
+        const deferCheck = !initial.automaticSync && canCheckOnPublish(initial);
         // Until the sender checks Drive, show its local edits and the time of its last check.
         applyStatus(deferCheck ? { ...initial, classification: null, heads: [], devices: [] } : initial, true);
-        if (initial.configured && !deferCheck) {
+        if (initial.configured && !initial.automaticSync && !deferCheck) {
           const checked = await api.checkSync().catch(() => null);
           if (current && checked) applyStatus(checked);
         }
@@ -125,8 +127,27 @@ export function useDeviceSync(lang: Language, active: boolean) {
     return () => { current = false; };
   }, [active]);
 
-  const check = useCallback(async () => {
-    const next = await run('check', () => api.checkSync(), zh ? '检查同步失败。' : 'Sync check failed.');
+  useEffect(() => {
+    if (!active || busy || !status?.configured || !status.automaticSync) return;
+    let current = true;
+    let reading = false;
+    async function refreshLocalStatus() {
+      if (reading || document.visibilityState === 'hidden') return;
+      reading = true;
+      try {
+        const next = await api.getSyncStatus();
+        if (current) setStatus(next);
+      } catch { /* Manual actions can still show failures. */ }
+      finally { reading = false; }
+    }
+    void refreshLocalStatus();
+    const timer = window.setInterval(refreshLocalStatus, 5_000);
+    return () => { current = false; window.clearInterval(timer); };
+  }, [active, busy, status?.configured, status?.automaticSync]);
+
+  const check = useCallback(async (automatic = false) => {
+    const next = await run('check', () => automatic ? api.checkSyncOnForeground() : api.checkSync(),
+      zh ? '检查同步失败。' : 'Sync check failed.');
     if (next) applyStatus(next);
   }, [applyStatus, run, zh]);
 
@@ -145,7 +166,7 @@ export function useDeviceSync(lang: Language, active: boolean) {
         if (next.transport === 'gdrive' && next.google.connected && !next.google.reconnectRequired) {
           applyStatus(next);
           setGoogleAuthDeadline(null);
-          void check();
+          void check(next.automaticSync);
           return;
         }
       } catch {
@@ -175,6 +196,7 @@ export function useDeviceSync(lang: Language, active: boolean) {
   async function saveConfig() {
     const next = await run('config', () => api.configureSync({
       transport: transportDraft,
+      ...(automaticSyncDraft !== status?.automaticSync ? { automaticSync: automaticSyncDraft } : {}),
       ...(transportDraft === 'folder' && folderDraft.trim() ? { folderPath: folderDraft.trim() } : {}),
       ...(deviceNameDraft.trim() ? { deviceName: deviceNameDraft.trim() } : {}),
     }), zh ? '保存同步设置失败。' : 'Could not save sync settings.');
@@ -183,7 +205,8 @@ export function useDeviceSync(lang: Language, active: boolean) {
     if (next.transport !== 'gdrive') setGoogleAuthDeadline(null);
     setPreview(null);
     setHistory(null);
-    if (next.configured) await check();
+    const targetChanged = next.transport !== status?.transport || next.folderPath !== status?.folderPath;
+    if (next.configured && (next.automaticSync || !status?.automaticSync || targetChanged)) await check(next.automaticSync);
     else setNotice(zh ? '同步设置已保存。' : 'Sync settings saved.');
   }
 
@@ -272,7 +295,7 @@ export function useDeviceSync(lang: Language, active: boolean) {
     setPreview(null);
     setHistory(null);
     publishOperation.current = null;
-    if (next.configured) await check();
+    if (next.configured) await check(next.automaticSync);
     else setNotice(zh ? '客户端已保存。请连接 Google Drive。' : 'OAuth client saved. Connect Google Drive to continue.');
   }
 
@@ -292,7 +315,7 @@ export function useDeviceSync(lang: Language, active: boolean) {
       return deadline;
     }, zh ? '无法开始 Google 授权。' : 'Could not start Google authorization.');
     if (result === 'already-connected') {
-      await check();
+      await check(status?.automaticSync);
     } else if (result !== undefined) {
       setGoogleAuthDeadline(result);
       setNotice(zh ? '请在浏览器中完成 Google 授权。连接状态会自动更新。' : 'Finish signing in to Google in your browser. This panel will update automatically.');
@@ -324,6 +347,8 @@ export function useDeviceSync(lang: Language, active: boolean) {
     setFolderDraft,
     deviceNameDraft,
     setDeviceNameDraft,
+    automaticSyncDraft,
+    setAutomaticSyncDraft,
     clientIdDraft,
     setClientIdDraft,
     clientSecretDraft,

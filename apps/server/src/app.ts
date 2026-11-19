@@ -147,6 +147,13 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       ...options.deviceSync,
     }
   );
+  app.addHook('onClose', () => deviceSync.close());
+  app.addHook('onResponse', async (request, reply) => {
+    if (reply.statusCode < 200 || reply.statusCode >= 300 ||
+        !['POST', 'PATCH', 'PUT', 'DELETE'].includes(request.method) ||
+        request.url.startsWith('/api/v1/sync/')) return;
+    deviceSync.observeLocalWrite();
+  });
   registerAllRoutes(app, {
     application,
     deviceSync,

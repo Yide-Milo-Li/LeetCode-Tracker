@@ -133,6 +133,7 @@ it('offers the optional skill alongside the selected client’s MCP configuratio
 describe('Minimal Desktop UI - Phase 10', () => {
   beforeEach(() => {
     localStorage.clear();
+    mock.method(api, 'checkSyncOnForeground', async () => null);
     mock.method(api, 'getSettings', async () => ({
       language: 'en',
       theme: 'system',

@@ -284,11 +284,23 @@ beforeEach(() => {
   mock.method(api, 'getProgressSnapshots', async () => ({ items: [], total: 0, page: 1, limit: 20 }));
   mock.method(api, 'getProgressImportHistory', async () => ({ items: [], total: 0 }));
   mock.method(api, 'getImportHistory', async () => ({ items: [], total: 0 }));
+  mock.method(api, 'checkSyncOnForeground', async () => null);
 });
 afterEach(() => {
   cleanup();
   mock.restoreAll();
   window.sessionStorage.clear();
+});
+
+it('signals automatic sync on startup and when returning to the app', async (t) => {
+  const foreground = t.mock.method(api, 'checkSyncOnForeground', async () => null);
+  await act(async () => { render(<App />); });
+  assert.equal(foreground.mock.callCount(), 1);
+  await act(async () => { fireEvent.focus(window); });
+  assert.equal(foreground.mock.callCount(), 2);
+  cleanup();
+  await act(async () => { fireEvent.focus(window); });
+  assert.equal(foreground.mock.callCount(), 2, 'unmounted windows no longer signal sync');
 });
 
 it('clearing an in-flight manual search removes its spinner and ignores the old response', async () => {

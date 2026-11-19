@@ -26,6 +26,16 @@ Whichever version you pick becomes the single latest snapshot (it supersedes the
 
 **History** lists every snapshot. Restoring an older one goes through the same preview and then marks it as the latest version so other devices converge on it.
 
+### Automatic sync
+
+Under **Settings → Sync**, turn on **Automatic sync** and save. The setting applies to this device and works with either sync method.
+
+- Opening the app, returning to it or reconnecting to the network checks for updates. If there is a newer snapshot or a conflict, the app links to Sync for review.
+- Once this device has published or received its first snapshot, saved edits are batched until 30 seconds after the last save. A fresh check must find that this device is the only one ahead before the app publishes.
+- With direct Google Drive, automatic checks start at most once per five minutes per running app. A batch of saved edits waits for that interval if needed, and publishing reuses the check. Folder sync uses the local folder and leaves file transfer to your file sync client.
+
+First publishes, receiving and conflict resolution require confirmation. Use **Check** or **Publish this device** to act immediately, including before switching devices. If you quit with saved edits waiting, the next launch can publish them. An interrupted Drive upload can be resumed from Sync with the original snapshot and its saved upload state.
+
 ### What stays on each device
 
 - AI provider API keys (`*_api_key`, `*_secret`, `*_token` settings).

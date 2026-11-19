@@ -1,9 +1,11 @@
 /** Settings "Sync" tab content: sync folder or Google Drive snapshots, split into setup and status rows. */
+import { useId } from 'react';
 import { AlertTriangle, Cloud, FolderOpen, History, RefreshCw, Upload, Download } from 'lucide-react';
 import type { SyncClassification, SyncSnapshotSummary, SyncTransportKind } from '../../api.ts';
 import { isTauri } from '../../platform/index.ts';
 import type { Language } from '../../i18n.ts';
 import { Feedback, Field, InfoPopover } from '../ui.tsx';
+import { SettingSwitch } from './SettingSwitch.tsx';
 import type { DeviceSync } from './useDeviceSync.ts';
 
 interface SyncSectionProps {
@@ -33,6 +35,7 @@ function formatBytes(bytes: number): string {
 export function SyncSection({ lang, sync }: SyncSectionProps) {
   const zh = lang === 'zh';
   const { status, busy, error, notice, preview, history, checkOnPublish } = sync;
+  const automaticSyncHintId = useId();
   const pendingPublish = status?.pendingPublish;
   const disabled = busy !== null;
   const classification = status?.classification ?? null;
@@ -168,9 +171,19 @@ export function SyncSection({ lang, sync }: SyncSectionProps) {
           )}
 
           {sync.transportDraft !== 'none' && (
-            <Field label={zh ? '本机名称' : 'This device’s name'}>
-              <input type="text" value={sync.deviceNameDraft} maxLength={80} onChange={(e) => sync.setDeviceNameDraft(e.target.value)} />
-            </Field>
+            <>
+              <Field label={zh ? '本机名称' : 'This device’s name'}>
+                <input type="text" value={sync.deviceNameDraft} maxLength={80} onChange={(e) => sync.setDeviceNameDraft(e.target.value)} />
+              </Field>
+              <div className="form-field">
+                <span>{zh ? '自动同步' : 'Automatic sync'}</span>
+                <SettingSwitch lang={lang} label={zh ? '自动同步' : 'Automatic sync'} describedBy={automaticSyncHintId}
+                  checked={sync.automaticSyncDraft} onChange={sync.setAutomaticSyncDraft} disabled={disabled} />
+                <small id={automaticSyncHintId}>{zh
+                  ? '启动或回到应用时检查更新。合并一段时间内的编辑后自动发布，接收新版前会请你确认。'
+                  : 'Checks when you open or return to the app and publishes saved edits in batches. Receiving an update requires confirmation.'}</small>
+              </div>
+            </>
           )}
 
           <div className="action-row">
@@ -185,7 +198,9 @@ export function SyncSection({ lang, sync }: SyncSectionProps) {
         <section className="preference-row">
           <div className="preference-label">
             <h2>{zh ? '同步状态' : 'Sync status'}</h2>
-            <p>{zh
+            <p>{status?.automaticSync ? (zh
+              ? '首次发布和接收新版需要确认。切换设备前，可立即手动发布尚未同步的修改。'
+              : 'Confirm the first publish and each receive. Use manual publish to send waiting edits before switching devices.') : zh
               ? '切换设备前先在原设备发布，到新设备后先接收。'
               : 'Publish before you leave a device; receive first when you arrive on another.'}</p>
             {status?.checkedAt != null && (
@@ -211,6 +226,8 @@ export function SyncSection({ lang, sync }: SyncSectionProps) {
                     {zh ? `有 ${status.unreadableFiles} 个同步文件无法读取，已忽略。` : `${status.unreadableFiles} sync files could not be read and were ignored.`}
                   </Feedback>
                 )}
+
+                {status.automaticSync && status.lastError && !error && <Feedback tone="warning">{status.lastError}</Feedback>}
 
                 <div className="action-row">
                   <button type="button" className="btn btn-secondary btn-sm" onClick={() => void sync.check()} disabled={disabled}>

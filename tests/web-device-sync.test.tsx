@@ -47,6 +47,7 @@ function status(overrides: Partial<SyncStatus> = {}): SyncStatus {
   return {
     transport: 'folder',
     configured: true,
+    automaticSync: false,
     deviceId: '33333333-3333-4333-8333-333333333333',
     deviceName: 'Laptop',
     folderPath: 'G:\\My Drive',
@@ -171,6 +172,32 @@ it('saves a sync folder and checks the remote right away', async () => {
   assert.equal(check.mock.callCount(), 1);
   assert.ok(screen.getByText(/Nothing published yet/));
   assert.ok(screen.getByRole('button', { name: /Publish this device/ }));
+});
+
+it('saves the automatic sync preference and uses the throttled check', async () => {
+  stubSettings();
+  let current = driveSender({ classification: null, checkedAt: null });
+  mock.method(api, 'getSyncStatus', async () => current);
+  const configure = mock.method(api, 'configureSync', async (input: Parameters<typeof api.configureSync>[0]) => {
+    current = { ...current, automaticSync: input.automaticSync! };
+    return current;
+  });
+  const foreground = mock.method(api, 'checkSyncOnForeground', async () => current);
+  const manualCheck = mock.method(api, 'checkSync', async () => current);
+  await renderSync();
+  const toggle = screen.getByRole('switch', { name: 'Automatic sync' });
+  assert.equal(toggle.getAttribute('aria-checked'), 'false');
+  await act(async () => { fireEvent.click(toggle); });
+  assert.equal(configure.mock.callCount(), 0);
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save sync settings' })); });
+  assert.equal(configure.mock.calls[0].arguments[0].automaticSync, true);
+  assert.equal(foreground.mock.callCount(), 1);
+  assert.equal(manualCheck.mock.callCount(), 0);
+  await act(async () => { fireEvent.click(toggle); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save sync settings' })); });
+  assert.equal(configure.mock.calls[1].arguments[0].automaticSync, false);
+  assert.equal(foreground.mock.callCount(), 1);
+  assert.equal(manualCheck.mock.callCount(), 0);
 });
 
 it('refreshes Google Drive when returning to the app after consent', async (t) => {

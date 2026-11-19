@@ -567,6 +567,10 @@ export const syncApi = {
     return request<SyncStatus>('/sync/check', { method: 'POST' });
   },
 
+  checkSyncOnForeground(): Promise<SyncStatus | null> {
+    return request<SyncStatus | null>('/sync/foreground', { method: 'POST' });
+  },
+
   getSyncHistory(): Promise<{ items: SyncSnapshotSummary[] }> {
     return request<{ items: SyncSnapshotSummary[] }>('/sync/history');
   },

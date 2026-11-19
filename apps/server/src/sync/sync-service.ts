@@ -163,6 +163,8 @@ type SelectedGoogleClient = GoogleClientConfig & { source: 'bundled' | 'custom' 
 const PREVIEW_TTL_MS = 30 * 60 * 1000;
 const CHECKED_UPDATE_TTL_MS = 60_000;
 const MAX_DELTA_STEPS = 8;
+const AUTO_PUBLISH_DELAY_MS = 30_000;
+const AUTO_DRIVE_INTERVAL_MS = 5 * 60_000;
 
 function changedUpdate(): DeviceSyncError {
   return new DeviceSyncError(409, 'SYNC_UPDATE_CHANGED', 'The available update changed. Choose a version from the refreshed list.');
@@ -229,6 +231,12 @@ export class DeviceSyncService {
   private hashCache?: { stamp: string; hash: string };
   private listingFlight: Promise<Listing> | null = null;
   private listingRevision = 0;
+  private lastListingAttemptAt: number | null = null;
+  private lastLocalWriteAt: number | null = null;
+  private observedDataStamp: string;
+  private automaticTimer?: NodeJS.Timeout;
+  private automaticFlight?: Promise<void>;
+  private closed = false;
 
   private get journal(): DriveSyncJournal {
     return this.driveJournal ??= new DriveSyncJournal(this.ctx.store.db);
@@ -256,6 +264,7 @@ export class DeviceSyncService {
     this.endpoints = { ...DEFAULT_GOOGLE_ENDPOINTS, ...options.googleEndpoints };
     this.now = options.now ?? Date.now;
     this.authFlow = new GoogleAuthorizationFlow(this.endpoints, this.fetchImpl, this.now);
+    this.observedDataStamp = ctx.store.dataStamp();
   }
 
   // ---------------------------------------------------------------------------
@@ -276,6 +285,7 @@ export class DeviceSyncService {
     return {
       transport,
       configured: transport === 'folder' ? this.setting(K.folderPath) !== null : transport === 'gdrive' && connected,
+      automaticSync: this.setting(K.automaticSync) === 'true',
       deviceId,
       deviceName,
       folderPath: this.setting(K.folderPath),
@@ -326,6 +336,7 @@ export class DeviceSyncService {
       }
     }
     if (input.deviceName !== undefined) values[K.deviceName] = input.deviceName;
+    if (input.automaticSync !== undefined) values[K.automaticSync] = String(input.automaticSync);
 
     return this.ctx.writeLock.run(() => {
       if (input.transport === 'folder' && !(values[K.folderPath] ?? this.setting(K.folderPath))) {
@@ -344,6 +355,7 @@ export class DeviceSyncService {
       const previousClient = this.googleClient();
       const nextClient = this.googleClient(values);
       const clientChanged = previousClient?.clientId !== nextClient?.clientId;
+      const secretChanged = previousClient?.clientSecret !== nextClient?.clientSecret;
       if (clientChanged) {
         values[K.googleGrantScope] = null;
         values[K.googleRefreshToken] = null;
@@ -351,16 +363,110 @@ export class DeviceSyncService {
       }
       const transportChanged = input.transport !== this.transport();
       const folderChanged = values[K.folderPath] !== undefined && values[K.folderPath] !== this.setting(K.folderPath);
+      const nameChanged = input.deviceName !== undefined && input.deviceName !== this.setting(K.deviceName);
       writeSyncSettings(this.ctx.store.db, values);
 
-      if (clientChanged || previousClient?.clientSecret !== nextClient?.clientSecret || transportChanged) {
+      if (clientChanged || secretChanged || transportChanged) {
         this.invalidateGoogleAuthorization();
         this.tokenSource = null;
       }
-      if (clientChanged || transportChanged || folderChanged) this.publishReplays.clear();
+      if (clientChanged || transportChanged || folderChanged) {
+        this.publishReplays.clear();
+        this.lastListingAttemptAt = null;
+      }
       if (clientChanged) this.reconnectRequired = false;
-      this.resetRemoteState(false);
+      if (clientChanged || secretChanged || transportChanged || folderChanged || nameChanged) this.resetRemoteState(false);
+      this.queueAutomaticPublish();
       return this.status();
+    });
+  }
+
+  /** Called after successful local mutations, including desktop MCP writes. */
+  observeLocalWrite(): void {
+    if (!this.automaticTransport() || !this.setting(K.baseSnapshotId)) return;
+    const stamp = this.ctx.store.dataStamp();
+    if (stamp === this.observedDataStamp) return;
+    this.observedDataStamp = stamp;
+    this.lastLocalWriteAt = this.now();
+    this.queueAutomaticPublish();
+  }
+
+  /** The visible app requests a check when it starts or returns to the foreground. */
+  async onForeground(): Promise<SyncStatus | null> {
+    await this.runAutomaticSync(true);
+    return !this.closed && this.setting(K.automaticSync) === 'true' ? this.status() : null;
+  }
+
+  async close(): Promise<void> {
+    this.closed = true;
+    this.clearCheckedUpdate();
+    clearTimeout(this.automaticTimer);
+    await this.automaticFlight;
+  }
+
+  private automaticTransport(): 'folder' | 'gdrive' | null {
+    if (this.closed || this.setting(K.automaticSync) !== 'true') return null;
+    const transport = this.transport();
+    if (transport === 'folder' && this.setting(K.folderPath)) return transport;
+    if (transport === 'gdrive' && !this.reconnectRequired && this.googleRefreshToken()) return transport;
+    return null;
+  }
+
+  private automaticWait(transport: 'folder' | 'gdrive', publish: boolean): number {
+    const interval = transport === 'gdrive' ? AUTO_DRIVE_INTERVAL_MS : AUTO_PUBLISH_DELAY_MS;
+    const nextListing = this.lastListingAttemptAt === null ? 0 : this.lastListingAttemptAt + interval;
+    const settled = publish && this.lastLocalWriteAt !== null ? this.lastLocalWriteAt + AUTO_PUBLISH_DELAY_MS : 0;
+    return Math.max(nextListing, settled) - this.now();
+  }
+
+  private queueAutomaticPublish(): void {
+    clearTimeout(this.automaticTimer);
+    const transport = this.automaticTransport();
+    if (!transport || !this.setting(K.baseSnapshotId)) return;
+    this.automaticTimer = setTimeout(() => {
+      void this.runAutomaticSync(false).catch(error => { this.toApiError(error); });
+    }, Math.max(0, this.automaticWait(transport, true))).unref();
+  }
+
+  private async runAutomaticSync(foreground: boolean): Promise<void> {
+    if (this.automaticFlight) {
+      await this.automaticFlight;
+      if (foreground) return;
+    }
+    const transport = this.automaticTransport();
+    if (!transport) return;
+    const local = this.localState();
+    const scope = transport === 'gdrive' ? this.tokenSource?.connection.scope : undefined;
+    const mayPublish = local.baseId !== null && local.dirty && (!scope || !this.journal.pendingPublish(scope));
+    if (!foreground && !mayPublish) return;
+    if (this.automaticWait(transport, mayPublish) > 0) {
+      if (mayPublish) this.queueAutomaticPublish();
+      return;
+    }
+
+    const cache = this.metaCache;
+    const flight = this.checkAndPublishAutomatically(mayPublish)
+      .catch(error => {
+        if (cache === this.metaCache) this.lastError = this.toApiError(error).message;
+      })
+      .finally(() => {
+        this.automaticFlight = undefined;
+      });
+    this.automaticFlight = flight;
+    await flight;
+  }
+
+  private async checkAndPublishAutomatically(mayPublish: boolean): Promise<void> {
+    const blobs = this.requireStore();
+    const listing = await this.refreshListing(blobs);
+    this.prepareCheckedUpdate(blobs, listing);
+    if (!mayPublish || listing.unreadable || listing.ambiguousSnapshotFiles) return;
+
+    await this.ctx.writeLock.run(async () => {
+      if (!this.automaticTransport() || listing !== this.listing || this.listingFlight ||
+          (this.lastLocalWriteAt !== null && this.now() - this.lastLocalWriteAt < AUTO_PUBLISH_DELAY_MS)) return;
+      const result = await this.publishLocked({}, blobs, listing);
+      if (result?.warning) this.lastError = result.warning;
     });
   }
 
@@ -368,27 +474,31 @@ export class DeviceSyncService {
   async check(): Promise<SyncStatus> {
     const blobs = this.requireStore();
     const listing = await this.refreshListing(blobs, true);
+    return this.status(this.prepareCheckedUpdate(blobs, listing));
+  }
+
+  private prepareCheckedUpdate(blobs: SyncBlobStore, listing: Listing): string | undefined {
     if (!(blobs instanceof GoogleDriveBlobStore) || listing !== this.listing || this.listingFlight ||
-        this.checkedUpdate || listing.unreadable) return this.status();
+        this.closed || this.checkedUpdate || listing.unreadable) return;
 
     const heads = findHeads(listing.snapshots);
     const head = heads[0];
-    if (heads.length !== 1 || !head.compatible || !head.envelope) return this.status();
-    if (!listing.fileIds.has(snapshotBlobNames(head.createdAt, head.snapshotId).data)) return this.status();
+    if (heads.length !== 1 || !head.compatible || !head.envelope) return;
+    if (!listing.fileIds.has(snapshotBlobNames(head.createdAt, head.snapshotId).data)) return;
 
     const rebuilt = this.previewDelta(listing.deltaChain, head.snapshotId);
-    if (!rebuilt && listing.ambiguousSnapshotFiles) return this.status();
+    if (!rebuilt && listing.ambiguousSnapshotFiles) return;
     const localHash = rebuilt?.baseHash ?? this.currentContentHash();
-    const status = this.status(localHash);
-    if (status.classification === 'remote-ahead') {
+    const local = this.localState(localHash);
+    if (classifySyncState(listing.snapshots, local.baseId, local.dirty).classification === 'remote-ahead') {
       this.checkedUpdate = {
         snapshot: head, bundle: rebuilt?.bundle,
-        baseId: status.baseSnapshotId, localHash,
+        baseId: local.baseId, localHash,
         expiresAt: this.now() + CHECKED_UPDATE_TTL_MS,
         timer: setTimeout(() => this.clearCheckedUpdate(), CHECKED_UPDATE_TTL_MS).unref(),
       };
     }
-    return status;
+    return localHash;
   }
 
   /** Every listed snapshot, newest first, for the history view. */
@@ -414,68 +524,75 @@ export class DeviceSyncService {
    * The same `operationId` with the same options replays the first result.
    */
   async publish(input: { operationId?: string; allowFork?: boolean }): Promise<SyncPublishResult> {
-    const fingerprint = JSON.stringify({ allowFork: input.allowFork === true });
     const deadline = Date.now() + DRIVE_BUDGET_MS;
-    return this.ctx.writeLock.run(async () => {
-      const blobs = this.requireStore(deadline);
-      const drive = blobs instanceof GoogleDriveBlobStore ? blobs : undefined;
-      const scope = drive ? await drive.scope().catch(error => { throw this.toApiError(error); }) : undefined;
-      const pending = scope
-        ? this.journal.pendingPublish(scope, input.operationId) ?? this.journal.pendingPublish(scope)
-        : undefined;
-      const operation = input.operationId ?? pending?.operationId ?? randomUUID();
-      const replay = scope ? this.journal.replay(scope, operation) : this.publishReplays.get(operation);
-      if (replay) {
-        if (replay.fingerprint !== fingerprint) throw new DeviceSyncError(409, 'SYNC_OPERATION_CONFLICT', 'Operation ID was used with different options');
-        return replay.result;
+    return this.ctx.writeLock.run(() => this.publishLocked(input, this.requireStore(deadline)));
+  }
+
+  private publishLocked(input: { operationId?: string; allowFork?: boolean }, blobs: SyncBlobStore): Promise<SyncPublishResult>;
+  private publishLocked(input: {}, blobs: SyncBlobStore, checkedListing: Listing): Promise<SyncPublishResult | undefined>;
+  private async publishLocked(
+    input: { operationId?: string; allowFork?: boolean }, blobs: SyncBlobStore, checkedListing?: Listing,
+  ): Promise<SyncPublishResult | undefined> {
+    const fingerprint = JSON.stringify({ allowFork: input.allowFork === true });
+    const drive = blobs instanceof GoogleDriveBlobStore ? blobs : undefined;
+    const scope = drive ? await drive.scope().catch(error => { throw this.toApiError(error); }) : undefined;
+    const pending = scope
+      ? this.journal.pendingPublish(scope, input.operationId) ?? this.journal.pendingPublish(scope)
+      : undefined;
+    if (checkedListing && (pending || checkedListing !== this.listing || this.listingFlight)) return;
+    const operation = input.operationId ?? pending?.operationId ?? randomUUID();
+    const replay = scope ? this.journal.replay(scope, operation) : this.publishReplays.get(operation);
+    if (replay) {
+      if (replay.fingerprint !== fingerprint) throw new DeviceSyncError(409, 'SYNC_OPERATION_CONFLICT', 'Operation ID was used with different options');
+      return replay.result;
+    }
+    if (pending && (pending.operationId !== operation || pending.allowFork !== !!input.allowFork)) {
+      throw new DeviceSyncError(409, 'SYNC_OPERATION_CONFLICT', 'Resume the pending publish with its original options.');
+    }
+    const finish = (result: SyncPublishResult) => {
+      if (scope) this.journal.finishPublish(scope, operation, fingerprint, result);
+      else if (input.operationId) this.publishReplays.set(operation, { fingerprint, result });
+      return result;
+    };
+    const listing = checkedListing ?? await this.refreshListing(blobs);
+    if (scope && drive && pending) {
+      const staged = this.journal.upload(scope, operation)!;
+      const snapshot = await this.sendStaged(drive, scope, staged);
+      return finish(await this.finishSnapshot(blobs, snapshot, staged.baseId));
+    }
+    const bundle = this.exportBundle();
+    const contentHash = computeContentHash(bundle.tables);
+    const local = this.localState(contentHash);
+    const graph = classifySyncState(listing.snapshots, local.baseId, local.dirty);
+    if (checkedListing && (graph.classification !== 'local-ahead' || !graph.heads[0].compatible)) return;
+    if (graph.classification !== 'up-to-date') {
+      // Refuse to publish what no receiver would accept.
+      try {
+        validateMigrationBundle(bundle);
+      } catch (error) {
+        throw new DeviceSyncError(422, 'SYNC_INVALID_DATA', `Local data failed validation: ${summarizeValidationError(error)}`);
       }
-      if (pending && (pending.operationId !== operation || pending.allowFork !== !!input.allowFork)) {
-        throw new DeviceSyncError(409, 'SYNC_OPERATION_CONFLICT', 'Resume the pending publish with its original options.');
-      }
-      const finish = (result: SyncPublishResult) => {
-        if (scope) this.journal.finishPublish(scope, operation, fingerprint, result);
-        else if (input.operationId) this.publishReplays.set(operation, { fingerprint, result });
-        return result;
-      };
-      const listing = await this.refreshListing(blobs);
-      if (scope && drive && pending) {
-        const staged = this.journal.upload(scope, operation)!;
-        const snapshot = await this.sendStaged(drive, scope, staged);
-        return finish(await this.finishSnapshot(blobs, snapshot, staged.baseId));
-      }
-      const bundle = this.exportBundle();
-      const contentHash = computeContentHash(bundle.tables);
-      const local = this.localState(contentHash);
-      const graph = classifySyncState(listing.snapshots, local.baseId, local.dirty);
-      if (graph.classification !== 'up-to-date') {
-        // Refuse to publish what no receiver would accept.
-        try {
-          validateMigrationBundle(bundle);
-        } catch (error) {
-          throw new DeviceSyncError(422, 'SYNC_INVALID_DATA', `Local data failed validation: ${summarizeValidationError(error)}`);
-        }
-      }
-      if (graph.classification === 'up-to-date') {
-        return finish({ published: false, snapshot: this.summarize(graph.heads[0], graph.heads) });
-      }
-      if (graph.classification === 'remote-ahead') {
-        throw new DeviceSyncError(409, 'SYNC_REMOTE_AHEAD', 'Another device published newer data; receive the latest snapshot first');
-      }
-      if (graph.heads.some(head => !head.compatible)) {
-        throw new DeviceSyncError(409, 'SYNC_INCOMPATIBLE', 'A newer app version published the latest snapshot; update this app first');
-      }
-      if (graph.classification === 'fork' && !input.allowFork) {
-        throw new DeviceSyncError(409, 'SYNC_FORK', 'More than one device changed data since the last sync; choose which version to keep');
-      }
-      const known = new Set(listing.snapshots.map(s => s.snapshotId));
-      const parentId = local.baseId && known.has(local.baseId) ? local.baseId : null;
-      const supersedes = graph.classification === 'fork'
-        ? graph.heads.map(head => head.snapshotId).filter(id => id !== parentId)
-        : [];
-      const snapshot = await this.upload(blobs, bundle, contentHash, { parentId, supersedes, kind: 'publish' },
-        { operation, purpose: 'publish', fingerprint });
-      return finish(await this.finishSnapshot(blobs, snapshot, this.setting(K.baseSnapshotId)));
-    });
+    }
+    if (graph.classification === 'up-to-date') {
+      return finish({ published: false, snapshot: this.summarize(graph.heads[0], graph.heads) });
+    }
+    if (graph.classification === 'remote-ahead') {
+      throw new DeviceSyncError(409, 'SYNC_REMOTE_AHEAD', 'Another device published newer data; receive the latest snapshot first');
+    }
+    if (graph.heads.some(head => !head.compatible)) {
+      throw new DeviceSyncError(409, 'SYNC_INCOMPATIBLE', 'A newer app version published the latest snapshot; update this app first');
+    }
+    if (graph.classification === 'fork' && !input.allowFork) {
+      throw new DeviceSyncError(409, 'SYNC_FORK', 'More than one device changed data since the last sync; choose which version to keep');
+    }
+    const known = new Set(listing.snapshots.map(s => s.snapshotId));
+    const parentId = local.baseId && known.has(local.baseId) ? local.baseId : null;
+    const supersedes = graph.classification === 'fork'
+      ? graph.heads.map(head => head.snapshotId).filter(id => id !== parentId)
+      : [];
+    const snapshot = await this.upload(blobs, bundle, contentHash, { parentId, supersedes, kind: 'publish' },
+      { operation, purpose: 'publish', fingerprint });
+    return finish(await this.finishSnapshot(blobs, snapshot, this.setting(K.baseSnapshotId)));
   }
 
   private async finishSnapshot(blobs: SyncBlobStore, snapshot: RemoteSnapshot, baseBefore: string | null): Promise<SyncPublishResult> {
@@ -769,6 +886,7 @@ export class DeviceSyncService {
       });
       this.reconnectRequired = false;
       this.publishReplays.clear();
+      this.lastListingAttemptAt = null;
       this.resetRemoteState();
     });
   }
@@ -896,6 +1014,7 @@ export class DeviceSyncService {
 
   private resetRemoteState(clearConnection = true): void {
     this.clearCheckedUpdate();
+    clearTimeout(this.automaticTimer);
     this.listingFlight = null;
     this.listing = null;
     this.preview = null;
@@ -944,6 +1063,7 @@ export class DeviceSyncService {
         ? blobs.requests.waitFor(this.listingFlight).catch(error => { throw this.toApiError(error); })
         : this.listingFlight;
     }
+    this.lastListingAttemptAt = this.now();
     const flight = this.readListing(blobs, shareLegacyHistory).finally(() => {
       if (this.listingFlight === flight) this.listingFlight = null;
     });
@@ -972,7 +1092,7 @@ export class DeviceSyncService {
           if (!entry) {
             entry = await this.readJson(blobs, file, scope,
               text => this.parseMeta(text, parsed.snapshotId, parsed.createdAt), legacyHistory) ?? 'unreadable';
-            if (!scope) cache.set(name, entry);
+            if (!scope && entry !== 'unreadable') cache.set(name, entry);
           }
           if (entry === 'unreadable') unreadable++;
           else snapshots.push(entry);

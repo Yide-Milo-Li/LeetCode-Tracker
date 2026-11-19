@@ -38,6 +38,7 @@ const { api } = await import('../apps/web/src/api.ts');
 beforeEach(() => {
   window.location.hash = '';
   document.body.innerHTML = '';
+  api.checkSyncOnForeground = async () => null;
   api.getSettings = async () => ({
     language: 'en',
     theme: 'system',

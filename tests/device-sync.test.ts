@@ -731,6 +731,109 @@ function selectDrive(p: Profile, client = 'client.apps.example', grant = 'refres
   writeSyncSettings(p.db, { sync_transport: 'gdrive', sync_google_client_id: client, sync_google_refresh_token: grant });
 }
 
+test('automatic Drive sync batches saves, limits listings and leaves receiving and conflicts for review', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let now = Date.UTC(2026, 5, 1);
+  const advance = (ms: number) => { now += ms; t.mock.timers.tick(ms); };
+  const google = fakeGoogle();
+  const a = await profile('auto-drive-a'), b = await profile('auto-drive-b');
+  selectDrive(a); selectDrive(b);
+  const options = { fetch: google.fetchImpl, googleEndpoints: google.endpoints, now: () => now };
+  const A = await device(a, options), B = await device(b, options);
+  const foreground = (d: typeof A) => d.call('POST', '/api/v1/sync/foreground');
+  const setAutomatic = (d: typeof A, automaticSync: boolean) => d.call('PUT', '/api/v1/sync/config', { transport: 'gdrive', automaticSync });
+  const save = async (d: typeof A, content: string) => {
+    const result = await d.call('PUT', '/api/v1/notes/1', { content });
+    assert.equal(result.status, 200, JSON.stringify(result.body));
+  };
+  const listings = () => google.state.listCalls - google.state.nameQueries;
+  try {
+    await seedMigrationProfile(a.store);
+    assert.equal((await foreground(A)).body, null);
+    assert.equal(listings(), 0);
+    assert.equal((await setAutomatic(A, true)).body.automaticSync, true);
+    assert.equal((await foreground(A)).body.classification, 'empty-remote');
+    assert.equal(google.state.writeCalls, 0, 'the first publish requires the user');
+    const initial = await A.call('POST', '/api/v1/sync/publish', {});
+    assert.equal(initial.body.published, true);
+    const preview = await B.call('POST', '/api/v1/sync/receive/preview', { snapshotId: initial.body.snapshot.snapshotId });
+    assert.equal((await B.call('POST', '/api/v1/sync/receive', { previewId: preview.body.previewId })).status, 200);
+    await setAutomatic(B, true);
+    const before = listings();
+    const writesBefore = google.state.writeCalls;
+    google.state.mediaGets = [];
+
+    advance(10_000);
+    await save(A, 'first draft');
+    advance(280_000);
+    assert.equal(listings(), before, 'a save within the Drive cooldown does not check yet');
+    await save(A, 'second draft');
+    advance(10_000);
+    await Promise.all([foreground(A), foreground(A)]);
+    assert.equal(listings(), before, 'returning to the foreground does not interrupt a burst of edits');
+    advance(19_999);
+    assert.equal(google.state.writeCalls, writesBefore);
+    advance(1);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    const published = (await A.call('GET', '/api/v1/sync/status')).body;
+    assert.equal(published.classification, 'up-to-date', JSON.stringify(published));
+    assert.equal(published.localDirty, false);
+    assert.notEqual(published.baseSnapshotId, initial.body.snapshot.snapshotId);
+    assert.equal(listings() - before, 1, 'the automatic publish reuses its fresh listing');
+    assert.equal(google.state.writeCalls - writesBefore, 3, 'one snapshot and acknowledgement');
+
+    const [checked] = await Promise.all([foreground(B), foreground(B), foreground(B)]);
+    assert.equal(checked.body.classification, 'remote-ahead');
+    assert.equal(listings() - before, 2, 'overlapping foreground events share one listing');
+    assert.deepEqual(google.state.mediaGets, []);
+    assert.notEqual(b.store.getProblemNote('1')?.content, 'second draft');
+    await save(B, 'unpublished on B');
+    advance(300_000);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    const fork = (await B.call('GET', '/api/v1/sync/status')).body;
+    assert.equal(fork.classification, 'fork');
+    assert.equal(fork.localDirty, true);
+    assert.equal(google.state.writeCalls - writesBefore, 3, 'the competing local version was not published');
+    assert.equal(b.store.getProblemNote('1')?.content, 'unpublished on B');
+
+    await save(A, 'saved before switching off');
+    await setAutomatic(A, false);
+    const beforeDisabled = listings();
+    advance(300_000);
+    await foreground(A);
+    assert.equal(listings(), beforeDisabled);
+    assert.equal(google.state.writeCalls - writesBefore, 3);
+  } finally {
+    await Promise.all([A.app.close(), B.app.close()]);
+    a.close(); b.close();
+  }
+});
+
+test('automatic folder sync publishes persisted edits on the next launch', async () => {
+  const shared = mkdtempSync(join(tmpdir(), 'auto sync folder '));
+  const p = await profile('auto-folder');
+  let app = await device(p);
+  try {
+    await seedMigrationProfile(p.store);
+    const config = await app.call('PUT', '/api/v1/sync/config', { transport: 'folder', folderPath: shared, automaticSync: true });
+    assert.equal(config.body.automaticSync, true);
+    const base = await app.call('POST', '/api/v1/sync/publish', {});
+    assert.equal(base.body.published, true);
+    assert.equal((await app.call('PUT', '/api/v1/notes/1', { content: 'saved before closing' })).status, 200);
+    await app.app.close();
+    await p.reopen();
+    app = await device(p);
+    const checked = await app.call('POST', '/api/v1/sync/foreground');
+    assert.equal(checked.body.automaticSync, true);
+    assert.equal(checked.body.classification, 'up-to-date');
+    assert.notEqual(checked.body.baseSnapshotId, base.body.snapshot.snapshotId);
+    assert.equal(checked.body.heads[0].parentId, base.body.snapshot.snapshotId);
+    assert.equal(readdirSync(join(shared, 'LeetCodeTrackerSync')).filter(name => name.endsWith('.ltsync.gz')).length, 2);
+  } finally {
+    await app.app.close(); p.close(); rmSync(shared, { recursive: true, force: true });
+  }
+});
+
 test('Drive coalesces overlapping checks, selects newest IDs across pages and caches validated revisions per account and project', async () => {
   const google = fakeGoogle();
   const p = await profile('drive-list');

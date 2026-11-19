@@ -76,7 +76,7 @@ import { useDesktopAgent } from './hooks/useDesktopAgent.ts';
 import { activityLabel } from './desktop-agent-copy.ts';
 import type { DesktopAgentStatus } from '../../../packages/contracts/src/desktop-agent.ts';
 import { usePreferences } from './hooks/usePreferences.ts';
-import type { PracticeRecord } from './api.ts';
+import { api, type PracticeRecord } from './api.ts';
 import { localizeApiError } from './error-i18n.ts';
 import {
   WorkspaceContext,
@@ -125,6 +125,39 @@ export function App() {
   const [selectedNoteProblem, setSelectedNoteProblem] = useState<string | null>(null);
   const [recordsFilter, setRecordsFilter] = useState<RecordsFilterRequest | null>(null);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('general');
+  const [syncAttention, setSyncAttention] = useState<{ key: string; fork: boolean } | null>(null);
+  const [dismissedSync, dismissSync] = useState<string>();
+  const viewingSync = view === 'settings' && settingsSection === 'sync';
+  useEffect(() => {
+    let current = true;
+    let checking = false;
+    async function checkForUpdates() {
+      if (checking || document.visibilityState === 'hidden') return;
+      checking = true;
+      try {
+        const status = await api.checkSyncOnForeground();
+        if (!current) return;
+        const classification = status?.classification;
+        setSyncAttention(status && (classification === 'remote-ahead' || classification === 'fork')
+          ? { key: `${classification}:${status.heads.map(head => head.snapshotId).join(',')}`, fork: classification === 'fork' }
+          : null);
+      } catch { /* Sync status and manual retry are available in Settings. */ }
+      finally { checking = false; }
+    }
+    void checkForUpdates();
+    window.addEventListener('focus', checkForUpdates);
+    window.addEventListener('online', checkForUpdates);
+    document.addEventListener('visibilitychange', checkForUpdates);
+    return () => {
+      current = false;
+      window.removeEventListener('focus', checkForUpdates);
+      window.removeEventListener('online', checkForUpdates);
+      document.removeEventListener('visibilitychange', checkForUpdates);
+    };
+  }, []);
+  useEffect(() => {
+    if (viewingSync && syncAttention) dismissSync(syncAttention.key);
+  }, [viewingSync, syncAttention]);
   const [noteNeedsSave, setNoteNeedsSave] = useState(false);
   const [practiceQueue, setPracticeQueue] = useState<PracticeRequest[]>([]);
   const practice = practiceQueue[0];
@@ -424,6 +457,18 @@ export function App() {
           </div>
         </aside>
         <main id="main-content" className="main-content" tabIndex={-1}>
+          {!viewingSync && syncAttention && syncAttention.key !== dismissedSync && (
+            <Feedback tone={syncAttention.fork ? 'warning' : 'info'}>
+              {syncAttention.fork
+                ? (zh ? '同步发现多个版本，需要你选择。' : 'Device sync found competing versions.')
+                : (zh ? '有可接收的同步更新。' : 'A device sync update is available.')}{' '}
+              <button className="text-link" onClick={() => {
+                setSettingsSection('sync');
+                navigate('settings');
+              }}>{zh ? '查看同步' : 'Review sync'}</button>
+              <button className="text-link" onClick={() => dismissSync(syncAttention.key)}>{zh ? '关闭提示' : 'Dismiss'}</button>
+            </Feedback>
+          )}
           {isTauri() && (
             <DesktopUpdateNotice
               lang={lang}

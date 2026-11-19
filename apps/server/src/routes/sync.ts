@@ -65,6 +65,10 @@ export function registerSyncRoutes(app: FastifyInstance, context: RouteContext):
     try { return reply.send(await sync.check()); } catch (error) { return sendError(reply, error); }
   });
 
+  app.post('/api/v1/sync/foreground', async (_request, reply) => {
+    try { return reply.send(await sync.onForeground()); } catch (error) { return sendError(reply, error); }
+  });
+
   app.get('/api/v1/sync/history', async (_request, reply) => {
     try { return reply.send({ items: await sync.history() }); } catch (error) { return sendError(reply, error); }
   });
