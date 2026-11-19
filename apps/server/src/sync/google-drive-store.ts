@@ -65,12 +65,16 @@ export class GoogleDriveBlobStore implements SyncBlobStore {
 
   async list(): Promise<SyncBlobEntry[]> {
     const newest = new Map<string, DriveFile>();
+    const duplicates = new Set<string>();
     const files = await this.listFiles();
     const hints = collectHistoryHints(files);
     this.indexIds.clear();
     for (const file of files) {
       if (isHistoryIndex(file.name) && !this.indexIds.has(file.name)) this.indexIds.set(file.name, file.id);
-      if (isSyncBlobName(file.name) && !newest.has(file.name)) newest.set(file.name, file);
+      if (!isSyncBlobName(file.name)) continue;
+      const selected = newest.get(file.name);
+      if (!selected) newest.set(file.name, file);
+      else if (selected.id !== file.id) duplicates.add(file.name);
     }
     return [...newest.values()].map(file => {
       const checksum = file.name.endsWith('.json') ? file.sha256Checksum : undefined;
@@ -80,7 +84,7 @@ export class GoogleDriveBlobStore implements SyncBlobStore {
         ? JSON.stringify([file.id, file.version, checksum])
         : file.version || file.modifiedTime ? JSON.stringify([file.id, file.version, file.modifiedTime]) : undefined;
       return {
-        name: file.name, id: file.id, revision,
+        name: file.name, id: file.id, revision, hasDuplicates: duplicates.has(file.name),
         jsonContent: checksum ? { sha256: checksum, text: description ?? hints.get(checksum) } : undefined,
       };
     });
@@ -207,21 +211,21 @@ export class GoogleDriveBlobStore implements SyncBlobStore {
   }
 
   /** Mutable per-device acknowledgement. Snapshot writes always go through the durable journal. */
-  async write(name: string, data: Buffer): Promise<void> {
+  async write(name: string, data: Buffer, listedId?: string): Promise<void> {
     assertSyncBlobName(name);
     const scope = await this.scope();
-    const existing = await this.listFiles(name);
+    const previous = this.journal.deviceFile(scope, name);
+    let missingId: string | undefined;
+    if (previous?.confirmed && previous.id === listedId) {
+      if (await this.updateIfPresent(listedId, name, data)) return;
+      missingId = listedId; // Drive's next listing can still contain the file that just returned 404.
+    }
+    const existing = (await this.listFiles(name)).filter(file => file.id !== missingId);
     if (!existing.length) {
-      const previous = this.journal.deviceFile(scope, name);
-      if (previous) {
-        // A newly created file can be addressable by ID before it appears in a listing.
-        try {
-          await this.update(previous.id, name, data);
-          this.journal.saveDeviceFile(scope, name, previous.id, true);
-          return;
-        } catch (error) {
-          if (!(error instanceof DriveRequestError && error.status === 404)) throw error;
-        }
+      // A newly created file can be addressable by ID before it appears in a listing.
+      if (previous && previous.id !== missingId && await this.updateIfPresent(previous.id, name, data)) {
+        this.journal.saveDeviceFile(scope, name, previous.id, true);
+        return;
       }
       // A confirmed file which has since been deleted needs a new ID.
       const id = previous && !previous.confirmed ? previous.id : (await this.generateIds(1))[0];
@@ -232,7 +236,19 @@ export class GoogleDriveBlobStore implements SyncBlobStore {
     }
     await this.update(existing[0].id, name, data);
     this.journal.saveDeviceFile(scope, name, existing[0].id, true);
-    for (const duplicate of existing.slice(1)) await this.deleteFile(duplicate.id);
+    for (const duplicate of existing.slice(1)) {
+      if (duplicate.id !== existing[0].id) await this.deleteFile(duplicate.id);
+    }
+  }
+
+  private async updateIfPresent(id: string, name: string, data: Buffer): Promise<boolean> {
+    try {
+      await this.update(id, name, data);
+      return true;
+    } catch (error) {
+      if (error instanceof DriveRequestError && error.status === 404) return false;
+      throw error;
+    }
   }
 
   private async update(id: string, name: string, data: Buffer): Promise<void> {

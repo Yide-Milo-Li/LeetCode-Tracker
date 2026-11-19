@@ -20,6 +20,8 @@ export class SyncTransportError extends Error {
 export interface SyncBlobEntry {
   name: string;
   id?: string;
+  /** Multiple distinct file IDs were listed under this name. */
+  hasDuplicates?: boolean;
   revision?: string;
   /** Drive's body checksum and, when available, matching JSON recovered from the listing. */
   jsonContent?: { sha256: string; text?: string };
@@ -37,7 +39,7 @@ export interface SyncBlobStore {
    * Create or replace a blob. Implementations must not expose partially written content under
    * `name` to their own `list`/`read`.
    */
-  write(name: string, data: Buffer): Promise<void>;
+  write(name: string, data: Buffer, listedId?: string): Promise<void>;
   /** Delete a blob; deleting a missing blob is not an error. */
   remove(name: string): Promise<void>;
 }

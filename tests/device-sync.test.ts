@@ -1146,6 +1146,70 @@ test('first Drive check lists 100 current or indexed legacy snapshots without a 
   }
 });
 
+test('Drive recovers a deleted or replaced acknowledgement and reconciles duplicates across pages', async () => {
+  const google = fakeGoogle();
+  const a = await profile('drive-ack-a'), b = await profile('drive-ack-b');
+  selectDrive(a); selectDrive(b);
+  let deletedButListed: string | undefined;
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    if (deletedButListed && init?.method === 'PATCH' && url.pathname === '/upload/files/' + deletedButListed) {
+      return new Response(null, { status: 404 });
+    }
+    const response = await google.fetchImpl(input, init);
+    if (deletedButListed && url.searchParams.get('q')?.startsWith('name = ')) {
+      google.files.delete(deletedButListed); // One stale listing includes the ID after its update returned 404.
+      deletedButListed = undefined;
+    }
+    return response;
+  };
+  const options = { fetch: fetchImpl, googleEndpoints: google.endpoints };
+  const A = await device(a, options), B = await device(b, options);
+  async function previewNext(note: string) {
+    a.store.upsertProblemNote('1', note);
+    const published = await A.call('POST', '/api/v1/sync/publish', {});
+    assert.equal(published.status, 200);
+    const snapshotId = published.body.snapshot.snapshotId as string;
+    const preview = await B.call('POST', '/api/v1/sync/receive/preview', { snapshotId });
+    assert.equal(preview.status, 200);
+    return { previewId: preview.body.previewId as string, snapshotId };
+  }
+  async function confirm(preview: Awaited<ReturnType<typeof previewNext>>, expectedNameQueries: number) {
+    google.state.nameQueries = 0;
+    const received = await B.call('POST', '/api/v1/sync/receive', { previewId: preview.previewId });
+    assert.equal(received.status, 200);
+    assert.equal(received.body.warning, undefined);
+    assert.equal(google.state.nameQueries, expectedNameQueries);
+    const matches = [...google.files.values()].filter(f => f.name === deviceName);
+    assert.equal(matches.length, 1);
+    assert.equal(JSON.parse(matches[0].data.toString()).lastReceived, preview.snapshotId);
+    return matches[0];
+  }
+  const deviceName = 'device-' + (await B.call('GET', '/api/v1/sync/status')).body.deviceId + '.json';
+  try {
+    await seedMigrationProfile(a.store);
+    const original = await confirm(await previewNext('first'), 1);
+
+    const beforeReplacement = await previewNext('replaced');
+    google.files.delete(original.id);
+    const replacement = { ...original, id: randomUUID() };
+    google.files.set(replacement.id, replacement);
+    assert.equal((await confirm(beforeReplacement, 1)).id, replacement.id);
+
+    const beforeDeletion = await previewNext('deleted');
+    deletedButListed = replacement.id;
+    const created = await confirm(beforeDeletion, 1);
+    assert.notEqual(created.id, replacement.id);
+
+    // The journal still matches the newest file. The older copy on another page forces reconciliation.
+    const duplicate = { ...created, id: randomUUID(), modifiedTime: '2020-01-01T00:00:00Z' };
+    google.files.set(duplicate.id, duplicate);
+    google.state.pageSize = 1;
+    assert.equal((await confirm(await previewNext('duplicates'), 2)).id, created.id);
+    assert.equal((await confirm(await previewNext('unique again'), 0)).id, created.id);
+  } finally { await A.app.close(); await B.app.close(); a.close(); b.close(); }
+});
+
 test('Drive publish and receive see fresh acknowledgements in one-page listings without downloading device JSON', async () => {
   const google = fakeGoogle();
   const a = await profile('drive-count-a'), b = await profile('drive-count-b');
@@ -1161,22 +1225,27 @@ test('Drive publish and receive see fresh acknowledgements in one-page listings 
   const receive = async (snapshotId: string) => {
     const preview = await B.call('POST', '/api/v1/sync/receive/preview', { snapshotId });
     assert.equal(preview.status, 200);
-    assert.equal((await B.call('POST', '/api/v1/sync/receive', { previewId: preview.body.previewId })).status, 200);
+    const received = await B.call('POST', '/api/v1/sync/receive', { previewId: preview.body.previewId });
+    assert.equal(received.status, 200);
+    assert.equal(received.body.warning, undefined);
   };
   try {
     await seedMigrationProfile(a.store);
     await receive(await publish());
+    assert.equal(google.state.nameQueries, 2, 'each new device locates its acknowledgement before creating it');
     for (const openSettings of [false, true]) {
       for (const d of [A, B]) assert.equal((await d.call('POST', '/api/v1/sync/check')).status, 200);
       a.store.upsertProblemNote('1', '同步 ' + openSettings);
       google.state.listCalls = google.state.generatedIdsCalls = google.state.writeCalls = 0;
+      google.state.nameQueries = 0;
       google.state.mediaGets = [];
 
       if (openSettings) assert.equal((await A.call('POST', '/api/v1/sync/check')).status, 200);
       const snapshotId = await publish();
       if (openSettings) assert.equal((await B.call('POST', '/api/v1/sync/check')).status, 200);
       await receive(snapshotId);
-      assert.equal(google.state.listCalls, openSettings ? 6 : 4);
+      assert.equal(google.state.listCalls, openSettings ? 4 : 2);
+      assert.equal(google.state.nameQueries, 0, 'both devices update the ID from their listing');
       assert.equal(google.state.generatedIdsCalls, 1);
       assert.equal(google.state.writeCalls, 4);
       const fileNames = google.state.mediaGets.map(id => google.files.get(id)!.name);

@@ -119,6 +119,7 @@ interface Listing {
   devices: SyncDeviceState[];
   unreadable: number;
   checkedAt: number;
+  /** The selected payload ID for reads or a unique device-file ID for writes. */
   fileIds: Map<string, string>;
 }
 
@@ -788,9 +789,9 @@ export class DeviceSyncService {
       let unreadable = 0;
       for (const file of entries) {
         const { name, id } = file;
-        if (id) fileIds.set(name, id);
         const parsed = parseSyncBlobName(name);
         if (!parsed) continue;
+        if (id && (parsed.type === 'data' || (parsed.type === 'device' && !file.hasDuplicates))) fileIds.set(name, id);
         if (parsed.type === 'meta') {
           let entry = scope ? undefined : cache.get(name);
           if (!entry) {
@@ -984,7 +985,9 @@ export class DeviceSyncService {
       updatedAt: this.now(),
     };
     try {
-      await blobs.write(deviceBlobName(deviceId), Buffer.from(JSON.stringify(syncDeviceStateSchema.parse(state))));
+      const name = deviceBlobName(deviceId);
+      const bytes = Buffer.from(JSON.stringify(syncDeviceStateSchema.parse(state)));
+      await blobs.write(name, bytes, this.listing?.fileIds.get(name));
       this.listingRevision++;
       if (this.listing) this.listing.devices = [...this.listing.devices.filter(d => d.deviceId !== deviceId), state];
       return undefined;

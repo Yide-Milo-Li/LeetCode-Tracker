@@ -79,6 +79,8 @@ For older snapshots, the first upgraded device can use its local SQLite cache or
 
 In the simulated Drive test, a new device with 100 current or fully indexed snapshots makes one account lookup and one single-page listing, with zero file downloads. Larger histories can require additional listing pages. Local caches, pending upload bytes and upload sessions are isolated by account and OAuth project and excluded from migration exports.
 
+When publishing or receiving, a device updates its acknowledgement by ID if the listing shows one matching file and this installation has already confirmed that ID for the connected account and project. A missing, replaced, or duplicate file triggers a lookup by name. With two established devices and single-page listings, a small snapshot handoff uses two list requests, one payload download, four writes and one ID reservation. Opening sync settings on both devices adds two list requests.
+
 ### Configure the bundled client for distribution
 
 Use a dedicated LCT production Google Cloud project with Drive API enabled and a **Desktop app** client. In Google Auth Platform, configure **External / In production** with the `drive.appdata` scope. Use a verified domain you own for the app homepage and privacy policy, and complete brand verification to display LCT's name and logo during consent. Google classifies `drive.appdata` as non-sensitive. [Production requirements](https://developers.google.com/identity/protocols/oauth2/production-readiness/policy-compliance) · [Brand verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/brand-verification)
