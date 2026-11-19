@@ -8,13 +8,16 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync, rmSync, readdirSync, readFileSync, writeFileSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { seedMigrationProfile } from './fixtures/migration-profile.ts';
 import { CatalogStore } from '../packages/database/src/store.ts';
 import { computeContentHash, writeSyncSettings, readSyncSetting } from '../packages/database/src/device-sync.ts';
 import { classifySyncState, findHeads, type SyncGraphNode } from '../packages/domain/src/device-sync.ts';
 import { buildApp } from '../apps/server/src/app.ts';
-import { isSyncBlobName } from '../apps/server/src/sync/blob-store.ts';
+import { snapshotBlobNames, isSyncBlobName } from '../apps/server/src/sync/blob-store.ts';
+import { DriveRequests, type DriveConnection } from '../apps/server/src/sync/drive-request.ts';
+import { isHistoryIndex } from '../apps/server/src/sync/drive-history-index.ts';
+import { GoogleAccessTokenSource } from '../apps/server/src/sync/google-oauth.ts';
 import { DesktopAgent } from '../apps/server/src/desktop-agent.ts';
 import { acquireDatabaseLease } from '../packages/database/src/lease.ts';
 import { DESKTOP_AGENT_HEADER, DESKTOP_AGENT_PATH } from '../packages/contracts/src/desktop-agent.ts';
@@ -22,9 +25,15 @@ import { DESKTOP_AGENT_HEADER, DESKTOP_AGENT_PATH } from '../packages/contracts/
 /** Isolated profile with real backups so receive exercises the safety-backup path. */
 async function profile(label: string) {
   const dir = mkdtempSync(join(tmpdir(), `sync ${label} 同步 `));
-  const db = new DatabaseSync(join(dir, 'tracker.sqlite'));
-  const store = await CatalogStore.open(db, { backupDir: join(dir, 'backups') });
-  return { db, store, dir, close() { db.close(); rmSync(dir, { recursive: true, force: true }); } };
+  const file = join(dir, 'tracker.sqlite');
+  const options = { backupDir: join(dir, 'backups') };
+  let db = new DatabaseSync(file);
+  let store = await CatalogStore.open(db, options);
+  return {
+    get db() { return db; }, get store() { return store; }, dir,
+    async reopen() { db.close(); db = new DatabaseSync(file); store = await CatalogStore.open(db, options); },
+    close() { db.close(); rmSync(dir, { recursive: true, force: true }); },
+  };
 }
 
 type Profile = Awaited<ReturnType<typeof profile>>;
@@ -402,11 +411,24 @@ test('incomplete, corrupt, foreign and future snapshots are rejected without tou
   }
 });
 
+function unpackDriveMultipart(init: RequestInit) {
+  const raw = Buffer.from(init.body as Uint8Array);
+  const boundary = /boundary=(.+)$/.exec(new Headers(init.headers).get('content-type')!)![1];
+  const delimiter = Buffer.from(`\r\n--${boundary}`);
+  const first = raw.indexOf('\r\n\r\n') + 4;
+  const split = raw.indexOf(delimiter, first);
+  const second = raw.indexOf('\r\n\r\n', split) + 4;
+  const metadata = JSON.parse(raw.toString('utf8', first, split));
+  return { metadata, data: raw.subarray(second, raw.lastIndexOf(delimiter)) };
+}
+
 /** In-memory Google token + Drive v3 endpoints sufficient for the adapter. */
 function fakeGoogle() {
-  const files = new Map<string, { id: string; name: string; data: Buffer; modifiedTime: string }>();
+  const files = new Map<string, { id: string; name: string; data: Buffer; modifiedTime: string; version?: string; description?: string }>();
   const issued = new Set<string>();
-  const state = { revoked: false, refreshCalls: 0, lastTokenBody: '' as string };
+  const sessions = new Map<string, { id: string; name: string; total: number; received: Buffer }>();
+  const state = { permissionId: 'account-1', checksums: true, aboutCalls: 0, indexWrites: 0, denyIndex: false,
+    generatedIdsCalls: 0, writeCalls: 0, pageSize: 1000, listCalls: 0, nameQueries: 0, mediaGets: [] as string[], revoked: false, refreshCalls: 0, lastTokenBody: '' as string };
   let clock = 0;
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
   const fetchImpl: typeof fetch = async (input, init) => {
@@ -421,7 +443,7 @@ function fakeGoogle() {
         return json({ access_token: 'access-1', expires_in: 3600, refresh_token: 'refresh-1' });
       }
       state.refreshCalls++;
-      if (state.revoked || body.get('refresh_token') !== 'refresh-1') return json({ error: 'invalid_grant' }, 400);
+      if (state.revoked || !['refresh-1', 'refresh-2'].includes(body.get('refresh_token') ?? '')) return json({ error: 'invalid_grant' }, 400);
       const token = `access-${randomUUID()}`;
       issued.add(token);
       return json({ access_token: token, expires_in: 3600 });
@@ -429,35 +451,93 @@ function fakeGoogle() {
     if (url.pathname === '/revoke') { state.revoked = true; return json({}); }
     if (!auth?.startsWith('Bearer ') || !issued.has(auth.slice(7))) return json({ error: 'unauthorized' }, 401);
     const stamp = () => new Date(Date.UTC(2026, 0, 1, 0, 0, clock++)).toISOString();
+    if (url.pathname === '/drive/about') { state.aboutCalls++; return json({ user: { permissionId: state.permissionId } }); }
+    if (url.pathname === '/drive/files/generateIds') {
+      state.generatedIdsCalls++;
+      assert.equal(url.searchParams.get('space'), 'appDataFolder');
+      return json({ ids: Array.from({ length: Number(url.searchParams.get('count')) }, () => randomUUID()) });
+    }
     if (url.pathname === '/drive/files' && method === 'GET') {
       assert.equal(url.searchParams.get('spaces'), 'appDataFolder');
       const q = url.searchParams.get('q');
       const name = q ? /name = '([^']+)'/.exec(q)?.[1] : undefined;
-      const list = [...files.values()].filter(f => !name || f.name === name).map(({ id, name, modifiedTime }) => ({ id, name, modifiedTime }));
-      return json({ files: list });
+      const fields = url.searchParams.get('fields')!;
+      const list = [...files.values()].filter(f => !name || f.name === name).map(file => ({
+        id: file.id, name: file.name, modifiedTime: file.modifiedTime,
+        version: fields.includes('version') ? file.version : undefined,
+        description: fields.includes('description') ? file.description : undefined,
+        sha256Checksum: state.checksums && fields.includes('sha256Checksum') ? createHash('sha256').update(file.data).digest('hex') : undefined,
+      }));
+      state.listCalls++;
+      if (name) state.nameQueries++;
+      const offset = Number(url.searchParams.get('pageToken') ?? '0');
+      const end = offset + state.pageSize;
+      return json({ files: list.slice(offset, end), nextPageToken: end < list.length ? String(end) : undefined });
     }
     const fileMatch = /^\/(drive|upload)\/files\/([^/]+)$/.exec(url.pathname);
+    if ((url.pathname === '/drive/files' && method === 'POST') || (fileMatch?.[1] === 'drive' && method === 'PATCH')) {
+      if (state.denyIndex) return json({}, 403);
+      const metadata = JSON.parse(String(init?.body));
+      const id = fileMatch ? decodeURIComponent(fileMatch[2]) : randomUUID();
+      const old = files.get(id);
+      if (fileMatch && !old) return json({}, 404);
+      if (!old) assert.deepEqual(metadata.parents, ['appDataFolder']);
+      const name = old?.name ?? metadata.name;
+      assert.ok(isHistoryIndex(name));
+      assert.ok(Buffer.byteLength(metadata.description) <= 16384);
+      files.set(id, { id, name, data: Buffer.alloc(0), modifiedTime: stamp(), description: metadata.description });
+      state.indexWrites++;
+      return json({ id });
+    }
     if (fileMatch && method === 'GET') {
       const file = files.get(decodeURIComponent(fileMatch[2]));
-      return file ? new Response(new Uint8Array(file.data)) : json({}, 404);
+      if (!file) return json({}, 404);
+      if (!url.searchParams.has('alt')) return json({ name: file.name, size: String(file.data.length),
+        md5Checksum: createHash('md5').update(file.data).digest('hex'), trashed: false });
+      state.mediaGets.push(file.id);
+      return new Response(new Uint8Array(file.data));
     }
     if (fileMatch && method === 'DELETE') { files.delete(decodeURIComponent(fileMatch[2])); return new Response(null, { status: 204 }); }
     if (fileMatch && method === 'PATCH') {
       const file = files.get(decodeURIComponent(fileMatch[2]));
       if (!file) return json({}, 404);
-      file.data = Buffer.from(init!.body as Uint8Array); file.modifiedTime = stamp();
+      const { metadata, data } = unpackDriveMultipart(init!);
+      file.data = data;
+      file.description = metadata.description;
+      file.version = String(Number(file.version ?? '1') + 1);
+      file.modifiedTime = stamp();
+      state.writeCalls++;
       return json({ id: file.id });
     }
+    if (url.pathname === '/upload/files' && url.searchParams.get('uploadType') === 'resumable') {
+      const { name, id } = JSON.parse(String(init?.body));
+      if (files.has(id)) return json({}, 409);
+      const key = '/upload/session/' + randomUUID();
+      sessions.set(key, { id, name, total: Number(new Headers(init?.headers).get('x-upload-content-length')), received: Buffer.alloc(0) });
+      return new Response(null, { status: 200, headers: { location: url.origin + key } });
+    }
+    if (url.pathname.startsWith('/upload/session/') && method === 'PUT') {
+      const session = sessions.get(url.pathname);
+      if (!session) return json({}, 404);
+      const range = new Headers(init?.headers).get('content-range')!;
+      if (!range.startsWith('bytes */')) {
+        assert.ok(range.startsWith('bytes ' + session.received.length + '-'), 'only unacknowledged bytes should be sent');
+        session.received = Buffer.concat([session.received, Buffer.from(init?.body as Uint8Array)]);
+      }
+      if (session.received.length === session.total) {
+        files.set(session.id, { id: session.id, name: session.name, data: session.received, modifiedTime: stamp() });
+        return json({ id: session.id }, 201);
+      }
+      return new Response(null, { status: 308, headers: session.received.length ? { Range: 'bytes=0-' + (session.received.length - 1) } : {} });
+    }
     if (url.pathname === '/upload/files' && method === 'POST' && url.searchParams.get('uploadType') === 'multipart') {
-      const raw = Buffer.from(init!.body as Uint8Array);
-      const boundary = /boundary=(.+)$/.exec(new Headers(init!.headers).get('content-type')!)![1];
-      const parts = raw.toString('latin1').split(`--${boundary}`);
-      const metadata = JSON.parse(parts[1].split('\r\n\r\n')[1].trim());
+      const { metadata, data } = unpackDriveMultipart(init!);
       assert.deepEqual(metadata.parents, ['appDataFolder']);
-      const start = raw.indexOf('\r\n\r\n', raw.indexOf(`--${boundary}`, 10)) + 4;
-      const end = raw.lastIndexOf(`\r\n--${boundary}--`);
-      const id = randomUUID();
-      files.set(id, { id, name: metadata.name, data: raw.subarray(start, end), modifiedTime: stamp() });
+      const id = metadata.id;
+      assert.ok(id);
+      if (files.has(id)) return json({}, 409);
+      state.writeCalls++;
+      files.set(id, { id, name: metadata.name, data, version: '1', description: metadata.description, modifiedTime: stamp() });
       return json({ id });
     }
     return json({ error: `unhandled ${method} ${url.pathname}` }, 500);
@@ -469,7 +549,7 @@ function fakeGoogle() {
     driveApi: 'https://drive.example.test/drive',
     driveUpload: 'https://drive.example.test/upload',
   };
-  return { fetchImpl, endpoints, files, state };
+  return { fetchImpl, endpoints, files, sessions, state };
 }
 
 test('Google Drive: PKCE loopback connect, appDataFolder round trip, revoke and reconnect', async () => {
@@ -643,4 +723,476 @@ test('blob names reject paths, temp files and conflict copies', () => {
   for (const name of [`../snap-0001763400000-${id}.json`, `snap-0001763400000-${id} (1).json`, '.tmp', `device-${id}.json.tmp`, `sub/device-${id}.json`]) {
     assert.equal(isSyncBlobName(name), false, name);
   }
+});
+
+function selectDrive(p: Profile, client = 'client.apps.example', grant = 'refresh-1') {
+  writeSyncSettings(p.db, { sync_transport: 'gdrive', sync_google_client_id: client, sync_google_refresh_token: grant });
+}
+
+test('Drive coalesces overlapping checks, selects newest IDs across pages and caches validated revisions per account and project', async () => {
+  const google = fakeGoogle();
+  const p = await profile('drive-list');
+  selectDrive(p);
+  let d = await device(p, { fetch: google.fetchImpl, googleEndpoints: google.endpoints });
+  const reopen = async () => {
+    await d.app.close();
+    await p.reopen();
+    d = await device(p, { fetch: google.fetchImpl, googleEndpoints: google.endpoints });
+    google.state.mediaGets = [];
+    google.state.listCalls = google.state.nameQueries = 0;
+  };
+  try {
+    const published = await d.call('POST', '/api/v1/sync/publish', {});
+    assert.equal(published.status, 200);
+    const meta = [...google.files.values()].find(f => f.name.startsWith('snap-') && f.name.endsWith('.json'))!;
+    const deviceFile = [...google.files.values()].find(f => f.name.startsWith('device-'))!;
+    delete meta.description;
+    delete deviceFile.description; // Older builds only wrote the JSON body.
+    const deviceId = randomUUID();
+    google.files.set(deviceId, { ...deviceFile, id: deviceId, name: 'device-' + deviceId + '.json',
+      data: Buffer.from(JSON.stringify({ ...JSON.parse(deviceFile.data.toString()), deviceId })) });
+    const template = JSON.parse(meta.data.toString());
+    for (let i = 1; i < 100; i++) {
+      const snapshotId = randomUUID();
+      const envelope = { ...template, createdAt: template.createdAt + i, snapshotId, parentId: template.snapshotId };
+      google.files.set(snapshotId, { ...meta, id: snapshotId, name: snapshotBlobNames(envelope.createdAt, snapshotId).meta,
+        data: Buffer.from(JSON.stringify(envelope)) });
+    }
+    const duplicate = { ...meta, id: randomUUID(), modifiedTime: '2099-01-01T00:00:00Z' };
+    google.files.set(duplicate.id, duplicate);
+    google.state.pageSize = 60;
+    await reopen();
+    const results = await Promise.all([d.call('POST', '/api/v1/sync/check'), d.call('GET', '/api/v1/sync/history'), d.call('POST', '/api/v1/sync/check')]);
+    assert.equal(results[1].body.items.length, 100);
+    assert.equal(google.state.listCalls, 2, 'two pages are shared by all three requests');
+    assert.equal(google.state.nameQueries, 0);
+    assert.equal(google.state.mediaGets.length, 102);
+    assert.ok(google.state.mediaGets.includes(duplicate.id));
+    assert.ok(!google.state.mediaGets.includes(meta.id));
+    await reopen();
+    assert.equal((await d.call('POST', '/api/v1/sync/check')).status, 200);
+    assert.deepEqual(google.state.mediaGets, [], 'legacy device bodies stay cached across restarts');
+    duplicate.modifiedTime = '2099-02-01T00:00:00Z';
+    duplicate.data = Buffer.from('{}');
+    for (let i = 0; i < 2; i++) {
+      google.state.mediaGets = [];
+      assert.equal((await d.call('POST', '/api/v1/sync/check')).body.unreadableFiles, 1);
+      assert.deepEqual(google.state.mediaGets, [duplicate.id], 'unreadable revisions are never cached');
+    }
+    google.state.permissionId = 'account-2';
+    // The fake reuses one file map; the second account has the legacy snapshots but no shared index yet.
+    for (const f of google.files.values()) if (isHistoryIndex(f.name)) google.files.delete(f.id);
+    selectDrive(p, 'client.apps.example', 'refresh-2');
+    await reopen();
+    assert.equal((await d.call('POST', '/api/v1/sync/check')).status, 200);
+    assert.equal(google.state.mediaGets.length, 102, 'another account cannot hit the original cache');
+    for (const f of google.files.values()) if (isHistoryIndex(f.name)) google.files.delete(f.id);
+    selectDrive(p, 'different-project.apps.example', 'refresh-2');
+    await reopen();
+    assert.equal((await d.call('POST', '/api/v1/sync/check')).status, 200);
+    assert.equal(google.state.mediaGets.length, 102, 'another project cannot hit the previous cache');
+  } finally { await d.app.close(); p.close(); }
+});
+
+test('Drive reconciles a committed metadata POST after a lost response and replays concurrent retries across restarts', async () => {
+  const google = fakeGoogle();
+  const p = await profile('drive-replay');
+  selectDrive(p);
+  let loseMetadata = true;
+  const options = { googleEndpoints: google.endpoints, fetch: (async (input, init) => {
+    const response = await google.fetchImpl(input, init);
+    if (loseMetadata && String(input).includes('uploadType=multipart') && [...google.files.values()].some(f => f.name.endsWith('.json'))) {
+      return new Response(null, { status: 503, headers: { 'Retry-After': '180' } });
+    }
+    return response;
+  }) as typeof fetch };
+  let d = await device(p, options);
+  try {
+    await seedMigrationProfile(p.store);
+    const operationId = randomUUID();
+    const post = (allowFork = false) => d.call('POST', '/api/v1/sync/publish', { operationId, allowFork });
+    assert.equal((await post()).status, 502);
+    assert.equal(google.files.size, 2);
+    const saved = p.db.prepare('SELECT envelope FROM drive_sync_uploads').get()!;
+    const staged = JSON.parse(String(saved.envelope));
+    p.store.upsertProblemNote('1', 'edited after interruption');
+    await d.app.close();
+    await p.reopen();
+    d = await device(p, options);
+    assert.deepEqual((await d.call('GET', '/api/v1/sync/status')).body.pendingPublish, { operationId, allowFork: false });
+    assert.equal((await post(true)).body.error, 'SYNC_OPERATION_CONFLICT');
+    loseMetadata = false;
+    const metadata = [...google.files.values()].find(file => file.name.endsWith('.json'))!;
+    const original = metadata.data;
+    metadata.data = Buffer.from(JSON.stringify({ ...staged, deviceName: 'unexpected content' }));
+    assert.equal((await post()).status, 502, 'a 409 is only success when the previously committed bytes match');
+    assert.equal(readSyncSetting(p.db, 'sync_base_snapshot_id'), null);
+    metadata.data = original;
+    const [first, second] = await Promise.all([post(), post()]);
+    assert.equal(first.status, 200, JSON.stringify(first.body));
+    assert.equal(first.body.snapshot.snapshotId, staged.snapshotId);
+    assert.deepEqual(second.body, first.body);
+    assert.equal(google.files.size, 3);
+    const local = (await d.call('GET', '/api/v1/sync/status')).body;
+    assert.equal(local.localDirty, true);
+    assert.equal(local.pendingPublish, undefined);
+    await d.app.close();
+    await p.reopen();
+    d = await device(p, options);
+    const calls = google.state.listCalls;
+    assert.deepEqual((await post()).body, first.body);
+    assert.equal(google.state.listCalls, calls, 'completed replay needs no Drive request');
+    assert.equal((await post(true)).body.error, 'SYNC_OPERATION_CONFLICT');
+    assert.equal(p.db.prepare('SELECT COUNT(*) AS n FROM drive_sync_uploads').get()?.n, 0);
+  } finally { await d.app.close(); p.close(); }
+});
+
+for (const expire of [false, true]) test(`Drive resumes a large publish after restart (session expired: ${expire})`, async () => {
+  const google = fakeGoogle();
+  const p = await profile('drive-upload');
+  selectDrive(p);
+  const ranges: string[] = [];
+  let interrupted = false;
+  const options = { googleEndpoints: google.endpoints, fetch: (async (input, init) => {
+    const response = await google.fetchImpl(input, init);
+    if (String(input).includes('/upload/session/')) {
+      ranges.push(new Headers(init?.headers).get('content-range')!);
+      if (!interrupted) {
+        interrupted = true;
+        return new Response(null, { status: 429, headers: { 'Retry-After': '120' } });
+      }
+    }
+    return response;
+  }) as typeof fetch };
+  let d = await device(p, options);
+  try {
+    // A real, poorly compressible migration bundle exceeds the multipart limit.
+    const value = randomBytes(6 * 1024 * 1024).toString('base64');
+    p.db.prepare('INSERT INTO settings(key,value,updated_at) VALUES (?,?,?)').run('fixture', value, 1);
+    const operationId = randomUUID();
+    const publish = () => d.call('POST', '/api/v1/sync/publish', { operationId });
+    assert.equal((await publish()).status, 502);
+    assert.equal(google.files.size, 0, 'metadata is invisible until the data is complete');
+    const record = p.db.prepare('SELECT session, length(payload) AS size FROM drive_sync_uploads').get()!;
+    assert.ok(record.session);
+    assert.ok(Number(record.size) > 5 * 1024 * 1024);
+    assert.ok(!JSON.stringify(p.store.exportMigrationBundle(5)).includes(String(record.session)));
+    await d.app.close();
+    await p.reopen();
+    d = await device(p, options);
+    if (expire) google.sessions.clear();
+    const resumed = await publish();
+    assert.equal(resumed.status, 200, JSON.stringify(resumed.body));
+    assert.equal(google.sessions.size, 1);
+    assert.match(ranges[1], /^bytes \*\//);
+    assert.match(ranges[2], expire ? /^bytes 0-/ : /^bytes 2097152-/);
+    assert.equal(google.files.size, 3);
+    const preview = await d.call('POST', '/api/v1/sync/receive/preview', { snapshotId: resumed.body.snapshot.snapshotId });
+    assert.equal(preview.status, 200, JSON.stringify(preview.body));
+  } finally { await d.app.close(); p.close(); }
+});
+
+function requestTestConnection(): DriveConnection {
+  const google = fakeGoogle();
+  return { notBefore: 0, tokens: new GoogleAccessTokenSource({ clientId: 'test' }, 'refresh-1', google.endpoints, google.fetchImpl) };
+}
+
+test('Drive retries transient reads, including a broken response body, but ordinary 403 is final', async () => {
+  const failures = [
+    () => new Response(null, { status: 429 }),
+    () => new Response(JSON.stringify({ error: { errors: [{ reason: 'userRateLimitExceeded' }] } }), { status: 403 }),
+    () => new Response(null, { status: 503 }),
+    () => { throw new TypeError('connection reset'); },
+    () => new Response(new ReadableStream({ start(controller) { controller.error(new Error('truncated body')); } })),
+  ];
+  await Promise.all(failures.map(async fail => {
+    let attempts = 0;
+    const client = new DriveRequests(requestTestConnection(), async () => ++attempts === 1 ? fail() : new Response('ok'), Date.now() + 5_000);
+    assert.equal((await client.send('https://drive.example.test/files')).bytes.toString(), 'ok');
+    assert.equal(attempts, 2);
+  }));
+  let attempts = 0;
+  const client = new DriveRequests(requestTestConnection(), async () => { attempts++; return new Response(null, { status: 403 }); }, Date.now() + 5_000);
+  await assert.rejects(client.send('https://drive.example.test/files'), /HTTP 403/);
+  assert.equal(attempts, 1);
+});
+
+test('Drive honors both Retry-After formats across local requests and aborts slow bodies at the operation deadline', async () => {
+  for (const retryAfter of ['120', new Date(Date.now() + 120_000).toUTCString()]) {
+    let attempts = 0;
+    const connection = requestTestConnection();
+    const limited: typeof fetch = async () => {
+      attempts++;
+      return new Response(null, { status: 429, headers: { 'Retry-After': retryAfter } });
+    };
+    for (let i = 0; i < 2; i++) {
+      const client = new DriveRequests(connection, limited, Date.now() + 5_000);
+      await assert.rejects(client.send('https://drive.example.test/files'), /cooldown/);
+    }
+    assert.equal(attempts, 1, 'a second request respects the first request’s cooldown');
+    assert.ok(connection.notBefore >= Date.now() + 118_000);
+  }
+  const slow: typeof fetch = async (_url, init) => new Response(new ReadableStream({
+    start(controller) { init!.signal!.addEventListener('abort', () => controller.error(new Error('aborted'))); },
+  }));
+  const keepAlive = setTimeout(() => {}, 200);
+  try {
+    const client = new DriveRequests(requestTestConnection(), slow, Date.now() + 30);
+    await assert.rejects(client.send('https://drive.example.test/files'), /timed out/);
+  } finally { clearTimeout(keepAlive); }
+});
+
+test('Drive safely retries a receive archive and can finish a restore resolution after reopening the profile', async () => {
+  const google = fakeGoogle();
+  const p = await profile('drive-restore');
+  selectDrive(p);
+  let failNextMeta = false;
+  let failResolution = false;
+  const options = { googleEndpoints: google.endpoints, fetch: (async (input, init) => {
+    if (String(input).includes('uploadType=multipart')) {
+      const body = Buffer.from(init!.body as Uint8Array).toString('latin1');
+      const isMeta = /"name":"snap-[^"]+\.json"/.test(body);
+      if (isMeta && (failNextMeta || (failResolution && body.includes('"kind":"publish"')))) {
+        failNextMeta = false;
+        return new Response(null, { status: 403 });
+      }
+    }
+    return google.fetchImpl(input, init);
+  }) as typeof fetch };
+  let d = await device(p, options);
+  try {
+    await seedMigrationProfile(p.store);
+    const first = await d.call('POST', '/api/v1/sync/publish', {});
+    assert.equal(first.status, 200);
+    p.store.upsertProblemNote('1', 'second version');
+    assert.equal((await d.call('POST', '/api/v1/sync/publish', {})).status, 200);
+    p.store.upsertProblemNote('1', 'local changes to archive');
+    const restore = async () => {
+      const preview = await d.call('POST', '/api/v1/sync/receive/preview', { snapshotId: first.body.snapshot.snapshotId });
+      assert.equal(preview.status, 200);
+      return d.call('POST', '/api/v1/sync/receive', { previewId: preview.body.previewId, localChanges: 'fork' });
+    };
+    failNextMeta = true;
+    assert.equal((await restore()).status, 502);
+    assert.equal(p.store.getProblemNote('1')?.content, 'local changes to archive');
+    const archiveId = JSON.parse(String(p.db.prepare("SELECT envelope FROM drive_sync_uploads WHERE purpose='archive'").get()?.envelope)).snapshotId;
+    await d.app.close();
+    await p.reopen();
+    d = await device(p, options);
+    failResolution = true;
+    const restored = await restore();
+    assert.equal(restored.status, 200, JSON.stringify(restored.body));
+    assert.equal(restored.body.forkSnapshotId, archiveId);
+    assert.ok(restored.body.warning);
+    assert.equal(restored.body.resolutionSnapshotId, null);
+    failResolution = false;
+    await d.app.close();
+    await p.reopen();
+    d = await device(p, options);
+    const pending = (await d.call('GET', '/api/v1/sync/status')).body.pendingPublish;
+    assert.equal(pending.allowFork, true);
+    assert.equal((await d.call('POST', '/api/v1/sync/publish', pending)).status, 200);
+    const current = (await d.call('POST', '/api/v1/sync/check')).body;
+    assert.equal(current.classification, 'up-to-date');
+    assert.equal(current.heads[0].parentId, first.body.snapshot.snapshotId);
+    assert.equal(p.store.getProblemNote('1')?.content, '# Synthetic note\n跨设备');
+    assert.equal(google.files.size, 9, 'two original snapshots, one archive, one resolution and one device file');
+  } finally { await d.app.close(); p.close(); }
+});
+
+test('Drive validates device descriptions and refreshes changed, replaced and legacy device files', async () => {
+  const google = fakeGoogle();
+  const p = await profile('drive-device-cache');
+  selectDrive(p);
+  const d = await device(p, { fetch: google.fetchImpl, googleEndpoints: google.endpoints });
+  const check = async (expectedDownloads: string[]) => {
+    google.state.mediaGets = [];
+    const result = await d.call('POST', '/api/v1/sync/check');
+    assert.equal(result.status, 200, JSON.stringify(result.body));
+    assert.deepEqual(google.state.mediaGets, expectedDownloads);
+    return result.body.devices;
+  };
+  try {
+    const deviceId = randomUUID();
+    const old = { deviceId, deviceName: '第一台电脑', appVersion: '1', lastPublished: null, lastReceived: null, updatedAt: 1 };
+    const body = JSON.stringify(old);
+    const file = { id: randomUUID(), name: 'device-' + deviceId + '.json', version: '1',
+      data: Buffer.from(body), description: body, modifiedTime: '2026-01-01T00:00:00Z' };
+    google.files.set(file.id, file);
+    assert.deepEqual(await check([]), [old], 'a verified listing is enough, including on the first check');
+
+    const next = { ...old, lastReceived: randomUUID(), updatedAt: 2 };
+    file.data = Buffer.from(JSON.stringify(next));
+    file.version = '2'; // A legacy client changed only the body, even keeping the same modification time.
+    assert.deepEqual(await check([file.id]), [next]);
+    assert.deepEqual(await check([]), [next]);
+
+    // A replacement with the same name, bytes and Drive version still has a distinct identity.
+    const replacement = { ...file, id: randomUUID(), modifiedTime: '2026-02-01T00:00:00Z' };
+    google.files.set(replacement.id, replacement);
+    assert.deepEqual(await check([replacement.id]), [next]);
+    google.files.delete(file.id);
+
+    const wrongDevice = JSON.stringify({ ...next, deviceId: randomUUID() });
+    replacement.description = wrongDevice;
+    replacement.data = Buffer.from(wrongDevice);
+    replacement.version = '3';
+    assert.deepEqual(await check([replacement.id]), []);
+    assert.deepEqual(await check([replacement.id]), [], 'an invalid body never poisons the cache');
+
+    google.state.checksums = false;
+    replacement.description = body;
+    replacement.data = Buffer.from(JSON.stringify(next));
+    assert.deepEqual(await check([replacement.id]), [next], 'without a provider checksum the file body wins');
+    assert.deepEqual(await check([replacement.id]), [next]);
+
+    google.files.clear();
+    assert.deepEqual(await check([]), [], 'removed devices immediately disappear');
+  } finally { await d.app.close(); p.close(); }
+});
+
+test('first Drive check lists 100 current or indexed legacy snapshots without a media download', async () => {
+  const google = fakeGoogle();
+  const publisher = await profile('history-publisher');
+  const reader = await profile('history-reader');
+  const legacy = await profile('history-legacy');
+  const fresh = await profile('history-fresh');
+  const options = { fetch: google.fetchImpl, googleEndpoints: google.endpoints };
+  for (const p of [publisher, reader, legacy, fresh]) selectDrive(p);
+  const [A, B, C, D] = await Promise.all([publisher, reader, legacy, fresh].map(p => device(p, options)));
+  const check = async (d: typeof A) => {
+    google.state.aboutCalls = google.state.listCalls = google.state.indexWrites = 0;
+    google.state.mediaGets = [];
+    const result = await d.call('POST', '/api/v1/sync/check');
+    assert.equal(result.status, 200, JSON.stringify(result.body));
+    return result.body;
+  };
+  try {
+    await seedMigrationProfile(publisher.store);
+    let latest: string | undefined;
+    for (let i = 0; i < 100; i++) {
+      publisher.store.upsertProblemNote('1', '练习 ' + i);
+      const result = await A.call('POST', '/api/v1/sync/publish', {});
+      assert.equal(result.body.published, true);
+      latest = result.body.snapshot.snapshotId;
+    }
+    const status = await check(B);
+    assert.deepEqual(status.heads.map((h: SyncGraphNode) => h.snapshotId), [latest]);
+    assert.equal(status.classification, 'remote-ahead');
+    assert.equal(google.state.aboutCalls, 1);
+    assert.equal(google.state.listCalls, 1);
+    assert.equal(google.state.indexWrites, 0);
+    assert.deepEqual(google.state.mediaGets, []);
+    const history = (await B.call('GET', '/api/v1/sync/history')).body.items;
+    assert.equal(history.length, 100);
+    const envelopes = [...google.files.values()].filter(f => f.name.startsWith('snap-') && f.name.endsWith('.json'));
+    for (const f of google.files.values()) if (f.name.endsWith('.gz')) assert.equal(f.description, undefined);
+    for (const f of envelopes) delete f.description; // Simulate immutable files created by older releases.
+
+    google.state.denyIndex = true;
+    assert.deepEqual((await check(C)).heads, status.heads, 'optional maintenance cannot fail a cold check');
+    assert.equal(google.state.mediaGets.length, 100);
+    google.state.denyIndex = false;
+    await check(C);
+    assert.deepEqual(google.state.mediaGets, [], 'an upgraded installation can seed the index from its SQLite cache');
+    const shardCount = google.state.indexWrites;
+    assert.ok(shardCount > 0 && shardCount <= 8);
+    assert.deepEqual((await check(D)).heads, status.heads);
+    assert.equal(google.state.aboutCalls, 1);
+    assert.equal(google.state.listCalls, 1);
+    assert.equal(google.state.indexWrites, 0);
+    assert.deepEqual(google.state.mediaGets, []);
+    assert.deepEqual((await D.call('GET', '/api/v1/sync/history')).body.items, history);
+
+    // Losing one index page costs only the envelopes it covered. The originals remain authoritative.
+    const page = [...google.files.values()].find(f => isHistoryIndex(f.name))!;
+    const covered = JSON.parse(page.description!).length;
+    page.description = '[]';
+    reader.db.exec('DELETE FROM drive_sync_metadata');
+    assert.deepEqual((await check(B)).heads, status.heads);
+    assert.equal(google.state.mediaGets.length, covered);
+    assert.equal(google.state.indexWrites, 1, 'repair the existing hint file');
+    assert.equal([...google.files.values()].filter(f => isHistoryIndex(f.name)).length, shardCount);
+
+    // A stale index cannot resurrect deletions, mask replacements or hide incompatible competing heads.
+    const tip = envelopes.at(-1)!;
+    google.files.delete(tip.id);
+    const sibling = envelopes.at(-2)!;
+    const source = JSON.parse(sibling.data.toString());
+    const newId = randomUUID();
+    const body = JSON.stringify({ ...source, snapshotId: newId, version: 2 });
+    google.files.set(newId, { ...sibling, id: newId, data: Buffer.from(body), description: body,
+      name: snapshotBlobNames(source.createdAt, newId).meta });
+    sibling.data = Buffer.from(JSON.stringify({ ...source, deviceName: '已修改' }));
+    google.state.pageSize = 40;
+    const pages = Math.ceil(google.files.size / 40);
+    const changed = await check(D);
+    assert.equal(changed.heads.length, 2);
+    assert.ok(changed.heads.some((h: { compatible: boolean; snapshotId: string }) => !h.compatible && h.snapshotId === newId));
+    assert.ok(changed.heads.some((h: { deviceName: string }) => h.deviceName === '已修改'));
+    assert.deepEqual(google.state.mediaGets, [sibling.id]);
+    assert.equal(google.state.listCalls, pages);
+    assert.equal(google.state.indexWrites, 1, 'an existing index also picks up a single changed legacy envelope');
+    assert.equal((await D.call('POST', '/api/v1/sync/receive/preview', { snapshotId: newId })).body.error, 'SYNC_INCOMPATIBLE');
+    assert.equal((await D.call('POST', '/api/v1/sync/receive/preview', { snapshotId: latest })).body.error, 'SYNC_NOT_FOUND');
+    google.state.checksums = false;
+    reader.db.exec('DELETE FROM drive_sync_metadata');
+    assert.deepEqual((await check(B)).heads, changed.heads);
+    assert.equal(google.state.mediaGets.length, 101, 'without Drive checksums a cold reader uses 100 envelope bodies and one device body');
+    assert.equal(google.state.indexWrites, 0);
+  } finally {
+    await Promise.all([A, B, C, D].map(d => d.app.close()));
+    for (const p of [publisher, reader, legacy, fresh]) p.close();
+  }
+});
+
+test('Drive publish and receive see fresh acknowledgements in one-page listings without downloading device JSON', async () => {
+  const google = fakeGoogle();
+  const a = await profile('drive-count-a'), b = await profile('drive-count-b');
+  selectDrive(a); selectDrive(b);
+  const options = { fetch: google.fetchImpl, googleEndpoints: google.endpoints };
+  const A = await device(a, options), B = await device(b, options);
+  const publish = async () => {
+    const result = await A.call('POST', '/api/v1/sync/publish', {});
+    assert.equal(result.status, 200, JSON.stringify(result.body));
+    assert.equal(result.body.published, true);
+    return result.body.snapshot.snapshotId as string;
+  };
+  const receive = async (snapshotId: string) => {
+    const preview = await B.call('POST', '/api/v1/sync/receive/preview', { snapshotId });
+    assert.equal(preview.status, 200);
+    assert.equal((await B.call('POST', '/api/v1/sync/receive', { previewId: preview.body.previewId })).status, 200);
+  };
+  try {
+    await seedMigrationProfile(a.store);
+    await receive(await publish());
+    for (const openSettings of [false, true]) {
+      for (const d of [A, B]) assert.equal((await d.call('POST', '/api/v1/sync/check')).status, 200);
+      a.store.upsertProblemNote('1', '同步 ' + openSettings);
+      google.state.listCalls = google.state.generatedIdsCalls = google.state.writeCalls = 0;
+      google.state.mediaGets = [];
+
+      if (openSettings) assert.equal((await A.call('POST', '/api/v1/sync/check')).status, 200);
+      const snapshotId = await publish();
+      if (openSettings) assert.equal((await B.call('POST', '/api/v1/sync/check')).status, 200);
+      await receive(snapshotId);
+      assert.equal(google.state.listCalls, openSettings ? 6 : 4);
+      assert.equal(google.state.generatedIdsCalls, 1);
+      assert.equal(google.state.writeCalls, 4);
+      const fileNames = google.state.mediaGets.map(id => google.files.get(id)!.name);
+      assert.equal(fileNames.length, 1);
+      assert.ok(fileNames[0].endsWith(snapshotId + '.ltsync.gz'), 'only the selected snapshot payload was downloaded');
+
+      google.state.mediaGets = [];
+      const status = await A.call('POST', '/api/v1/sync/check');
+      assert.equal(status.status, 200);
+      assert.ok(status.body.devices.some((item: { lastReceived: string }) => item.lastReceived === snapshotId));
+      assert.ok(google.state.mediaGets.every(id => !google.files.get(id)!.name.startsWith('device-')));
+      google.state.listCalls = 0;
+      google.state.mediaGets = [];
+      assert.equal((await A.call('POST', '/api/v1/sync/check')).status, 200);
+      assert.equal(google.state.listCalls, 1);
+      assert.deepEqual(google.state.mediaGets, []);
+    }
+  } finally { await A.app.close(); await B.app.close(); a.close(); b.close(); }
 });

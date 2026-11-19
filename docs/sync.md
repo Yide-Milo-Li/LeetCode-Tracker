@@ -65,6 +65,20 @@ If you previously used a custom client, the installer asks you to reconnect when
 
 LCT uses an installed-app loopback callback with PKCE and an expiring, single-use state. The refresh token stays in local SQLite settings, unencrypted and excluded from exports. **Disconnect** clears the local token and attempts to revoke the Google grant. Revoking the grant can require other devices on the same account and project to reconnect. [Google token revocation](https://developers.google.com/identity/protocols/oauth2/native-app#tokenrevoke)
 
+### Interrupted Drive sync
+
+If a publish is interrupted, reopen **Settings → Sync** and choose **Resume previous publish**. LCT uploads the snapshot captured when you first clicked publish. Edits made afterwards stay on this device as unpublished changes. A large upload continues from the last byte Drive confirms. If the session expired, LCT restarts the same file using its reserved ID.
+
+Drive requests back off with jitter on rate limits, temporary server errors and network failures. The installation honors Google's `Retry-After` and shares the cooldown across its active connection. If the wait would exceed the remaining request time, the app returns control so you can retry later.
+
+### Loading snapshot history on a new device
+
+Every check lists the files in the connected account’s app data folder. A publisher includes a copy of each snapshot envelope and device acknowledgement in the corresponding Drive file’s description. A new device verifies this JSON against Drive’s SHA-256 checksum, checks its identity against the filename, and builds the full history from the listing. It downloads the selected snapshot payload when you preview a receive. Overlapping checks on one installation share a listing.
+
+For older snapshots, the first upgraded device can use its local SQLite cache or download the missing envelopes. When a check or history view finds at least eight verified envelopes missing from the Drive descriptions, it groups them into small index files in the same app data folder. Later checks fill in any remaining entries and include new snapshots from older publishers. Each check spends up to three seconds and eight writes on this optional work. Another device can then read those envelopes in its own listing. A missing or stale hint falls back to the local cache or original envelope. Each listed snapshot is checked individually, so deleted snapshots disappear and competing versions stay visible.
+
+In the simulated Drive test, a new device with 100 current or fully indexed snapshots makes one account lookup and one single-page listing, with zero file downloads. Larger histories can require additional listing pages. Local caches, pending upload bytes and upload sessions are isolated by account and OAuth project and excluded from migration exports.
+
 ### Configure the bundled client for distribution
 
 Use a dedicated LCT production Google Cloud project with Drive API enabled and a **Desktop app** client. In Google Auth Platform, configure **External / In production** with the `drive.appdata` scope. Use a verified domain you own for the app homepage and privacy policy, and complete brand verification to display LCT's name and logo during consent. Google classifies `drive.appdata` as non-sensitive. [Production requirements](https://developers.google.com/identity/protocols/oauth2/production-readiness/policy-compliance) · [Brand verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/brand-verification)
@@ -83,11 +97,13 @@ Both options store the same flat set of files:
 | `snap-<createdAt>-<id>.json` | publishing device, once, after the data file | envelope: parent, superseded heads, device, app version, bundle/schema version, content hash |
 | `device-<id>.json` | that device only | snapshot it currently holds, last published and last received |
 
+Direct Drive sync can also create `lct-history-cache-v1-<hash>.json` files. Their descriptions hold copies of older envelopes. Older apps ignore them.
+
 A receive verifies the gzip stream, that the embedded envelope matches the listed one, that the bundle version is supported, the content hash, and the bundle's table references, all before anything is replaced. A snapshot from a newer app version is listed but cannot be received or overwritten until this device is updated.
 
 ## Limits
 
 - Not a live or merging sync; there is no limit on the number of devices, but edit on one at a time.
 - Snapshots are full copies (up to the 64 MiB bundle limit, gzip-compressed). The app does not delete old snapshots yet.
-- Requests from the desktop window time out after 60 seconds, which bounds very large uploads on slow connections.
+- The desktop window allows 60 seconds per request. Drive operations budget 55 seconds for network work. Uploads over 5 MiB use resumable sessions with 2 MiB chunks.
 - Snapshots are not encrypted by the app; they are protected by your Drive account or sync folder permissions.

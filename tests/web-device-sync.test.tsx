@@ -253,3 +253,15 @@ it('offers every competing version when several devices published', async () => 
   assert.equal(screen.queryByText(/up to date/), null);
   assert.equal(screen.getAllByText(/not on the latest version/).length, 2);
 });
+
+it('resumes the saved publish after reopening Settings even when its snapshot already appeared on Drive', async () => {
+  stubSettings();
+  const pendingPublish = { operationId: '77777777-7777-4777-8777-777777777777', allowFork: false };
+  const pending = status({ transport: 'gdrive', pendingPublish, classification: 'fork' });
+  mock.method(api, 'getSyncStatus', async () => pending);
+  mock.method(api, 'checkSync', async () => pending);
+  const publish = mock.method(api, 'publishSync', async () => ({ published: true, snapshot: head }));
+  await renderSync();
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Resume previous publish' })); });
+  assert.deepEqual(publish.mock.calls[0].arguments[0], pendingPublish);
+});

@@ -183,12 +183,16 @@ export function useDeviceSync(lang: Language, active: boolean) {
     if (folder) setFolderDraft(folder);
   }
 
-  async function publish(allowFork = false) {
+  async function publish(allowFork = false, resumeId?: string) {
     const key = JSON.stringify({ allowFork });
     if (publishOperation.current?.key !== key) publishOperation.current = { key, id: crypto.randomUUID() };
-    const operationId = publishOperation.current.id;
+    const operationId = resumeId ?? publishOperation.current.id;
     const result = await run('publish', () => api.publishSync({ operationId, allowFork }), zh ? '发布快照失败。' : 'Publishing failed.');
-    if (!result) return;
+    if (!result) {
+      const next = await api.getSyncStatus().catch(() => null);
+      if (next) applyStatus(next);
+      return;
+    }
     publishOperation.current = null;
     setNotice(result.published
       ? (zh ? '快照已上传。各设备接收后会在下方显示为“已是最新”。' : 'Snapshot uploaded. Each device shows as up to date below once it receives it.')

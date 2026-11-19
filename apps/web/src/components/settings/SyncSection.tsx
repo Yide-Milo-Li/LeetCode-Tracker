@@ -33,6 +33,7 @@ function formatBytes(bytes: number): string {
 export function SyncSection({ lang, sync }: SyncSectionProps) {
   const zh = lang === 'zh';
   const { status, busy, error, notice, preview, history } = sync;
+  const pendingPublish = status?.pendingPublish;
   const disabled = busy !== null;
   const classification = status?.classification ?? null;
   const head: SyncSnapshotSummary | undefined = status?.heads.find(h => h.compatible) ?? status?.heads[0];
@@ -212,7 +213,14 @@ export function SyncSection({ lang, sync }: SyncSectionProps) {
                     <RefreshCw size={14} />
                     <span>{busy === 'check' ? '…' : zh ? '检查更新' : 'Check'}</span>
                   </button>
-                  {(classification === 'empty-remote' || classification === 'local-ahead') && (
+                  {pendingPublish && (
+                    <button type="button" className="btn btn-primary btn-sm" disabled={disabled}
+                      onClick={() => void sync.publish(pendingPublish.allowFork, pendingPublish.operationId)}>
+                      <Upload size={14} />
+                      <span>{busy === 'publish' ? '…' : zh ? '继续上次的发布' : 'Resume previous publish'}</span>
+                    </button>
+                  )}
+                  {!pendingPublish && (classification === 'empty-remote' || classification === 'local-ahead') && (
                     <button type="button" className="btn btn-primary btn-sm" onClick={() => void sync.publish()} disabled={disabled}>
                       <Upload size={14} />
                       <span>{busy === 'publish' ? '…' : zh ? '发布本机数据' : 'Publish this device'}</span>
@@ -224,7 +232,7 @@ export function SyncSection({ lang, sync }: SyncSectionProps) {
                       <span>{busy === 'preview' ? '…' : zh ? `接收 ${receivable[0].deviceName} 的版本` : `Receive ${receivable[0].deviceName}’s version`}</span>
                     </button>
                   )}
-                  {classification === 'fork' && status.heads.every(h => h.compatible) && (
+                  {!pendingPublish && classification === 'fork' && status.heads.every(h => h.compatible) && (
                     <button type="button" className="btn btn-secondary btn-sm" onClick={() => void sync.publish(true)} disabled={disabled}>
                       <Upload size={14} />
                       <span>{zh ? '保留本机版本并发布' : 'Keep this device’s version'}</span>

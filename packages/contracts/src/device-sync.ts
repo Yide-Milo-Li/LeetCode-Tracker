@@ -135,6 +135,8 @@ export interface SyncStatus {
     connected: boolean;
     reconnectRequired: boolean;
   };
+  /** A Drive publish that can be resumed with its original options and bytes. */
+  pendingPublish?: { operationId: string; allowFork: boolean };
   baseSnapshotId: string | null;
   localDirty: boolean;
   /** Null until a remote listing succeeded in this process. */

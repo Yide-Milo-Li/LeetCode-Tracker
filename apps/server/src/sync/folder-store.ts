@@ -34,12 +34,12 @@ export class FolderBlobStore implements SyncBlobStore {
     this.label = this.root;
   }
 
-  async list(): Promise<string[]> {
+  async list() {
     const entries = await fs.readdir(this.root, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
       if (error.code === 'ENOENT') return [];
       throw this.wrap(error);
     });
-    return entries.filter(entry => entry.isFile() && isSyncBlobName(entry.name)).map(entry => entry.name).sort();
+    return entries.filter(entry => entry.isFile() && isSyncBlobName(entry.name)).map(entry => entry.name).sort().map(name => ({ name }));
   }
 
   async read(name: string): Promise<Buffer> {

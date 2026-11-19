@@ -9,7 +9,7 @@
  * Every write that touches the local profile runs under the server write lock. Receiving always
  * creates a safety backup first (via `importSnapshotBundle`) and never auto-resolves forks.
  */
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import * as os from 'node:os';
 import { z } from 'zod';
 import type { SnapshotBundleV5 } from '../../../../packages/contracts/src/migration.ts';
@@ -39,6 +39,9 @@ import {
   writeSyncSettings,
   type SyncSettingKey,
 } from '../../../../packages/database/src/device-sync.ts';
+import { DriveSyncJournal, type StagedUpload } from '../../../../packages/database/src/drive-sync-journal.ts';
+import { DRIVE_BUDGET_MS, DriveRequests, type DriveConnection } from './drive-request.ts';
+import { sha256 } from './drive-history-index.ts';
 import { validateMigrationBundle } from '../../../../packages/database/src/migration-bundle.ts';
 import type { CatalogStore } from '../../../../packages/database/src/store.ts';
 import { classifySyncState, findHeads } from '../../../../packages/domain/src/device-sync.ts';
@@ -49,6 +52,7 @@ import {
   parseSyncBlobName,
   snapshotBlobNames,
   type SyncBlobStore,
+  type SyncBlobEntry,
 } from './blob-store.ts';
 import { FolderBlobStore, validateSyncFolder } from './folder-store.ts';
 import { GoogleDriveBlobStore } from './google-drive-store.ts';
@@ -115,6 +119,7 @@ interface Listing {
   devices: SyncDeviceState[];
   unreadable: number;
   checkedAt: number;
+  fileIds: Map<string, string>;
 }
 
 interface PendingPreview {
@@ -154,6 +159,13 @@ function summarizeValidationError(error: unknown): string {
   return error instanceof Error ? error.message.slice(0, 300) : 'unknown error';
 }
 
+function parseDeviceState(text: string, deviceId: string): SyncDeviceState | undefined {
+  try {
+    const parsed = syncDeviceStateSchema.safeParse(JSON.parse(text));
+    if (parsed.success && parsed.data.deviceId === deviceId) return parsed.data;
+  } catch { /* Ignore incomplete device acknowledgements. */ }
+}
+
 /** Coordinates configuration, OAuth, remote listing, publish and receive for this device. */
 export class DeviceSyncService {
   private readonly ctx: DeviceSyncContext;
@@ -164,7 +176,14 @@ export class DeviceSyncService {
   private readonly authFlow: GoogleAuthorizationFlow;
   private metaCache = new Map<string, RemoteSnapshot | 'unreadable'>();
   private readonly publishReplays = new Map<string, { fingerprint: string; result: SyncPublishResult }>();
-  private tokenSource: { key: string; source: GoogleAccessTokenSource } | null = null;
+  private tokenSource: { key: string; connection: DriveConnection } | null = null;
+  private driveJournal?: DriveSyncJournal;
+  private listingFlight: Promise<Listing> | null = null;
+  private listingRevision = 0;
+
+  private get journal(): DriveSyncJournal {
+    return this.driveJournal ??= new DriveSyncJournal(this.ctx.store.db);
+  }
   private listing: Listing | null = null;
   private preview: PendingPreview | null = null;
   private lastError: string | null = null;
@@ -189,7 +208,10 @@ export class DeviceSyncService {
     const { deviceId, deviceName } = this.identity();
     const transport = this.transport();
     const client = this.googleClient();
-    const connected = this.googleRefreshToken(client) !== null;
+    const refreshToken = this.googleRefreshToken(client);
+    const connected = refreshToken !== null;
+    const scope = transport === 'gdrive' && client && refreshToken
+      ? this.savedDriveScope(this.grantKey(client.clientId, refreshToken)) : undefined;
     const local = this.localState();
     const graph = this.listing ? classifySyncState(this.listing.snapshots, local.baseId, local.dirty) : null;
     return {
@@ -206,6 +228,7 @@ export class DeviceSyncService {
         connected,
         reconnectRequired: this.reconnectRequired || (!connected && this.setting(K.googleRefreshToken) !== null),
       },
+      ...(scope ? { pendingPublish: this.journal.pendingPublish(scope) } : {}),
       baseSnapshotId: local.baseId,
       localDirty: local.dirty,
       classification: graph?.classification ?? null,
@@ -263,6 +286,7 @@ export class DeviceSyncService {
       const nextClient = this.googleClient(values);
       const clientChanged = previousClient?.clientId !== nextClient?.clientId;
       if (clientChanged) {
+        values[K.googleGrantScope] = null;
         values[K.googleRefreshToken] = null;
         values[K.googleAuthorizedClientId] = null;
       }
@@ -272,10 +296,11 @@ export class DeviceSyncService {
 
       if (clientChanged || previousClient?.clientSecret !== nextClient?.clientSecret || transportChanged) {
         this.invalidateGoogleAuthorization();
+        this.tokenSource = null;
       }
       if (clientChanged || transportChanged || folderChanged) this.publishReplays.clear();
       if (clientChanged) this.reconnectRequired = false;
-      this.resetRemoteState();
+      this.resetRemoteState(false);
       return this.status();
     });
   }
@@ -283,14 +308,14 @@ export class DeviceSyncService {
   /** List the remote store and refresh classification. */
   async check(): Promise<SyncStatus> {
     const blobs = this.requireStore();
-    await this.refreshListing(blobs);
+    await this.refreshListing(blobs, true);
     return this.status();
   }
 
   /** Every listed snapshot, newest first, for the history view. */
   async history(): Promise<SyncSnapshotSummary[]> {
     const blobs = this.requireStore();
-    const listing = await this.refreshListing(blobs);
+    const listing = await this.refreshListing(blobs, true);
     const heads = findHeads(listing.snapshots);
     return [...listing.snapshots]
       .sort((a, b) => b.createdAt - a.createdAt)
@@ -311,16 +336,34 @@ export class DeviceSyncService {
    */
   async publish(input: { operationId?: string; allowFork?: boolean }): Promise<SyncPublishResult> {
     const fingerprint = JSON.stringify({ allowFork: input.allowFork === true });
-    if (input.operationId) {
-      const replay = this.publishReplays.get(input.operationId);
+    const deadline = Date.now() + DRIVE_BUDGET_MS;
+    return this.ctx.writeLock.run(async () => {
+      const blobs = this.requireStore(deadline);
+      const drive = blobs instanceof GoogleDriveBlobStore ? blobs : undefined;
+      const scope = drive ? await drive.scope().catch(error => { throw this.toApiError(error); }) : undefined;
+      const pending = scope
+        ? this.journal.pendingPublish(scope, input.operationId) ?? this.journal.pendingPublish(scope)
+        : undefined;
+      const operation = input.operationId ?? pending?.operationId ?? randomUUID();
+      const replay = scope ? this.journal.replay(scope, operation) : this.publishReplays.get(operation);
       if (replay) {
         if (replay.fingerprint !== fingerprint) throw new DeviceSyncError(409, 'SYNC_OPERATION_CONFLICT', 'Operation ID was used with different options');
         return replay.result;
       }
-    }
-    const result = await this.ctx.writeLock.run(async () => {
-      const blobs = this.requireStore();
+      if (pending && (pending.operationId !== operation || pending.allowFork !== !!input.allowFork)) {
+        throw new DeviceSyncError(409, 'SYNC_OPERATION_CONFLICT', 'Resume the pending publish with its original options.');
+      }
+      const finish = (result: SyncPublishResult) => {
+        if (scope) this.journal.finishPublish(scope, operation, fingerprint, result);
+        else if (input.operationId) this.publishReplays.set(operation, { fingerprint, result });
+        return result;
+      };
       const listing = await this.refreshListing(blobs);
+      if (scope && drive && pending) {
+        const staged = this.journal.upload(scope, operation)!;
+        const snapshot = await this.sendStaged(drive, scope, staged);
+        return finish(await this.finishSnapshot(blobs, snapshot, staged.baseId));
+      }
       const bundle = this.exportBundle();
       const contentHash = computeContentHash(bundle.tables);
       const local = this.localState(contentHash);
@@ -334,7 +377,7 @@ export class DeviceSyncService {
         }
       }
       if (graph.classification === 'up-to-date') {
-        return { published: false, snapshot: this.summarize(graph.heads[0], graph.heads) };
+        return finish({ published: false, snapshot: this.summarize(graph.heads[0], graph.heads) });
       }
       if (graph.classification === 'remote-ahead') {
         throw new DeviceSyncError(409, 'SYNC_REMOTE_AHEAD', 'Another device published newer data; receive the latest snapshot first');
@@ -350,18 +393,24 @@ export class DeviceSyncService {
       const supersedes = graph.classification === 'fork'
         ? graph.heads.map(head => head.snapshotId).filter(id => id !== parentId)
         : [];
-      const snapshot = await this.upload(blobs, bundle, contentHash, { parentId, supersedes, kind: 'publish' });
+      const snapshot = await this.upload(blobs, bundle, contentHash, { parentId, supersedes, kind: 'publish' },
+        { operation, purpose: 'publish', fingerprint });
+      return finish(await this.finishSnapshot(blobs, snapshot, this.setting(K.baseSnapshotId)));
+    });
+  }
+
+  private async finishSnapshot(blobs: SyncBlobStore, snapshot: RemoteSnapshot, baseBefore: string | null): Promise<SyncPublishResult> {
+    // A user may have received another snapshot while a failed publish was waiting for a retry.
+    const base = this.setting(K.baseSnapshotId);
+    if (base === baseBefore || base === snapshot.snapshotId) {
       writeSyncSettings(this.ctx.store.db, {
-        [K.baseSnapshotId]: snapshot.snapshotId,
-        [K.baseContentHash]: contentHash,
+        [K.baseSnapshotId]: snapshot.snapshotId, [K.baseContentHash]: snapshot.envelope!.contentHash,
         [K.lastPublished]: snapshot.snapshotId,
       });
-      const warning = await this.writeOwnDevice(blobs);
-      const heads = findHeads(this.listing!.snapshots);
-      return { published: true, snapshot: this.summarize(snapshot, heads), ...(warning ? { warning } : {}) };
-    });
-    if (input.operationId) this.publishReplays.set(input.operationId, { fingerprint, result });
-    return result;
+    }
+    const warning = await this.writeOwnDevice(blobs);
+    const heads = findHeads(this.listing!.snapshots);
+    return { published: true, snapshot: this.summarize(snapshot, heads), ...(warning ? { warning } : {}) };
   }
 
   // ---------------------------------------------------------------------------
@@ -383,7 +432,7 @@ export class DeviceSyncService {
     const names = snapshotBlobNames(snapshot.createdAt, snapshot.snapshotId);
     let bytes: Buffer;
     try {
-      bytes = await blobs.read(names.data);
+      bytes = await blobs.read(names.data, listing.fileIds.get(names.data));
     } catch (error) {
       this.requireCurrentRemote(cache);
       if (error instanceof SyncTransportError && error.code === 'SYNC_NOT_FOUND') {
@@ -442,12 +491,13 @@ export class DeviceSyncService {
    * content is published so every device converges on it.
    */
   async receive(input: { previewId: string; localChanges?: 'fork' | 'discard' }): Promise<SyncReceiveResult> {
+    const deadline = Date.now() + DRIVE_BUDGET_MS;
     return this.ctx.writeLock.run(async () => {
       const preview = this.preview;
       if (!preview || preview.previewId !== input.previewId || this.now() - preview.createdAt > (this.options.previewTtlMs ?? PREVIEW_TTL_MS)) {
         throw new DeviceSyncError(409, 'SYNC_PREVIEW_EXPIRED', 'Preview expired; preview the snapshot again');
       }
-      const blobs = this.requireStore();
+      const blobs = this.requireStore(deadline);
       const before = this.exportBundle();
       const beforeHash = computeContentHash(before.tables);
       const local = this.localState(beforeHash);
@@ -461,13 +511,20 @@ export class DeviceSyncService {
       }
       const listing = this.listing ?? await this.refreshListing(blobs);
       const known = new Set(listing.snapshots.map(s => s.snapshotId));
+      const driveScope = blobs instanceof GoogleDriveBlobStore
+        ? await blobs.scope().catch(error => { throw this.toApiError(error); }) : undefined;
+      // Retrying a failed receive with a new preview must reuse the same archive.
+      const archiveOperation = 'archive-' + createHash('sha256')
+        .update(JSON.stringify([local.baseId, beforeHash, preview.snapshot.snapshotId])).digest('hex');
       let forkSnapshotId: string | null = null;
       if (local.dirty && input.localChanges === 'fork') {
         const parentId = local.baseId && known.has(local.baseId) ? local.baseId : null;
-        forkSnapshotId = (await this.upload(blobs, before, beforeHash, { parentId, supersedes: [], kind: 'fork' })).snapshotId;
+        forkSnapshotId = (await this.upload(blobs, before, beforeHash, { parentId, supersedes: [], kind: 'fork' },
+          { operation: archiveOperation, purpose: 'archive', fingerprint: '' })).snapshotId;
       }
 
       const restored = await this.ctx.store.importSnapshotBundle(preview.bundle);
+      if (driveScope) this.journal.clearArchives(driveScope);
       this.preview = null;
       const warnings: string[] = [];
       const refreshWarning = this.ctx.refreshAfterReplace();
@@ -486,11 +543,17 @@ export class DeviceSyncService {
       if (!(heads.length === 1 && heads[0].snapshotId === preview.snapshot.snapshotId)) {
         try {
           const supersedes = heads.map(head => head.snapshotId).filter(id => id !== preview.snapshot.snapshotId);
-          const resolution = await this.upload(blobs, after, afterHash, { parentId: preview.snapshot.snapshotId, supersedes, kind: 'publish' });
+          const operation = randomUUID();
+          const fingerprint = JSON.stringify({ allowFork: true });
+          const resolution = await this.upload(blobs, after, afterHash, { parentId: preview.snapshot.snapshotId, supersedes, kind: 'publish' },
+            { operation, purpose: 'resolution', fingerprint });
           resolutionSnapshotId = resolution.snapshotId;
           writeSyncSettings(this.ctx.store.db, {
             [K.baseSnapshotId]: resolution.snapshotId,
             [K.lastPublished]: resolution.snapshotId,
+          });
+          if (driveScope) this.journal.finishPublish(driveScope, operation, fingerprint, {
+            published: true, snapshot: this.summarize(resolution, findHeads(this.listing!.snapshots)),
           });
         } catch {
           warnings.push('Data was received, but marking it as the current version failed; publish from this device to finish.');
@@ -541,6 +604,7 @@ export class DeviceSyncService {
         throw new DeviceSyncError(400, 'SYNC_AUTHORIZATION_FAILED', 'The Google authorization has been superseded');
       }
       writeSyncSettings(this.ctx.store.db, {
+        [K.googleGrantScope]: null,
         [K.googleRefreshToken]: refreshToken,
         [K.googleAuthorizedClientId]: client.clientId,
       });
@@ -560,6 +624,7 @@ export class DeviceSyncService {
     const token = await this.ctx.writeLock.run(() => {
       const refreshToken = this.googleRefreshToken();
       writeSyncSettings(this.ctx.store.db, {
+        [K.googleGrantScope]: null,
         [K.googleRefreshToken]: null,
         [K.googleAuthorizedClientId]: null,
         ...(this.transport() === 'gdrive' ? { [K.transport]: 'none' } : {}),
@@ -624,8 +689,17 @@ export class DeviceSyncService {
     return this.setting(K.googleRefreshToken);
   }
 
+  private grantKey(clientId: string, refreshToken: string): string {
+    return createHash('sha256').update(JSON.stringify([clientId, refreshToken])).digest('hex');
+  }
+
+  private savedDriveScope(grant: string): string | undefined {
+    const binding = this.setting(K.googleGrantScope)?.split('.');
+    return binding?.[0] === grant ? binding[1] : undefined;
+  }
+
   /** Blob store for the configured transport. */
-  private requireStore(): SyncBlobStore {
+  private requireStore(deadline = Date.now() + DRIVE_BUDGET_MS): SyncBlobStore {
     const transport = this.transport();
     if (transport === 'folder') {
       const folder = this.setting(K.folderPath);
@@ -637,20 +711,31 @@ export class DeviceSyncService {
       if (client && refreshToken) {
         const key = JSON.stringify([client.clientId, client.clientSecret, refreshToken]);
         if (this.tokenSource?.key !== key) {
-          this.tokenSource = { key, source: new GoogleAccessTokenSource(client, refreshToken, this.endpoints, this.fetchImpl, this.now) };
+          const tokens = new GoogleAccessTokenSource(client, refreshToken, this.endpoints, this.fetchImpl, this.now);
+          const grant = this.grantKey(client.clientId, refreshToken);
+          const connection: DriveConnection = {
+            tokens, notBefore: 0, scope: this.savedDriveScope(grant),
+            identified: scope => {
+              if (this.tokenSource?.connection === connection) {
+                writeSyncSettings(this.ctx.store.db, { [K.googleGrantScope]: grant + '.' + scope });
+              }
+            },
+          };
+          this.tokenSource = { key, connection };
         }
-        return new GoogleDriveBlobStore(this.tokenSource.source, this.endpoints, this.fetchImpl);
+        return new GoogleDriveBlobStore(new DriveRequests(this.tokenSource.connection, this.fetchImpl, deadline), this.endpoints, client.clientId, this.journal);
       }
       throw new DeviceSyncError(409, 'SYNC_RECONNECT_REQUIRED', 'Connect Google Drive first');
     }
     throw new DeviceSyncError(400, 'SYNC_NOT_CONFIGURED', 'Choose a sync method first');
   }
 
-  private resetRemoteState(): void {
+  private resetRemoteState(clearConnection = true): void {
+    this.listingFlight = null;
     this.listing = null;
     this.preview = null;
     this.metaCache = new Map();
-    this.tokenSource = null;
+    if (clearConnection) this.tokenSource = null;
     this.lastError = null;
   }
 
@@ -677,35 +762,56 @@ export class DeviceSyncService {
   }
 
   /** List and parse remote metadata. Snapshot metadata is immutable and cached by name. */
-  private async refreshListing(blobs: SyncBlobStore): Promise<Listing> {
+  private refreshListing(blobs: SyncBlobStore, shareLegacyHistory = false): Promise<Listing> {
+    if (this.listingFlight) {
+      return blobs instanceof GoogleDriveBlobStore
+        ? blobs.requests.waitFor(this.listingFlight).catch(error => { throw this.toApiError(error); })
+        : this.listingFlight;
+    }
+    const flight = this.readListing(blobs, shareLegacyHistory).finally(() => {
+      if (this.listingFlight === flight) this.listingFlight = null;
+    });
+    this.listingFlight = flight;
+    return flight;
+  }
+
+  private async readListing(blobs: SyncBlobStore, shareLegacyHistory: boolean): Promise<Listing> {
     const cache = this.metaCache;
     try {
-      const names = await blobs.list();
+      const revision = this.listingRevision;
+      const scope = blobs instanceof GoogleDriveBlobStore ? await blobs.scope() : undefined;
+      const entries = await blobs.list();
+      const fileIds = new Map<string, string>();
       const snapshots: RemoteSnapshot[] = [];
       const devices: SyncDeviceState[] = [];
+      const legacyHistory: string[] | undefined = shareLegacyHistory && scope ? [] : undefined;
       let unreadable = 0;
-      for (const name of names) {
+      for (const file of entries) {
+        const { name, id } = file;
+        if (id) fileIds.set(name, id);
         const parsed = parseSyncBlobName(name);
         if (!parsed) continue;
         if (parsed.type === 'meta') {
-          let entry = cache.get(name);
+          let entry = scope ? undefined : cache.get(name);
           if (!entry) {
-            entry = this.parseMeta(await blobs.read(name), parsed.snapshotId, parsed.createdAt);
-            cache.set(name, entry);
+            entry = await this.readJson(blobs, file, scope,
+              text => this.parseMeta(text, parsed.snapshotId, parsed.createdAt), legacyHistory) ?? 'unreadable';
+            if (!scope) cache.set(name, entry);
           }
           if (entry === 'unreadable') unreadable++;
           else snapshots.push(entry);
         } else if (parsed.type === 'device') {
-          try {
-            const state = syncDeviceStateSchema.parse(JSON.parse((await blobs.read(name)).toString('utf8')));
-            if (state.deviceId === parsed.deviceId) devices.push(state);
-          } catch (error) {
-            if (error instanceof SyncTransportError && error.code !== 'SYNC_NOT_FOUND') throw error;
-          }
+          const state = await this.readJson(blobs, file, scope, text => parseDeviceState(text, parsed.deviceId));
+          if (state) devices.push(state);
         }
       }
       this.requireCurrentRemote(cache);
-      this.listing = { snapshots, devices, unreadable, checkedAt: this.now() };
+      if (legacyHistory?.length && blobs instanceof GoogleDriveBlobStore) {
+        await blobs.shareLegacyHistory(legacyHistory);
+        this.requireCurrentRemote(cache);
+      }
+      if (revision !== this.listingRevision) return this.readListing(blobs, shareLegacyHistory);
+      this.listing = { snapshots, devices, unreadable, fileIds, checkedAt: this.now() };
       this.lastError = null;
       this.reconnectRequired = false;
       return this.listing;
@@ -715,6 +821,40 @@ export class DeviceSyncService {
     }
   }
 
+  private async readJson<T>(
+    blobs: SyncBlobStore, file: SyncBlobEntry, scope: string | undefined,
+    parse: (text: string) => T | undefined, legacyHistory?: string[],
+  ): Promise<T | undefined> {
+    const { name, revision, jsonContent } = file;
+    const device = name.startsWith('device-');
+    const cached = scope && revision && (!device || jsonContent) ? this.journal.metadata(scope, name, revision) : undefined;
+    const remember = (text: string) => {
+      if (jsonContent && !jsonContent.text) legacyHistory?.push(text);
+      if (scope && revision && (!device || jsonContent) && text !== cached) this.journal.cache(scope, name, revision, text);
+    };
+    const hint = jsonContent?.text ?? (cached && (!jsonContent || sha256(cached) === jsonContent.sha256) ? cached : undefined);
+    if (hint) {
+      const value = parse(hint);
+      if (value !== undefined) {
+        remember(hint);
+        return value;
+      }
+    }
+
+    let bytes: Buffer;
+    try {
+      bytes = await blobs.read(name, file.id);
+    } catch (error) {
+      if (device && error instanceof SyncTransportError && error.code === 'SYNC_NOT_FOUND') return;
+      throw error;
+    }
+    const text = bytes.toString('utf8');
+    const value = parse(text);
+    // A file can change between list and get. Only share exact UTF-8 bytes for the listed revision.
+    if (value !== undefined && (!jsonContent || sha256(text) === jsonContent.sha256)) remember(text);
+    return value;
+  }
+
   private requireCurrentRemote(cache: typeof this.metaCache): void {
     if (cache !== this.metaCache) {
       throw new DeviceSyncError(409, 'SYNC_CONFIG_CHANGED', 'Sync settings changed. Try again.');
@@ -722,17 +862,17 @@ export class DeviceSyncService {
   }
 
   /** Parse a metadata blob; newer envelope versions become incompatible graph nodes. */
-  private parseMeta(bytes: Buffer, snapshotId: string, createdAt: number): RemoteSnapshot | 'unreadable' {
+  private parseMeta(text: string, snapshotId: string, createdAt: number): RemoteSnapshot | undefined {
     let raw: unknown;
     try {
-      raw = JSON.parse(bytes.toString('utf8'));
+      raw = JSON.parse(text);
     } catch {
-      return 'unreadable';
+      return;
     }
     const current = syncEnvelopeSchema.safeParse(raw);
     if (current.success && current.data.version <= DEVICE_SYNC_VERSION) {
       const envelope = current.data;
-      if (envelope.snapshotId !== snapshotId || envelope.createdAt !== createdAt) return 'unreadable';
+      if (envelope.snapshotId !== snapshotId || envelope.createdAt !== createdAt) return;
       return {
         snapshotId,
         parentId: envelope.parentId,
@@ -749,10 +889,9 @@ export class DeviceSyncService {
       };
     }
     const future = futureEnvelopeSchema.safeParse(raw);
-    if (future.success && future.data.version > DEVICE_SYNC_VERSION && future.data.snapshotId === snapshotId) {
+    if (future.success && future.data.version > DEVICE_SYNC_VERSION && future.data.snapshotId === snapshotId && future.data.createdAt === createdAt) {
       return { ...future.data, createdAt, envelope: null, compatible: false };
     }
-    return 'unreadable';
   }
 
   /** Write data then metadata for a new snapshot and add it to the cached listing. */
@@ -760,7 +899,8 @@ export class DeviceSyncService {
     blobs: SyncBlobStore,
     bundle: SnapshotBundleV5,
     contentHash: string,
-    graph: { parentId: string | null; supersedes: string[]; kind: 'publish' | 'fork' }
+    graph: { parentId: string | null; supersedes: string[]; kind: 'publish' | 'fork' },
+    intent: { operation: string; purpose: 'publish' | 'archive' | 'resolution'; fingerprint: string }
   ): Promise<RemoteSnapshot> {
     const { deviceId, deviceName } = this.identity();
     const snapshotId = randomUUID();
@@ -786,26 +926,48 @@ export class DeviceSyncService {
     const envelope = syncEnvelopeSchema.parse({ ...draft, payloadBytes: Buffer.byteLength(JSON.stringify(bundle)) });
     const names = snapshotBlobNames(createdAt, snapshotId);
     try {
+      if (blobs instanceof GoogleDriveBlobStore) {
+        const scope = await blobs.scope();
+        let staged = this.journal.upload(scope, intent.operation);
+        if (!staged) {
+          const [dataId, metaId] = await blobs.generateIds(2);
+          staged = { operation: intent.operation, envelope, payload: encodeSnapshotFile(envelope, bundle), dataId, metaId,
+            session: null, dataDone: false, baseId: this.setting(K.baseSnapshotId) };
+          this.journal.stage(scope, intent.purpose, intent.fingerprint, staged);
+        }
+        return await this.sendStaged(blobs, scope, staged);
+      }
       await blobs.write(names.data, encodeSnapshotFile(envelope, bundle));
       await blobs.write(names.meta, Buffer.from(JSON.stringify(envelope)));
+      return this.recordSnapshot(envelope);
     } catch (error) {
       throw this.toApiError(error);
     }
-    const snapshot: RemoteSnapshot = {
-      snapshotId,
-      parentId: envelope.parentId,
-      supersedes: envelope.supersedes,
-      kind: envelope.kind,
-      createdAt,
-      envelope,
-      deviceId,
-      deviceName,
-      appVersion: envelope.appVersion,
-      payloadBytes: envelope.payloadBytes,
-      compatible: true,
-    };
-    this.metaCache.set(names.meta, snapshot);
-    if (this.listing) this.listing.snapshots.push(snapshot);
+  }
+
+  private async sendStaged(blobs: GoogleDriveBlobStore, scope: string, staged: StagedUpload): Promise<RemoteSnapshot> {
+    const { operation, envelope } = staged;
+    const names = snapshotBlobNames(envelope.createdAt, envelope.snapshotId);
+    try {
+      if (!staged.dataDone) {
+        await blobs.create(names.data, staged.dataId, staged.payload, {
+          location: staged.session, save: location => this.journal.setSession(scope, operation, location),
+        });
+        this.journal.dataComplete(scope, operation);
+      }
+      await blobs.create(names.meta, staged.metaId, Buffer.from(JSON.stringify(envelope)));
+      return this.recordSnapshot(envelope);
+    } catch (error) {
+      throw this.toApiError(error);
+    }
+  }
+
+  private recordSnapshot(envelope: SyncEnvelope): RemoteSnapshot {
+    const snapshot: RemoteSnapshot = { ...envelope, envelope, compatible: true };
+    this.listingRevision++;
+    if (this.listing && !this.listing.snapshots.some(s => s.snapshotId === snapshot.snapshotId)) {
+      this.listing.snapshots.push(snapshot);
+    }
     return snapshot;
   }
 
@@ -823,6 +985,7 @@ export class DeviceSyncService {
     };
     try {
       await blobs.write(deviceBlobName(deviceId), Buffer.from(JSON.stringify(syncDeviceStateSchema.parse(state))));
+      this.listingRevision++;
       if (this.listing) this.listing.devices = [...this.listing.devices.filter(d => d.deviceId !== deviceId), state];
       return undefined;
     } catch {

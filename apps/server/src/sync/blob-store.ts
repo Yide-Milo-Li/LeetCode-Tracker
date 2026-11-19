@@ -16,14 +16,23 @@ export class SyncTransportError extends Error {
   }
 }
 
+/** Identity of the precise revision selected by a listing, when supplied by the transport. */
+export interface SyncBlobEntry {
+  name: string;
+  id?: string;
+  revision?: string;
+  /** Drive's body checksum and, when available, matching JSON recovered from the listing. */
+  jsonContent?: { sha256: string; text?: string };
+}
+
 /** Minimal blob operations; names are validated by {@link isSyncBlobName}. */
 export interface SyncBlobStore {
   /** Human-readable location shown in status (folder path or "Google Drive"). */
   readonly label: string;
   /** All valid blob names currently visible; unknown names (temp files, conflict copies) are skipped. */
-  list(): Promise<string[]>;
+  list(): Promise<SyncBlobEntry[]>;
   /** Read a blob fully. Throws `SYNC_NOT_FOUND` when absent. */
-  read(name: string): Promise<Buffer>;
+  read(name: string, id?: string): Promise<Buffer>;
   /**
    * Create or replace a blob. Implementations must not expose partially written content under
    * `name` to their own `list`/`read`.

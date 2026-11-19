@@ -138,11 +138,24 @@ export class GoogleAuthorizationFlow {
   }
 }
 
+/** A refresh transport failure can use the same deadline and cooldown as the Drive request. */
+export class GoogleRefreshError extends SyncTransportError {
+  readonly status: number;
+  readonly retryAfter: string | null;
+
+  constructor(status: number, retryAfter: string | null = null) {
+    super('SYNC_TRANSPORT_FAILED', status ? `Google token refresh failed (HTTP ${status})` : 'Could not reach Google');
+    this.status = status;
+    this.retryAfter = retryAfter;
+  }
+}
+
 /**
  * Short-lived access tokens derived from a refresh token, refreshed one minute before expiry.
  * `invalid_grant` (revoked, expired testing-mode token) maps to `SYNC_RECONNECT_REQUIRED`.
  */
 export class GoogleAccessTokenSource {
+  private refreshing?: Promise<string>;
   private cached: { token: string; expiresAt: number } | null = null;
   private readonly client: GoogleClientConfig;
   private readonly refreshToken: string;
@@ -164,8 +177,13 @@ export class GoogleAccessTokenSource {
     this.now = now;
   }
 
-  async get(): Promise<string> {
+  async get(signal?: AbortSignal): Promise<string> {
     if (this.cached && this.cached.expiresAt - 60_000 > this.now()) return this.cached.token;
+    this.refreshing ??= this.refresh(signal).finally(() => { this.refreshing = undefined; });
+    return this.refreshing;
+  }
+
+  private async refresh(signal?: AbortSignal): Promise<string> {
     const body = new URLSearchParams({
       grant_type: 'refresh_token',
       refresh_token: this.refreshToken,
@@ -176,18 +194,19 @@ export class GoogleAccessTokenSource {
     try {
       response = await this.fetchImpl(this.endpoints.token, {
         method: 'POST',
+        signal,
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body,
       });
     } catch {
-      throw new SyncTransportError('SYNC_TRANSPORT_FAILED', 'Could not reach Google');
+      throw new GoogleRefreshError(0);
     }
     if (!response.ok) {
       const error = await response.json().catch(() => ({})) as { error?: string };
       if (response.status === 400 || response.status === 401 || error.error === 'invalid_grant') {
         throw new SyncTransportError('SYNC_RECONNECT_REQUIRED', 'Google access was revoked or expired; reconnect');
       }
-      throw new SyncTransportError('SYNC_TRANSPORT_FAILED', `Google token refresh failed (HTTP ${response.status})`);
+      throw new GoogleRefreshError(response.status, response.headers.get('retry-after'));
     }
     const json = (await response.json()) as { access_token?: string; expires_in?: number };
     if (!json.access_token) throw new SyncTransportError('SYNC_TRANSPORT_FAILED', 'Google returned no access token');
@@ -196,8 +215,8 @@ export class GoogleAccessTokenSource {
   }
 
   /** Forget the cached access token after a 401 so the next call refreshes. */
-  invalidate(): void {
-    this.cached = null;
+  invalidate(rejectedToken: string): void {
+    if (this.cached?.token === rejectedToken) this.cached = null;
   }
 }
 

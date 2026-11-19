@@ -86,6 +86,7 @@ export const SYNC_SETTING_KEYS = {
   baseContentHash: 'sync_base_content_hash',
   lastPublished: 'sync_last_published',
   lastReceived: 'sync_last_received',
+  googleGrantScope: 'sync_google_grant_scope',
   googleAuthorizedClientId: 'sync_google_authorized_client_id',
   googleClientId: 'sync_google_client_id',
   googleClientSecret: 'sync_google_client_secret',
