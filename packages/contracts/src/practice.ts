@@ -3,7 +3,7 @@
  * progress page snapshots, preflight preview, and Gemini-assisted imports.
  */
 import { z } from 'zod';
-import { isEventTime, timeZoneSchema } from './time.ts';
+import { isEventTime, localDate, timeZoneSchema } from './time.ts';
 
 /** Helper to validate non-blank trimmed strings. */
 function nonBlank(max: number) {
@@ -322,6 +322,27 @@ const MONTH_MAP: Record<string, string> = {
   july: '07', august: '08', september: '09', october: '10', november: '11', december: '12',
 };
 
+const RELATIVE_UNIT_MS: Record<string, number> = {
+  s: 1000,
+  m: 60_000,
+  h: 3_600_000,
+  d: 86_400_000,
+};
+
+function progressElapsedMs(raw: string): number | undefined {
+  const text = raw.toLowerCase();
+  if (/^(?:just\s+now|a\s+few\s+seconds\s+ago)$/.test(text)) return 0;
+  const match = /^(?:(\d+)\s*|an?\s+)(s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?)\s+ago$/.exec(text);
+  if (!match) return undefined;
+  const [, amount = '1', unit] = match;
+  return Number(amount) * RELATIVE_UNIT_MS[unit[0]];
+}
+
+interface ProgressDateContext {
+  now?: number;
+  sourceTimezone?: string | null;
+}
+
 /**
  * Result of parsing a raw date or timestamp string from LeetCode progress.
  */
@@ -334,23 +355,32 @@ export interface NormalizedDateResult {
 /**
  * Parse and normalize arbitrary date strings from LeetCode progress pages.
  * Supports ISO strings ("2026-08-26", "2026-08-26T14:20:00Z"), month-day formats
- * ("Aug 26, 2026", "Aug 26", "08/26/2026"), and requires batchYear when year is omitted.
+ * ("Aug 26, 2026", "Aug 26", "08/26/2026"), and relative submission labels.
  *
  * @param raw Input date string.
- * @param batchYear Optional year to apply if the input lacks a year.
+ * @param batchYear Year for absolute dates without a year.
+ * @param context Reference instant and source timezone for relative labels.
  * @returns Normalized ISO date string, precision, and year presence flag.
  */
-export function normalizeProgressDate(raw: string, batchYear?: number): NormalizedDateResult {
-  const result = parseProgressDate(raw, batchYear);
+export function normalizeProgressDate(raw: string, batchYear?: number, context: ProgressDateContext = {}): NormalizedDateResult {
+  const result = parseProgressDate(raw, batchYear, context);
   if (!isEventTime(result.dateStr, result.precision)) throw new Error('Invalid calendar date or timestamp');
   return result;
 }
 
 /** Parse supported pasted formats without assigning an implicit zone to clock times. */
-function parseProgressDate(raw: string, batchYear?: number): NormalizedDateResult {
+function parseProgressDate(raw: string, batchYear: number | undefined, context: ProgressDateContext): NormalizedDateResult {
   const trimmed = raw.trim();
   if (!trimmed) {
     throw new Error('Date string is empty');
+  }
+
+  const elapsedMs = progressElapsedMs(trimmed);
+  if (elapsedMs !== undefined) {
+    const estimated = new Date((context.now ?? Date.now()) - elapsedMs);
+    if (!(estimated.getUTCFullYear() > 0)) throw new Error(`Invalid relative date: '${trimmed}'`);
+    // LeetCode rounds relative labels. Keep calendar-day precision for these estimates.
+    return { dateStr: localDate(estimated.getTime(), context.sourceTimezone ?? 'UTC'), precision: 'date', hasYear: false };
   }
 
   // 1. ISO 8601 with optional time: YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss...

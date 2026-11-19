@@ -286,6 +286,87 @@ describe('Practice & Progress API Endpoints', () => {
       assert.equal(formatBody.candidates[0].lastSubmitted, '2026-01-15');
     });
 
+    it('imports recent submissions alongside fixed dates from LeetCode Practice History', async (t) => {
+      // 1 a.m. in Los Angeles. Two hours ago is on the previous local date.
+      let now = Date.parse('2026-11-19T09:00:00Z');
+      t.mock.method(Date, 'now', () => now);
+      const parking = { frontendId: '1603', lastResult: 'Accepted' };
+      const assistant = new GeminiAssistant({
+        apiKey: 'test-key',
+        generateContentFn: async ({ contents }) => {
+          const candidates = contents.includes('a few seconds ago')
+            ? [{ ...parking, lastSubmitted: 'a few seconds ago', submissions: 2, sourceLine: 1, endLine: 5 }]
+            : [
+              { ...parking, lastSubmitted: '2 hours ago', submissions: 1, sourceLine: 3, endLine: 7 },
+              { frontendId: '92', lastSubmitted: 'Nov 11', lastResult: 'Accepted', submissions: 6, sourceLine: 8, endLine: 12 },
+            ];
+          return { text: JSON.stringify({ candidates }) };
+        },
+      });
+      const { app, store, db } = await setupTestApp(assistant);
+      t.after(async () => {
+        await app.close();
+        db.close();
+      });
+      await store.importJsonl([
+        JSON.stringify({ id: '1603', title: 'Design Parking System', difficulty: 'Easy' }),
+        JSON.stringify({ id: '92', title: 'Reverse Linked List II', difficulty: 'Medium' }),
+      ].join('\n'));
+      const rawText = 'Practice History\nFilter\n2 hours ago\n1603. Design Parking System\nEasy\nAccepted\n1\nNov 11\n92. Reverse Linked List II\nMed.\nAccepted\n6';
+      const formatted = await app.inject({ method: 'POST', url: '/api/v1/progress-imports/format', payload: { rawText } });
+      assert.equal(formatted.statusCode, 200);
+      const { candidates } = formatted.json();
+      assert.equal(candidates[0].lastSubmitted, '2 hours ago');
+
+      const payload = { candidates, batchYear: 2026, sourceTimezone: 'America/Los_Angeles' };
+      const response = await app.inject({ method: 'POST', url: '/api/v1/progress-imports/preview', payload });
+      assert.equal(response.statusCode, 200);
+      const preview = response.json();
+      assert.equal(preview.errorCount, 0, JSON.stringify(preview.errors));
+      assert.equal(preview.insertCount, 2);
+
+      const committed = await app.inject({
+        method: 'POST', url: '/api/v1/progress-imports', payload: { previewId: preview.previewId },
+      });
+      assert.equal(committed.statusCode, 200);
+      assert.equal(committed.json().insertedCount, 2);
+      assert.equal(store.getProgressSnapshot('1603')?.lastSubmittedAt, '2026-11-18');
+      assert.equal(store.getProgressSnapshot('1603')?.timePrecision, 'date');
+      assert.equal(store.getProgressSnapshot('92')?.lastSubmittedAt, '2026-11-11');
+
+      candidates[0].lastSubmitted = '2h ago';
+      const repeated = await app.inject({ method: 'POST', url: '/api/v1/progress-imports/preview', payload });
+      assert.equal(repeated.statusCode, 200);
+      assert.equal(repeated.json().unchangedCount, 2);
+
+      // November 20 in UTC is still November 19 in the saved timezone.
+      now = Date.parse('2026-11-20T04:00:00Z');
+      await store.updateSettings({ timezone: 'America/Los_Angeles' });
+      const fresh = await app.inject({
+        method: 'POST', url: '/api/v1/progress-imports/format',
+        payload: { rawText: 'a few seconds ago\n1603. Design Parking System\nEasy\nAccepted\n2' },
+      });
+      assert.equal(fresh.statusCode, 200);
+      const freshCandidates = fresh.json().candidates;
+      assert.equal(freshCandidates[0].lastSubmitted, 'a few seconds ago');
+      const freshResponse = await app.inject({
+        method: 'POST', url: '/api/v1/progress-imports/preview', payload: { candidates: freshCandidates },
+      });
+      assert.equal(freshResponse.statusCode, 200);
+      const freshPreview = freshResponse.json();
+      assert.equal(freshPreview.errorCount, 0, JSON.stringify(freshPreview.errors));
+      assert.equal(freshPreview.updateCount, 1);
+      assert.deepEqual(freshPreview.items[0].incomingSnapshot, {
+        lastSubmittedAt: '2026-11-19', timePrecision: 'date', lastResult: 'Accepted', totalSubmissions: 2,
+      });
+      const updated = await app.inject({
+        method: 'POST', url: '/api/v1/progress-imports', payload: { previewId: freshPreview.previewId },
+      });
+      assert.equal(updated.statusCode, 200);
+      assert.equal(updated.json().updatedCount, 1);
+      assert.equal(store.getProgressSnapshot('1603')?.totalSubmissions, 2);
+    });
+
     it('handles Gemini errors gracefully', async () => {
       const mock = new MockGeminiAssistant();
       mock.shouldFail = true;

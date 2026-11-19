@@ -459,7 +459,7 @@ export class LLMAssistant implements ILLMAssistant {
     const lines = rawText.split(/(?<=\n)|(?<=\r)(?!\n)/);
     const systemInstruction = `You are a structured data formatting assistant. Your ONLY job is to parse tabular LeetCode progress text into structured records.
 The user pasted text copied from their personal LeetCode Progress page, which typically contains:
-- Last Submitted (e.g. "Aug 26, 2026", "Sep 8", "2026-08-26")
+- Last Submitted (e.g. "Aug 26, 2026", "Sep 8", "2026-08-26", "2 hours ago", "2h ago", "a few seconds ago")
 - Problem (e.g. "1. Two Sum", "206. Reverse Linked List")
 - Last Result (e.g. "Accepted", "Wrong Answer", "Time Limit Exceeded")
 - Submissions count (integer number of submissions, e.g. 3)
@@ -467,7 +467,7 @@ The user pasted text copied from their personal LeetCode Progress page, which ty
 For each identifiable problem row:
 - frontendId: The numeric or frontend problem ID string (e.g. "1" from "1. Two Sum").
 - title: Problem title if present (e.g. "Two Sum").
-- lastSubmitted: The exact submission date or timestamp string from the text.
+- lastSubmitted: Copy the Last Submitted value verbatim, including relative labels such as "a few seconds ago" and "an hour ago". The app resolves relative labels during preview.
 - lastResult: The submission result string.
 - submissions: The total submissions count as an integer. If missing or invalid, use -1.
 - sourceLine: 1-based starting line in the pasted text. For a multiline entry, also give endLine (inclusive).

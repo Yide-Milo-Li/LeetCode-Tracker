@@ -359,6 +359,8 @@ export function previewProgressImport(
   getProblemFn: (value: string, by: 'id' | 'frontendId' | 'slug') => CatalogProblem | null
 ): ProgressImportPreview {
   const parsed = progressImportPreviewRequestSchema.parse(requestInput);
+  const now = Date.now();
+  const sourceTimezone = parsed.sourceTimezone ?? defaultTimezone;
   const resolvedSet = new Set(
     parsed.resolvedOverrides?.filter((r) => r.confirmOverride).map((r) => r.frontendId) ?? []
   );
@@ -368,7 +370,7 @@ export function previewProgressImport(
 
   for (const [idx, c] of parsed.candidates.entries()) {
     try {
-      const normDate = normalizeProgressDate(c.lastSubmitted, parsed.batchYear);
+      const normDate = normalizeProgressDate(c.lastSubmitted, parsed.batchYear, { now, sourceTimezone });
       if (c.submissions < 0) {
         throw new Error(
           `Invalid total submissions: '${c.submissions}'. Must be a non-negative integer.`
@@ -590,13 +592,12 @@ export function previewProgressImport(
     }
   }
 
-  const now = Date.now();
   const errorCount = errors.length + items.filter((i) => i.action === 'error').length;
   const validCount = items.filter((i) => i.allowedToCommit).length;
 
   return {
     previewId: randomUUID(),
-    sourceTimezone: parsed.sourceTimezone ?? defaultTimezone,
+    sourceTimezone,
     catalogRevision,
     practiceRevision,
     createdAt: now,
