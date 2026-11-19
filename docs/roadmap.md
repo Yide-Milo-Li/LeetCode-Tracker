@@ -1,11 +1,11 @@
 # Roadmap
 
-Release 1.3.1, a patch on 1.3.0, ships Windows 11 x64 and Apple Silicon macOS 14+ desktop distributions with guided setup, SQLite schema v12 / Snapshot Bundle v5, local recommendation selection, searchable Topic Insights, local/AI note formatting, and palette-tinted native app icons that persist after quitting. Implemented features and historical benchmark observations below are distinct from the open acceptance work listed here. See [current status](status.md).
+Release 1.4.0 adds device sync, AI client access through MCP and signed in-app updates for Windows x64 and Apple Silicon macOS. [Release notes](releases/1.4.0.md) · [Verification](status.md)
 
 ## Desktop distribution: implemented and remaining
 
 - Implemented: Tauri host, private Node 26.13.0, authenticated IPC bridge, native export authorization, sidecar lifecycle/retry, palette-tinted native icons, unsigned Windows x64 NSIS installer, and ad-hoc signed Apple Silicon macOS `.app`/`.dmg` package.
-- Remaining: clean-machine installation/upgrade/downgrade, real WebView2/native-dialog acceptance, performance measurements, Windows code signing, Apple notarization, and automatic updates.
+- Remaining: clean-machine installation/upgrade/downgrade, real WebView2/native-dialog acceptance, performance measurements, Windows code signing, Apple notarization, and end-to-end verification of signed updates on installed builds.
 
 ## Historical milestones carried into v1.0.0
 
@@ -49,7 +49,7 @@ Release 1.3.1, a patch on 1.3.0, ships Windows 11 x64 and Apple Silicon macOS 14
 - SQLite v10 outcome feedback, knowledge profiles, and adaptive topic allocation; Snapshot Bundle v3 preserves that feedback and accepts legacy imports.
 - Local Add one, strict integer review quotas, confirmed Today item removal, and difficulty-count short-circuit filling.
 - Updated Today, Problems, Statistics, and Notes workspaces; Statistics is the default Progress tab. Notes adds unsaved-change protection, formatting, split preview, and focus mode.
-- Internal Apple Silicon macOS build and native CI workflow; public macOS distribution and physical-device acceptance remain separate.
+- Public Apple Silicon macOS packages, native migration CI, practice timer, and local and AI-assisted note formatting.
 
 ## Future Community Directions
 
@@ -57,8 +57,7 @@ Release 1.3.1, a patch on 1.3.0, ships Windows 11 x64 and Apple Silicon macOS 14
   - Floating/pinned real-time practice stopwatch with keyboard shortcuts (e.g., pause/resume).
   - Automated elapsed duration recording upon marking problems complete, eliminating manual time estimates.
   - Distraction-free full-screen Zen mode that temporarily hides sidebar navigation and peripheral stats, keeping only the problem link, timer, and solution scratchpad.
-- **AI-Assisted Note Prettier**:
-  - One-click intelligent Markdown formatting for solution scratchpads and notes via the active LLM provider (Gemini, OpenAI, or DeepSeek).
+- **Additional note formatting options**:
   - Automatically standardizes structure (Approach, Complexity Analysis, Clean Implementation, Traps & Edge Cases), formats multi-language code snippets, extracts LaTeX complexity notation, and polishes notes without altering original reasoning.
 - **Spaced Repetition: Mastery Rating & 7-Day Review Forecast**:
   - Post-solve 4-tier self-evaluation (`Easy` / `Good` / `Hard` / `Again`) inspired by scientific spaced repetition mechanisms (Anki/SuperMemo), dynamically recalibrating subsequent review intervals.

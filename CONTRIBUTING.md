@@ -1,6 +1,6 @@
 # Contributing
 
-Release versions must agree across workspace package manifests, npm lockfile, the API health response, and Tauri/Cargo metadata. Use the GitHub-hosted Windows and macOS builds for acceptance and release installers. The [desktop guide](docs/desktop.md) describes the candidate and tagged release workflows. Keep release assets and private evidence out of Git.
+Use one product version across the workspaces, desktop manifests, lockfiles, API health response, exported migration metadata and MCP server. Use the GitHub-hosted Windows and macOS builds for acceptance and release installers. The [desktop guide](docs/desktop.md) describes the candidate and tagged release workflows. Keep release assets and private evidence out of Git.
 
 Read the [documentation index](docs/README.md), [requirements](docs/requirements.md), and [current status](docs/status.md) before proposing changes.
 
@@ -22,7 +22,7 @@ Maintain Chinese and English interface strings together; keep technical document
 
 ## Release and showcase maintenance
 
-Keep workspace manifests, lockfiles, Tauri/Cargo, API health version, and migration bundle producer version aligned. Update current guides and README links without rewriting historical release notes. Run `npm run assets:screenshots` after the production build to refresh the fictional-data gallery; inspect every output. Record automated/local evidence separately from remote CI and physical-device checks. Publish installers and SHA-256 checksums under a new immutable tag. Commit titles use `type: contents` with a lowercase type and concise English summary.
+Update the root and workspace manifests, npm lockfile, Tauri and Cargo metadata, Cargo lockfile, API health version, migration bundle producer version and reported MCP server version together. Update current guides and README links without rewriting historical release notes. Run `npm run assets:screenshots` after the production build to refresh the fictional-data gallery; inspect every output. Record automated/local evidence separately from remote CI and physical-device checks. Push the matching version tag to stage signed update packages, installers, a manifest and SHA-256 checksums. Review the draft assets and release notes before publishing. Commit titles use `type: contents` with a lowercase type and concise English summary.
 
 ## Sensitive data
 

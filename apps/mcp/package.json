@@ -1,6 +1,6 @@
 {
   "name": "leetcode-tracker-mcp",
-  "version": "0.1.0",
+  "version": "1.4.0",
   "description": "Standalone MCP server for LeetCode Tracker: read your local practice catalog, today's plan, notes and progress from any MCP client.",
   "license": "MIT",
   "type": "module",

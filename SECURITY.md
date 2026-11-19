@@ -8,11 +8,17 @@ Provider keys are stored in local SQLite without OS credential encryption. Raw S
 
 See [desktop limitations](docs/desktop.md) and [provider behavior](docs/llm-providers.md). Complete native/clean-machine security acceptance remains pending.
 
+## Desktop updates and connected clients
+
+AI client writes to a running desktop profile require the device-local opt-in under Settings → AI clients. The sidecar authenticates forwarded writes and serializes them with desktop edits. Direct Drive sync requests the `drive.appdata` scope. Sync snapshots contain practice history and notes, so protect the destination folder or Google account. [MCP permissions](apps/mcp/README.md) · [Device sync](docs/sync.md)
+
+Tagged builds sign the Windows update installer and the macOS update archive. The release job verifies both signatures, and updater-enabled apps verify the downloaded package before installation. Windows Authenticode signing and Apple Developer ID notarization remain separate platform checks. [Desktop updates](docs/desktop.md#14-app-updates)
+
 ## Reporting and safe sharing
 
 Release 1.0.0 pins `@fastify/static` to 10.1.3 in both root and server manifests, replacing the vulnerable 8.x dependency. The release audit reported zero known npm vulnerabilities at verification time. A regression reproduces the old encoded-path route-guard bypass and passes with the upgraded dependency; static SPA/API behavior and native static-disabled behavior are also tested. This is a dated dependency check, not a guarantee against future advisories.
 
-Release 1.3.1 distributes an unsigned Windows x64 installer and an ad-hoc signed, unnotarized Apple Silicon macOS `.dmg` package. Do not publish credentials, personal records or database contents in issues. Use GitHub private vulnerability reporting if available; otherwise request a private channel without disclosing sensitive details.
+The Windows installer is distributed without Authenticode signing. The Apple Silicon macOS app bundle uses ad-hoc signing. Do not publish credentials, personal records or database contents in issues. Use GitHub private vulnerability reporting if available; otherwise request a private channel without disclosing sensitive details.
 
 Users must have rights to use supplied data. Keep databases, exports, backups, logs and keys out of Git. Use synthetic public examples. Validate imported records and preserve prior data on failure. The MIT license covers code and does not grant rights to third-party content.
 

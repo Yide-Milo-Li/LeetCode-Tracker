@@ -1,6 +1,6 @@
 # Promotional assets and 1.1.0 announcement
 
-The images in this social folder are historical theme examples. Use the freshly generated [1.1.0 README gallery](../../../README.md) for current UI screenshots.
+The announcement and theme examples in this folder are from 1.1.0. Use the [README gallery](../../../README.md) for current UI screenshots.
 
 These images are generated from an isolated synthetic catalog and seeded practice data. The cover and theme matrix are illustrative HTML artwork; the remaining images capture the shared browser UI. They are not native-installer or WebView2 acceptance evidence. Filenames retain their original theme names for link stability.
 

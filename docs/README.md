@@ -1,15 +1,17 @@
 # Documentation index
 
-[Release 1.3.1 notes](releases/1.3.1.md) · [Desktop installation and native runtime (Windows & macOS)](desktop.md) · [Current verification and limitations](status.md)
+[1.4.0 release notes](releases/1.4.0.md) · [1.3.1 release notes](releases/1.3.1.md) · [Desktop installation and native runtime (Windows & macOS)](desktop.md) · [Current verification and limitations](status.md)
 
 Users provide their own JSONL problem metadata with appropriate usage rights. The application creates its own SQLite database. Catalog import and progress import are separate implemented workflows; the repository contains no dataset.
 
-All maintained documentation is English. The implemented desktop interface supports Chinese and English, with four main destinations: Today, Problems, Progress and Notes, plus Settings. Release 1.3.1 includes a Windows 11 x64 Tauri NSIS installer and an Apple Silicon macOS 14+ `.app`/`.dmg` package, while retaining cross-platform browser source mode.
+All maintained documentation is English. The implemented desktop interface supports Chinese and English, with four main destinations: Today, Problems, Progress and Notes, plus Settings. Release 1.4.0 includes a Windows 11 x64 Tauri NSIS installer and an Apple Silicon macOS 14+ `.app`/`.dmg` package, while retaining cross-platform browser source mode.
 
 ## Architecture & System Design
 
 - [Architecture](architecture.md): Component structure, write ownership, persistence boundaries, and storage engine.
-- [Interactive visual architecture](diagrams/architecture.html): Standalone explorable HTML architecture diagram with dark/light themes, search, and guided views.
+- [Interactive visual architecture](diagrams/architecture.html): Historical diagram of the browser application before the native shell.
+- [Application boundaries](application-boundaries.md): Shared HTTP and MCP operations, write ownership and the desktop bridge.
+- [MCP and LCT setup](../apps/mcp/README.md): Connect an AI client to the local profile and install practice shortcuts in the desktop app.
 - [Device sync](sync.md): Transfer your profile through a sync folder or the Google Drive app data folder. Includes setup for official installers and source runs, fork handling and limits.
 - [AI provider configuration](llm-providers.md): Supported Gemini (`gemini-3.8-flash`, `gemini-4-hydrogen`), OpenAI (`gpt-6-luna`, `gpt-6.1-terra`), and DeepSeek (`deepseek-flash`) models, per-model reasoning effort controls, credential isolation, and fallback policies.
 

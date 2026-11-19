@@ -16,6 +16,10 @@ Run each of `today`, `log`, `note`, `review` and `setup` as the second argument 
 
 `npm run docs:check` validates maintained Markdown titles and local links without modifying files. See [tests](../tests/README.md) for isolated verification commands.
 
+## Desktop release scripts
+
+On version tags, `scripts/configure-desktop-updater.mjs` configures the public verification key and stable update feed. The tag build produces the signed packages. After platform checks pass, `scripts/stage-desktop-release.sh` verifies the tag and signatures, generates `latest.json` and `SHA256SUMS.txt`, and uploads the assets to a draft GitHub Release. See the [desktop release workflow](../docs/desktop.md#4-desktop-builds).
+
 ## Backup policy
 
 Startup verifies schema compatibility and awaits a pre-migration snapshot before upgrading older schemas to v12. Before any catalog-changing import, it creates `pre-import-latest.sqlite` and, if absent, the first snapshot for that UTC date as `daily-YYYY-MM-DD.sqlite`. The latest 14 distinct daily snapshots are retained. Migration snapshots and pre-restore safety snapshots are retained separately. A failed required snapshot aborts migration or import; unchanged-only imports preserve the existing pre-change snapshot.

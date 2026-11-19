@@ -2,7 +2,7 @@
 
 Users supply JSON Lines (`.jsonl`) through the local workbench. The repository distributes contracts and storage code, not a problem dataset; storage performs no network requests.
 
-- `application`: Transport-neutral business operations over an opened store (catalog, practice, planning, notes, dashboard, exports, bundle, settings), with operation admission and runtime lease ownership. The standalone MCP server uses it; the HTTP server does not yet.
+- `application`: Transport-neutral business operations over an opened store (catalog, practice, planning, notes, dashboard, exports, bundle, settings), with operation admission and runtime lease ownership. The Fastify and MCP adapters share these operations. The desktop sidecar serializes forwarded MCP writes with its own writes. See the [application boundaries](../docs/application-boundaries.md).
 - `contracts`: Zod catalog, practice, snapshot, planning, dashboard and preference contracts, including nullable duration and optional practice operation IDs.
 - `database`: SQLite v12 storage, schema inspection, atomic imports/practices, durable replay fingerprints, revision conflicts, snapshots and offline recovery.
 - `domain`: Pure quota, review, completion-evidence, timezone-aware activity and statistics rules. The client reuses evidence ordering for acknowledged writes while awaiting authoritative plan refresh.

@@ -144,3 +144,5 @@ Today's immediate completion saves the actual timestamp first; the optional meta
 ## Device migration export
 
 The Settings export action and frontend/native bundle API request **Snapshot Bundle v5** (schema v12), preserving nullable practice outcomes, outcome-review policy, explanation/provenance versions, optional time/calibration rules and explicit swap/removal feedback. Imports accept v1/v2/v3/v5; v4 belongs to a different lineage and is rejected. Prior Release 1.2.0 used v3/schema 10. Legacy export returns HTTP 409 when it cannot preserve `phase39-v1` semantics. Ordinary migration uses v5; target keys remain private and unchanged. See [local recommendation portability](local-recommendations.md#portability-and-rollback).
+
+Release 1.4.0 uses the same v5 payload for migration files and device sync. A sync envelope records the producing device and snapshot history. OAuth credentials and device-specific sync settings stay local. See [device sync](sync.md).

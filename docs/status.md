@@ -1,6 +1,12 @@
 # Implementation status
 
-## Unreleased — Phase 41 device sync (in progress on `main`)
+## Release 1.4.0
+
+Release 1.4.0 adds device sync, the bundled MCP server and LCT skill, reorganized Settings and signed desktop updates. It uses SQLite schema v12 and Snapshot Bundle v5. [Release notes](releases/1.4.0.md)
+
+Branch checks cover the application suite, Windows and macOS packaging and macOS native migration. Updater signing and draft staging run on version tags. The candidate checks below cover the specific builds named. End-to-end installation from a published signed update feed still needs verification. [CI by revision](https://github.com/Yide-Milo-Li/LeetCode-Tracker/actions/workflows/ci.yml)
+
+### Device sync acceptance
 
 Device sync through a sync folder or the Google Drive app data folder is implemented in source ([device sync](sync.md)): snapshot envelope contracts, content hashing, fork-aware graph rules, folder and Drive adapters, loopback PKCE OAuth, `/api/v1/sync/*` routes, the Settings → Sync tab, a desktop folder picker and the Google consent host allowlist. No schema or bundle format change.
 
@@ -10,7 +16,7 @@ On November 18, 2026, a macOS Apple Silicon build with LCT's bundled production 
 
 On Windows x64, the hosted candidate at `d54f332` completed real Google authorization with the bundled client, retained access after restarting, and restored the 4,046-problem snapshot. A second account completed a test upload and restore, followed by cleanup. The candidate also passed interactive fresh installation and a silent upgrade from 1.3.0. The later change restricting custom OAuth configuration to development builds needs its own hosted installer acceptance. [Windows candidate](https://github.com/Yide-Milo-Li/LeetCode-Tracker/actions/runs/44426376866/artifacts/14486298211)
 
-## Release 1.3.1 — current delivery baseline
+## Release 1.3.1
 
 Release `v1.3.1` is a patch on 1.3.0: the progress import hint names the configured AI provider, review spacing options use plain names, the heatmap and several controls follow the active palette, the Today Note menu and quick-copy dropdowns use native popovers, the quick-note drawer reuses the shared dialog for focus handling, the web client is split into smaller Settings, Notes, style, and hook modules, and the palette-tinted app icon persists after quitting (Windows shortcuts, macOS `.app` custom icon). SQLite schema v12, Snapshot Bundle v5, and the `/api/v1` surface are unchanged. See [1.3.1 release notes](releases/1.3.1.md).
 

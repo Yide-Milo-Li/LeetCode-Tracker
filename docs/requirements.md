@@ -1,6 +1,6 @@
 # Product requirements
 
-Release 1.1.0 shares these desktop UI requirements between source browsers and the Windows Tauri shell. Native packaging does not expand mobile support or imply completion of the outstanding [desktop acceptance work](status.md).
+The Windows x64 and Apple Silicon macOS desktop apps share these UI requirements with source-mode browsers. Installed-app acceptance is tracked in [implementation status](status.md).
 
 Status: accepted requirements; not an implementation claim.
 
@@ -28,7 +28,7 @@ The four primary destinations are Today (default), Problems, Progress and Notes.
 - Progress defaults to Statistics, with Records as its other tab. Top actions open Import progress and Manual record. Manual entry searches the local catalog first, supports historical and date-only practice, and uses the same record editor. Missing problems lead to catalog import.
 - Progress import has paste, candidate review, per-problem conflict resolution, explicit confirmation and result steps. The selected AI provider organizes candidates only; server matching, semantic validation, deduplication and atomic commit remain authoritative. Current snapshots and their audit versions remain distinct from real submission history.
 - Problems preserves search, filters, pagination and metadata details, with contextual practice entry. Import problems is a separate JSONL workspace with upload/paste, preview, errors, results and paginated import history.
-- Settings exposes language, theme/high contrast, timezone, provider configuration and export actions. A browser timezone suggestion requires explicit saving. Provider saves and connection probes remain distinct actions.
+- Settings exposes language, theme/high contrast, timezone, provider configuration and export actions. Choosing a timezone or accepting the device suggestion saves the preference. Provider saves and connection probes remain distinct actions.
 
 Use warm neutral surfaces, sage emphasis, offline sans-serif fonts, readable 14–16 px body text and consistent CSS tokens. Provide localized labels, focus trapping/restoration and reduced-motion support. Loading must not fabricate progress or overwrite drafts. Details, filters and scroll survive ordinary workspace navigation.
 

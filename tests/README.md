@@ -1,8 +1,12 @@
 # Testing boundaries
 
-## Release 1.3.1 verification baseline
+## 1.4.0 verification
 
-The Release 1.3.1 suite passes **525 JavaScript/Web/sidecar tests (333 backend/domain/storage + 191 Web DOM + 1 isolated bundle)** and **17 Rust unit tests**. Packaging and WKWebView E2E specs run in CI; screenshots were last recorded for 1.3.0 below; see [1.3.1 release notes](../docs/releases/1.3.1.md).
+Branch CI runs the application suite, Windows desktop checks and installer build, Apple Silicon packaging and migration checks, and a separate WKWebView migration job. Tag builds also verify the updater package signatures before staging a draft. The README gallery was refreshed with synthetic data for 1.4.0. Installed-app results for earlier builds are recorded in [implementation status](../docs/status.md). [CI runs](https://github.com/Yide-Milo-Li/LeetCode-Tracker/actions/workflows/ci.yml)
+
+## Published release baselines
+
+The Release 1.3.1 suite passed **525 JavaScript/Web/sidecar tests (333 backend/domain/storage + 191 Web DOM + 1 isolated bundle)** and **17 Rust unit tests**. Packaging and WKWebView E2E specs run in CI. See [1.3.1 release notes](../docs/releases/1.3.1.md).
 
 The Release 1.3.0 suite passed **519 JavaScript/Web/sidecar tests (333 backend/domain/storage + 185 Web DOM + 1 isolated bundle) and 11 Rust tests**, plus remote CI `2/2` isolated WKWebView E2E specs. Older phase counts below are historical. Typecheck, docs, production Vite build, 8 regenerated showcase screenshots, Rust fmt/clippy, macOS `.app`/`.dmg` packaging, and Windows NSIS packaging are covered across local and CI runs. Remote CI and manual Gatekeeper/clean-VM acceptance are separate; see [current status](../docs/status.md) and [release notes](../docs/releases/1.3.0.md).
 

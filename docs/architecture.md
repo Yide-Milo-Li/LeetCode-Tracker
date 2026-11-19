@@ -45,6 +45,8 @@ flowchart TD
 
 ## Component structure
 
+The desktop installer bundles a stdio MCP server. Fastify and MCP reuse `packages/application` operations. The sidecar handles authorized writes to an open desktop profile and manages device sync through a folder or Google Drive. The native host verifies signed desktop updates. See [application boundaries](application-boundaries.md), [device sync](sync.md) and [desktop updates](desktop.md#14-app-updates).
+
 - **`packages/contracts`**: Validated Zod schemas and normalization pipelines for JSON Lines parsing, preflight preview, import summaries, catalog filtering, manual practice records, progress snapshots, conflict evaluation, planning lifecycle, and dashboard analytics.
 - **`packages/database`**: High-performance SQLite engine (`DatabaseSync`) managing schema migrations (supported v3–v10 to v12; v11 is a separate incompatible lineage), preflight validation, atomic multi-table writes, point-in-time backups via native Node SQLite backup, daily backup pruning, problem notes store, planning store, dashboard query layer, and offline restore.
 - **`packages/domain`**: Pure algorithmic domain logic for deterministic quota calculation (largest remainder), review candidate selection, streak calculation, yearly heatmap matrix generation, and activity pagination.

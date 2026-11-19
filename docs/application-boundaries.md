@@ -4,7 +4,7 @@
 
 `openTrackerRuntime` acquires the database lease before opening backed storage. The application owns operation admission, the write lock, planning and previews. Ordinary operations may overlap. Restore requires an idle application and rejects new work until replacement ends. Close drains admitted work before releasing SQLite and its lease.
 
-MCP reads and previews open a fresh read-only connection per call. Writes try `openTrackerRuntime` first. If the desktop sidecar owns the lease and the user has enabled AI client writes, the MCP process forwards the tool with a dedicated loopback token. Discovery must match the live lease identity and protocol version. The sidecar revalidates arguments and runs compound writes under the shared lock. Catalog imports send the contents read by the MCP process. See the [MCP server guide](../apps/mcp/README.md).
+MCP reads and previews of existing data open a fresh read-only connection per call. A catalog preview for a missing profile uses an empty in-memory database. Writes try `openTrackerRuntime` first. If the desktop sidecar owns the lease and the user has enabled AI client writes, the MCP process forwards the tool with a dedicated loopback token. Discovery must match the live lease identity and protocol version. The sidecar revalidates arguments and runs compound writes under the shared lock. Catalog imports send the contents read by the MCP process. See the [MCP server guide](../apps/mcp/README.md).
 
 MCP practice creation requires a client-generated operation ID and recovers timestamp, precision and timezone defaults from its immutable creation fingerprint. Removed or replaced targets resolve against their original plan version before entering the existing replay path. `planning.applyRules` replays before generating a new preview and atomically saves the plan plus response metadata in the existing `planning_operations.result_json`; old plan-only receipts remain readable, and saved plan/history payloads and schema v12 are unchanged.
 
@@ -52,6 +52,7 @@ Existing contracts validate inputs inside each application method. Outputs are i
 | `POST /api/v1/daily-plan-overrides/preview` | `planning.previewOverride` | body; no params | Shared generation, local edits and preview state | server-planning-api; focus-session-planning |
 | `POST /api/v1/daily-plan-overrides/commit` | `planning.commitOverride` | body; no params | Shared generation, local edits and preview state | server-planning-api; focus-session-planning |
 | `GET /api/v1/dashboard` | `dashboard.summary` | query; no params | Read-only metrics | server-dashboard-api |
+| `GET /api/v1/dashboard/recent` | `dashboard.recent` | none | Seven-day activity overview for Today | server-dashboard-api |
 | `GET /api/v1/dashboard/activity` | `dashboard.activity` | query; no params | Read-only metrics | server-dashboard-api |
 | `GET /api/v1/notes` | `notes.list` | query; no params | Note reads and serialized saves | notes-store; application-core |
 | `GET /api/v1/notes/:frontendId` | `notes.read` | none; frontendId | Note reads and serialized saves | notes-store; application-core |

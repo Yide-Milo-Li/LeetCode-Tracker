@@ -2,7 +2,7 @@
 
 Device sync moves your whole profile between any number of your own computers: catalog, practice records, progress snapshots, notes, strategies, daily plans, review state and portable settings. It is built on the same Snapshot Bundle v5 used by **Export migration file**, so the same guarantees apply: references are validated before writing, a safety backup is created before replacing data, and provider API keys never leave the device.
 
-Device sync is unreleased. Automated tests cover the sync folder and a simulated Drive API. See [implementation status](status.md) for the macOS and Windows live acceptance results and candidate revisions.
+Device sync is available starting with 1.4.0. Automated tests cover the sync folder and a simulated Drive API. See [implementation status](status.md) for the macOS and Windows live acceptance results and candidate revisions.
 
 ## How it works
 
@@ -117,7 +117,7 @@ Both options store the same flat set of files:
 
 Direct Drive sync can also create `lct-history-cache-v1-<hash>.json` files. Their descriptions hold copies of older envelopes. Older apps ignore them.
 
-A receive verifies the gzip stream, that the embedded envelope matches the listed one, that the bundle version is supported, the content hash, and the bundle's table references, all before anything is replaced. A snapshot from a newer app version is listed but cannot be received or overwritten until this device is updated.
+A receive verifies the gzip stream, that the embedded envelope matches the listed one, that the bundle version is supported, the content hash, and the bundle's table references, all before anything is replaced. If an envelope, bundle or schema version is too new for this device, the app lists the incompatible snapshot and blocks receiving or superseding it. The producer app version is displayed for reference.
 
 ## Limits
 

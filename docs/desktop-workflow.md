@@ -8,7 +8,7 @@ Today is the homepage. Problems is the local catalog. Notes provides problem Mar
 
 On a new installation, Today opens a three-step setup guide instead of an empty plan: timezone (saved as soon as it is picked, with a one-click device suggestion), catalog import, and study rhythm. The rhythm step offers a weekday preset (Monday–Friday, one Easy and two Medium problems, one of them a review) or a link to the full schedule editor. Only the current step is shown; finished steps are checked and every step can be revisited or skipped. Finishing or skipping the guide is remembered in this browser, and installations that already have a timezone, catalog and schedule never see it. Afterwards, Today flags an empty catalog with a link to Problems → Import problems.
 
-Settings is split into four tabs: General (language, timezone), Appearance (interface mode, color palette), AI assistant and Data. Picking a timezone saves it immediately. Switching interface mode keeps a palette that already matches the new mode and returns to the default palette otherwise. In AI assistant, only the provider and API key are visible by default; model, fallback chain and base URL are under **Advanced: model and endpoint**.
+Settings groups preferences into General, Appearance, Practice & notes, AI assistant, Sync and Data. The native desktop app adds AI clients. Picking a timezone saves it immediately. Switching interface mode keeps a palette that already matches the new mode and returns to the default palette otherwise. In AI assistant, only the provider and API key are visible by default; model, fallback chain and base URL are under **Advanced: model and endpoint**.
 
 Today shows one locally selected encouragement below its heading. The library contains 240 paired English/Chinese lines, with 60 for each period: morning (06:00–11:00), daytime (11:00–17:00), evening (17:00–22:00), and night (22:00–06:00). Selection follows the saved timezone, or the browser timezone until configured. Night keeps the same line across midnight; changing language translates the same line. No extra AI request is made. Plan details exposes timezone and version metadata.
 
@@ -26,6 +26,7 @@ Today shows one locally selected encouragement below its heading. The library co
 | Record extra or historical practice | Progress → Manual record |
 | Record a selected catalog problem | Problems → problem detail → Record practice |
 | Review metrics and activity dates | Progress → Statistics |
+| Check for a desktop update in an updater-enabled build | Settings → General → App updates |
 | Change language or timezone | Settings → General |
 | Change interface mode or color palette | Settings → Appearance |
 | Turn swap/remove feedback or note format-on-save on or off | Settings → Practice & notes |
@@ -104,7 +105,7 @@ Existing strategies display the planner's actual rounded counts. Saving without 
 
 The Notes Workspace provides a filterable master list, formatting toolbar, and Edit / Split / Preview modes for problem reflections, complexity notes, code snippets, and knowledge exports. The preview supports CommonMark, GFM and math syntax; math is styled as text rather than typeset by a full LaTeX engine. A blank line separates paragraphs, and images are represented without automatic network requests. The math parser has a transitive KaTeX dependency, constrained by a scoped override to a patched release; the application does not invoke its renderer.
 
-- **Local formatting**: Format on save defaults to on and can be disabled in the note toolbar. A worker verifies that parsed content stays unchanged, including code and formulas; unsupported extensions or incomplete fences are saved as written. Undo restores the previous draft and saves that version unformatted once. Opening, importing and exporting notes never rewrites them.
+- **Local formatting**: Format on save defaults to on. Change it under **Settings → Practice & notes**. A worker verifies that parsed content stays unchanged, including code and formulas; unsupported extensions or incomplete fences are saved as written. Undo restores the previous draft and saves that version unformatted once. Opening, importing and exporting notes never rewrites them.
 - **AI formatting**: Select part of the editor or use the whole note, open **AI format**, inspect the expanded range and request a suggestion. The provider returns layout instructions referring to immutable fragments; the local server validates them and builds a candidate. Apply it to the draft only after reviewing both versions, then save normally. Existing code blocks, inline code, formulas, links and protected blocks are withheld from provider text; other selected note text is sent to the configured provider. The operation does not write a note or automatically retry a content-protection failure.
 
 - **Focus and save**: `Ctrl+\` / `⌘\` toggles Notes focus mode; `Ctrl+S` / `⌘S` saves the active draft (the UI automatically displays `⌘S` and `⌘\` on macOS). Focus mode starts off. The practice timeline can be expanded separately.
