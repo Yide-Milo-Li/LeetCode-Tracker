@@ -7,7 +7,8 @@
   min-width: 0;
   font-size: 14px;
 }
-.form-field > span {
+.form-field > span,
+.form-field > label {
   font-weight: 550;
 }
 .form-field > small {

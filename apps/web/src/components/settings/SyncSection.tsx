@@ -1,5 +1,5 @@
 /** Settings "Sync" tab content: sync folder or Google Drive snapshots, split into setup and status rows. */
-import { useId } from 'react';
+import { useId, useRef } from 'react';
 import { AlertTriangle, Cloud, FolderOpen, History, RefreshCw, Upload, Download } from 'lucide-react';
 import type { SyncClassification, SyncSnapshotSummary, SyncTransportKind } from '../../api.ts';
 import { isTauri } from '../../platform/index.ts';
@@ -21,6 +21,7 @@ const STATE_COPY: Record<SyncClassification, { en: string; zh: string; tone: 'su
   'remote-ahead': { en: 'Another device published newer data.', zh: '其他设备发布了更新的数据。', tone: 'info' },
   fork: { en: 'More than one version changed independently since the last sync. Pick the one to keep; nothing is merged automatically.', zh: '上次同步后出现了多个各自修改过的版本。请选择保留哪一份，不会自动合并。', tone: 'warning' },
 };
+const SYNC_SUCCESS_TIMEOUT_MS = 8_000;
 
 function formatTime(ms: number, zh: boolean): string {
   return new Date(ms).toLocaleString(zh ? 'zh-CN' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' });
@@ -35,7 +36,11 @@ function formatBytes(bytes: number): string {
 export function SyncSection({ lang, sync }: SyncSectionProps) {
   const zh = lang === 'zh';
   const { status, busy, error, notice, preview, history, checkOnPublish } = sync;
+  const folderInputId = useId();
   const automaticSyncHintId = useId();
+  const setupHeading = useRef<HTMLHeadingElement>(null);
+  const checkButton = useRef<HTMLButtonElement>(null);
+  const browseLabel = zh ? '浏览文件夹' : 'Browse folders';
   const pendingPublish = status?.pendingPublish;
   const disabled = busy !== null;
   const classification = status?.classification ?? null;
@@ -57,11 +62,16 @@ export function SyncSection({ lang, sync }: SyncSectionProps) {
     { id: 'gdrive', label: 'Google Drive' },
   ];
 
+  function restoreFeedbackFocus() {
+    const target = checkButton.current && !checkButton.current.disabled ? checkButton.current : setupHeading.current;
+    target?.focus({ preventScroll: true });
+  }
+
   return (
     <>
       <section className="preference-row">
         <div className="preference-label">
-          <h2>{zh ? '设备同步' : 'Device sync'}</h2>
+          <h2 ref={setupHeading} tabIndex={-1}>{zh ? '设备同步' : 'Device sync'}</h2>
           <InfoPopover
             label={zh ? '设备同步说明' : 'Device sync help'}
             content={
@@ -96,12 +106,12 @@ export function SyncSection({ lang, sync }: SyncSectionProps) {
           </div>
 
           {sync.transportDraft === 'folder' && (
-            <Field
-              label={zh ? '同步文件夹（绝对路径）' : 'Sync folder (absolute path)'}
-              hint={zh ? '会在其中创建 LeetCodeTrackerSync 子文件夹。' : 'A LeetCodeTrackerSync subfolder is created inside it.'}
-            >
-              <div className="input-with-action">
+            <div className="form-field">
+              <label htmlFor={folderInputId}>{zh ? '同步文件夹（绝对路径）' : 'Sync folder (absolute path)'}</label>
+              <div className="sync-folder-picker">
                 <input
+                  id={folderInputId}
+                  aria-describedby={`${folderInputId}-hint`}
                   type="text"
                   value={sync.folderDraft}
                   onChange={(e) => sync.setFolderDraft(e.target.value)}
@@ -109,12 +119,13 @@ export function SyncSection({ lang, sync }: SyncSectionProps) {
                   spellCheck={false}
                 />
                 {isTauri() && (
-                  <button type="button" className="icon-action-btn" onClick={() => void sync.chooseFolder()} aria-label={zh ? '浏览文件夹' : 'Browse folders'} disabled={disabled}>
-                    <FolderOpen size={16} />
+                  <button type="button" className="btn btn-secondary sync-folder-browse" onClick={() => void sync.chooseFolder()} aria-label={browseLabel} title={browseLabel} disabled={disabled}>
+                    <FolderOpen size={18} aria-hidden="true" />
                   </button>
                 )}
               </div>
-            </Field>
+              <small id={`${folderInputId}-hint`}>{zh ? '会在其中创建 LeetCodeTrackerSync 子文件夹。' : 'A LeetCodeTrackerSync subfolder is created inside it.'}</small>
+            </div>
           )}
 
           {sync.transportDraft === 'gdrive' && google && (
@@ -139,11 +150,11 @@ export function SyncSection({ lang, sync }: SyncSectionProps) {
                 </div>
               )}
               {google.bundledClientAvailable ? (
-                <p className="field-status">
-                  {google.reconnectRequired && !google.connected
-                    ? (zh ? '请使用 LCT 官方客户端重新授权。原 Google Cloud 项目的快照仍保存在原项目中。' : 'Reconnect with the LCT OAuth client. Snapshots from your previous Google Cloud project stay in that project.')
-                    : (zh ? '正在使用 LCT 官方客户端' : 'Using the LCT OAuth client')}
-                </p>
+                google.reconnectRequired && !google.connected && (
+                  <p className="field-status">{zh
+                    ? '请重新连接 Google Drive。原 Google Cloud 项目的快照仍保存在原项目中。'
+                    : 'Reconnect to Google Drive. Snapshots from your previous Google Cloud project stay in that project.'}</p>
+                )
               ) : (
                 <details className="sync-oauth-settings" open={!google.clientConfigured}>
                   <summary>{zh ? '开发者 OAuth 设置' : 'Developer OAuth settings'}</summary>
@@ -211,8 +222,17 @@ export function SyncSection({ lang, sync }: SyncSectionProps) {
           <div className="settings-stack">
             {status?.configured && (
               <>
-                {stateCopy && (
-                  <Feedback tone={stateCopy.tone}>
+                {stateCopy && !sync.statusSummaryDismissed && (
+                  <Feedback
+                    key={status.checkedAt}
+                    tone={stateCopy.tone}
+                    dismiss={{
+                      label: zh ? '关闭同步状态提示' : 'Dismiss sync status',
+                      run: sync.dismissStatusSummary,
+                      afterMs: stateCopy.tone === 'success' ? SYNC_SUCCESS_TIMEOUT_MS : undefined,
+                      restoreFocus: restoreFeedbackFocus,
+                    }}
+                  >
                     {zh ? stateCopy.zh : stateCopy.en}
                     {status.heads.length > 1 ? (
                       <> {zh ? `当前有 ${status.heads.length} 个并列版本。` : `${status.heads.length} competing versions.`}</>
@@ -221,16 +241,19 @@ export function SyncSection({ lang, sync }: SyncSectionProps) {
                     )}
                   </Feedback>
                 )}
-                {status.unreadableFiles > 0 && (
-                  <Feedback tone="warning">
+                {status.unreadableFiles > 0 && !sync.unreadableWarningDismissed && (
+                  <Feedback tone="warning" dismiss={{
+                    label: zh ? '关闭同步文件警告' : 'Dismiss sync file warning',
+                    run: sync.dismissUnreadableWarning,
+                    restoreFocus: restoreFeedbackFocus,
+                  }}>
                     {zh ? `有 ${status.unreadableFiles} 个同步文件无法读取，已忽略。` : `${status.unreadableFiles} sync files could not be read and were ignored.`}
                   </Feedback>
                 )}
-
                 {status.automaticSync && status.lastError && !error && <Feedback tone="warning">{status.lastError}</Feedback>}
 
                 <div className="action-row">
-                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => void sync.check()} disabled={disabled}>
+                  <button ref={checkButton} type="button" className="btn btn-secondary btn-sm" onClick={() => void sync.check()} disabled={disabled}>
                     <RefreshCw size={14} />
                     <span>{busy === 'check' ? '…' : zh ? '检查更新' : 'Check'}</span>
                   </button>
@@ -386,8 +409,21 @@ export function SyncSection({ lang, sync }: SyncSectionProps) {
 
       {(notice || error) && (
         <div className="settings-stack settings-feedback">
-          {notice && <Feedback tone="success">{notice}</Feedback>}
-          {error && <Feedback tone="error">{error}</Feedback>}
+          {notice && (
+            <Feedback key={notice} tone={sync.googleAuthPending ? 'info' : 'success'} dismiss={{
+              label: zh ? '关闭同步操作提示' : 'Dismiss sync notification',
+              run: sync.dismissNotice,
+              afterMs: sync.googleAuthPending ? undefined : SYNC_SUCCESS_TIMEOUT_MS,
+              restoreFocus: restoreFeedbackFocus,
+            }}>{notice}</Feedback>
+          )}
+          {error && (
+            <Feedback tone="error" dismiss={{
+              label: zh ? '关闭同步错误提示' : 'Dismiss sync error',
+              run: sync.dismissError,
+              restoreFocus: restoreFeedbackFocus,
+            }}>{error}</Feedback>
+          )}
         </div>
       )}
     </>

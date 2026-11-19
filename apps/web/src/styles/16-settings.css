@@ -78,6 +78,19 @@
   padding-top: 4px;
 }
 
+.sync-folder-picker {
+  display: flex;
+  gap: 8px;
+}
+.sync-folder-picker > input {
+  flex: 1;
+  min-width: 0;
+}
+.sync-folder-browse {
+  min-inline-size: 42px;
+  padding-inline: 10px;
+}
+
 .desktop-update-controls {
   display: grid;
   gap: 8px;

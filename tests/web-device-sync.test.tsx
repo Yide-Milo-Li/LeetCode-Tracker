@@ -226,7 +226,7 @@ it('refreshes Google Drive when returning to the app after consent', async (t) =
 
   await renderSync();
   fireEvent.click(screen.getByRole('button', { name: 'Google Drive' }));
-  assert.ok(screen.getByText('Using the LCT OAuth client'));
+  assert.equal(screen.queryByText('Using the LCT OAuth client'), null);
   assert.equal(screen.queryByLabelText(/OAuth client ID/), null);
   assert.equal(screen.queryByLabelText(/OAuth client secret/), null);
   assert.equal(screen.queryByText('Developer OAuth settings'), null);
@@ -250,6 +250,83 @@ it('refreshes Google Drive when returning to the app after consent', async (t) =
   assert.equal((screen.getByLabelText(/This device’s name/) as HTMLInputElement).value, 'Edited name');
   await act(async () => { fireEvent.focus(window); });
   assert.equal(check.mock.callCount(), 1);
+});
+
+it('keeps the desktop folder picker beside the labeled path field', async () => {
+  stubSettings();
+  const folder = status();
+  mock.method(api, 'getSyncStatus', async () => folder);
+  mock.method(api, 'checkSync', async () => folder);
+  const invoke = mock.fn(async (_command: string) => '/Users/test/Sync/2026-11-18');
+  Object.assign(window, { __TAURI_INTERNALS__: { invoke } });
+  try {
+    await renderSync();
+    const input = screen.getByRole<HTMLInputElement>('textbox', { name: 'Sync folder (absolute path)' });
+    const browse = screen.getByRole('button', { name: 'Browse folders' });
+    assert.equal(input.nextElementSibling, browse);
+    assert.equal(browse.closest('label'), null);
+    await act(async () => { fireEvent.click(browse); });
+    assert.deepEqual(invoke.mock.calls[0].arguments, ['pick_folder']);
+    assert.equal(input.value, '/Users/test/Sync/2026-11-18');
+  } finally {
+    Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
+  }
+});
+
+it('dismisses sync confirmations independently and restarts the timeout after a fresh check', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  stubSettings();
+  let current = status({ classification: 'local-ahead', localDirty: true });
+  mock.method(api, 'getSyncStatus', async () => current);
+  mock.method(api, 'checkSync', async () => current);
+  mock.method(api, 'publishSync', async () => {
+    current = { ...current, classification: 'up-to-date', localDirty: false, checkedAt: 2 };
+    return { published: true, snapshot: head };
+  });
+  await renderSync();
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Publish this device' })); });
+  assert.ok(screen.getByText(/Snapshot uploaded/));
+  assert.ok(screen.getByText('Up to date with the latest snapshot.'));
+
+  const dismissStatus = screen.getByRole('button', { name: 'Dismiss sync status' });
+  act(() => { dismissStatus.focus(); });
+  act(() => { t.mock.timers.tick(8_000); });
+  assert.equal(screen.queryByText(/Snapshot uploaded/), null);
+  assert.equal(document.activeElement, dismissStatus);
+
+  fireEvent.click(dismissStatus);
+  assert.equal(screen.queryByText('Up to date with the latest snapshot.'), null);
+  const check = screen.getByRole('button', { name: 'Check' });
+  assert.equal(document.activeElement, check);
+
+  await act(async () => { fireEvent.click(check); });
+  const refreshedDismiss = screen.getByRole('button', { name: 'Dismiss sync status' });
+  fireEvent.mouseOver(refreshedDismiss);
+  act(() => { t.mock.timers.tick(8_000); });
+  assert.ok(screen.getByText('Up to date with the latest snapshot.'));
+  fireEvent.mouseOut(refreshedDismiss);
+  act(() => { t.mock.timers.tick(8_000); });
+  assert.equal(screen.queryByText('Up to date with the latest snapshot.'), null);
+});
+
+it('keeps sync warnings and errors available until they are closed', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  stubSettings();
+  const fork = status({ classification: 'fork', unreadableFiles: 2 });
+  mock.method(api, 'getSyncStatus', async () => fork);
+  mock.method(api, 'checkSync', async () => fork);
+  mock.method(api, 'getSyncHistory', async () => { throw new Error('Could not reach the sync folder'); });
+  await renderSync();
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'History' })); });
+  act(() => { t.mock.timers.tick(16_000); });
+  assert.ok(screen.getByText(/More than one version changed/));
+  assert.ok(screen.getByText(/2 sync files could not be read/));
+  assert.ok(screen.getByRole('alert'));
+  fireEvent.click(screen.getByRole('button', { name: 'Dismiss sync file warning' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Dismiss sync error' }));
+  assert.equal(screen.queryByText(/2 sync files could not be read/), null);
+  assert.equal(screen.queryByRole('alert'), null);
+  assert.ok(screen.getByRole('button', { name: /Keep this device/ }));
 });
 
 it('lets source users save their own Desktop OAuth client', async () => {

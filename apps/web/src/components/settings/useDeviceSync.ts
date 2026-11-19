@@ -55,6 +55,8 @@ export function useDeviceSync(lang: Language, active: boolean) {
   const workspace = useWorkspace();
   const zh = lang === 'zh';
   const [status, setStatus] = useState<SyncStatus | null>(null);
+  const [statusSummaryDismissed, setStatusSummaryDismissed] = useState(false);
+  const [unreadableWarningDismissed, setUnreadableWarningDismissed] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -67,6 +69,10 @@ export function useDeviceSync(lang: Language, active: boolean) {
   const [clientIdDraft, setClientIdDraft] = useState('');
   const [clientSecretDraft, setClientSecretDraft] = useState('');
   const [googleAuthDeadline, setGoogleAuthDeadline] = useState<number | null>(null);
+  const dismissStatusSummary = useCallback(() => setStatusSummaryDismissed(true), []);
+  const dismissUnreadableWarning = useCallback(() => setUnreadableWarningDismissed(true), []);
+  const dismissNotice = useCallback(() => setNotice(''), []);
+  const dismissError = useCallback(() => setError(''), []);
   /** One publish intent keeps its operation ID until a response confirms the result. */
   const publishOperation = useRef<{ key: string; id: string } | null>(null);
 
@@ -82,6 +88,8 @@ export function useDeviceSync(lang: Language, active: boolean) {
 
   const applyStatus = useCallback((next: SyncStatus, syncDrafts = false) => {
     setStatus(next);
+    setStatusSummaryDismissed(false);
+    setUnreadableWarningDismissed(false);
     if (syncDrafts) {
       setTransportDraft(next.transport);
       setFolderDraft(next.folderPath ?? '');
@@ -145,6 +153,14 @@ export function useDeviceSync(lang: Language, active: boolean) {
     return () => { current = false; window.clearInterval(timer); };
   }, [active, busy, status?.configured, status?.automaticSync]);
 
+  useEffect(() => {
+    setStatusSummaryDismissed(false);
+  }, [status?.checkedAt, status?.classification]);
+
+  useEffect(() => {
+    setUnreadableWarningDismissed(false);
+  }, [status?.unreadableFiles]);
+
   const check = useCallback(async (automatic = false) => {
     const next = await run('check', () => automatic ? api.checkSyncOnForeground() : api.checkSync(),
       zh ? '检查同步失败。' : 'Sync check failed.');
@@ -176,7 +192,8 @@ export function useDeviceSync(lang: Language, active: boolean) {
       }
       if (!cancelled && Date.now() >= deadline) {
         setGoogleAuthDeadline(null);
-        setNotice(zh ? 'Google 授权未完成，请重新连接。' : 'Google sign-in did not finish. Connect again to retry.');
+        setNotice('');
+        setError(zh ? 'Google 授权未完成，请重新连接。' : 'Google sign-in did not finish. Connect again to retry.');
       }
     }
 
@@ -334,10 +351,17 @@ export function useDeviceSync(lang: Language, active: boolean) {
 
   return {
     status,
+    statusSummaryDismissed,
+    dismissStatusSummary,
+    unreadableWarningDismissed,
+    dismissUnreadableWarning,
     checkOnPublish: status?.classification === null && canCheckOnPublish(status),
     busy,
     error,
+    dismissError,
     notice,
+    dismissNotice,
+    googleAuthPending: googleAuthDeadline !== null,
     preview,
     setPreview,
     history,

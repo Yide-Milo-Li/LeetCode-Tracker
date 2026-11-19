@@ -64,18 +64,54 @@ export function Feedback({
   children,
   tone = 'error',
   retry,
+  dismiss,
 }: {
   children: ReactNode;
   tone?: 'error' | 'success' | 'warning' | 'info';
   retry?: { label: string; run: () => void };
+  dismiss?: { label: string; run: () => void; afterMs?: number; restoreFocus?: () => void };
 }) {
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const afterMs = dismiss?.afterMs;
+  const onDismiss = dismiss?.run;
+  const role = tone === 'error' ? 'alert' : 'status';
+
+  useEffect(() => {
+    if (afterMs === undefined || !onDismiss || hovered || focused) return;
+    const timer = setTimeout(onDismiss, afterMs);
+    return () => clearTimeout(timer);
+  }, [afterMs, onDismiss, hovered, focused]);
+
   return (
-    <div className={`feedback ${tone}`} role={tone === 'error' ? 'alert' : 'status'}>
+    <div
+      className={`feedback ${tone}`}
+      role={dismiss ? undefined : role}
+      onMouseEnter={afterMs === undefined ? undefined : () => setHovered(true)}
+      onMouseLeave={afterMs === undefined ? undefined : () => setHovered(false)}
+      onFocus={afterMs === undefined ? undefined : () => setFocused(true)}
+      onBlur={afterMs === undefined ? undefined : (event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false);
+      }}
+    >
       <AlertCircle size={16} aria-hidden="true" />
-      <div>{children}</div>
+      <div role={dismiss ? role : undefined}>{children}</div>
       {retry && (
         <button className="btn btn-secondary btn-sm" onClick={retry.run}>
           {retry.label}
+        </button>
+      )}
+      {dismiss && (
+        <button
+          type="button"
+          className="btn-icon feedback-dismiss"
+          aria-label={dismiss.label}
+          onClick={(event) => {
+            if (event.currentTarget === document.activeElement) dismiss.restoreFocus?.();
+            dismiss.run();
+          }}
+        >
+          <X size={16} aria-hidden="true" />
         </button>
       )}
     </div>
