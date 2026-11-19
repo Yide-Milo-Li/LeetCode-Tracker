@@ -57,7 +57,9 @@ These are format examples, not a bundled curriculum. An AI-generated catalog can
 
 ### Today's practice
 
-![Today's practice](docs/assets/screenshots/01-today-overview.png)
+![Today's practice with an active plan](docs/assets/screenshots/01-today-overview.png)
+
+The screenshot shows Today with a generated plan. On a rest day or after the final problem is removed from the plan, the seven-day activity appears in its own card.
 
 The unified Today panel combines plan completion, Add one / Adjust today actions, a built-in practice timer linked to practice records, clickable problem titles, dual-path Note navigation (go to workspace or quick-view slide drawer), and seven-day activity. Define reusable weekly strategies with exact difficulty quotas, fixed new/review counts, and topic preferences. Add one runs locally without model calls; remove completed items with explicit confirmation and inspect plan versions. Recommendations explain their source. Local code owns candidate membership, uniqueness, quotas, and persistence; optional Gemini, OpenAI, or DeepSeek assistance remains advisory. Routine explanations and encouragement are local; optional semantic selection is bounded and used only for an effective choice. Opt-in outcome review, duration-shadow calibration, time budgets and explicit optional feedback preserve hard quotas. See [local recommendations](docs/local-recommendations.md) for development-candidate policies and validation limits.
 
@@ -75,7 +77,7 @@ Browse a filterable problem list alongside a Markdown editor and CommonMark/GFM 
 
 ### Appearance and keyboard access
 
-Ten palettes, English/Chinese text, and light/dark/system appearance support desktop work, and selecting a palette dynamically tints the window/Dock icon to match. All eight gallery screenshots show light mode with the default palette, captured from an isolated fictional catalog and synthetic practice history. They illustrate the current browser UI, not the full native WebView acceptance matrix.
+Ten palettes, English/Chinese text, and light/dark/system appearance support desktop work, and selecting a palette dynamically tints the window/Dock icon to match. All eight screenshots come from the 1.4.0 browser build in English with the default light palette and synthetic catalog and practice data.
 
 | Shortcut | Action |
 | --- | --- |
