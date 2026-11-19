@@ -398,7 +398,8 @@ const planningApi = {
     return planningMutation(`/daily-plans/${planId}/replace`, options);
   },
 
-  appendPlanItem(planId: string, options: { expectedVersion: number }): Promise<DailyPlan> {
+  /** Omit `kind` to fill the review cap first; `review` may exceed the cap (backlog action). */
+  appendPlanItem(planId: string, options: { expectedVersion: number; kind?: 'new' | 'review' }): Promise<DailyPlan> {
     return planningMutation(`/daily-plans/${planId}/append`, options);
   },
 

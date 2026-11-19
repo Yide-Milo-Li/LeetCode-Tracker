@@ -119,7 +119,7 @@ describe('Domain Scheduling Algorithms', () => {
 
     // Captured from the pre-refactor algorithm: iterating UTF-16 code units would
     // move this valid custom ID to last place and change the selected problems.
-    assert.equal(ALGORITHM_VERSION, 'phase39-v1');
+    assert.equal(ALGORITHM_VERSION, 'phase48-v1');
     assert.deepEqual(pool.map((problem) => problem.questionId), [
       'custom-😀', '1', '0', '2', '5', '4', '7', '6', '9', '8',
     ]);
@@ -239,11 +239,12 @@ describe('Domain Scheduling Algorithms', () => {
     ];
 
     const result = select(pool, rules);
-    // Strict quotas: target 2 reviews (only 1 available), target 1 new (1 selected). Total 2.
-    assert.equal(result.selected.length, 2);
+    // Phase 48: the review count is a cap. 1 review is due, so the unused review slot becomes new work.
+    assert.equal(result.selected.length, 3);
     assert.equal(result.selected.filter(p => p.kind === 'review').length, 1);
-    assert.equal(result.selected.filter(p => p.kind === 'new').length, 1);
-    assert.ok(result.notices.some(n => n.en.includes('review quota deficit')));
+    assert.equal(result.selected.filter(p => p.kind === 'new').length, 2);
+    assert.equal(result.reviewBacklog, 0);
+    assert.deepEqual(result.notices, []);
   });
 
   it('prioritizes review candidates by overdue status: earlier due date first, known due date before null, and reviews before new', () => {
@@ -508,8 +509,8 @@ it('all-review selection never backfills with new problems', () => {
   ];
   const result = select(pool, rules);
   assert.deepEqual(result.selected.map(p => p.questionId), ['review']);
-  assert.ok(result.notices.some(n => n.en.includes('2 slots unavailable')));
+  assert.ok(result.notices.some(n => n.en.includes('Only 1 review(s) are due today')));
   assert.equal(select(pool.slice(1), rules).selected.length, 0);
-  assert.equal(select(pool, { ...rules, reviewPercent: 50 }).selected.length, 2,
-    'Partial review leaves review deficit without cross-kind substitution');
+  assert.equal(select(pool, { ...rules, reviewPercent: 50 }).selected.length, 3,
+    'Partial review turns unused review capacity into new problems');
 });

@@ -531,16 +531,16 @@ it('never creates a strategy from invalid difficulty, total or review counts', a
   change('Daily Question Count', '3');
   change('Easy count', '1');
   change('Medium count', '1');
-  fireEvent.click(screen.getByLabelText('Some review'));
+  fireEvent.click(screen.getByLabelText('Up to a review cap'));
   const save = screen.getByRole('button', { name: 'Save Strategy' }) as HTMLButtonElement;
   for (const invalid of ['', '0', '-1', '1.5', '4']) {
-    change('Review count', invalid);
-    assert.equal(save.disabled, true, `Review count ${invalid} must prevent creation`);
+    change('Review cap', invalid);
+    assert.equal(save.disabled, true, `Review cap ${invalid} must prevent creation`);
     fireEvent.click(save);
     assert.equal(create.mock.callCount(), 0);
   }
   assert.equal(screen.getByLabelText('Daily Question Count').getAttribute('aria-invalid'), 'true');
-  change('Review count', '1');
+  change('Review cap', '1');
   for (const invalid of ['-1', '1.5', '4', '']) {
     change('Easy count', invalid);
     assert.equal(save.disabled, true);
@@ -561,24 +561,23 @@ it('never creates a strategy from invalid difficulty, total or review counts', a
   assert.equal(create.mock.calls[0].arguments[0].rules.reviewPercent, 100 / 3);
 });
 
-it('all-review follows the total and mode switching retains the partial draft', async () => {
+it('review-only hides the cap and mix, and mode switching retains the partial draft', async () => {
   const { create } = await openCountEditor();
   const change = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
   change('Strategy Name', 'All review');
   change('Daily Question Count', '3');
   change('Easy count', '1');
   change('Medium count', '1');
-  fireEvent.click(screen.getByLabelText('Some review'));
-  change('Review count', '2');
-  fireEvent.click(screen.getByLabelText('All review'));
-  const review = screen.getByLabelText('Review count') as HTMLInputElement;
-  assert.equal(review.readOnly, true);
-  assert.equal(review.value, '3');
+  fireEvent.click(screen.getByLabelText('Up to a review cap'));
+  change('Review cap', '2');
+  fireEvent.click(screen.getByLabelText('Reviews only'));
+  // Review-only takes every due review up to the total: no cap input and no new-problem mix.
+  assert.equal(screen.queryByLabelText('Review cap'), null);
+  assert.equal(screen.queryByLabelText('Easy count'), null);
   change('Daily Question Count', '5');
-  assert.equal(review.value, '5');
-  fireEvent.click(screen.getByLabelText('Some review'));
-  assert.equal(review.value, '2');
-  fireEvent.click(screen.getByLabelText('All review'));
+  fireEvent.click(screen.getByLabelText('Up to a review cap'));
+  assert.equal((screen.getByLabelText('Review cap') as HTMLInputElement).value, '2');
+  fireEvent.click(screen.getByLabelText('Reviews only'));
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save Strategy' })); });
   assert.equal(create.mock.callCount(), 1);
   assert.equal(create.mock.calls[0].arguments[0].rules.reviewPercent, 100);
@@ -593,15 +592,15 @@ it('strategy save and reopen preserve partial review even when its count equals 
   fireEvent.change(screen.getByLabelText('Daily Question Count'), { target: { value: '2' } });
   fireEvent.change(screen.getByLabelText('Easy count'), { target: { value: '2' } });
   fireEvent.change(screen.getByLabelText('Medium count'), { target: { value: '0' } });
-  fireEvent.click(screen.getByLabelText('Some review'));
-  fireEvent.change(screen.getByLabelText('Review count'), { target: { value: '2' } });
+  fireEvent.click(screen.getByLabelText('Up to a review cap'));
+  fireEvent.change(screen.getByLabelText('Review cap'), { target: { value: '2' } });
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save Strategy' })); });
   const input = create.mock.calls[0].arguments[0];
   assert.equal(input.rules.reviewMode, 'partial');
   assert.equal(input.rules.reviewCount, 2);
   cleanup();
   const { update } = await openCountEditor({ ...input, id: 'partial', version: 1, deleted: false });
-  assert.equal((screen.getByLabelText('Some review') as HTMLInputElement).checked, true);
+  assert.equal((screen.getByLabelText('Up to a review cap') as HTMLInputElement).checked, true);
   fireEvent.change(screen.getByLabelText('Daily Question Count'), { target: { value: '3' } });
   fireEvent.change(screen.getByLabelText('Easy count'), { target: { value: '3' } });
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save Strategy' })); });
@@ -644,7 +643,7 @@ it('editing a legacy strategy preserves untouched rounded difficulty and review 
       reviewEnabled: true, reviewPercent: 1, tags: [], premium: false, preference: '' } };
   const { update } = await openCountEditor(original);
   assert.equal((screen.getByLabelText('Easy count') as HTMLInputElement).value, '1');
-  assert.equal((screen.getByLabelText('Review count') as HTMLInputElement).value, '0');
+  assert.equal((screen.getByLabelText('Review cap') as HTMLInputElement).value, '0');
   fireEvent.change(screen.getByLabelText('Strategy Name'), { target: { value: 'Renamed' } });
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save Strategy' })); });
   assert.equal(update.mock.callCount(), 1);
@@ -1254,30 +1253,32 @@ describe('Phase 26: Today remove plan item UI', () => {
 });
 
 
-it('saves opt-in review policy, shadow trial and time budget only after explicit strategy submission', async () => {
-  const existing: Strategy = { id: 'phase39-strategy', version: 1, name: 'Synthetic', deleted: false, weekdays: [1], rules: createMockPlan().rules };
+it('saves the time budget only after explicit submission and keeps spacing out of the strategy editor', async () => {
+  const rules = { ...createMockPlan().rules, reviewPolicy: 'outcome-v2' as const, personalDurationCalibration: true };
+  const existing: Strategy = { id: 'phase39-strategy', version: 1, name: 'Synthetic', deleted: false, weekdays: [1], rules };
   const { update } = await openCountEditor(existing);
-  const advanced = screen.queryByText('Advanced Settings');
-  if (advanced) fireEvent.click(advanced);
-  fireEvent.change(screen.getByLabelText('Review spacing'), { target: { value: 'outcome-v2' } });
-  fireEvent.click(screen.getByLabelText('Personal duration experiment (shadow)'));
+  // Spacing is learner-wide (Settings), never per strategy.
+  assert.equal(screen.queryByLabelText('Review spacing'), null);
+  assert.equal(screen.queryByLabelText('Personal duration experiment (shadow)'), null);
   fireEvent.change(screen.getByLabelText('Daily time budget (minutes, optional)'), { target: { value: '25' } });
   assert.equal(update.mock.callCount(), 0);
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save Strategy' })); });
   assert.equal(update.mock.callCount(), 1);
   const saved = update.mock.calls[0].arguments[1].rules;
-  assert.equal(saved.reviewPolicy, 'outcome-v2'); assert.equal(saved.adaptiveReviewEnabled, false);
-  assert.equal(saved.personalDurationCalibration, true); assert.equal(saved.timeBudgetMinutes, 25);
+  assert.equal(saved.timeBudgetMinutes, 25);
+  // Legacy fields stay readable for older synced builds.
+  assert.equal(saved.reviewPolicy, 'outcome-v2'); assert.equal(saved.personalDurationCalibration, true);
 });
 
 it('keeps bilingual optional controls labeled and independent without automatic submission', async () => {
-  const { RecommendationOptions } = await import('../apps/web/src/components/RecommendationOptions.tsx');
+  const { ReviewSpacingOptions, TimeBudgetField } = await import('../apps/web/src/components/RecommendationOptions.tsx');
   for (const lang of ['en', 'zh'] as const) {
     let submitted = 0;
     function Draft() {
       const [value, setValue] = React.useState<any>({});
       return <form onSubmit={event => { event.preventDefault(); submitted++; }}>
-        <RecommendationOptions lang={lang} reviewEnabled value={value} onChange={patch => setValue({ ...value, ...patch })} />
+        <ReviewSpacingOptions lang={lang} value={value} onChange={(patch: object) => setValue({ ...value, ...patch })} />
+        <TimeBudgetField lang={lang} value={value.timeBudgetMinutes} onChange={(minutes: number | null) => setValue({ ...value, timeBudgetMinutes: minutes })} />
         <button type="submit">Submit draft</button>
       </form>;
     }
@@ -1295,18 +1296,18 @@ it('keeps bilingual optional controls labeled and independent without automatic 
   }
 });
 
-it('keeps override policy changes local to the draft until explicit preview', async () => {
+it('keeps override budget changes local to the draft until explicit preview and offers no per-day spacing', async () => {
   const plan = createMockPlan();
   const preview = mock.method(api, 'previewDailyPlanOverride', async (input: any) => ({ id: 'p39-preview', date: plan.date, expiresAt: Date.now() + 60000,
-    base: plan.rules, rules: input.rules, changed: ['reviewPolicy', 'timeBudgetMinutes'], issues: [], unresolved: [], counts: { Easy: 1, Medium: 1, Hard: 0 },
+    base: plan.rules, rules: input.rules, changed: ['timeBudgetMinutes'], issues: [], unresolved: [], counts: { Easy: 1, Medium: 1, Hard: 0 },
     candidateCount: 10, planVersion: 1, revision: { catalog: 1, planning: 1, practice: 1, timezone: plan.timezone } }));
   render(<PromptOverrideModal isOpen lang="en" currentPlan={plan} onClose={() => {}} onApplied={() => {}} />);
-  fireEvent.change(screen.getByLabelText('Review spacing'), { target: { value: 'outcome-v2' } });
+  assert.equal(screen.queryByLabelText('Review spacing'), null);
   fireEvent.change(screen.getByLabelText('Daily time budget (minutes, optional)'), { target: { value: '10' } });
   assert.equal(preview.mock.callCount(), 0);
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Preview/i })); });
   assert.equal(preview.mock.callCount(), 1);
-  assert.equal(preview.mock.calls[0].arguments[0].rules.reviewPolicy, 'outcome-v2');
+  assert.equal(preview.mock.calls[0].arguments[0].rules.reviewPolicy, undefined);
   assert.equal(preview.mock.calls[0].arguments[0].rules.timeBudgetMinutes, 10);
 });
 
@@ -1561,20 +1562,69 @@ it('shows budget infeasibility without changing quotas and opens explicit adjust
 });
 
 it('names review spacing options without version ids and describes only the selected one', async () => {
-  const { RecommendationOptions } = await import('../apps/web/src/components/RecommendationOptions.tsx');
+  const { ReviewSpacingOptions } = await import('../apps/web/src/components/RecommendationOptions.tsx');
   function Host() {
     const [value, setValue] = React.useState<any>({});
-    return <RecommendationOptions lang="en" reviewEnabled value={value} onChange={patch => setValue({ ...value, ...patch })} />;
+    return <ReviewSpacingOptions lang="en" value={value} onChange={(patch: object) => setValue({ ...value, ...patch })} />;
   }
   render(<Host />);
   const select = screen.getByLabelText('Review spacing') as HTMLSelectElement;
   const labels = [...select.options].map(option => option.textContent ?? '');
   assert.ok(labels.every(label => !/\bv\d\b|legacy|opt-in/i.test(label)), labels.join(' | '));
-  assert.match(select.getAttribute('aria-describedby') ? document.getElementById(select.getAttribute('aria-describedby')!)!.textContent! : '', /Pick one/);
+  assert.match(select.getAttribute('aria-describedby') ? document.getElementById(select.getAttribute('aria-describedby')!)!.textContent! : '', /Applies to every strategy/);
 
   fireEvent.change(select, { target: { value: 'fixed' } });
   assert.match(screen.getByText(/1, 3, 7, 14, then 30 days/).textContent!, /Each review/);
   fireEvent.change(select, { target: { value: 'outcome-v2' } });
   assert.ok(screen.getByText(/unsolved ones return the next day/));
   assert.equal(screen.queryByText(/1, 3, 7, 14, then 30 days/), null);
+});
+
+it('shows the review backlog on Today and pulls one review in on request', async () => {
+  const plan = createMockPlan({ reviewBacklog: 3 });
+  const appendCalls: Array<'new' | 'review' | undefined> = [];
+  const controller: import('../apps/web/src/hooks/useDailyPlan.ts').UseDailyPlanReturn = {
+    loading: false, ensureResult: { status: 'ready', plan }, plan, error: null, clearError: () => {}, replacingBatch: false, replacingItemId: null,
+    appending: false, removingItemId: null, isPlanMutationPending: () => false, refresh: async () => {}, replaceOne: async () => {},
+    replaceAllUnfinished: async () => {}, appendOne: async kind => { appendCalls.push(kind); }, removeOne: async () => {},
+    onOverrideCommitted: () => {}, onPracticeLogged: async () => {},
+  };
+  await act(async () => { render(<TodayPlanView lang="en" onNavigateToSettings={() => {}} planController={controller} />); });
+  assert.ok(screen.getByText("3 more due reviews are past today's review cap"));
+  fireEvent.click(screen.getByRole('button', { name: 'Add a review' }));
+  assert.deepEqual(appendCalls, ['review']);
+  cleanup();
+
+  // Older plans without the field, and plans with nothing left, show no backlog row.
+  for (const reviewBacklog of [undefined, 0]) {
+    const quiet = createMockPlan(reviewBacklog === undefined ? {} : { reviewBacklog });
+    await act(async () => { render(<TodayPlanView lang="en" onNavigateToSettings={() => {}}
+      planController={{ ...controller, plan: quiet, ensureResult: { status: 'ready', plan: quiet } }} />); });
+    assert.equal(screen.queryByRole('button', { name: 'Add a review' }), null);
+    cleanup();
+  }
+});
+
+it('edits the learner-wide review rhythm in Practice settings and rolls back a failed save', async () => {
+  const { PracticeSection } = await import('../apps/web/src/components/settings/PracticeSection.tsx');
+  mock.method(api, 'getSettings', async () => ({ reviewPolicy: 'duration-v1', personalDurationCalibration: false }) as any);
+  let fail = false;
+  const update = mock.method(api, 'updateSettings', async (input: any) => {
+    if (fail) throw new Error('offline');
+    return input;
+  });
+  await act(async () => {
+    render(<PracticeSection lang="en" promptSwapFeedback onPromptSwapFeedbackChange={() => {}}
+      notesFormatOnSave onNotesFormatOnSaveChange={() => {}} />);
+  });
+  const select = screen.getByLabelText('Review spacing') as HTMLSelectElement;
+  assert.equal(select.value, 'duration-v1');
+  await act(async () => { fireEvent.change(select, { target: { value: 'outcome-v2' } }); });
+  assert.deepEqual(update.mock.calls[0].arguments[0], { reviewPolicy: 'outcome-v2' });
+  assert.equal(select.value, 'outcome-v2');
+
+  fail = true;
+  await act(async () => { fireEvent.change(select, { target: { value: 'fixed' } }); });
+  assert.equal(select.value, 'outcome-v2');
+  assert.ok(screen.getByRole('alert'));
 });

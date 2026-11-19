@@ -2,7 +2,7 @@
  * Strategy card component for displaying individual recommendation strategy rules and actions.
  */
 import React from 'react';
-import { difficultyCounts, reviewCountForRules } from '../strategy-counts.ts';
+import { difficultyCounts, reviewCountForRules, reviewModeForRules } from '../strategy-counts.ts';
 import { IconButton } from './ui.tsx';
 import { Edit2, Trash2 } from 'lucide-react';
 import type { Strategy } from '../api.ts';
@@ -92,12 +92,14 @@ export const StrategyCard: React.FC<StrategyCardProps> = ({
         <div className="strategy-detail-row">
           <span className="text-muted">{t.reviewCount}:</span>
           <span>
-            {s.rules.reviewEnabled ? (
-              <span className="badge badge-success">
-                {reviewCountForRules(s.rules)} / {s.rules.dailyCount}
-              </span>
+            {reviewModeForRules(s.rules) === 'none' ? (
+              <span className="badge badge-secondary">{t.disableReview}</span>
+            ) : reviewModeForRules(s.rules) === 'all' ? (
+              <span className="badge badge-success">{t.allReview}</span>
             ) : (
-              <span className="badge badge-secondary">{lang === 'zh' ? '关闭' : 'Disabled'}</span>
+              <span className="badge badge-success">
+                {lang === 'zh' ? `最多 ${reviewCountForRules(s.rules)} 道` : `Up to ${reviewCountForRules(s.rules)}`}
+              </span>
             )}
           </span>
         </div>

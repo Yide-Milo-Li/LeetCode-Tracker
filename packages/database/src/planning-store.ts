@@ -3,8 +3,8 @@ import type { DatabaseSync } from 'node:sqlite';
 import { createEvidenceDateResolver } from '../../domain/src/recommendations.ts';
 import { randomUUID } from 'node:crypto';
 import type { CatalogStore } from './store.ts';
-import { strategyInputSchema, PlanningError, type Strategy, type StrategyInput, type DailyPlan, type Evidence, type RevisionStamp, type ReviewState, type Rules } from '../../contracts/src/recommendations.ts';
-import { evidenceAfter, projectReviewStates, calculateTagMastery, calculateKnowledgeProfile } from '../../domain/src/index.ts';
+import { strategyInputSchema, PlanningError, type Strategy, type StrategyInput, type DailyPlan, type Evidence, type ReviewPolicy, type RevisionStamp, type ReviewState, type Rules } from '../../contracts/src/recommendations.ts';
+import { evidenceAfter, calculateTagMastery, calculateKnowledgeProfile, legacyDurationCalibration, legacyReviewPolicy, projectPolicyReviewStates } from '../../domain/src/index.ts';
 import type { CatalogProblem } from '../../contracts/src/sync.ts';
 
 /** Optional response facts belong to the receipt, never to the saved plan or its history. */
@@ -124,15 +124,27 @@ export class PlanningStore {
     return [...manual, ...snapshots] as unknown as Evidence[];
   }
 
-  /** Recompute review projections so revocations never leave stale cached success state. */
-  reviewStates(zone: string, now: number): ReviewState[] {
-    const events = this.evidence(); const solved = new Set(events.map(e => e.questionId));
-    for (const r of this.db.prepare("SELECT question_id FROM progress_snapshots WHERE status='active' AND has_accepted=1").all() as { question_id: string }[]) solved.add(r.question_id);
-    const baseline = Number((this.db.prepare("SELECT value FROM catalog_meta WHERE key='review_baseline'").get() as { value: string }).value);
-    return projectReviewStates([],events,solved,zone,baseline,now);
+  /**
+   * Learner-wide review spacing policy.
+   *
+   * Settings own it once chosen. Until then it is derived from active strategies saved before the
+   * policy moved to Settings, so upgrading changes nothing while those strategies agree.
+   */
+  reviewPolicy(): ReviewPolicy {
+    return this.catalog.getSettings().reviewPolicy ?? legacyReviewPolicy(this.strategies().map(s => s.rules));
   }
 
-  /** Read one consistent local snapshot and derive fixed projections without mutating caches. */
+  /** Learner-wide personal-duration experiment switch, derived like {@link reviewPolicy}. */
+  durationCalibration(): boolean {
+    return this.catalog.getSettings().personalDurationCalibration ?? legacyDurationCalibration(this.strategies().map(s => s.rules));
+  }
+
+  /** Recompute review projections so revocations never leave stale cached success state. */
+  reviewStates(zone: string, now: number): ReviewState[] {
+    return this.analysisContext(zone, now).states;
+  }
+
+  /** Read one consistent local snapshot and project review state under the learner-wide policy without mutating caches. */
   analysisContext(zone: string, now: number, raw = this.catalog.getDashboardRawData()) {
     const events:Evidence[]=[
       ...raw.manualRecords.filter(r=>r.status==='active' && r.completed).map(r=>({
@@ -146,7 +158,6 @@ export class PlanningStore {
     for(const s of raw.snapshots)if(s.status==='active'&&s.hasAccepted)solved.add(s.questionId);
     const baseline=Number((this.db.prepare("SELECT value FROM catalog_meta WHERE key='review_baseline'").get() as {value:string}).value);
     const resolveDate = createEvidenceDateResolver(zone, now);
-    const fixed = projectReviewStates(raw.problems, events, solved, zone, baseline, now, false, resolveDate);
     const reviewEvents: import('../../contracts/src/recommendations.ts').ReviewEvent[] = [
       ...raw.manualRecords.filter(r => r.status === 'active').map(r => ({
         id: 'manual:' + r.id, questionId: r.questionId, at: r.practicedAt, precision: r.timePrecision,
@@ -155,19 +166,21 @@ export class PlanningStore {
       })),
       ...events.filter(e => e.id.startsWith('snapshot:')).map(e => ({ ...e, completed: true, outcome: null })),
     ];
-    return { raw, events, reviewEvents, solved, baseline, fixed, resolveDate };
+    const policy = this.reviewPolicy();
+    const states = projectPolicyReviewStates(policy, { problems: raw.problems, events, reviewEvents, solved, zone, baseline, now, resolveDate });
+    return { raw, events, reviewEvents, solved, baseline, policy, states, resolveDate };
   }
 
   /** Expose only aggregate insight facts; GET never updates review caches or revisions. */
   masteryReport(zone:string,now:number) {
-    const {raw,fixed}=this.analysisContext(zone, now, this.catalog.dashboardSnapshot());
-    return calculateTagMastery({...raw,now,userZone:zone,reviewStates:fixed});
+    const {raw,states}=this.analysisContext(zone, now, this.catalog.dashboardSnapshot());
+    return calculateTagMastery({...raw,now,userZone:zone,reviewStates:states});
   }
 
   /** Compute multi-signal Knowledge Profile aggregating topic × difficulty evidence. */
   knowledgeProfileReport(zone: string, now: number) {
-    const { raw, fixed, resolveDate } = this.analysisContext(zone, now, this.catalog.dashboardSnapshot());
-    return calculateKnowledgeProfile({ ...raw, now, userZone: zone, reviewStates: fixed, revision: this.stamp() }, resolveDate);
+    const { raw, states, resolveDate } = this.analysisContext(zone, now, this.catalog.dashboardSnapshot());
+    return calculateKnowledgeProfile({ ...raw, now, userZone: zone, reviewStates: states, revision: this.stamp() }, resolveDate);
   }
 
   /** Reconcile completion without mutating a historical version's event timestamps. */
@@ -246,7 +259,7 @@ export class PlanningStore {
   }
 
   /** Commit a plan version and retry result together after all provider work has finished. */
-  commit(plan: DailyPlan, stamp: RevisionStamp, expectedVersion: number | null, operationId: string, fingerprint: string, changed = true, validate?: () => void, metadata?: Pick<PlanningReceipt, 'changed'> & { fixedReviewStates?: readonly ReviewState[] }): Promise<DailyPlan> {
+  commit(plan: DailyPlan, stamp: RevisionStamp, expectedVersion: number | null, operationId: string, fingerprint: string, changed = true, validate?: () => void, metadata?: Pick<PlanningReceipt, 'changed'> & { reviewStates?: readonly ReviewState[] }): Promise<DailyPlan> {
     return this.write(() => {
       const replay = this.replay(operationId, fingerprint); if (replay) return replay;
       validate?.(); // Recheck request lifetime after waiting for the shared backup/write queue.
@@ -264,7 +277,7 @@ export class PlanningStore {
       const receipt = metadata?.changed ? JSON.stringify({ plan, changed: metadata.changed }) : json;
       this.db.prepare('INSERT INTO planning_operations VALUES(?,?,?)').run(operationId, fingerprint, receipt);
       // A supplied projection uses the same evidence stamp, zone and plan clock as this commit.
-      const states = metadata?.fixedReviewStates ?? this.reviewStates(plan.timezone, plan.updatedAt);
+      const states = metadata?.reviewStates ?? this.reviewStates(plan.timezone, plan.updatedAt);
       const upsertState = this.db.prepare('INSERT OR REPLACE INTO problem_review_state VALUES(?,?,?)');
       for (const state of states) upsertState.run(state.questionId, JSON.stringify(state), stamp.practice);
       this.db.prepare('DELETE FROM problem_review_state WHERE question_id NOT IN (SELECT question_id FROM practice_records WHERE status=\'active\' AND completed=1 UNION SELECT question_id FROM progress_snapshots WHERE status=\'active\' AND has_accepted=1)').run();

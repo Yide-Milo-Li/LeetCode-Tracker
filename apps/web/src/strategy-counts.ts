@@ -104,3 +104,12 @@ export function reviewPercentForCount(total: number, mode: ReviewMode | null, co
   if (!isCount(count) || count < 1 || count > total) throw new Error('Review count must be between one and the daily total');
   return count * 100 / total;
 }
+
+/**
+ * New-problem split on a day when the review cap is fully used.
+ * Mirrors the planner: the mix is a ratio applied to whatever count reviews leave.
+ */
+export function newCountsAtCap(total: number, cap: number, counts: Record<Difficulty, number>): Record<Difficulty, number> {
+  const [Easy, Medium, Hard] = allocate(Math.max(0, total - cap), difficulties.map(d => counts[d]));
+  return { Easy, Medium, Hard };
+}

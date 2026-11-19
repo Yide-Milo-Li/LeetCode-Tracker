@@ -10,7 +10,7 @@ import { api, type DailyPlan, type OverridePreview, type RulePatch } from '../ap
 import { localizeApiError, localizePlanningIssue } from '../error-i18n.ts';
 import { formatDifficulty, translations, type Language } from '../i18n.ts';
 import { Dialog } from './ui.tsx';
-import { RecommendationOptions, readRecommendationOptions, reviewPolicyLabel } from './RecommendationOptions.tsx';
+import { TimeBudgetField } from './RecommendationOptions.tsx';
 import {
   difficulties,
   type Difficulty,
@@ -120,8 +120,8 @@ export const PromptOverrideModal: React.FC<PromptOverrideModalProps> = ({
         reviewPercent: r.reviewPercent,
         preference: r.preference,
         focusWeakTags: r.focusWeakTags,
-        adaptiveReviewEnabled: r.adaptiveReviewEnabled,
-        ...readRecommendationOptions(r),
+        ...(r.reviewScope !== undefined ? { reviewScope: r.reviewScope } : {}),
+        ...(r.timeBudgetMinutes !== undefined ? { timeBudgetMinutes: r.timeBudgetMinutes } : {}),
       });
     } else {
       setDailyCount('');
@@ -253,7 +253,7 @@ export const PromptOverrideModal: React.FC<PromptOverrideModalProps> = ({
       reviewMode: mode,
       reviewCount: typeof nextCount === 'number' ? nextCount : undefined,
       reviewEnabled: mode !== 'none',
-      ...(mode === 'none' ? { reviewPercent: null, adaptiveReviewEnabled: false, ...(prev.reviewPolicy ? { reviewPolicy: 'fixed' as const } : {}) } : {}),
+      ...(mode === 'none' ? { reviewPercent: null } : {}),
       ...(mode === 'all' ? { reviewPercent: 100 } : {}),
     }));
     setPreview(null);
@@ -433,27 +433,27 @@ export const PromptOverrideModal: React.FC<PromptOverrideModalProps> = ({
     lang === 'zh'
       ? {
           dailyCount: '每日题数',
-          difficulty: '难度题数',
+          difficulty: '新题难度配比',
           tags: '标签',
           premium: '包含 Premium',
-          reviewMode: '复习模式',
-          reviewCount: '复习题数',
+          reviewMode: '复习',
+          reviewCount: '复习上限',
+          reviewScope: '复习范围',
           preference: '软偏好',
-          focusWeakTags: '自适应专题推荐',
-          adaptiveReviewEnabled: '自适应复习',
-          reviewPolicy: '复习间隔', personalDurationCalibration: '个人用时影子实验', timeBudgetMinutes: '时间预算（分钟）',
+          focusWeakTags: '薄弱专题优先',
+          timeBudgetMinutes: '时间预算（分钟）',
         }
       : {
           dailyCount: 'Daily count',
-          difficulty: 'Difficulty counts',
+          difficulty: 'New-problem mix',
           tags: 'Tags',
           premium: 'Include Premium',
-          reviewMode: 'Review mode',
-          reviewCount: 'Review count',
+          reviewMode: 'Reviews',
+          reviewCount: 'Review cap',
+          reviewScope: 'Review scope',
           preference: 'Soft preference',
-          focusWeakTags: 'Adaptive topic recommendations',
-          adaptiveReviewEnabled: 'Adaptive review',
-          reviewPolicy: 'Review spacing', personalDurationCalibration: 'Personal duration shadow experiment', timeBudgetMinutes: 'Time budget (minutes)',
+          focusWeakTags: 'Weak topics first',
+          timeBudgetMinutes: 'Time budget (minutes)',
         };
 
   function formatRuleValue(key: string, value: any, baseRules?: Rules | null): React.ReactNode {
@@ -471,18 +471,23 @@ export const PromptOverrideModal: React.FC<PromptOverrideModalProps> = ({
     if (key === 'reviewMode') {
       return lang === 'zh'
         ? value === 'all'
-          ? '全部复习'
+          ? '仅复习'
           : value === 'partial'
-          ? '部分复习'
+          ? '复习设上限'
           : '仅新题'
         : value === 'all'
-        ? 'All review'
+        ? 'Reviews only'
         : value === 'partial'
-        ? 'Some review'
+        ? 'Up to a review cap'
         : 'New only';
     }
     if (key === 'reviewCount') {
-      return `${value} ${lang === 'zh' ? '题' : 'problem(s)'}`;
+      return lang === 'zh' ? `最多 ${value} 题` : `Up to ${value}`;
+    }
+    if (key === 'reviewScope') {
+      return value === 'matching'
+        ? (lang === 'zh' ? '仅所选标签' : 'Selected tags only')
+        : (lang === 'zh' ? '全部到期复习' : 'All due reviews');
     }
     if (key === 'dailyCount') {
       return `${value} ${lang === 'zh' ? '题' : 'problem(s)'}`;
@@ -490,8 +495,7 @@ export const PromptOverrideModal: React.FC<PromptOverrideModalProps> = ({
     if (key === 'tags') {
       return Array.isArray(value) && value.length > 0 ? value.join(', ') : lang === 'zh' ? '不限' : 'Any';
     }
-    if (key === 'reviewPolicy') return reviewPolicyLabel(String(value), lang);
-    if (key === 'premium' || key === 'focusWeakTags' || key === 'adaptiveReviewEnabled' || key === 'personalDurationCalibration') {
+    if (key === 'premium' || key === 'focusWeakTags') {
       return value ? (lang === 'zh' ? '是' : 'Yes') : lang === 'zh' ? '否' : 'No';
     }
     return typeof value === 'string' ? value : JSON.stringify(value);
@@ -505,8 +509,9 @@ export const PromptOverrideModal: React.FC<PromptOverrideModalProps> = ({
     'reviewMode',
     'reviewCount',
     'preference',
+    'reviewScope',
     'focusWeakTags',
-    'adaptiveReviewEnabled', 'reviewPolicy', 'personalDurationCalibration', 'timeBudgetMinutes',
+    'timeBudgetMinutes',
   ];
 
   return (
@@ -697,27 +702,7 @@ export const PromptOverrideModal: React.FC<PromptOverrideModalProps> = ({
                 </select>
               </label>
 
-              {!draft.reviewPolicy && <label>
-                {t.adaptiveReviewEnabled}
-                <select
-                  aria-label={t.adaptiveReviewEnabled}
-                  value={
-                    draft.adaptiveReviewEnabled === undefined ? '' : String(draft.adaptiveReviewEnabled)
-                  }
-                  onChange={(e) =>
-                    edit({
-                      adaptiveReviewEnabled:
-                        e.target.value === '' ? undefined : e.target.value === 'true',
-                    })
-                  }
-                >
-                  <option value="">{lang === 'zh' ? '继承现有规则' : 'Inherit current rule'}</option>
-                  <option value="true">{lang === 'zh' ? '开启' : 'On'}</option>
-                  <option value="false">{lang === 'zh' ? '关闭' : 'Off'}</option>
-                </select>
-              </label>}
-              {!draft.reviewPolicy && <p className="text-muted">{t.adaptiveReviewDescription}</p>}
-              <RecommendationOptions lang={lang} reviewEnabled={reviewMode !== 'none'} value={draft} onChange={edit} />
+              <TimeBudgetField lang={lang} value={draft.timeBudgetMinutes} onChange={minutes => edit({ timeBudgetMinutes: minutes })} />
 
               <button
                 className="btn btn-secondary"

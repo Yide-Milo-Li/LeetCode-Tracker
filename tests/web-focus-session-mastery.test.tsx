@@ -36,24 +36,20 @@ it('opens a focus-only draft without setting required quantities, review or week
     const dialog = screen.getByRole('dialog');
     assert.ok(dialog);
     assert.equal((screen.getByLabelText(translations.en.focusWeakTags) as HTMLInputElement).checked, true);
-    const adaptive = screen.queryByLabelText(translations.en.adaptiveReviewEnabled);
-    assert.equal(adaptive, null);
+    assert.equal(screen.queryByLabelText('Review spacing'), null);
     assert.equal(save.mock.calls.length, 0);
     await act(async () => finish());
     assert.ok(screen.getByText(translations.en.noWeakTopics));
 });
-it('keeps the two switches independent and conditionally prompts adaptive review when review is active', async () => {
+it('shows weak-topic selection only with new problems and keeps the choice across review modes', async () => {
     library();
     mock.method(api, 'getMasteryReport', async () => { throw Error('offline'); });
     await act(async () => render(<StrategiesView lang="zh" focusRequest={1}/>));
-    assert.equal(screen.queryByLabelText(translations.zh.adaptiveReviewEnabled), null);
+    assert.equal((screen.getByLabelText(translations.zh.focusWeakTags) as HTMLInputElement).checked, true);
+    // Review-only strategies never pick new problems, so the new-problem section is hidden.
     fireEvent.click(screen.getByLabelText(translations.zh.allReview));
-    const adaptive = screen.getByLabelText(translations.zh.adaptiveReviewEnabled) as HTMLInputElement;
-    assert.equal(adaptive.disabled, false);
-    fireEvent.click(adaptive);
-    assert.equal(adaptive.checked, true);
+    assert.equal(screen.queryByLabelText(translations.zh.focusWeakTags), null);
     fireEvent.click(screen.getByLabelText(translations.zh.disableReview));
-    assert.equal(screen.queryByLabelText(translations.zh.adaptiveReviewEnabled), null);
     assert.equal((screen.getByLabelText(translations.zh.focusWeakTags) as HTMLInputElement).checked, true);
     assert.ok(screen.getByText(translations.zh.insightLoadError));
 });
@@ -103,12 +99,12 @@ it('sends explicit false in manual override while absent controls inherit', asyn
     const call = mock.method(api, 'previewDailyPlanOverride', async () => preview);
     await act(async () => render(<PromptOverrideModal isOpen lang="en" currentPlan={null} onClose={() => { }} onApplied={() => { }}/>));
     fireEvent.click(screen.getByText('Edit rules manually'));
-    fireEvent.change(screen.getByLabelText(translations.en.adaptiveReviewEnabled), { target: { value: 'false' } });
+    fireEvent.change(screen.getByLabelText(translations.en.focusWeakTags), { target: { value: 'false' } });
     await act(async () => fireEvent.click(screen.getByText('Preview edited rules')));
     const payload = call.mock.calls[0].arguments[0];
     assert.ok(payload);
-    assert.equal(payload.rules?.adaptiveReviewEnabled, false);
-    assert.equal(Object.hasOwn(payload.rules ?? {}, 'focusWeakTags'), false);
+    assert.equal(payload.rules?.focusWeakTags, false);
+    assert.equal(Object.hasOwn(payload.rules ?? {}, 'premium'), false);
 });
 
 it('renders Option 1 semantic micro-pills, shared legend, and hoverable segmented feedback bars', async () => {

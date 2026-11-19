@@ -409,8 +409,8 @@ describe('Recommendation & Planning API Endpoints', () => {
       sourceTimezone: 'UTC',
     });
 
-    // 1. Preview override with prompt reducing Easy to 0% (e.g. "all hard")
-    // Should flag that 1 completed Easy problem exceeds 0 proposed quota!
+    // 1a. Phase 48: a completed Easy problem no longer conflicts with "all hard"; the remaining
+    // new slots are filled by cumulative deficit around it.
     res = await app.inject({
       method: 'POST',
       url: '/api/v1/daily-plan-overrides/preview',
@@ -420,8 +420,20 @@ describe('Recommendation & Planning API Endpoints', () => {
       },
     });
     assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.json().issues, []);
+
+    // 1b. Review-only rules leave no room for the completed new problem.
+    res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/daily-plan-overrides/preview',
+      payload: {
+        date: dateStr,
+        prompt: 'all review 3 problems',
+      },
+    });
+    assert.equal(res.statusCode, 200);
     const conflictPreview = res.json();
-    assert.ok(conflictPreview.issues.some((iss: string) => iss.includes('Completed Easy problems')));
+    assert.ok(conflictPreview.issues.some((iss: string) => iss.includes('Completed new problems')), JSON.stringify(conflictPreview.issues));
 
     // Attempting to commit with issues fails with 400
     res = await app.inject({
@@ -713,7 +725,7 @@ describe('Recommendation & Planning API Endpoints', () => {
     assert.equal(reviewSlot.kind, 'review');
     assert.equal(reviewSlot.problem.questionFrontendId, '1');
 
-    // Replace the only review problem. Because no other Easy review problem exists,
+    // Replace the only review problem. Because no other due review exists (of any difficulty),
     // it must retain the original problem and append a notice rather than converting the slot to 'new'.
     res = await app.inject({
       method: 'POST',
@@ -729,7 +741,7 @@ describe('Recommendation & Planning API Endpoints', () => {
     const updatedPlan = res.json();
     assert.equal(updatedPlan.items[0].problem.questionFrontendId, '1');
     assert.equal(updatedPlan.items[0].kind, 'review');
-    assert.ok(updatedPlan.notices.some((n: any) => n.en.includes('No alternative Easy (review) problem available')));
+    assert.ok(updatedPlan.notices.some((n: any) => n.en.includes('No other due review is available')));
   });
 });
 

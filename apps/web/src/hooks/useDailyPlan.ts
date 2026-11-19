@@ -34,7 +34,8 @@ export interface UseDailyPlanReturn {
   /** Trigger a background check/refresh of today's plan. */
   refresh: () => Promise<void>;
   /** Append one question to today's plan. */
-  appendOne: () => Promise<void>;
+  /** Append one problem; `review` pulls the next due review even when today's review cap is full. */
+  appendOne: (kind?: 'new' | 'review') => Promise<void>;
   /** Remove a single question from today's plan. */
   removeOne: (item: PlanItem, feedbackReason?: RecommendationFeedbackReason) => Promise<void>;
   /** Replace a single problem in today's plan while preserving slot properties. */
@@ -205,7 +206,7 @@ export function useDailyPlan(lang: Language = 'en'): UseDailyPlanReturn {
     }
   }, [ensureResult, refresh]);
 
-  const appendOne = useCallback(async () => {
+  const appendOne = useCallback(async (kind?: 'new' | 'review') => {
     if (!ensureResult?.plan || planMutationPending.current) return;
     planMutationPending.current = true;
     setAppending(true);
@@ -214,6 +215,7 @@ export function useDailyPlan(lang: Language = 'en'): UseDailyPlanReturn {
     try {
       const updated = await api.appendPlanItem(ensureResult.plan.id, {
         expectedVersion: ensureResult.plan.version,
+        ...(kind ? { kind } : {}),
       });
       if (currentRevision === changeRevision.current) {
         setEnsureResult({ status: 'ready', plan: updated });

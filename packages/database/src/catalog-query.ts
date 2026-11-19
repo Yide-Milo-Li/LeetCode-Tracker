@@ -312,6 +312,9 @@ export function getUserSettings(db: DatabaseSync): UserSettings {
   let palette: ThemePalette = 'default';
   let timezone: string | null = null;
   let llmProvider: 'gemini' | 'openai' | 'deepseek' = 'gemini';
+  // Undefined means "never chosen": planning derives both from active strategies instead.
+  let reviewPolicy: 'fixed' | 'duration-v1' | 'outcome-v2' | undefined;
+  let personalDurationCalibration: boolean | undefined;
 
   let geminiApiKey: string | null = null;
   let geminiModel: string | null = null;
@@ -356,6 +359,12 @@ export function getUserSettings(db: DatabaseSync): UserSettings {
     }
     if (r.key === 'llm_provider' && (r.value === 'gemini' || r.value === 'openai' || r.value === 'deepseek')) {
       llmProvider = r.value;
+    }
+    if (r.key === 'review_policy' && (r.value === 'fixed' || r.value === 'duration-v1' || r.value === 'outcome-v2')) {
+      reviewPolicy = r.value;
+    }
+    if (r.key === 'personal_duration_calibration' && (r.value === 'true' || r.value === 'false')) {
+      personalDurationCalibration = r.value === 'true';
     }
 
     // Gemini
@@ -455,6 +464,8 @@ export function getUserSettings(db: DatabaseSync): UserSettings {
     palette,
     timezone,
     llmProvider,
+    ...(reviewPolicy ? { reviewPolicy } : {}),
+    ...(personalDurationCalibration !== undefined ? { personalDurationCalibration } : {}),
     geminiApiKey,
     geminiModel,
     geminiFallbackModels,
@@ -511,6 +522,16 @@ export function updateUserSettingsTransaction(
     }
     if (input.llmProvider !== undefined) {
       updateStmt.run('llm_provider', input.llmProvider, now);
+    }
+    // Review spacing changes every projected due date, so cached plan inputs and previews go stale.
+    if (input.reviewPolicy !== undefined || input.personalDurationCalibration !== undefined) {
+      if (input.reviewPolicy !== undefined) updateStmt.run('review_policy', input.reviewPolicy, now);
+      if (input.personalDurationCalibration !== undefined) {
+        updateStmt.run('personal_duration_calibration', String(input.personalDurationCalibration), now);
+      }
+      db.prepare(
+        "UPDATE catalog_meta SET value=CAST(value AS INTEGER)+1 WHERE key='planning_revision'"
+      ).run();
     }
 
     /** Persist only supplied provider fields within the enclosing settings transaction. */

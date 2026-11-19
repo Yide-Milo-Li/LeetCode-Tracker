@@ -135,10 +135,10 @@ it('rejects append after restore invalidation or local calendar rollover', async
   }
 });
 
-it('subtracts retained reviews globally before distributing remaining review slots', () => {
-  const retained = [{ kind: 'review', problem: { difficulty: 'Medium' }, completed: true }] as PlanItem[];
-  const pool = [{ questionId: 'review', difficulty: 'Easy', kind: 'review' },
-    { questionId: 'fresh', difficulty: 'Easy', kind: 'new' }] as Candidate[];
+it('counts retained reviews against the cap before filling new problems', () => {
+  const retained = [{ kind: 'review', problem: { questionId: 'done', difficulty: 'Medium', topicTags: [] }, completed: true }] as unknown as PlanItem[];
+  const pool = [{ questionId: 'review', difficulty: 'Easy', kind: 'review', topicTags: [] },
+    { questionId: 'fresh', difficulty: 'Easy', kind: 'new', topicTags: [] }] as unknown as Candidate[];
   const result = select(pool, { ...rules, dailyCount: 2, difficulty: { Easy: 50, Medium: 50, Hard: 0 },
     reviewEnabled: true, reviewPercent: 50, reviewMode: 'partial', reviewCount: 1 }, retained);
   assert.deepEqual(result.selected.map(p => p.questionId), ['fresh']);

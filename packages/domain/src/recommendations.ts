@@ -16,11 +16,13 @@ import {
 } from '../../contracts/src/recommendations.ts';
 import { isEventTime, localDate, addDays, isTimeZone } from '../../contracts/src/time.ts';
 import type { CatalogProblem } from '../../contracts/src/sync.ts';
+import type { AdaptiveSlot } from './adaptive-topics.ts';
+import { selectCandidateSlots } from './selection.ts';
 
 import { ANALYSIS_VERSION, DURATION_THRESHOLDS, REVIEW_VERSION, validDuration } from './review-policy.ts';
 
-/** Versioned opt-in topic priorities and duration-based review explanations. */
-export const ALGORITHM_VERSION = 'phase39-v1';
+/** Phase 48: reviews ignore the difficulty mix, the review count is a cap, and spare review slots become new problems. */
+export const ALGORITHM_VERSION = 'phase48-v1';
 export const intervals = [1, 3, 7, 14, 30] as const;
 const ZH_DIFFICULTY: Record<Difficulty, string> = { Easy: '简单', Medium: '中等', Hard: '困难' };
 
@@ -194,16 +196,22 @@ export function projectReviewStates(
   return [...solved].map(id=>reviewState(id,true,grouped.get(id)??[],zone,baseline,now,
     {adaptive,difficulty:byId.get(id)?.difficulty,resolveDate}));
 }
+/** Premium access is a hard constraint for every kind of problem. */
+function passesPremium(problem: CatalogProblem, rules: Rules): boolean {
+  return rules.premium || !problem.isPaidOnly;
+}
+
+/** An empty tag list means every tag. */
+function passesTags(problem: CatalogProblem, rules: Rules): boolean {
+  return rules.tags.length === 0 || problem.topicTags.some((tag) => rules.tags.includes(tag.slug));
+}
+
 /**
- * Matches problem against verifiable hard constraints (premium and tags).
+ * Matches problem against verifiable hard constraints (premium and tags) as a new problem.
+ * Reviews skip the tag check unless the strategy sets `reviewScope: 'matching'`.
  */
 export function matches(problem: CatalogProblem, rules: Rules): boolean {
-  const passesPremium = rules.premium || !problem.isPaidOnly;
-  const passesTags =
-    rules.tags.length === 0 ||
-    problem.topicTags.some((tag) => rules.tags.includes(tag.slug));
-
-  return passesPremium && passesTags;
+  return passesPremium(problem, rules) && passesTags(problem, rules);
 }
 
 /**
@@ -235,14 +243,20 @@ function compareDueDates(dueDateA: string | null, dueDateB: string | null): numb
   return 0;
 }
 
-/** Apply due-date and optional topic priority before seeded ties. */
+/**
+ * Apply due-date and optional topic priority before seeded ties.
+ *
+ * Solved problems are review candidates only once due. The tag filter applies to reviews only when
+ * `reviewScope` is `'matching'`, so a topic-focused strategy does not strand other due reviews.
+ */
 export function candidates(
   problems:CatalogProblem[],states:ReviewState[],rules:Rules,date:string,seed:string,excluded:Set<string>,weakTagSlugs:string[]=[]
 ):Candidate[]{
   const stateById=new Map(states.map(s=>[s.questionId,s])),weak=new Set(rules.focusWeakTags?weakTagSlugs:[]);
-  return problems.filter(p=>matches(p,rules)&&!excluded.has(p.questionId)).flatMap<Candidate>(p=>{
+  return problems.filter(p=>passesPremium(p,rules)&&!excluded.has(p.questionId)).flatMap<Candidate>(p=>{
     const state=stateById.get(p.questionId);
     if(state?.solved && (!rules.reviewEnabled || (state.dueDate && state.dueDate>date)))return [];
+    if((!state?.solved || rules.reviewScope==='matching') && !passesTags(p,rules))return [];
     const matched=p.topicTags.filter(t=>weak.has(t.slug)).map(t=>t.slug);
     const review=rules.adaptiveReviewEnabled?state?.adjustment??null:null;
     return [{...p,kind:state?.solved?'review':'new',dueDate:state?.solved?state.dueDate:null,
@@ -275,6 +289,8 @@ export function reorderCandidates(pool:Candidate[],ids:string[],rules:Rules):Can
 export interface Selection {
   selected: Candidate[];
   notices: Bilingual[];
+  slots: AdaptiveSlot[];
+  reviewBacklog: number;
 }
 
 /**
@@ -317,99 +333,101 @@ export function nextDifficultyForAppend(
   return bestDiff;
 }
 
+/** Slot plan before any problem is chosen; every selection path fills these slots the same way. */
+export interface SlotPlan {
+  slots: AdaptiveSlot[];
+  notices: Bilingual[];
+  /** Due reviews left out because the review cap or the daily count was reached. */
+  reviewBacklog: number;
+}
+
 /**
- * Select daily quotas while preserving completed items.
- * Enforces strict integer quotas without cross-kind substitution between review and new problems.
+ * Split the remaining new-problem capacity across difficulties.
+ *
+ * Uses largest-remainder quotas for the whole new-problem count. When completed work already
+ * exceeds a difficulty's share, the rest is filled by cumulative deficit instead, so retained
+ * items never make the plan invalid.
+ */
+function newProblemQuotas(total: number, ratio: Record<Difficulty, number>, kept: PlanItem[]): Record<Difficulty, number> {
+  const keptCounts = Object.fromEntries(difficulties.map(d => [d, kept.filter(i => i.problem.difficulty === d).length])) as Record<Difficulty, number>;
+  const target = allocate(total, difficulties.map(d => ratio[d]));
+  if (difficulties.every((d, i) => keptCounts[d] <= target[i])) {
+    return Object.fromEntries(difficulties.map((d, i) => [d, target[i] - keptCounts[d]])) as Record<Difficulty, number>;
+  }
+  const remaining: Record<Difficulty, number> = { Easy: 0, Medium: 0, Hard: 0 };
+  const items: { problem: { difficulty: Difficulty } }[] = kept.map(i => ({ problem: { difficulty: i.problem.difficulty } }));
+  for (let i = kept.length; i < total; i++) {
+    const next = nextDifficultyForAppend(ratio, items);
+    remaining[next]++;
+    items.push({ problem: { difficulty: next } });
+  }
+  return remaining;
+}
+
+/**
+ * Plan today's open slots: due reviews first, up to the review cap, then new problems.
+ *
+ * - Reviews are ordered by due date and ignore the difficulty mix.
+ * - In `partial` mode, review capacity that no due review fills becomes new problems.
+ * - In `all` mode no new problem is ever added; a short plan gets a notice instead.
+ * - New problems follow the difficulty mix with no transfer between difficulties.
+ *
+ * @throws PlanningError `COMPLETED_QUOTA` when retained (completed) items exceed the review cap or
+ *   the new-problem capacity.
+ */
+export function planSlots(pool: Candidate[], rules: Rules, retained: PlanItem[] = []): SlotPlan {
+  const { reviewMode, targetReviewCount: cap } = resolveReviewSettings(rules);
+  const keptReviews = retained.filter(item => item.kind === 'review');
+  const keptNew = retained.filter(item => item.kind === 'new');
+  if (keptReviews.length > cap) {
+    throw new PlanningError('COMPLETED_QUOTA', `Completed review items (${keptReviews.length}) exceed the review cap (${cap})`);
+  }
+  const used = new Set(retained.map(item => item.problem.questionId));
+  const dueAvailable = pool.filter(p => p.kind === 'review' && !used.has(p.questionId)).length;
+  const open = Math.max(0, rules.dailyCount - retained.length);
+  const addedReviews = Math.min(cap - keptReviews.length, dueAvailable, open);
+  const reviewTotal = keptReviews.length + addedReviews;
+  const newTotal = reviewMode === 'all' ? 0 : rules.dailyCount - reviewTotal;
+  if (keptNew.length > newTotal) {
+    throw new PlanningError('COMPLETED_QUOTA', `Completed new items (${keptNew.length}) exceed the new item capacity (${newTotal})`);
+  }
+
+  const notices: Bilingual[] = [];
+  const slots: AdaptiveSlot[] = Array.from({ length: addedReviews }, () => ({ difficulty: null, kind: 'review' as const }));
+  const newCounts = newProblemQuotas(newTotal, rules.difficulty, keptNew);
+  for (const difficulty of difficulties) {
+    const wanted = newCounts[difficulty];
+    for (let i = 0; i < wanted; i++) slots.push({ difficulty, kind: 'new' });
+    const available = pool.filter(p => p.kind === 'new' && p.difficulty === difficulty && !used.has(p.questionId)).length;
+    if (available < wanted) {
+      const shortage = wanted - available;
+      notices.push({
+        en: `${difficulty}: ${shortage} new problem slot(s) unavailable under the current filters.`,
+        zh: `${ZH_DIFFICULTY[difficulty]}：当前条件下缺少 ${shortage} 道新题。`,
+      });
+    }
+  }
+  if (reviewMode === 'all' && reviewTotal < rules.dailyCount) {
+    notices.push({
+      en: `Only ${reviewTotal} review(s) are due today; the plan stays shorter instead of adding new problems.`,
+      zh: `今天只有 ${reviewTotal} 道复习到期；计划保持较短，不补充新题。`,
+    });
+  }
+  return { slots, notices, reviewBacklog: reviewMode === 'none' ? 0 : dueAvailable - addedReviews };
+}
+
+/**
+ * Select today's problems while preserving completed items.
+ *
+ * Plans slots with {@link planSlots} and fills them with the shared slot allocator using local
+ * priorities only (no exploration budget).
  */
 export function select(
   pool: Candidate[],
   rules: Rules,
   retained: PlanItem[] = []
 ): Selection {
-  const limits = quotas(rules);
-  const selected: Candidate[] = [];
-  const notices: Bilingual[] = [];
-
-  const { reviewMode, targetReviewCount } = resolveReviewSettings(rules);
-
-  const totalKeptReview = retained.filter(item => item.kind === 'review').length;
-  if (totalKeptReview > targetReviewCount) {
-    throw new PlanningError(
-      'COMPLETED_QUOTA',
-      `Completed review items (${totalKeptReview}) exceed the review quota (${targetReviewCount})`
-    );
-  }
-
-  const targetFreshCount = rules.dailyCount - targetReviewCount;
-  const totalKeptFresh = retained.filter(item => item.kind === 'new').length;
-  if (totalKeptFresh > targetFreshCount) {
-    throw new PlanningError(
-      'COMPLETED_QUOTA',
-      `Completed new items (${totalKeptFresh}) exceed the new item quota (${targetFreshCount})`
-    );
-  }
-
-  // Completed reviews may occupy a different difficulty than a fresh proportional
-  // allocation. Subtract them globally, then allocate only the unfilled capacity.
-  const remainingLimits = difficulties.map(d => limits[d] - retained.filter(i => i.problem.difficulty === d).length);
-  if (remainingLimits.some(n => n < 0)) throw new PlanningError('COMPLETED_QUOTA', 'Completed items exceed a difficulty quota');
-  const reviewTargets = allocate(targetReviewCount - totalKeptReview, remainingLimits);
-
-  for (let i = 0; i < difficulties.length; i++) {
-    const difficulty = difficulties[i];
-    const kept = retained.filter((item) => item.problem.difficulty === difficulty);
-
-    if (kept.length > limits[difficulty]) {
-      throw new PlanningError(
-        'COMPLETED_QUOTA',
-        `Completed ${difficulty} items exceed the proposed quota`
-      );
-    }
-
-    const remainingSlotCount = limits[difficulty] - kept.length;
-    const targetDifficultyReviewCount = Math.min(
-      remainingSlotCount,
-      reviewTargets[i]
-    );
-    const targetDifficultyFreshCount = remainingSlotCount - targetDifficultyReviewCount;
-
-    const reviews = pool.filter((p) => p.difficulty === difficulty && p.kind === 'review');
-    const fresh = reviewMode === 'all' ? [] : pool.filter((p) => p.difficulty === difficulty && p.kind === 'new');
-
-    const chosenReviews = reviews.slice(0, targetDifficultyReviewCount);
-    const chosenFresh = fresh.slice(0, targetDifficultyFreshCount);
-
-    const chosen = [...chosenReviews, ...chosenFresh];
-
-    // Emit notice if review quota was short within this difficulty (no cross-kind substitution)
-    if (chosenReviews.length < targetDifficultyReviewCount) {
-      const deficit = targetDifficultyReviewCount - chosenReviews.length;
-      notices.push({
-        en: `${difficulty}: review quota deficit of ${deficit} problem(s).`,
-        zh: `${ZH_DIFFICULTY[difficulty]}：缺少 ${deficit} 道复习题。`,
-      });
-    }
-
-    // Emit notice if fresh problem quota was short within this difficulty (no cross-kind substitution)
-    if (chosenFresh.length < targetDifficultyFreshCount) {
-      const deficit = targetDifficultyFreshCount - chosenFresh.length;
-      notices.push({
-        en: `${difficulty}: fresh problem deficit of ${deficit} problem(s).`,
-        zh: `${ZH_DIFFICULTY[difficulty]}：缺少 ${deficit} 道新题。`,
-      });
-    }
-
-    // Emit notice if hard filters or shortages caused a total shortage in this difficulty
-    if (chosen.length < remainingSlotCount) {
-      const shortage = remainingSlotCount - chosen.length;
-      notices.push({
-        en: `${difficulty}: ${shortage} slots unavailable under the hard filters.`,
-        zh: `${ZH_DIFFICULTY[difficulty]}：硬条件下缺少 ${shortage} 道题。`,
-      });
-    }
-
-    selected.push(...chosen);
-  }
-
-  return { selected, notices };
+  const plan = planSlots(pool, rules, retained);
+  const selected = selectCandidateSlots(pool, plan.slots, 1, retained, false).selected;
+  return { selected, notices: plan.notices, slots: plan.slots, reviewBacklog: plan.reviewBacklog };
 }

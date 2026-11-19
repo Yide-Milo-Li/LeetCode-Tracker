@@ -7,16 +7,22 @@ const ZH_DIFFICULTY: Record<Difficulty, string> = { Easy: '简单', Medium: '中
 
 /** Selection capacity already validated against difficulty and review constraints. */
 export interface AdaptiveSlot {
-  difficulty: Difficulty;
+  /** Null accepts any difficulty; review slots use it because due date, not the mix, decides reviews. */
+  difficulty: Difficulty | null;
   kind: 'new' | 'review';
   /** Undefined allocates a new slot; null preserves an unbudgeted legacy slot. */
   ordinal?: number | null;
 }
 
-/** Rank an individual topic/difficulty signal; overdue work is a priority, not weakness. */
-function priority(evidence: TopicDifficultyEvidence): [number, number] {
+/**
+ * Rank an individual topic/difficulty signal; overdue work is a priority, not weakness.
+ *
+ * The overdue signal ranks reviews only. A new problem in a topic with overdue reviews would not
+ * clear them, and with review off that count only grows, so new problems skip it.
+ */
+function priority(evidence: TopicDifficultyEvidence, kind: Candidate['kind']): [number, number] {
   if (evidence.reasons.includes('feedback_assistance')) return [0, -(evidence.weightedOutcomeShares.assisted + evidence.weightedOutcomeShares.unsolved)];
-  if (evidence.overdueCount > 0 || evidence.dueTodayCount > 0) return [1, -evidence.overdueCount];
+  if (kind === 'review' && (evidence.overdueCount > 0 || evidence.dueTodayCount > 0)) return [1, -evidence.overdueCount];
   if (evidence.reasons.includes('duration_threshold')) return [2, -(evidence.longDurationRate ?? 0)];
   if (evidence.sufficiency === 'sufficient') return [3, 0];
   return [4, evidence.distinctProblemCount];
@@ -35,7 +41,7 @@ export function rankAdaptiveTopics(
         const topic = topics.get(t.slug);
         if (!topic) return [];
         const evidence = topic.difficulties[candidate.difficulty];
-        const rank = [...priority(evidence), recentExposure.get(`${t.slug}:${candidate.difficulty}`) ?? 0];
+        const rank = [...priority(evidence, candidate.kind), recentExposure.get(`${t.slug}:${candidate.difficulty}`) ?? 0];
         return [{ topic, evidence, rank }];
       })
       .sort((a, b) => compareRank(a.rank, b.rank) || a.topic.tagSlug.localeCompare(b.topic.tagSlug));

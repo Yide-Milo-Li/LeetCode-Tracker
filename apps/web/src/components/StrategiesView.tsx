@@ -1,10 +1,11 @@
 /**
  * Strategies & Weekly Schedule View component.
- * Allows users to configure recommendation strategies (daily count, difficulty mix,
- * topic tags, spaced repetition, premium) and map them across weekdays with conflict detection.
+ * Allows users to configure recommendation strategies (daily count, review cap, new-problem mix,
+ * topic tags, premium) and map them across weekdays with conflict detection. Review spacing is a
+ * learner-wide setting (Settings › Practice), not part of a strategy.
  */
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { Plus, CheckCircle2, AlertCircle, Clock, ChevronDown } from 'lucide-react';
+import { Plus, CheckCircle2, AlertCircle, Clock } from 'lucide-react';
 import { api, type Strategy, type StrategyInput, type TopicTag, type TagMastery } from '../api.ts';
 import { localizeApiError } from '../error-i18n.ts';
 import { translations, type Language } from '../i18n.ts';
@@ -14,12 +15,31 @@ import { difficulties, strategyInputSchema } from '../../../../packages/contract
 import {
   emptyDifficultyDraft, difficultyCounts, reviewCountForRules, reviewModeForRules,
   updateDifficultyDraft, isCount, percentagesForCounts, reviewPercentForCount,
-  unchangedReview, type ReviewMode, type CountInput,
+  unchangedReview, newCountsAtCap, type ReviewMode, type CountInput,
 } from '../strategy-counts.ts';
 import { WeeklyScheduleGrid } from './WeeklyScheduleGrid.tsx';
 import { StrategyCard } from './StrategyCard.tsx';
-import { RecommendationOptions, readRecommendationOptions } from './RecommendationOptions.tsx';
-import type { RulePatch } from '../../../../packages/contracts/src/recommendations.ts';
+import { TimeBudgetField } from './RecommendationOptions.tsx';
+import type { Rules } from '../../../../packages/contracts/src/recommendations.ts';
+
+/** Placeholder mix for review-only strategies, which never pick new problems. */
+const REVIEW_ONLY_MIX: Rules['difficulty'] = { Easy: 0, Medium: 100, Hard: 0 };
+
+/** One-line explanation of what each review mode does on a day with too few or too many due reviews. */
+const REVIEW_MODE_HINT: Record<ReviewMode, { en: string; zh: string }> = {
+  none: {
+    en: 'Only new problems. Due reviews stay out of the plan.',
+    zh: '只排新题，到期复习不会进入计划。',
+  },
+  partial: {
+    en: 'Due reviews first, up to the cap. Unused review slots become new problems. Due reviews beyond the cap are listed on Today, where you can add them.',
+    zh: '先排到期复习，最多到上限；到期题不足时，空出的名额改排新题。超出上限的到期复习会在今日页提示，可以一键加入。',
+  },
+  all: {
+    en: 'Due reviews only, most overdue first. If fewer are due, the plan is shorter; no new problems are added.',
+    zh: '只排到期复习，逾期最久的在前。到期题不足时计划会变短，不补新题。',
+  },
+};
 
 interface StrategiesViewProps {
   lang: Language;
@@ -46,8 +66,8 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
   const [difficultyDraft, setDifficultyDraft] = useState(emptyDifficultyDraft);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [focusWeakTags, setFocusWeakTags] = useState(false);
-  const [adaptiveReviewEnabled,setAdaptiveReviewEnabled]=useState(false);
-  const [recommendationOptions, setRecommendationOptions] = useState<RulePatch>({});
+  const [reviewScopeMatching, setReviewScopeMatching] = useState(false);
+  const [timeBudget, setTimeBudget] = useState<number | null>(null);
   const [masteryLoading,setMasteryLoading]=useState(true);
   const [masteryError,setMasteryError]=useState(false);
   const [masteryRetry,setMasteryRetry]=useState(0);
@@ -57,7 +77,6 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
   const validationId = React.useId();
   const [weekdays, setWeekdays] = useState<number[]>([]);
   const [preference, setPreference] = useState('');
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const loadSequence = useRef(0);
@@ -113,7 +132,6 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
       consumedFocusRequest.current=focusRequest;
       openCreateModal();
       setFocusWeakTags(true);
-      setAdvancedOpen(true);
     }
   },[focusRequest]);
 
@@ -125,14 +143,13 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
     setDifficultyDraft(emptyDifficultyDraft());
     setSelectedTags([]);
     setFocusWeakTags(false);
-    setAdaptiveReviewEnabled(false);
-    setRecommendationOptions({});
+    setReviewScopeMatching(false);
+    setTimeBudget(null);
     setPremium(false);
     setReviewMode(null);
     setReviewCount('');
     setWeekdays([]);
     setPreference('');
-    setAdvancedOpen(false);
     setError(null);
     setModalOpen(true);
   }
@@ -145,14 +162,13 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
     setDifficultyDraft({ values: difficultyCounts(s.rules), automatic: null });
     setSelectedTags(s.rules.tags);
     setFocusWeakTags(!!s.rules.focusWeakTags);
-    setAdaptiveReviewEnabled(!!s.rules.adaptiveReviewEnabled);
-    setRecommendationOptions(readRecommendationOptions(s.rules));
+    setReviewScopeMatching(s.rules.reviewScope === 'matching');
+    setTimeBudget(s.rules.timeBudgetMinutes ?? null);
     setPremium(s.rules.premium);
     setReviewMode(reviewModeForRules(s.rules));
     setReviewCount(reviewCountForRules(s.rules));
     setWeekdays(s.weekdays);
     setPreference(s.rules.preference);
-    setAdvancedOpen(Boolean(s.rules.reviewPolicy || s.rules.personalDurationCalibration || s.rules.timeBudgetMinutes || s.rules.focusWeakTags || s.rules.tags?.length > 0 || (s.rules.preference && s.rules.preference.trim().length > 0)));
     setError(null);
     setModalOpen(true);
   }
@@ -162,20 +178,28 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
   const currentSum = difficulties.reduce((sum, d) => sum + (typeof counts[d] === 'number' ? counts[d] : 0), 0);
   const hasDifficulties = difficulties.every(d => isCount(counts[d]));
   const isSumValid = hasDifficulties && currentSum === dailyCount;
+  // Review-only strategies never pick new problems, so the mix is neither shown nor required.
+  const mixRequired = reviewMode !== 'all';
   const reviewUnchanged = unchangedReview(dailyCount, reviewMode, reviewCount, editingStrategy?.rules);
   const isReviewValid = reviewMode !== null && (reviewMode !== 'partial' || reviewUnchanged ||
     (isCount(reviewCount) && reviewCount >= 1 && typeof dailyCount === 'number' && reviewCount <= dailyCount));
   const exceedsTotal = typeof dailyCount === 'number' && (
-    difficulties.some(d => typeof counts[d] === 'number' && counts[d] > dailyCount) || currentSum > dailyCount ||
+    (mixRequired && (difficulties.some(d => typeof counts[d] === 'number' && counts[d] > dailyCount) || currentSum > dailyCount)) ||
     (reviewMode === 'partial' && typeof reviewCount === 'number' && reviewCount > dailyCount));
-  const invalidCount = difficulties.some(d => counts[d] !== '' && !isCount(counts[d]));
+  const invalidCount = mixRequired && difficulties.some(d => counts[d] !== '' && !isCount(counts[d]));
+  const invalidBudget = timeBudget !== null && (!Number.isInteger(timeBudget) || timeBudget < 1 || timeBudget > 1440);
   const validationMessage = exceedsTotal ? t.countExceedsTotal
     : dailyCount !== '' && !hasDailyCount ? t.dailyCountInvalid
     : invalidCount ? t.wholeCountsRequired
-    : hasDifficulties && !isSumValid ? t.countsMustMatch
+    : mixRequired && hasDifficulties && !isSumValid ? t.countsMustMatch
     : reviewMode === 'partial' && reviewCount !== '' && !isReviewValid ? t.reviewCountInvalid : '';
   const isFormValid = name.trim().length > 0 && name.trim().length <= 100 && preference.trim().length <= 2000 &&
-    hasDailyCount && isSumValid && isReviewValid && !exceedsTotal && !invalidCount;
+    hasDailyCount && (!mixRequired || isSumValid) && isReviewValid && !exceedsTotal && !invalidCount && !invalidBudget;
+  // Shown under the mix: the new-problem split on a day that uses the whole review cap.
+  const capSplit = reviewMode === 'partial' && hasDailyCount && isSumValid && isCount(reviewCount) && reviewCount >= 1 && reviewCount <= Number(dailyCount)
+    ? { newCount: Number(dailyCount) - reviewCount, cap: reviewCount, split: newCountsAtCap(Number(dailyCount), reviewCount, counts as Record<'Easy' | 'Medium' | 'Hard', number>) }
+    : null;
+  const reviewOn = reviewMode !== null && reviewMode !== 'none';
 
   /** Persist rules and weekday ownership atomically; conflicts retain the draft. */
   async function handleSave() {
@@ -196,24 +220,37 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
     setSaving(true);
     setError(null);
     try {
+      const legacy = editingStrategy?.rules;
       const payload: StrategyInput = {
         name: name.trim(),
         rules: {
           dailyCount: dailyCount as number,
-          difficulty: percentagesForCounts(dailyCount as number, counts, editingStrategy?.rules),
+          difficulty: isSumValid
+            ? percentagesForCounts(dailyCount as number, counts, legacy)
+            : legacy?.difficulty ?? REVIEW_ONLY_MIX,
           tags: selectedTags,
           premium,
           reviewEnabled: reviewMode !== 'none',
-          reviewPercent: reviewPercentForCount(dailyCount as number, reviewMode, reviewCount, editingStrategy?.rules),
+          reviewPercent: reviewPercentForCount(dailyCount as number, reviewMode, reviewCount, legacy),
           // Untouched legacy shares that round to zero remain readable without creating an invalid partial quota.
-          ...(reviewUnchanged && !editingStrategy?.rules.reviewMode && reviewMode === 'partial' && reviewCount === 0
+          ...(reviewUnchanged && !legacy?.reviewMode && reviewMode === 'partial' && reviewCount === 0
             ? {}
             : { reviewMode: reviewMode!, reviewCount: reviewMode === 'partial' ? Number(reviewCount) : null }),
+          // Write the scope only when it differs from the default, so older builds can still edit most strategies.
+          ...(reviewOn && reviewScopeMatching && selectedTags.length > 0
+            ? { reviewScope: 'matching' as const }
+            : legacy?.reviewScope !== undefined ? { reviewScope: 'all' as const } : {}),
           preference: preference.trim(),
-          ...recommendationOptions,
-          ...(recommendationOptions.reviewPolicy
-            ? { reviewPolicy: reviewMode === 'none' ? 'fixed' : recommendationOptions.reviewPolicy, adaptiveReviewEnabled: reviewMode !== 'none' && recommendationOptions.reviewPolicy === 'duration-v1' }
-            : adaptiveReviewEnabled && reviewMode !== 'none' ? { adaptiveReviewEnabled: true } : editingStrategy?.rules.adaptiveReviewEnabled !== undefined ? { adaptiveReviewEnabled: false } : {}),
+          ...(timeBudget !== null
+            ? { timeBudgetMinutes: timeBudget }
+            : legacy?.timeBudgetMinutes != null ? { timeBudgetMinutes: null } : {}),
+          // Legacy per-strategy spacing fields stay readable for older synced builds; planning now reads
+          // Settings. Keep them consistent with the review switch so the contract still accepts them.
+          ...(legacy?.reviewPolicy !== undefined ? { reviewPolicy: reviewOn ? legacy.reviewPolicy : 'fixed' as const } : {}),
+          ...(legacy?.adaptiveReviewEnabled !== undefined
+            ? { adaptiveReviewEnabled: reviewOn && (legacy.reviewPolicy ? legacy.reviewPolicy === 'duration-v1' : legacy.adaptiveReviewEnabled) }
+            : {}),
+          ...(legacy?.personalDurationCalibration !== undefined ? { personalDurationCalibration: legacy.personalDurationCalibration } : {}),
           ...(focusWeakTags
             ? { focusWeakTags: true }
             : editingStrategy?.rules.focusWeakTags !== undefined
@@ -362,7 +399,7 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
               </div>
             )}
 
-            {/* 1. Essential Settings */}
+            {/* 1. Basics */}
             <div className="strategy-form-section">
               {/* Name & Count */}
               <div className="form-grid-2">
@@ -402,31 +439,6 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
                 </div>
               </div>
 
-              {/* Counts remain explicit; only the system-owned third field tracks the remainder. */}
-              <div className="form-group">
-                <div className="u-display-flex u-justify-content-space-between u-margin-bottom-0-25rem">
-                  <span className="form-label">{t.difficultyCounts} *</span>
-                  <span className="text-muted" aria-live="polite">{currentSum} / {dailyCount || '—'}</span>
-                </div>
-                <div className="difficulty-inputs-row">
-                  {difficulties.map((difficulty, index) => {
-                    const label = [t.easyCount, t.mediumCount, t.hardCount][index];
-                    return <div className="diff-input-group" key={difficulty}>
-                      <label className={`diff-input-label difficulty-${difficulty.toLowerCase()}`} htmlFor={`${validationId}-${difficulty}`}>{label}</label>
-                      <input id={`${validationId}-${difficulty}`} type="number" className="form-input"
-                        min="0" max={dailyCount || undefined} step="1" aria-label={label}
-                        value={counts[difficulty]} aria-invalid={counts[difficulty] !== '' &&
-                          (!isCount(counts[difficulty]) || (typeof dailyCount === 'number' && counts[difficulty] > dailyCount))}
-                        aria-describedby={validationMessage ? validationId : undefined}
-                        onChange={e => setDifficultyDraft(draft => updateDifficultyDraft(draft, dailyCount, {
-                          difficulty, value: e.target.value === '' ? '' : Number(e.target.value),
-                        }))} />
-                    </div>;
-                  })}
-                </div>
-              </div>
-              {validationMessage && <p id={validationId} role="alert" className="strategy-count-error">{validationMessage}</p>}
-
               {/* Weekday Assignment */}
               <div className="form-group">
                 <label className="form-label">{t.assignedDays}</label>
@@ -451,21 +463,9 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
                   })}
                 </div>
               </div>
-            </div>
 
-            {/* 2. Review & Problem Pool Settings */}
-            <div className="strategy-form-section u-margin-top-1rem">
               <div className="form-grid-2">
-                <div className="form-group">
-                  <span className="form-label" id={`${validationId}-review-mode`}>{t.reviewMode} *</span>
-                  <div role="radiogroup" aria-labelledby={`${validationId}-review-mode`} className="u-display-flex u-flex-direction-column u-gap-0-5rem u-margin-top-0-25rem">
-                    {(['none', 'partial', 'all'] as const).map((mode, index) => <label key={mode} className="form-checkbox-label u-cursor-pointer">
-                      <input type="radio" name="reviewMode" checked={reviewMode === mode} onChange={() => {setReviewMode(mode);if(mode==='none')setAdaptiveReviewEnabled(false);}} />
-                      <span>{[t.disableReview, t.partialReview, t.allReview][index]}</span>
-                    </label>)}
-                  </div>
-                </div>
-
+                <TimeBudgetField lang={lang} value={timeBudget} onChange={setTimeBudget} />
                 <div className="form-group">
                   <label className="form-label">{t.includePremium}</label>
                   <label className="form-checkbox-label u-margin-top-0-5rem">
@@ -475,60 +475,120 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
                 </div>
               </div>
 
-              {/* Sub-options revealed only when review mode is active */}
-              {(reviewMode === 'partial' || reviewMode === 'all') && (
-                <div className="review-sub-options u-margin-top-0-75rem">
-                  <div className="form-group u-margin-bottom-0-75rem">
-                    <label className="form-label" htmlFor={`${validationId}-review`}>{t.reviewCount} *</label>
-                    <input
-                      id={`${validationId}-review`}
-                      type="number"
-                      className="form-input"
-                      min="1"
-                      max={dailyCount || undefined}
-                      step="1"
-                      aria-label={t.reviewCount}
-                      value={reviewMode === 'all' ? dailyCount : reviewCount}
-                      readOnly={reviewMode === 'all'}
-                      aria-invalid={reviewMode === 'partial' && reviewCount !== '' && !isReviewValid}
-                      aria-describedby={validationMessage ? validationId : undefined}
-                      onChange={e => setReviewCount(e.target.value === '' ? '' : Number(e.target.value))}
-                      required
-                    />
-                  </div>
-                  {!recommendationOptions.reviewPolicy && <div className="form-group u-margin-top-0-5rem">
-                    <label className="form-checkbox-label">
-                      <input type="checkbox" checked={adaptiveReviewEnabled}
-                        onChange={e=>setAdaptiveReviewEnabled(e.target.checked)} />
-                      <span>{t.adaptiveReviewEnabled}</span>
-                    </label>
-                    <p className="text-muted u-margin-top-0-25rem">{t.adaptiveReviewDescription}</p>
-                  </div>}
+              {/* Topic tags selection; applies to new problems, and to reviews only when asked below. */}
+              <div className="form-group">
+                <div className="u-display-flex u-justify-content-space-between u-margin-bottom-0-25rem">
+                  <label className="form-label">{t.topicTagsFilter}</label>
+                  {selectedTags.length > 0 && (
+                    <button
+                      type="button"
+                      className="btn-link text-muted"
+                      onClick={() => setSelectedTags([])}
+                    >
+                      {t.clearTags}
+                    </button>
+                  )}
+                </div>
+                <div className="tag-chips-scroll">
+                  {allTags.slice(0, 40).map((tag) => {
+                    const isSelected = selectedTags.includes(tag.slug);
+                    return (
+                      <button
+                        key={tag.slug}
+                        type="button"
+                        className={`tag-chip selectable ${isSelected ? 'selected' : ''}`}
+                        onClick={() => toggleTag(tag.slug)}
+                      >
+                        {tag.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* 2. Reviews */}
+            <div className="strategy-form-section u-margin-top-1rem">
+              <div className="form-group">
+                <span className="form-label" id={`${validationId}-review-mode`}>{t.reviewMode} *</span>
+                <div role="radiogroup" aria-labelledby={`${validationId}-review-mode`} className="u-display-flex u-flex-direction-column u-gap-0-5rem u-margin-top-0-25rem">
+                  {(['none', 'partial', 'all'] as const).map((mode, index) => <label key={mode} className="form-checkbox-label u-cursor-pointer">
+                    <input type="radio" name="reviewMode" checked={reviewMode === mode} onChange={() => setReviewMode(mode)} />
+                    <span>{[t.disableReview, t.partialReview, t.allReview][index]}</span>
+                  </label>)}
+                </div>
+                {reviewMode && <p className="text-muted u-margin-top-0-25rem">{REVIEW_MODE_HINT[reviewMode][lang]}</p>}
+              </div>
+
+              {reviewMode === 'partial' && (
+                <div className="form-group u-margin-top-0-75rem">
+                  <label className="form-label" htmlFor={`${validationId}-review`}>{t.reviewCount} *</label>
+                  <input
+                    id={`${validationId}-review`}
+                    type="number"
+                    className="form-input"
+                    min="1"
+                    max={dailyCount || undefined}
+                    step="1"
+                    aria-label={t.reviewCount}
+                    value={reviewCount}
+                    aria-invalid={reviewCount !== '' && !isReviewValid}
+                    aria-describedby={validationMessage ? validationId : undefined}
+                    onChange={e => setReviewCount(e.target.value === '' ? '' : Number(e.target.value))}
+                    required
+                  />
+                </div>
+              )}
+
+              {reviewOn && selectedTags.length > 0 && (
+                <div className="form-group u-margin-top-0-75rem">
+                  <label className="form-checkbox-label">
+                    <input type="checkbox" checked={reviewScopeMatching} onChange={e => setReviewScopeMatching(e.target.checked)} />
+                    <span>{lang === 'zh' ? '只复习带所选标签的题' : 'Only review problems with the selected tags'}</span>
+                  </label>
+                  <p className="text-muted">{lang === 'zh'
+                    ? '关闭时，其他专题的到期复习也会排进来，避免积压。'
+                    : 'When off, due reviews from other topics are included too, so they do not pile up.'}</p>
                 </div>
               )}
             </div>
 
-            {/* 3. Advanced & Optional Preferences (Collapsible) */}
-            <details
-              className="strategy-advanced-details u-margin-top-1rem"
-              open={advancedOpen}
-              onToggle={(e) => setAdvancedOpen(e.currentTarget.open)}
-            >
-              <summary className="strategy-advanced-summary">
-                <div className="strategy-advanced-title">
-                  <ChevronDown size={16} className="strategy-advanced-chevron" aria-hidden="true" />
-                  <span className="form-label">{t.advancedStrategyOptions}</span>
+            {/* 3. New problems (review-only strategies never pick any) */}
+            {mixRequired && (
+              <div className="strategy-form-section u-margin-top-1rem">
+                {/* Counts remain explicit; only the system-owned third field tracks the remainder. */}
+                <div className="form-group">
+                  <div className="u-display-flex u-justify-content-space-between u-margin-bottom-0-25rem">
+                    <span className="form-label">{t.difficultyCounts} *</span>
+                    <span className="text-muted" aria-live="polite">{currentSum} / {dailyCount || '—'}</span>
+                  </div>
+                  <div className="difficulty-inputs-row">
+                    {difficulties.map((difficulty, index) => {
+                      const label = [t.easyCount, t.mediumCount, t.hardCount][index];
+                      return <div className="diff-input-group" key={difficulty}>
+                        <label className={`diff-input-label difficulty-${difficulty.toLowerCase()}`} htmlFor={`${validationId}-${difficulty}`}>{label}</label>
+                        <input id={`${validationId}-${difficulty}`} type="number" className="form-input"
+                          min="0" max={dailyCount || undefined} step="1" aria-label={label}
+                          value={counts[difficulty]} aria-invalid={counts[difficulty] !== '' &&
+                            (!isCount(counts[difficulty]) || (typeof dailyCount === 'number' && counts[difficulty] > dailyCount))}
+                          aria-describedby={validationMessage ? validationId : undefined}
+                          onChange={e => setDifficultyDraft(draft => updateDifficultyDraft(draft, dailyCount, {
+                            difficulty, value: e.target.value === '' ? '' : Number(e.target.value),
+                          }))} />
+                      </div>;
+                    })}
+                  </div>
+                  <p className="text-muted u-margin-top-0-25rem">
+                    {lang === 'zh'
+                      ? '按不排复习的一天填写；有复习时，按这个比例分配剩下的新题名额。'
+                      : 'Fill this in for a day without reviews. On review days, the remaining new-problem slots follow the same ratio.'}
+                    {capSplit && (lang === 'zh'
+                      ? ` 复习排满 ${capSplit.cap} 道时：新题 ${capSplit.newCount} 道（简单 ${capSplit.split.Easy} / 中等 ${capSplit.split.Medium} / 困难 ${capSplit.split.Hard}）。`
+                      : ` With all ${capSplit.cap} reviews: ${capSplit.newCount} new (Easy ${capSplit.split.Easy} / Medium ${capSplit.split.Medium} / Hard ${capSplit.split.Hard}).`)}
+                  </p>
                 </div>
-                {selectedTags.length > 0 && (
-                  <span className="tag-count-badge">
-                    {selectedTags.length} {t.tagsSelected}
-                  </span>
-                )}
-              </summary>
-              <div className="strategy-advanced-content">
-                <RecommendationOptions lang={lang} reviewEnabled={reviewMode !== null && reviewMode !== 'none'} value={recommendationOptions}
-                  onChange={patch => { setRecommendationOptions(previous => ({ ...previous, ...patch })); if (patch.adaptiveReviewEnabled !== undefined) setAdaptiveReviewEnabled(patch.adaptiveReviewEnabled); }} />
-                {/* Focus weak tags */}
+
+                {/* Weak topics first */}
                 <div className="form-group focus-session-box">
                   <label className="form-checkbox-label">
                     <input type="checkbox" checked={focusWeakTags} onChange={e=>setFocusWeakTags(e.target.checked)} />
@@ -540,54 +600,26 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
                     :weakTags.length?<div className="top-tags-wrap">{weakTags.slice(0,3).map(tag=><span className="tag-chip" key={tag.tagSlug}>{tag.tagName}</span>)}</div>
                     :<p className="text-muted">{t.noWeakTopics}</p>}
                 </div>
-
-                {/* Topic tags selection */}
-                <div className="form-group">
-                  <div className="u-display-flex u-justify-content-space-between u-margin-bottom-0-25rem">
-                    <label className="form-label">{t.topicTagsFilter}</label>
-                    {selectedTags.length > 0 && (
-                      <button
-                        type="button"
-                        className="btn-link text-muted"
-                        onClick={() => setSelectedTags([])}
-                      >
-                        {t.clearTags}
-                      </button>
-                    )}
-                  </div>
-                  <div className="tag-chips-scroll">
-                    {allTags.slice(0, 40).map((tag) => {
-                      const isSelected = selectedTags.includes(tag.slug);
-                      return (
-                        <button
-                          key={tag.slug}
-                          type="button"
-                          className={`tag-chip selectable ${isSelected ? 'selected' : ''}`}
-                          onClick={() => toggleTag(tag.slug)}
-                        >
-                          {tag.name}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Qualitative Study Preferences */}
-                <div className="form-group">
-                  <label className="form-label">{t.studyPreferences}</label>
-                  <p className="text-muted u-margin-bottom-0-5rem">{t.studyPreferencesDesc}</p>
-                  <textarea
-                    className="form-textarea"
-                    rows={2}
-                    aria-label={t.studyPreferences}
-                    maxLength={2000}
-                    value={preference}
-                    onChange={(e) => setPreference(e.target.value)}
-                    placeholder={t.preferencesPlaceholder}
-                  />
-                </div>
               </div>
-            </details>
+            )}
+            {validationMessage && <p id={validationId} role="alert" className="strategy-count-error">{validationMessage}</p>}
+
+            {/* 4. Qualitative Study Preferences */}
+            <div className="strategy-form-section u-margin-top-1rem">
+              <div className="form-group">
+                <label className="form-label">{t.studyPreferences}</label>
+                <p className="text-muted u-margin-bottom-0-5rem">{t.studyPreferencesDesc}</p>
+                <textarea
+                  className="form-textarea"
+                  rows={2}
+                  aria-label={t.studyPreferences}
+                  maxLength={2000}
+                  value={preference}
+                  onChange={(e) => setPreference(e.target.value)}
+                  placeholder={t.preferencesPlaceholder}
+                />
+              </div>
+            </div>
           </div>
 
           <div className="modal-footer">

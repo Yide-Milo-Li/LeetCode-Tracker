@@ -17,9 +17,18 @@ export {
   matches,
   candidates,
   select,
+  planSlots,
   nextDifficultyForAppend,
   type Selection,
+  type SlotPlan,
 } from './recommendations.ts';
+
+export {
+  legacyReviewPolicy,
+  legacyDurationCalibration,
+} from './review-policy.ts';
+
+export { projectPolicyReviewStates } from './outcome-review.ts';
 
 export {
   rankAdaptiveTopics,

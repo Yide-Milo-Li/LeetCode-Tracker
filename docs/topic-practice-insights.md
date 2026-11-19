@@ -16,9 +16,11 @@ Revoked records are excluded. Unknown/future dates do not become today's practic
 
 ## Independent controls
 
-`focusWeakTags` and `adaptiveReviewEnabled` are optional booleans. Missing fields behave as false at execution; omitted patch fields inherit existing values. Explicit false disables that option. Adaptive review requires `reviewEnabled: true`; contradictory combinations are rejected.
+`focusWeakTags` is an optional per-strategy boolean. Missing fields behave as false at execution; omitted patch fields inherit existing values. Explicit false disables it.
 
-Topic focus uses the Knowledge Profile policy below. Priorities apply to individual topic/difficulty pairs, within the selected tags and other hard constraints. Earlier-due reviews always take priority. Fixed review and new-item quotas do not substitute for one another, including after retaining completed items. There is no question-number-based classic/frequency ranking.
+Review spacing is learner-wide: Settings stores `reviewPolicy` (`fixed`, `duration-v1` or `outcome-v2`) and the duration experiment. Until Settings stores a policy, planning derives it from active strategies' legacy fields (`outcome-v2` if any strategy used it, else `duration-v1` if any used it or `adaptiveReviewEnabled`, else `fixed`). The legacy per-strategy fields remain readable for older bundles and synced devices; planning ignores them. Plans, insights and the review-state cache all use the same policy.
+
+Topic focus uses the Knowledge Profile policy below. Priorities apply to individual topic/difficulty pairs, within the selected tags and other hard constraints. Earlier-due reviews always take priority. Reviews never fill a new-problem shortage; unused review capacity becomes new problems, including after retaining completed items. There is no question-number-based classic/frequency ranking.
 
 Adaptive review uses completed manual durations only: Easy 30, Medium 45 and Hard 60 minutes, inclusively. A threshold-reaching due/overdue success holds the current stage and halves its base interval with floor rounding and a one-day minimum. A later due success below threshold or without duration advances normally and clears the adjustment. Early success does not change the schedule; at most one transition occurs per question/day.
 
@@ -39,7 +41,7 @@ The fixed ladder remains 1, 3, 7, 14 and 30 days. A stage-two review with a seve
   - `developing`: Samples are accumulating but have not satisfied stability or reinforcement criteria.
   - `insufficient_evidence`: Fewer than 3 problems or 2 practice days.
 
-When `focusWeakTags` is enabled, eligible topic/difficulty pairs are ordered by sufficient assisted/unsolved feedback, due/overdue work, sufficient duration anomalies, and other sufficient evidence. Insufficiently evidenced pairs enter exploration without being described as weak. Each candidate has one target from the strategy's allowed tags. Request-local target exposure, initialized with retained items and updated after each selection, then recent committed recommendation exposure break equal signal priorities before semantic preference and the seeded order.
+When `focusWeakTags` is enabled, eligible topic/difficulty pairs are ordered by sufficient assisted/unsolved feedback, due/overdue work (reviews only; a new problem does not clear overdue reviews), sufficient duration anomalies, and other sufficient evidence. Insufficiently evidenced pairs enter exploration without being described as weak. Each candidate has one target from the strategy's allowed tags. Request-local target exposure, initialized with retained items and updated after each selection, then recent committed recommendation exposure break equal signal priorities before semantic preference and the seeded order.
 
 Each committed new adaptive slot carries an `explorationOrdinal`: every fifth slot of the same strategy prefers exploration, while the others prefer consolidation. One-question days therefore accumulate toward exploration. Cold starts use exploration for coverage; unavailable exploration candidates fall back to consolidation within the same difficulty and kind. Consequently 20% is an allocation target, not a guaranteed observed ratio when evidence or eligible candidates are missing.
 

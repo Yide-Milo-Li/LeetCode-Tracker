@@ -233,10 +233,10 @@ test('strategy and today plan: create, append with replay, replace, remove and a
     const afterPractice = (await client.call('tracker_get_today')).structuredContent;
     assert.equal(afterPractice.items.find((item: any) => item.frontendId === solved.frontendId).completed, true);
     assert.equal(afterPractice.completedCount, 1);
-    const conflicting = { dailyCount: 2, difficulty: { Easy: 0, Medium: 0, Hard: 100 }, reviewEnabled: false, reviewPercent: null };
-    if (solved.difficulty !== 'Hard') {
-      assert.equal(errorCode(await client.call('tracker_apply_today_rules', { rules: conflicting, expectedVersion: removed.version, operationId: randomUUID() })), 'RULES_NOT_APPLICABLE');
-    }
+    // Phase 48: a completed problem outside the new mix is kept and the rest is filled around it, but
+    // review-only rules leave no room for a completed new problem.
+    const conflicting = { dailyCount: 2, difficulty: { Easy: 0, Medium: 0, Hard: 100 }, reviewEnabled: true, reviewPercent: 100 };
+    assert.equal(errorCode(await client.call('tracker_apply_today_rules', { rules: conflicting, expectedVersion: removed.version, operationId: randomUUID() })), 'RULES_NOT_APPLICABLE');
 
     const rules = { dailyCount: 3, difficulty: { Easy: 0, Medium: 0, Hard: 100 }, reviewEnabled: false, reviewPercent: null };
     rules.difficulty = { Easy: solved.difficulty === 'Easy' ? 100 / 3 : 0, Medium: solved.difficulty === 'Medium' ? 100 / 3 : 0, Hard: solved.difficulty === 'Hard' ? 100 : 200 / 3 };
@@ -581,4 +581,42 @@ test('practice outputs give the calendar day in the profile timezone, not the UT
     assert.equal((await client.call('tracker_get_problems', { frontendIds: ['5'] })).structuredContent.problems[0].recentPractices[0].localDate, '2026-11-17');
     assert.equal((await client.call('tracker_get_note_context', { frontendId: '5' })).structuredContent.practices[0].localDate, '2026-11-17');
   } finally { await client.close(); p.cleanup(); }
+});
+
+test('Phase 48: today reports the review backlog and a typed append pulls one review past the cap', async () => {
+  const p = profileWithCatalog();
+  const { client } = await StdioClient.start(entry, p.dbPath);
+  try {
+    // Three problems solved ten days ago are overdue reviews today.
+    const tenDaysAgo = new Date(Date.now() - 10 * 86_400_000).toISOString();
+    for (const id of ['1', '11', '21']) {
+      await createPractice(client, { questionFrontendId: id, completed: true, practicedAt: tenDaysAgo, timePrecision: 'datetime' });
+    }
+    await client.call('tracker_save_strategy', {
+      name: 'Capped', weekdays: [0, 1, 2, 3, 4, 5, 6], dailyCount: 3,
+      difficultyCounts: { Easy: 0, Medium: 3, Hard: 0 }, review: { mode: 'partial', count: 1 },
+    });
+    const created = (await client.call('tracker_create_today')).structuredContent;
+    assert.equal(created.status, 'ready');
+    const today0 = (await client.call('tracker_get_today')).structuredContent;
+    assert.equal(today0.items.filter((item: any) => item.kind === 'review').length, 1, 'the cap holds');
+    assert.equal(today0.items.filter((item: any) => item.kind === 'new').length, 2);
+    assert.equal(today0.reviewBacklog, 2);
+
+    const invalid = await client.request('tools/call', { name: 'tracker_edit_today',
+      arguments: { expectedVersion: today0.version, operationId: randomUUID(), steps: [{ action: 'remove', frontendId: today0.items[0].frontendId, kind: 'review' }] } });
+    assert.ok(invalid.error || invalid.result?.isError, 'kind is only valid on append');
+
+    const plain = (await editToday(client, today0.version, [{ action: 'append' }])).structuredContent;
+    assert.deepEqual(plain.applied, ['append']);
+    const typed = (await editToday(client, plain.version, [{ action: 'append', kind: 'review' }])).structuredContent;
+    assert.deepEqual(typed.applied, ['append review']);
+    const today1 = (await client.call('tracker_get_today')).structuredContent;
+    assert.equal(today1.items.at(-2).kind, 'new', 'a plain append with a full cap adds a new problem');
+    assert.equal(today1.items.at(-1).kind, 'review');
+    assert.equal(today1.reviewBacklog, 1);
+  } finally {
+    await client.close();
+    p.cleanup();
+  }
 });

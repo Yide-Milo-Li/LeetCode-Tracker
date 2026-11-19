@@ -22,7 +22,7 @@ export function selectCandidateSlots(pool: Candidate[], slots: AdaptiveSlot[], n
   for (const item of retained) exposure.set(topicKey(item), (exposure.get(topicKey(item)) ?? 0) + 1);
   const semantic = new Map(semanticIds.map((id, i) => [id, i])), selected: Candidate[] = [], choices: Candidate[][] = [];
   for (const slot of slots) {
-    let eligible = pool.filter(p => p.difficulty === slot.difficulty && p.kind === slot.kind && !used.has(p.questionId));
+    let eligible = pool.filter(p => (slot.difficulty === null || p.difficulty === slot.difficulty) && p.kind === slot.kind && !used.has(p.questionId));
     if (!eligible.length) continue;
     let ordinal = slot.ordinal;
     if (adaptive && slot.kind === 'new') {

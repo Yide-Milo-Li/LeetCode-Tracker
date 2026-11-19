@@ -51,10 +51,10 @@ async function resolveDate(application: TrackerApplication, date: string | undef
 const strategyCountsSchema = z.object({
   dailyCount: z.number().int().min(1).max(50).describe('Problems per day'),
   difficultyCounts: z.object({ Easy: z.number().int().min(0), Medium: z.number().int().min(0), Hard: z.number().int().min(0) })
-    .describe('How many of each difficulty; must add up to dailyCount'),
+    .describe('New-problem mix for a day without reviews; must add up to dailyCount. Reviews ignore it, and remaining new slots follow its ratio'),
   review: z.object({
-    mode: z.enum(['none', 'partial', 'all']).describe('none: only new problems; partial: some reviews; all: only reviews'),
-    count: z.number().int().min(0).optional().describe('For partial, 1 to dailyCount; for none, omit or use 0'),
+    mode: z.enum(['none', 'partial', 'all']).describe('none: only new problems; partial: due reviews first up to count, unused review slots become new problems; all: only due reviews, a shorter plan when few are due'),
+    count: z.number().int().min(0).optional().describe('Review cap for partial, 1 to dailyCount; for none, omit or use 0'),
   }).refine(review => review.count !== 0 || review.mode === 'none', {
     path: ['count'], message: 'A zero review count requires mode "none".',
   }),

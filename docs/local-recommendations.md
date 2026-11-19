@@ -2,11 +2,19 @@
 
 This describes the `phase39-v1` recommendation and efficiency architecture shipped in Release 1.3.0, using SQLite schema 12 and portable Snapshot Bundle v5 (prior Release 1.2.0 used schema 10 / Bundle v3). Schema 11 / Bundle v4 belong to the separate LC-2.0 lineage and are deliberately not accepted here.
 
+## Phase 48 strategy behavior (`phase48-v1`)
+
+- A plan has a review part and a new-problem part. The review count is a cap: due reviews fill it first, ordered by due date, recovery priority, then evidence, regardless of the difficulty mix. In `partial` mode, unused review capacity becomes new problems at the strategy's mix (largest-remainder quotas, or cumulative deficit when completed items already exceed a share). `all` mode never adds new problems; a short plan gets a notice.
+- The tag filter applies to reviews only when the strategy sets `reviewScope: 'matching'`; the default `all` keeps other topics' due reviews from piling up.
+- Plans record `reviewBacklog`, the due reviews left out by the cap. Append accepts an optional `kind`; `review` may exceed the cap and raises that day's cap. Older plans without the field are unchanged.
+- Review spacing and the duration experiment are learner-wide settings, so one problem has one due date across strategies, insights and the review-state cache.
+- Weak-topic ranking of new problems ignores the overdue-review signal, which only grows when review is off.
+
 ## Deterministic pipeline
 
-A revision-consistent snapshot produces separate completion evidence, outcome-review events, a 30-day topic profile and a labeled 90-day summary. Hard premium, tag, difficulty, new and review quotas precede the shared fixed-slot allocator. Earlier-due reviews and stronger evidence classes remain ahead of diversity. Within tied priorities, retained/current-batch target exposure, recent committed recommendation exposure, optional lower effort, semantic preference and stable seeded order break ties. Recommendation exposure means committed allocation, not a view, click, dislike or attempt.
+A revision-consistent snapshot produces separate completion evidence, outcome-review events, a 30-day topic profile and a labeled 90-day summary. Hard premium and tag filters, the review cap and new-problem difficulty quotas precede the shared fixed-slot allocator (see Phase 48 below). Earlier-due reviews and stronger evidence classes remain ahead of diversity. Within tied priorities, retained/current-batch target exposure, recent committed recommendation exposure, optional lower effort, semantic preference and stable seeded order break ties. Recommendation exposure means committed allocation, not a view, click, dislike or attempt.
 
-Generation, append, replacement and override share this policy. Every fifth cumulative new adaptive slot prefers exploration; replacement reuses its ordinal and historical versions retain the high-water mark. Shortages never transfer difficulty or silently replace reviews with new work. Completed retained items and exclusions remain authoritative.
+Generation, append, replacement and override share this policy. Every fifth cumulative new adaptive slot prefers exploration; replacement reuses its ordinal and historical versions retain the high-water mark. New-problem shortages never transfer difficulty and are never filled with reviews. Completed retained items and exclusions remain authoritative.
 
 Routine bilingual reasons and encouragement are local. Saved historical reasons and versions are not rewritten. Content provenance is local; selection provenance names a model only when its validated result changes membership or an explicitly requested meaningful sequence. Parsed but ineffective results are not model-selected recommendations.
 

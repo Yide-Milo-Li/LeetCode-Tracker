@@ -197,6 +197,30 @@ function PlanNoticesStrip({ plan, lang }: { plan: DailyPlan; lang: Language }) {
 }
 
 
+/** Due reviews left out by today's review cap, with an explicit action to pull one in. */
+function ReviewBacklogRow({ plan, lang, disabled, onAddReview }: {
+  plan: DailyPlan; lang: Language; disabled: boolean; onAddReview: () => void;
+}) {
+  const count = plan.reviewBacklog ?? 0;
+  if (count <= 0) return null;
+  const zh = lang === 'zh';
+  return (
+    <div className="plan-notice-strip" role="status">
+      <div className="plan-notice-row">
+        <div className="plan-notice-summary">
+          <span className="plan-notice-text">
+            {zh ? `另有 ${count} 道到期复习超出今日复习上限` : `${count} more due ${count === 1 ? 'review is' : 'reviews are'} past today's review cap`}
+          </span>
+        </div>
+        <button type="button" className="plan-notice-toggle" disabled={disabled} onClick={onAddReview}>
+          <Plus size={14} aria-hidden="true" />
+          <span>{zh ? '加一道复习' : 'Add a review'}</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** Keep plan refreshes independent of language/theme, and scope save state to a single task row. */
 function TodayPlanViewInner({
   lang,
@@ -749,6 +773,15 @@ function TodayPlanViewInner({
             </section>
           )}
           <PlanNoticesStrip plan={plan} lang={lang} />
+          <ReviewBacklogRow
+            plan={plan}
+            lang={lang}
+            disabled={controller.loading || controller.appending || controller.isPlanMutationPending() || saving.size > 0}
+            onAddReview={() => {
+              if (controller.loading || controller.appending || controller.isPlanMutationPending() || saving.size > 0) return;
+              void controller.appendOne('review');
+            }}
+          />
           <div className="today-problems">
             {plan.items.map((item) => (
               <TodayProblemRow

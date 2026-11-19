@@ -3,7 +3,8 @@
  *
  * Covers:
  * 1. Cumulative difficulty deficit selection formula and tie-breaking order (Easy > Medium > Hard).
- * 2. Strict non-cross-kind substitution in domain select() (no fresh backfill for reviews, no review backfill for fresh).
+ * 2. Review cap semantics in domain select() (Phase 48): unused review capacity becomes new problems,
+ *    reviews never backfill a new-problem shortage.
  * 3. PlanningService appendPlanItem(): version bumping, dailyCount update, exclusion of all historical items,
  *    difficulty selection via cumulative distribution, review quota adherence, and failure without state mutation.
  * 4. Canonical rule comparison in previewDailyPlanOverride and commitDailyPlanOverride (changed: [], idempotent return).
@@ -106,8 +107,8 @@ describe('Phase 24: Cumulative Difficulty Deficit Formula (nextDifficultyForAppe
   });
 });
 
-describe('Phase 24: Strict Non-Cross-Kind Substitution in Domain select()', () => {
-  it('leaves review deficit without backfilling fresh problems when review candidates are short', () => {
+describe('Phase 48: Review Cap and Backfill in Domain select()', () => {
+  it('turns unused review capacity into new problems when fewer reviews are due than the cap', () => {
     const rules: Rules = {
       dailyCount: 4,
       difficulty: { Easy: 100, Medium: 0, Hard: 0 },
@@ -131,17 +132,15 @@ describe('Phase 24: Strict Non-Cross-Kind Substitution in Domain select()', () =
     ];
 
     const result = select(pool, rules);
-    // Target: 2 review, 2 fresh.
-    // Review has only 1 candidate -> 1 selected, 1 review deficit.
-    // Fresh target is 2 -> 2 selected.
-    // Total selected MUST be 3 (1 review + 2 fresh), NOT backfilled to 4!
-    assert.equal(result.selected.length, 3);
+    // Cap 2 reviews, only 1 due -> 1 review; the spare review slot becomes new -> 3 new. Total 4.
+    assert.equal(result.selected.length, 4);
     assert.equal(result.selected.filter((p) => p.kind === 'review').length, 1);
-    assert.equal(result.selected.filter((p) => p.kind === 'new').length, 2);
-    assert.ok(result.notices.some((n) => n.en.includes('review quota deficit of 1')));
+    assert.equal(result.selected.filter((p) => p.kind === 'new').length, 3);
+    assert.equal(result.reviewBacklog, 0);
+    assert.deepEqual(result.notices, []);
   });
 
-  it('leaves fresh problem deficit without backfilling review problems when fresh candidates are short', () => {
+  it('leaves a new-problem shortage unfilled instead of adding reviews beyond the cap', () => {
     const rules: Rules = {
       dailyCount: 4,
       difficulty: { Easy: 100, Medium: 0, Hard: 0 },
@@ -166,13 +165,34 @@ describe('Phase 24: Strict Non-Cross-Kind Substitution in Domain select()', () =
     ];
 
     const result = select(pool, rules);
-    // Target 1 review -> 1 review selected.
-    // Target 3 fresh -> only 1 fresh available -> 1 fresh selected, 2 fresh deficit.
-    // Total selected MUST be 2, NOT backfilled with extra reviews!
+    // Cap 1 review -> 1 review selected; 9 more due reviews are reported as backlog.
+    // 3 new slots but only 1 new problem -> 2 slots stay empty; reviews never fill them.
     assert.equal(result.selected.length, 2);
     assert.equal(result.selected.filter((p) => p.kind === 'review').length, 1);
     assert.equal(result.selected.filter((p) => p.kind === 'new').length, 1);
-    assert.ok(result.notices.some((n) => n.en.includes('fresh problem deficit of 2')));
+    assert.equal(result.reviewBacklog, 9);
+    assert.ok(result.notices.some((n) => n.en.includes('Easy: 2 new problem slot(s) unavailable')));
+  });
+
+  it('schedules due reviews regardless of the difficulty mix', () => {
+    const rules: Rules = {
+      dailyCount: 3,
+      difficulty: { Easy: 0, Medium: 100, Hard: 0 },
+      tags: [],
+      premium: false,
+      reviewMode: 'partial',
+      reviewCount: 2,
+      reviewEnabled: true,
+      reviewPercent: 66.67,
+      preference: '',
+    };
+    const pool: Candidate[] = [
+      { ...createMockProblem('easy-review', 'Easy'), kind: 'review', dueDate: '2026-09-01' },
+      { ...createMockProblem('hard-review', 'Hard'), kind: 'review', dueDate: '2026-09-02' },
+      ...Array.from({ length: 3 }, (_, i) => ({ ...createMockProblem(`m${i}`, 'Medium'), kind: 'new' as const, dueDate: null })),
+    ];
+    const result = select(pool, rules);
+    assert.deepEqual(result.selected.map((p) => p.questionId), ['easy-review', 'hard-review', 'm0']);
   });
 
   it('detects quota conflict when retained completed items exceed target quotas', () => {

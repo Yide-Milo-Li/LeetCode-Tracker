@@ -82,8 +82,12 @@ const planStepSchema = z.object({
   feedbackReason: recommendationFeedbackReasonSchema.optional(),
   confirmRevokePracticeIds: z.array(z.string().min(1)).optional()
     .describe('For remove only. After user confirmation, copy the practiceIds from the dry run for this item. Removing the item revokes those records.'),
+  kind: z.enum(['new', 'review']).optional()
+    .describe('For append only. Omit to fill the review cap with due reviews first, then add new problems. "review" adds the next due review even past the cap (see reviewBacklog); "new" adds a new problem.'),
 }).refine(step => step.action === 'remove' || step.confirmRevokePracticeIds === undefined, {
   message: 'Only remove steps can confirm practice revocations',
+}).refine(step => step.action === 'append' || step.kind === undefined, {
+  message: 'Only append steps take a kind',
 });
 type PlanStep = z.infer<typeof planStepSchema>;
 
@@ -264,7 +268,7 @@ export function registerBatchTools({ register }: Registrar): void {
       const touched = new Set<string>();
       const resolved: Array<{ step: PlanStep; itemId?: string; label: string }> = [];
       for (const [index, step] of steps.entries()) {
-        if (step.action === 'append') { resolved.push({ step, label: 'append' }); continue; }
+        if (step.action === 'append') { resolved.push({ step, label: step.kind ? `append ${step.kind}` : 'append' }); continue; }
         if (step.action === 'replace_unfinished') {
           // It swaps items the caller has not named, so later steps could no longer be checked against the plan.
           if (index !== steps.length - 1) return refuse('INVALID_INPUT', `steps.${index}: replace_unfinished must be the last step.`);
@@ -309,7 +313,7 @@ export function registerBatchTools({ register }: Registrar): void {
         const fingerprint = index === 0 ? batchFingerprint : undefined;
         try {
           if (step.action === 'append') {
-            current = await application.planning.append({ operationId: stepId, expectedVersion: version }, { id: plan.id }, fingerprint);
+            current = await application.planning.append({ operationId: stepId, expectedVersion: version, ...(step.kind ? { kind: step.kind } : {}) }, { id: plan.id }, fingerprint);
           } else if (step.action === 'replace_unfinished') {
             current = await application.planning.replace({ operationId: stepId, expectedVersion: version, mode: 'all_unfinished', feedbackReason: step.feedbackReason }, { id: plan.id }, fingerprint);
           } else if (step.action === 'remove') {

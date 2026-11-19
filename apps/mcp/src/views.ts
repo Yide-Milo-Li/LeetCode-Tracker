@@ -56,6 +56,8 @@ export function summarizePlan(plan: DailyPlan, lang: 'en' | 'zh' = 'en') {
     strategyId: plan.strategyId,
     completedCount: items.filter(item => item.completed).length,
     totalCount: items.length,
+    // Due reviews left out by the review cap; an append step with kind "review" adds one.
+    ...(plan.reviewBacklog ? { reviewBacklog: plan.reviewBacklog } : {}),
     items,
   };
 }

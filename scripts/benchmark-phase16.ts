@@ -53,12 +53,12 @@ for (const count of [10_000, 50_000]) {
   function selection(focus: boolean) {
     const current = store.planning.analysisContext('America/Los_Angeles', now);
     const effective = { ...rules, focusWeakTags: focus };
-    let pool = candidates(current.raw.problems, current.fixed, effective, '2026-09-16', 'benchmark', new Set());
+    let pool = candidates(current.raw.problems, current.states, effective, '2026-09-16', 'benchmark', new Set());
     if (focus) {
-      const report = calculateTagMastery({ ...current.raw, now, userZone: 'America/Los_Angeles', reviewStates: current.fixed });
+      const report = calculateTagMastery({ ...current.raw, now, userZone: 'America/Los_Angeles', reviewStates: current.states });
       const eligible = new Set(pool.flatMap(p => p.topicTags.map(t => t.slug)));
       const topics = focusTopics(report).filter(t => eligible.has(t.tagSlug)).slice(0, 3).map(t => t.tagSlug);
-      pool = candidates(current.raw.problems, current.fixed, effective, '2026-09-16', 'benchmark', new Set(), topics);
+      pool = candidates(current.raw.problems, current.states, effective, '2026-09-16', 'benchmark', new Set(), topics);
     }
     return select(pool, effective);
   }
@@ -71,7 +71,7 @@ for (const count of [10_000, 50_000]) {
   selection(true);
   db.prepare = prepare;
   const analysis = await measure(() => calculateTagMastery({ ...context.raw, now,
-    userZone: 'America/Los_Angeles', reviewStates: context.fixed }));
+    userZone: 'America/Los_Angeles', reviewStates: context.states }));
   const pipeline = await measure(() => store.planning.masteryReport('America/Los_Angeles', now));
   const assistant: IGeminiAssistant = {
     getStatus: () => ({ configured: false, model: 'local' }),

@@ -11,16 +11,13 @@ import {
   ALGORITHM_VERSION,
   candidates,
   calculateKnowledgeProfile,
-  projectReviewStates,
-  reorderCandidates,
   quotas,
-  select,
+  planSlots,
   nextDifficultyForAppend,
   rankAdaptiveTopics,
-  selectAdaptiveSlots,
 } from '../../domain/src/index.ts';
 import { selectCandidateSlots, buildSelectionSlate } from '../../domain/src/selection.ts';
-import { attemptDays, projectOutcomeReviewStates, longWindowFeatures, estimatePlanTime } from '../../domain/src/outcome-review.ts';
+import { attemptDays, longWindowFeatures, estimatePlanTime } from '../../domain/src/outcome-review.ts';
 import { compilePreference } from '../../domain/src/preference.ts';
 import { RecommendationCache, cacheKey } from './recommendation-cache.ts';
 import { emitDiagnostic, type DiagnosticSink } from './telemetry.ts';
@@ -75,7 +72,6 @@ export class PlanningService {
   private readonly featureCache = new RecommendationCache<{
     problems: CatalogProblem[];
     states: ReviewState[];
-    fixed: ReviewState[];
     long: ReturnType<typeof longWindowFeatures>;
     profile?: ReturnType<typeof calculateKnowledgeProfile>;
     computedAt: number;
@@ -236,15 +232,21 @@ export class PlanningService {
     return this.writeLock.run(() => this.planning.commit(...args));
   }
 
-  /** Share evidence and committed budget history across every selection path. */
+  /**
+   * Share evidence and committed budget history across every selection path.
+   *
+   * Review state comes from the learner-wide spacing policy, so a problem has the same due date
+   * whichever weekday's strategy is planning it.
+   */
   private candidateContext(rules: Rules, date: string, zone: string, now: number, seed: string,
     excluded: Set<string>, strategyId: string | null = null) {
-    const key = cacheKey([this.planning.stamp(), date, zone, rules, ALGORITHM_VERSION]);
+    const calibration = this.planning.durationCalibration();
+    const key = cacheKey([this.planning.stamp(), date, zone, rules, this.planning.reviewPolicy(), calibration, ALGORITHM_VERSION]);
     let feature = this.featureCache.get(key);
     if (!feature || now < feature.computedAt || feature.validUntil <= now ||
       feature.sourceDates.some(([source, day]) => localDate(now, source) !== day)) {
       const context = this.planning.analysisContext(zone, now);
-      const { raw, reviewEvents, resolveDate, fixed } = context;
+      const { raw, reviewEvents, resolveDate, states } = context;
       let validUntil = Infinity;
       const sourceZones = new Set([zone]);
       const trackBoundary = (at: string, precision: string, sourceZone: string | null) => {
@@ -256,17 +258,11 @@ export class PlanningService {
       for (const event of reviewEvents) trackBoundary(event.at, event.precision, event.zone ?? null);
       for (const snapshot of raw.snapshots) trackBoundary(snapshot.lastSubmittedAt, snapshot.timePrecision, snapshot.sourceTimezone ?? null);
       const days = attemptDays(reviewEvents, zone, now, resolveDate);
-      const states = rules.reviewPolicy === 'outcome-v2'
-        ? projectOutcomeReviewStates(raw.problems, reviewEvents, context.solved, zone, context.baseline, now, days, resolveDate)
-        : rules.adaptiveReviewEnabled
-          ? projectReviewStates(raw.problems, context.events, context.solved, zone, context.baseline, now, true, resolveDate)
-          : fixed;
       feature = {
         problems: raw.problems,
         states,
-        fixed,
         long: longWindowFeatures(raw.problems, reviewEvents, zone, now, days),
-        profile: rules.focusWeakTags ? calculateKnowledgeProfile({ ...raw, now, userZone: zone, reviewStates: fixed }, resolveDate) : undefined,
+        profile: rules.focusWeakTags ? calculateKnowledgeProfile({ ...raw, now, userZone: zone, reviewStates: states }, resolveDate) : undefined,
         computedAt: now,
         validUntil,
         sourceDates: [...sourceZones].filter(isTimeZone).map(source => [source, localDate(now, source)]),
@@ -283,13 +279,13 @@ export class PlanningService {
       return { ...p, explanation: { ...p.explanation!, ...(target ? { targetTopic: { slug: target.slug, name: target.name } } : {}),
         historicalExposure: history.recentExposure.get((target?.slug ?? 'untagged') + ':' + p.difficulty) ?? 0,
         ...(target ? { freshness: feature.long.freshness.get(target.slug + ':' + p.difficulty) } : {}),
-        durationEstimate: { minutes: (rules.personalDurationCalibration && duration.eligible ? duration.medianMinutes! : duration.staticThresholdMinutes) * (p.kind === 'review' ? .5 : 1),
-          source: rules.personalDurationCalibration && duration.eligible ? 'personal' as const : 'heuristic' as const, kind: p.kind },
-        ...(rules.personalDurationCalibration ? { durationShadow: { version: duration.version, eligible: duration.eligible,
+        durationEstimate: { minutes: (calibration && duration.eligible ? duration.medianMinutes! : duration.staticThresholdMinutes) * (p.kind === 'review' ? .5 : 1),
+          source: calibration && duration.eligible ? 'personal' as const : 'heuristic' as const, kind: p.kind },
+        ...(calibration ? { durationShadow: { version: duration.version, eligible: duration.eligible,
           sampleCount: duration.sampleCount, thresholdMinutes: duration.thresholdMinutes, staticThresholdMinutes: duration.staticThresholdMinutes } } : {}) } };
     });
     const focusTagNames = [...new Set(pool.filter(p => p.isFocusTopic).map(p => p.explanation!.targetTopic!.name))];
-    return { pool, nextOrdinal: history.nextOrdinal, focusTagNames, fixedReviewStates: feature.fixed,
+    return { pool, nextOrdinal: history.nextOrdinal, focusTagNames, reviewStates: feature.states,
       notices: rules.focusWeakTags && !focusTagNames.length
         ? [{ en: 'Insufficient evidence for reinforcement; selecting for coverage within current constraints.',
              zh: '暂无足够巩固证据；在当前约束内选择题目以补充覆盖。' }] : [] };
@@ -365,6 +361,19 @@ export class PlanningService {
     return new Set(plan?this.planning.versions(plan.id).flatMap(v=>v.items.map(i=>i.problem.questionId)):[]);
   }
 
+  /**
+   * Due reviews still outside today's plan after a mutation.
+   *
+   * `pool` already excludes every earlier version's items, so a removed review does not count again.
+   * Returns undefined for plans written before Phase 48 so their snapshots stay unchanged.
+   */
+  private remainingBacklog(plan: DailyPlan, pool: Candidate[], used: Iterable<string>): number | undefined {
+    if (plan.reviewBacklog === undefined) return undefined;
+    if (resolveReviewSettings(plan.rules).reviewMode === 'none') return 0;
+    const taken = new Set(used);
+    return pool.filter(p => p.kind === 'review' && !taken.has(p.questionId)).length;
+  }
+
   /** Share a generation without holding the database queue across provider calls. */
   private async generateDailyPlan(targetDate: string, userTimezone: string, operationId?: string): Promise<EnsureResult> {
     const now = Date.now();
@@ -385,14 +394,14 @@ export class PlanningService {
 
     const context = this.candidateContext(rules, targetDate, userTimezone, now,
       targetDate + ':' + strategy.id, new Set(), strategy.id);
-    const { pool, focusTagNames: weakTagNames } = context;
+    const { pool } = context;
 
-    const selection = select(pool, rules, []);
-    const choice = await this.choose(context, selection.selected.map(p => ({ difficulty: p.difficulty, kind: p.kind })), rules, [], targetDate, deadline);
-    selection.selected = choice.selected;
-    const aiContent = fallbackPlanContent(selection.selected, rules);
+    const slotPlan = planSlots(pool, rules, []);
+    const choice = await this.choose(context, slotPlan.slots, rules, [], targetDate, deadline);
+    const selected = choice.selected;
+    const aiContent = fallbackPlanContent(selected, rules);
     const generationModel = choice.model, generationProvider = choice.provider;
-    const items: PlanItem[] = selection.selected.map(p => ({
+    const items: PlanItem[] = selected.map(p => ({
       id: randomUUID(),
       problem: p,
       kind: p.kind,
@@ -428,7 +437,8 @@ export class PlanningService {
       source: generationModel === 'local' ? 'local' : generationProvider,
       model: generationModel === 'local' ? null : generationModel,
       encouragement: aiContent.encouragement,
-      notices: [...selection.notices,...context.notices],
+      notices: [...slotPlan.notices,...context.notices],
+      reviewBacklog: slotPlan.reviewBacklog,
       catalogRevision: stamp.catalog,
       practiceRevision: stamp.practice,
       planningRevision: stamp.planning,
@@ -453,7 +463,7 @@ export class PlanningService {
         if (this.transientEpoch !== epoch) throw new PlanningError('STALE_DATA', 'Profile changed during generation; retry', 409);
         if (localDate(Date.now(), userTimezone) !== localDate(now, userTimezone)) throw new PlanningError('STALE_PLAN', 'Calendar date changed during generation; retry', 409);
       },
-      { fixedReviewStates: context.fixedReviewStates },
+      { reviewStates: context.reviewStates },
     );
 
     return { status: 'ready', plan: committed };
@@ -539,9 +549,9 @@ export class PlanningService {
         return item; // Retain existing problem and its original addedAt
       }
 
-      // Find candidate strictly matching slot difficulty and kind
+      // New problems keep the slot difficulty; a review is replaced by the next due review of any difficulty.
       const eligible = pool.filter(p => !excludedIds.has(p.questionId));
-      const candidate = selectCandidateSlots(eligible, [{ difficulty: item.problem.difficulty, kind: item.kind,
+      const candidate = selectCandidateSlots(eligible, [{ difficulty: item.kind === 'review' ? null : item.problem.difficulty, kind: item.kind,
         ordinal: item.explanation?.explorationOrdinal ?? null }], context.nextOrdinal, retained, !!plan.rules.focusWeakTags, [], plan.rules.timeBudgetMinutes != null).selected[0];
 
       if (candidate) {
@@ -571,10 +581,13 @@ export class PlanningService {
         };
       }
 
-      // No replacement available under hard filters preserving difficulty and kind
-      notices.push({
+      // No replacement available under the hard filters for this slot.
+      notices.push(item.kind === 'review' ? {
+        en: 'No other due review is available under current filters. Original retained.',
+        zh: '当前条件下没有其他到期复习可替换，已保留原题目。',
+      } : {
         en: `No alternative ${item.problem.difficulty} (${item.kind}) problem available under current filters. Original retained.`,
-        zh: `当前硬条件下未找到可替换的${ZH_DIFFICULTY[item.problem.difficulty]}（${item.kind === 'review' ? '复习' : '新题'}）题目，已保留原题目。`,
+        zh: `当前硬条件下未找到可替换的${ZH_DIFFICULTY[item.problem.difficulty]}（新题）题目，已保留原题目。`,
       });
       retained.push(item);
       return item;
@@ -587,12 +600,14 @@ export class PlanningService {
       };
     }
 
+    const backlog = this.remainingBacklog(plan, pool, excludedIds);
     const newPlan: DailyPlan = {
       ...plan,
       version: plan.version + 1,
       algorithmVersion: ALGORITHM_VERSION,
       items: updatedItems,
       notices,
+      ...(backlog !== undefined ? { reviewBacklog: backlog } : {}),
       updatedAt: now,
       source: 'local', model: null,
       provenance: { version: 'recommendation-v1', selection: 'local', selectionModel: null, content: 'local', callReason: 'local_mutation', membershipChanged: true, orderChanged: false },
@@ -616,21 +631,27 @@ export class PlanningService {
 
   /**
    * Append one question to an existing daily plan.
-   * Inherits effective rules, excludes all questions from prior versions of today,
-   * selects target difficulty by cumulative distribution deficiency, adheres strictly
-   * to review mode and quota, and updates dailyCount to max(original, items.length).
-   * Generates recommendation explanation entirely via deterministic local fallbacks
-   * without calling external model providers.
+   *
+   * Inherits effective rules and excludes all questions from prior versions of today. Without an
+   * explicit kind it fills the review cap with due reviews first, then adds a new problem whose
+   * difficulty follows the cumulative deficit of the new-problem mix. `kind: 'review'` may exceed
+   * the cap (the backlog action) and raises today's cap to match. Updates dailyCount to
+   * max(original, items.length). Explanations come from deterministic local templates only.
+   *
+   * @throws PlanningError `REVIEW_DISABLED` / `NEW_DISABLED` when the kind contradicts the review
+   *   mode, `NO_CANDIDATES` when nothing eligible remains.
    */
   public async appendPlanItem(
     planId: string,
     options: {
       expectedVersion: number;
       operationId: string;
+      kind?: 'new' | 'review';
     },
     batchFingerprint?: string,
   ): Promise<DailyPlan> {
-    const fingerprint = withBatchFingerprint(`append:${planId}:${options.expectedVersion}`, batchFingerprint);
+    // Kind-less requests keep their original fingerprint so stored receipts still replay.
+    const fingerprint = withBatchFingerprint(`append:${planId}:${options.expectedVersion}${options.kind ? ':' + options.kind : ''}`, batchFingerprint);
     const replayed = this.planning.replay(options.operationId, fingerprint);
     if (replayed) {
       return replayed;
@@ -654,21 +675,12 @@ export class PlanningService {
     if (plan.date !== analysisDate) throw new PlanningError('STALE_PLAN', 'Only today can be appended; reload the current day', 409);
     const reviewSettings = resolveReviewSettings(plan.rules);
     const arrangedReviews = plan.items.filter(i => i.kind === 'review').length;
-
-    let targetKind: 'new' | 'review';
-    if (reviewSettings.reviewMode === 'none') {
-      targetKind = 'new';
-    } else if (reviewSettings.reviewMode === 'all') {
-      targetKind = 'review';
-    } else {
-      const R = reviewSettings.reviewCount!;
-      if (arrangedReviews > R) {
-        throw new PlanningError('REVIEW_QUOTA_CONFLICT', 'Actual review questions exceed the review quota; adjust today to resolve', 400);
-      }
-      targetKind = arrangedReviews < R ? 'review' : 'new';
+    if (options.kind === 'review' && reviewSettings.reviewMode === 'none') {
+      throw new PlanningError('REVIEW_DISABLED', "Review is off in today's rules; change today's rules to add a review", 400);
     }
-
-    const targetDifficulty = nextDifficultyForAppend(plan.rules.difficulty, plan.items);
+    if (options.kind === 'new' && reviewSettings.reviewMode === 'all') {
+      throw new PlanningError('NEW_DISABLED', "Today's rules allow reviews only; change today's rules to add a new problem", 400);
+    }
 
     const versions = this.planning.versions(plan.id);
     const excluded = new Set<string>();
@@ -687,6 +699,15 @@ export class PlanningService {
       excluded,
       plan.strategyId
     );
+
+    const dueLeft = context.pool.some(p => p.kind === 'review');
+    const targetKind: 'new' | 'review' = options.kind
+      ?? (reviewSettings.reviewMode === 'all' ? 'review'
+        : reviewSettings.reviewMode === 'none' ? 'new'
+        : arrangedReviews < reviewSettings.targetReviewCount && dueLeft ? 'review' : 'new');
+    // The difficulty mix describes new problems only; reviews are picked by due date.
+    const targetDifficulty = targetKind === 'review' ? null
+      : nextDifficultyForAppend(plan.rules.difficulty, plan.items.filter(i => i.kind === 'new'));
 
     const candidate = selectCandidateSlots(context.pool, [{ difficulty: targetDifficulty, kind: targetKind }],
       context.nextOrdinal, plan.items, !!plan.rules.focusWeakTags, [], plan.rules.timeBudgetMinutes != null).selected[0];
@@ -723,21 +744,27 @@ export class PlanningService {
 
     const newItems = [...plan.items, newItem];
     const newDailyCount = Math.min(50, Math.max(plan.rules.dailyCount, newItems.length));
+    // An explicit review beyond the cap raises today's cap so later edits stay within it.
+    const reviewCount = reviewSettings.reviewMode === 'partial' && reviewSettings.reviewCount !== null
+      ? Math.min(newDailyCount, Math.max(reviewSettings.reviewCount, arrangedReviews + (targetKind === 'review' ? 1 : 0)))
+      : reviewSettings.reviewCount;
     const updatedRules: Rules = {
       ...plan.rules,
       dailyCount: newDailyCount,
       reviewMode: reviewSettings.reviewMode,
-      reviewCount: reviewSettings.reviewCount,
-      reviewPercent: reviewSettings.reviewMode === 'partial' && reviewSettings.reviewCount !== null
-        ? (reviewSettings.reviewCount / newDailyCount) * 100
+      reviewCount,
+      reviewPercent: reviewSettings.reviewMode === 'partial' && reviewCount !== null
+        ? (reviewCount / newDailyCount) * 100
         : plan.rules.reviewPercent,
     };
+    const backlog = this.remainingBacklog(plan, context.pool, [candidate.questionId]);
 
     const newPlan: DailyPlan = {
       ...plan,
       version: plan.version + 1,
       rules: updatedRules,
       items: newItems,
+      ...(backlog !== undefined ? { reviewBacklog: backlog } : {}),
       updatedAt: now,
       source: 'local', model: null,
       provenance: { version: 'recommendation-v1', selection: 'local', selectionModel: null, content: 'local', callReason: 'local_mutation', membershipChanged: true, orderChanged: false },
@@ -929,12 +956,16 @@ export class PlanningService {
     delete patch.focusWeakTags;
     delete patch.adaptiveReviewEnabled;
     delete patch.reviewPolicy; delete patch.personalDurationCalibration; delete patch.timeBudgetMinutes;
-    if(options.prompt && /focus|adaptive|薄弱|专题|自适应/i.test(options.prompt) && !options.rules)
+    // Only requests to toggle weak-topic or adaptive behavior need the structured controls.
+    // "专题 <tag>" is a tag filter the local compiler already understands.
+    if(options.prompt && /\badaptive\b|weak[\s-]*topics?|薄弱|自适应/i.test(options.prompt) && !options.rules)
       unresolved.push('Use the structured focus and adaptive review controls to specify these options.');
 
     if (options.rules) {
       patch = { ...patch, ...options.rules };
     }
+    // Spacing policy is learner-wide (Settings); a one-day override cannot change it.
+    delete patch.reviewPolicy; delete patch.adaptiveReviewEnabled; delete patch.personalDurationCalibration;
 
     // Legacy clients change enabled/share only. Resolve that explicit intent before
     // merging, otherwise the saved modern mode/count silently overrides their edit.
@@ -1006,16 +1037,10 @@ export class PlanningService {
       }
     }
 
-    // Check completed problems vs new quotas
+    // Completed items must fit the proposed review cap and new-problem capacity. Difficulty no longer
+    // conflicts: reviews ignore the mix and new problems fill the rest by cumulative deficit.
     if (basePlan) {
-      for (const d of ['Easy', 'Medium', 'Hard'] as const) {
-        const completed = basePlan.items.filter(i => i.completed && i.problem.difficulty === d).length;
-        if (completed > counts[d]) {
-          issues.push(`Completed ${d} problems (${completed}) exceed the proposed quota (${counts[d]}).`);
-        }
-      }
-
-      const { targetReviewCount } = resolveReviewSettings({
+      const { reviewMode: proposedMode, targetReviewCount } = resolveReviewSettings({
         dailyCount: proposed.dailyCount ?? baseRules?.dailyCount ?? 0,
         reviewEnabled: proposed.reviewEnabled ?? baseRules?.reviewEnabled ?? false,
         reviewPercent: proposed.reviewPercent ?? baseRules?.reviewPercent ?? null,
@@ -1026,7 +1051,7 @@ export class PlanningService {
       if (completedReviews > targetReviewCount) {
         issues.push(`Completed review problems (${completedReviews}) exceed the proposed review quota (${targetReviewCount}).`);
       }
-      const targetFreshCount = (proposed.dailyCount ?? baseRules?.dailyCount ?? 0) - targetReviewCount;
+      const targetFreshCount = proposedMode === 'all' ? 0 : (proposed.dailyCount ?? baseRules?.dailyCount ?? 0) - completedReviews;
       const completedFresh = basePlan.items.filter(i => i.completed && i.kind === 'new').length;
       if (completedFresh > targetFreshCount) {
         issues.push(`Completed new problems (${completedFresh}) exceed the proposed new question quota (${targetFreshCount}).`);
@@ -1085,9 +1110,8 @@ export class PlanningService {
       if (proposed.adaptiveReviewEnabled !== undefined && Boolean(proposed.adaptiveReviewEnabled) !== Boolean(baseRules.adaptiveReviewEnabled)) {
         changedFields.push('adaptiveReviewEnabled');
       }
-      for (const field of ['reviewPolicy', 'personalDurationCalibration', 'timeBudgetMinutes'] as const) {
-        if (proposed[field] !== baseRules[field]) changedFields.push(field);
-      }
+      if ((proposed.reviewScope ?? 'all') !== (baseRules.reviewScope ?? 'all')) changedFields.push('reviewScope');
+      if ((proposed.timeBudgetMinutes ?? null) !== (baseRules.timeBudgetMinutes ?? null)) changedFields.push('timeBudgetMinutes');
     }
     const changed = baseRules ? [...new Set(changedFields)] : Object.keys(patch);
 
@@ -1245,14 +1269,14 @@ export class PlanningService {
       preview.date+':override:'+options.operationId,excluded,basePlan?.strategyId ?? null);
     const {pool}=context;
 
-    const selection = select(pool, effectiveRules, retainedItems);
+    const slotPlan = planSlots(pool, effectiveRules, retainedItems);
     const reusable = basePlan?.items.filter(i => !i.completed && i.kind === 'new').map(i => i.explanation?.explorationOrdinal ?? null) ?? [];
-    const choice = await this.choose(context, selection.selected.map(p => ({ difficulty: p.difficulty, kind: p.kind,
-      ...(effectiveRules.focusWeakTags && p.kind === 'new' && reusable.length ? { ordinal: reusable.shift() } : {}) })), effectiveRules, retainedItems, preview.date, deadline);
-    selection.selected = choice.selected;
-    const aiContent = fallbackPlanContent(selection.selected, effectiveRules);
+    const choice = await this.choose(context, slotPlan.slots.map(slot => ({ ...slot,
+      ...(effectiveRules.focusWeakTags && slot.kind === 'new' && reusable.length ? { ordinal: reusable.shift() } : {}) })), effectiveRules, retainedItems, preview.date, deadline);
+    const selected = choice.selected;
+    const aiContent = fallbackPlanContent(selected, effectiveRules);
     const generationModel = choice.model, generationProvider = choice.provider;
-    const newItems: PlanItem[] = selection.selected.map(p => ({
+    const newItems: PlanItem[] = selected.map(p => ({
       id: randomUUID(),
       problem: p,
       kind: p.kind,
@@ -1283,7 +1307,8 @@ export class PlanningService {
         planningRevision: preview.revision.planning,
         rules: effectiveRules,
         items: combinedItems,
-        notices: [...selection.notices,...context.notices],
+        notices: [...slotPlan.notices,...context.notices],
+        reviewBacklog: slotPlan.reviewBacklog,
         encouragement: aiContent.encouragement,
         updatedAt: now,
         action: 'override',
@@ -1302,7 +1327,8 @@ export class PlanningService {
         source: generationModel === 'local' ? 'local' : generationProvider,
         model: generationModel === 'local' ? null : generationModel,
         encouragement: aiContent.encouragement,
-        notices: [...selection.notices,...context.notices],
+        notices: [...slotPlan.notices,...context.notices],
+        reviewBacklog: slotPlan.reviewBacklog,
         catalogRevision: preview.revision.catalog,
         practiceRevision: preview.revision.practice,
         planningRevision: preview.revision.planning,

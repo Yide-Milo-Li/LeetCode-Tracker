@@ -1,7 +1,58 @@
-/** "Practice & notes" Settings tab: behavior toggles for the Today plan and the notes editor. */
-import { useId } from 'react';
+/** "Practice & notes" Settings tab: review spacing plus behavior toggles for the Today plan and the notes editor. */
+import { useEffect, useId, useState } from 'react';
+import { api } from '../../api.ts';
+import { localizeApiError } from '../../error-i18n.ts';
 import { translations, type Language } from '../../i18n.ts';
+import { ReviewSpacingOptions, type ReviewSpacingValue } from '../RecommendationOptions.tsx';
 import { SettingSwitch } from './SettingSwitch.tsx';
+
+/**
+ * Learner-wide review spacing. Loads the effective values (derived from older strategies until
+ * first saved) and persists each change immediately, rolling back on failure.
+ */
+function ReviewSpacingRow({ lang }: { lang: Language }) {
+  const zh = lang === 'zh';
+  const [value, setValue] = useState<ReviewSpacingValue | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    api.getSettings()
+      .then(settings => { if (active) setValue({ reviewPolicy: settings.reviewPolicy, personalDurationCalibration: settings.personalDurationCalibration }); })
+      .catch(err => { if (active) setError(localizeApiError(err, lang, zh ? '加载复习设置失败。' : 'Failed to load review settings.')); });
+    return () => { active = false; };
+  }, []);
+
+  /** Optimistically apply one change; restore the previous value if saving fails. */
+  function update(patch: ReviewSpacingValue) {
+    if (!value) return;
+    const previous = value;
+    setValue({ ...value, ...patch });
+    setSaving(true);
+    setError('');
+    api.updateSettings(patch)
+      .catch(err => { setValue(previous); setError(localizeApiError(err, lang, zh ? '保存复习设置失败。' : 'Failed to save review settings.')); })
+      .finally(() => setSaving(false));
+  }
+
+  return (
+    <section className="preference-row">
+      <div className="preference-label">
+        <h2>{zh ? '复习节奏' : 'Review rhythm'}</h2>
+        <p>{zh
+          ? '决定每道题何时再次到期。所有学习安排共用同一套节奏，同一道题在任何一天的到期日都一致。'
+          : 'Decides when each problem is due again. Every strategy shares it, so a problem has the same due date on any day.'}</p>
+        {error && <p role="alert" className="text-danger">{error}</p>}
+      </div>
+      <div>
+        {value
+          ? <ReviewSpacingOptions lang={lang} value={value} disabled={saving} onChange={update} />
+          : !error && <p role="status" className="text-muted">{zh ? '加载中…' : 'Loading…'}</p>}
+      </div>
+    </section>
+  );
+}
 
 interface PracticeSectionProps {
   lang: Language;
@@ -27,6 +78,8 @@ export function PracticeSection({
 
   return (
     <div role="tabpanel" id="settings-panel-practice" aria-labelledby="settings-tab-practice" className="settings-panel">
+      <ReviewSpacingRow lang={lang} />
+
       <section className="preference-row">
         <div className="preference-label">
           <h2>{swapLabel}</h2>

@@ -5,9 +5,20 @@ import type { CatalogProblem } from './sync.ts';
 export const difficulties = ['Easy', 'Medium', 'Hard'] as const;
 export type Difficulty = typeof difficulties[number];
 
-/** Explicit review mode: none (0 review), partial (fixed R items), or all (100% review). */
+/**
+ * Explicit review mode: none (no reviews), partial (at most R due reviews; unused review capacity
+ * becomes new problems), or all (due reviews only, up to the daily count).
+ */
 export const reviewModeSchema = z.enum(['none', 'partial', 'all']);
 export type ReviewMode = z.infer<typeof reviewModeSchema>;
+
+/** Learner-wide review spacing policy; stored in settings, not per strategy. */
+export const reviewPolicySchema = z.enum(['fixed', 'duration-v1', 'outcome-v2']);
+export type ReviewPolicy = z.infer<typeof reviewPolicySchema>;
+
+/** Whether a strategy's tag filter also limits which due reviews it schedules. */
+export const reviewScopeSchema = z.enum(['all', 'matching']);
+export type ReviewScope = z.infer<typeof reviewScopeSchema>;
 
 export const ruleFieldsSchema = z.object({
   dailyCount: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
@@ -18,10 +29,14 @@ export const ruleFieldsSchema = z.object({
   reviewPercent: z.number().min(0).max(100).nullable(),
   reviewMode: reviewModeSchema.optional(),
   reviewCount: z.number().int().nonnegative().nullable().optional(),
+  reviewScope: reviewScopeSchema.optional(),
   preference: z.string().max(2000).default(''),
   focusWeakTags: z.boolean().optional(),
+  /** Legacy (phase 39): still parsed for old bundles and synced devices; generation reads settings instead. */
   adaptiveReviewEnabled: z.boolean().optional(),
-  reviewPolicy: z.enum(['fixed', 'duration-v1', 'outcome-v2']).optional(),
+  /** Legacy (phase 39): still parsed for old bundles and synced devices; generation reads settings instead. */
+  reviewPolicy: reviewPolicySchema.optional(),
+  /** Legacy (phase 39): still parsed for old bundles and synced devices; generation reads settings instead. */
   personalDurationCalibration: z.boolean().optional(),
   timeBudgetMinutes: z.number().int().min(1).max(1440).nullable().optional(),
 }).strict();
@@ -197,6 +212,8 @@ export interface DailyPlan {
   provenance?: { version: 'recommendation-v1'; selection: 'local' | 'model'; selectionModel: string | null; content: 'local'; callReason: string; membershipChanged: boolean; orderChanged: boolean };
   timeEstimate?: { newMinutes: number; reviewMinutes: number; totalMinutes: number; budgetMinutes: number | null; feasible: boolean };
   feedback?: { questionId: string; action: 'replace' | 'remove'; reason: RecommendationFeedbackReason; recordedAt: number }[];
+  /** Due reviews left out by the review cap when the plan was last selected; absent on older plans. */
+  reviewBacklog?: number;
 }
 export interface RevisionStamp { catalog: number; practice: number; planning: number; timezone: string | null }
 export interface OverridePreview {
@@ -235,6 +252,8 @@ export const replaceSchema = operationSchema.extend({ expectedVersion: z.number(
   .refine(v => v.mode !== 'one' || !!v.itemId, 'Select an item to replace');
 export const appendPlanItemSchema = operationSchema.extend({
   expectedVersion: z.number().int().positive(),
+  /** Omitted: fill the review cap first, then new. `review` may exceed the cap and raises it for today. */
+  kind: z.enum(['new', 'review']).optional(),
 }).strict();
 export type AppendPlanItemInput = z.infer<typeof appendPlanItemSchema>;
 

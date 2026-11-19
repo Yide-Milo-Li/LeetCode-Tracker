@@ -434,11 +434,21 @@ export type ThemePalette = z.infer<typeof themePaletteSchema>;
 export const llmProviderSchema = z.enum(['gemini', 'openai', 'deepseek']);
 export type LLMProvider = z.infer<typeof llmProviderSchema>;
 
+/**
+ * Learner-wide review spacing policy. Mirrors `reviewPolicySchema` in `recommendations.ts`, which
+ * cannot be imported here without a module cycle.
+ */
+const settingsReviewPolicySchema = z.enum(['fixed', 'duration-v1', 'outcome-v2']);
+
 /** Persisted user preference settings. */
 export const userSettingsSchema = z.object({
   language: z.enum(['en', 'zh']),
   notesFormatOnSave: z.boolean().optional(),
   promptSwapFeedback: z.boolean().optional(),
+  /** Absent until chosen in Settings; planning then derives it from active strategies. */
+  reviewPolicy: settingsReviewPolicySchema.optional(),
+  /** Absent until chosen in Settings; planning then derives it from active strategies. */
+  personalDurationCalibration: z.boolean().optional(),
   theme: z.enum(['light', 'dark', 'system']),
   palette: themePaletteSchema.default('default').optional(),
   timezone: z.string().max(100).nullable().default(null),
@@ -492,6 +502,8 @@ export const updateSettingsInputSchema = z.object({
   language: z.enum(['en', 'zh']).optional(),
   notesFormatOnSave: z.boolean().optional(),
   promptSwapFeedback: z.boolean().optional(),
+  reviewPolicy: settingsReviewPolicySchema.optional(),
+  personalDurationCalibration: z.boolean().optional(),
   theme: z.enum(['light', 'dark', 'system']).optional(),
   palette: themePaletteSchema.optional(),
   timezone: timeZoneSchema.nullable().optional(),
@@ -514,6 +526,8 @@ export const updateSettingsInputSchema = z.object({
   data.language !== undefined ||
   data.notesFormatOnSave !== undefined ||
   data.promptSwapFeedback !== undefined ||
+  data.reviewPolicy !== undefined ||
+  data.personalDurationCalibration !== undefined ||
   data.theme !== undefined ||
   data.palette !== undefined ||
   data.timezone !== undefined ||

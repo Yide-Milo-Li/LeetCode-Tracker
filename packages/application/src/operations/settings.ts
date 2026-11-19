@@ -15,10 +15,18 @@ import { fail, artifact } from '../errors.ts';
 /** Create operations over the owning application's shared context. */
 export function createSettingsOperations(context: ApplicationContext) {
   const { store, writeLock, gemini } = context;
-  /** get: validates input and preserves existing business rules. */
+  /**
+   * get: return stored settings plus the effective learner-wide review policy.
+   * Until Settings stores a policy, it is derived from active strategies; reporting the derived
+   * value keeps the Settings control truthful about what planning actually uses.
+   */
   const get = async (input: unknown = {}) => {
     const settings = store.getSettings();
-    return settings;
+    return {
+      ...settings,
+      reviewPolicy: settings.reviewPolicy ?? store.planning.reviewPolicy(),
+      personalDurationCalibration: settings.personalDurationCalibration ?? store.planning.durationCalibration(),
+    };
   };
 
   /** update: validates input and preserves existing business rules. */

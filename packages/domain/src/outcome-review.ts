@@ -1,8 +1,8 @@
 /** Pure, replayable attempt scheduling and separate long-window evidence summaries. */
 import type { CatalogProblem } from '../../contracts/src/sync.ts';
-import type { Difficulty, ReviewEvent, ReviewState, ReviewDecision, Candidate, Rules, PlanItem } from '../../contracts/src/recommendations.ts';
+import type { Difficulty, Evidence, ReviewEvent, ReviewState, ReviewDecision, Candidate, Rules, PlanItem } from '../../contracts/src/recommendations.ts';
 import { addDays, localDate } from '../../contracts/src/time.ts';
-import { createEvidenceDateResolver, intervals, reviewState } from './recommendations.ts';
+import { createEvidenceDateResolver, intervals, projectReviewStates, reviewState } from './recommendations.ts';
 import { DURATION_THRESHOLDS, validDuration } from './review-policy.ts';
 
 const priority = { unsolved: 3, assisted: 2, independent: 1 };
@@ -152,4 +152,35 @@ export function estimatePlanTime(items: Pick<PlanItem, 'kind' | 'problem' | 'exp
   result.totalMinutes = result.newMinutes + result.reviewMinutes;
   result.feasible = result.budgetMinutes === null || result.totalMinutes <= result.budgetMinutes;
   return result;
+}
+
+/** Inputs shared by every spacing policy; mirrors `PlanningStore.analysisContext`. */
+export interface ReviewProjectionInput {
+  problems: CatalogProblem[];
+  /** Completed success evidence (manual completions and snapshot successes). */
+  events: Evidence[];
+  /** Every active attempt, including incomplete ones; used by outcome-based spacing. */
+  reviewEvents: ReviewEvent[];
+  solved: Set<string>;
+  zone: string;
+  baseline: number;
+  now: number;
+  resolveDate: (event: Evidence) => string | null;
+  /** Optional precomputed `attemptDays(reviewEvents, ...)` to avoid a second date pass. */
+  days?: readonly AttemptDay[];
+}
+
+/**
+ * Project review state for one learner-wide spacing policy.
+ *
+ * Every consumer (plans, insights, the review-state cache) calls this with the same policy so a
+ * problem has one due date everywhere.
+ */
+export function projectPolicyReviewStates(policy: 'fixed' | 'duration-v1' | 'outcome-v2', input: ReviewProjectionInput): ReviewState[] {
+  const { problems, events, reviewEvents, solved, zone, baseline, now, resolveDate } = input;
+  if (policy === 'outcome-v2') {
+    return projectOutcomeReviewStates(problems, reviewEvents, solved, zone, baseline, now,
+      input.days ?? attemptDays(reviewEvents, zone, now, resolveDate), resolveDate);
+  }
+  return projectReviewStates(problems, events, solved, zone, baseline, now, policy === 'duration-v1', resolveDate);
 }
