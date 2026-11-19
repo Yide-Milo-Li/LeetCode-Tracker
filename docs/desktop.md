@@ -2,7 +2,7 @@
 
 LeetCode Tracker provides native desktop packages for **Windows 11 x64** (`LeetCode-Tracker_1.3.1_x64-setup.exe`, NSIS installer) and **Apple Silicon macOS 14+** (`LeetCode-Tracker_1.3.1_aarch64.dmg`, ad-hoc signed `.app`/`.dmg`). Both platforms run the exact same local-first React UI, Fastify `/api/v1` service, SQLite v12 storage engine, and bundled private **Node.js 26.13.0** runtime. End users have **zero requirement** to install Node.js, npm, Git, or Rust.
 
-Download installers and `SHA256SUMS.txt` from [Release 1.3.1](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.3.1). Automated boundary tests and local/CI packaging do not establish clean-VM Windows installation, populated-profile upgrade/downgrade compatibility, Windows 10 compatibility, Apple notarization, or the full WebView2/Gatekeeper acceptance matrix; see the [1.3.1 release notes](releases/1.3.1.md).
+Download installers and `SHA256SUMS.txt` from the [latest release](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/latest). Automated boundary tests and local/CI packaging do not establish clean-VM Windows installation, populated-profile upgrade/downgrade compatibility, Windows 10 compatibility, Apple notarization, or the full WebView2/Gatekeeper acceptance matrix; see the [1.3.1 release notes](releases/1.3.1.md).
 
 ### Known 1.0.0 startup failure
 
@@ -21,7 +21,7 @@ The historical published 1.0.0 Windows host can fail before readiness because Ta
 - **Administrator Rights**: **Not required**. The installer uses a per-user installation scope.
 
 #### Installation Steps
-1. Download `LeetCode-Tracker_1.3.1_x64-setup.exe` and `SHA256SUMS.txt` from [Release 1.3.1](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.3.1).
+1. Download the `_x64-setup.exe` installer and `SHA256SUMS.txt` from the [latest release](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/latest).
 2. Run the installer (if Windows SmartScreen shows an unknown-publisher warning because the installer is unsigned, click **More info → Run anyway**). You can select the destination directory (defaults to `%LOCALAPPDATA%\Programs\LeetCode Tracker`).
 3. Launch **LeetCode Tracker** from the desktop shortcut or Start Menu.
 4. On first launch, follow the three-step setup guide on **Today** (Timezone → JSONL Problems → Study rhythm), or import a Snapshot Bundle v5 migration file under **Settings → Data → Import migration file**.
@@ -33,7 +33,7 @@ The historical published 1.0.0 Windows host can fail before readiness because Ta
 - **Package**: Produces an ad-hoc signed (`signingIdentity: "-"`) `LeetCode Tracker.app` and `LeetCode-Tracker_1.3.1_aarch64.dmg` (`LeetCode Tracker_1.3.1_aarch64.dmg` from local Tauri output).
 
 #### Installation & First Launch (DMG / `.app`)
-1. Download `LeetCode-Tracker_1.3.1_aarch64.dmg` (and `SHA256SUMS.txt`) from [Release 1.3.1](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.3.1), double-click the `.dmg`, and drag **LeetCode Tracker.app** into **Applications** (do not run directly from inside the read-only DMG if you want standard Dock pinning and upgrades; user data is always stored outside the `.app` under `~/Library/Application Support/com.leetcodetracker.desktop/`).
+1. Download the `_aarch64.dmg` disk image (and `SHA256SUMS.txt`) from the [latest release](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/latest), double-click the `.dmg`, and drag **LeetCode Tracker.app** into **Applications** (do not run directly from inside the read-only DMG if you want standard Dock pinning and upgrades; user data is always stored outside the `.app` under `~/Library/Application Support/com.leetcodetracker.desktop/`).
 2. **First-launch Gatekeeper approval (unnotarized ad-hoc package)**:
    - Because `APPLE_ID` / `APPLE_API_KEY` notarization is not configured on this package, macOS Gatekeeper may block the first open with *"Apple could not verify LeetCode Tracker"* or *"unidentified developer"*.
    - Open **System Settings → Privacy & Security**, scroll to the **Security** section, and click **Open Anyway** for **LeetCode Tracker** (or Control-click **LeetCode Tracker.app** in Finder and choose **Open**).
@@ -146,7 +146,13 @@ To prevent orphan background processes:
 
 ---
 
-## 4. Building from Source
+## 4. Desktop builds
+
+Use GitHub Actions artifacts for Windows and macOS acceptance and distribution. Push the candidate commit to a `release/**` branch. In its successful [CI run](https://github.com/Yide-Milo-Li/LeetCode-Tracker/actions/workflows/ci.yml), download `windows-desktop-unsigned` and `macos-arm64-desktop-internal` and test those installers on the target machines.
+
+For a formal release, push a version tag matching the package version, such as `v1.4.0`. After all CI jobs pass, the same run stages its two installers and a combined `SHA256SUMS.txt` in a draft GitHub Release. Review the draft and publish it when ready. Once the latest stable release has both installers and matching checksums, the retention workflow removes older installer and checksum attachments. Release notes, tags and GitHub-generated source archives stay available.
+
+The commands below reproduce the builds for local development.
 
 ### 4.1 Windows x64 Installer
 

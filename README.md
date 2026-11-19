@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.3.1"><img src="https://img.shields.io/badge/release-1.3.1-blue?style=flat-square" alt="Release 1.3.1"></a>
+  <a href="https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/latest"><img src="https://img.shields.io/github/v/release/Yide-Milo-Li/LeetCode-Tracker?style=flat-square" alt="Latest release"></a>
   <a href="docs/desktop.md"><img src="https://img.shields.io/badge/desktop-Windows%20x64%20%2B%20macOS%20ARM64-455a64?style=flat-square" alt="Windows x64 and macOS ARM64"></a>
   <a href="tests/README.md"><img src="https://img.shields.io/badge/tests-519%20JS%20%2B%2011%20Rust-brightgreen?style=flat-square" alt="519 JavaScript and 11 Rust tests"></a>
   <a href="docs/architecture.md"><img src="https://img.shields.io/badge/sqlite-schema%20v12-003b57?style=flat-square" alt="SQLite schema v12"></a>
@@ -18,7 +18,7 @@ Release 1.3.1 packages the React interface, Fastify API, SQLite engine (schema v
 
 ## Download and start
 
-Download the installer for your OS from [Release 1.3.1](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/tag/v1.3.1) (both packages include `SHA256SUMS.txt` for verification):
+Download the installer for your OS from the [latest release](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/latest) and use the accompanying `SHA256SUMS.txt` to verify the download.
 
 | Platform | Download | How to install & open |
 | --- | --- | --- |

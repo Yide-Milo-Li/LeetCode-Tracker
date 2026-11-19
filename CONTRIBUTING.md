@@ -1,6 +1,6 @@
 # Contributing
 
-Release versions must agree across workspace package manifests, npm lockfile, the API health response, and Tauri/Cargo metadata. For native changes, also run the Rust checks and Windows/macOS builds in the [desktop guide](docs/desktop.md). Keep release assets and private evidence out of Git; attach installer/checksum assets to the matching release tag.
+Release versions must agree across workspace package manifests, npm lockfile, the API health response, and Tauri/Cargo metadata. Use the GitHub-hosted Windows and macOS builds for acceptance and release installers. The [desktop guide](docs/desktop.md) describes the candidate and tagged release workflows. Keep release assets and private evidence out of Git.
 
 Read the [documentation index](docs/README.md), [requirements](docs/requirements.md), and [current status](docs/status.md) before proposing changes.
 

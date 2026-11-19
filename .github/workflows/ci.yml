@@ -5,6 +5,8 @@ on:
     branches:
       - main
       - 'release/**'
+    tags:
+      - 'v[0-9]*'
   pull_request:
     branches:
       - main
@@ -81,7 +83,7 @@ jobs:
           New-Item -ItemType Directory -Force .local/evidence/phase21 | Out-Null
           git rev-parse HEAD | Set-Content .local/evidence/phase21/windows-commit.txt
           (Get-FileHash (Get-ChildItem apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1).FullName -Algorithm SHA256).Hash | Set-Content .local/evidence/phase21/SHA256SUMS-windows.txt
-      # This artifact is for CI review; this workflow never publishes a Release.
+      # Acceptance and tagged release packaging consume the same CI artifact.
       - uses: actions/upload-artifact@v4
         with:
           name: windows-desktop-unsigned
@@ -196,3 +198,29 @@ jobs:
             .local/evidence/phase21/macos-settings.png
             .local/evidence/phase21/wdio-dependencies.json
           if-no-files-found: error
+
+  stage-release:
+    name: Stage CI installers in a draft release
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
+    needs: [verify, desktop-windows, desktop-macos, desktop-macos-native]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-desktop-unsigned
+          path: dist/release-input/windows
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-arm64-desktop-internal
+          path: dist/release-input/macos
+      - name: Stage Windows and macOS downloads and SHA-256 checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: bash scripts/stage-desktop-release.sh
