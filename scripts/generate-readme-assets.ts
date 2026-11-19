@@ -5,6 +5,12 @@
  * full year practice activity, daily plan, notes, strategies, and themes),
  * connects headless Chrome via CDP with deviceScaleFactor: 2, and saves screenshots
  * to `docs/assets/screenshots/`.
+ *
+ * Optional environment variables (all default to the README gallery):
+ * - `README_SCREENSHOT_THEME`: `light` (default) or `dark`, captured with the default palette.
+ * - `README_SCREENSHOT_LANG`: `en` (default) or `zh`.
+ * - `README_SCREENSHOT_DIR`: output directory; defaults to `docs/assets/screenshots`.
+ * An unknown theme or language fails before anything is captured.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import * as path from 'node:path';
@@ -67,11 +73,23 @@ class CdpClient {
   }
 }
 
+/** Read an enumerated capture option from the environment, rejecting unknown values. */
+function captureOption<T extends string>(name: string, allowed: readonly T[], fallback: T): T {
+  const value = process.env[name]?.trim();
+  if (!value) return fallback;
+  if (!(allowed as readonly string[]).includes(value)) {
+    throw new Error(`${name} must be one of ${allowed.join(', ')}, got "${value}"`);
+  }
+  return value as T;
+}
+
 /** Seed an isolated public fixture and refresh all README screenshots. */
 async function main() {
+  const theme = captureOption('README_SCREENSHOT_THEME', ['light', 'dark'] as const, 'light');
+  const language = captureOption('README_SCREENSHOT_LANG', ['en', 'zh'] as const, 'en');
   console.log('🚀 Generating High-Definition Screenshots for GitHub README...');
 
-  const outputDir = path.resolve(process.cwd(), 'docs/assets/screenshots');
+  const outputDir = path.resolve(process.cwd(), process.env.README_SCREENSHOT_DIR?.trim() || 'docs/assets/screenshots');
   if (!fs.existsSync(outputDir)) {
     fs.mkdirSync(outputDir, { recursive: true });
   }
@@ -97,8 +115,8 @@ async function main() {
   // 2. Configure default theme and language
   await store.updateSettings({
     timezone: 'America/New_York',
-    language: 'en',
-    theme: 'dark',
+    language,
+    theme,
     palette: 'default',
     geminiApiKey: '',
     openaiApiKey: '',
@@ -398,7 +416,7 @@ $$dp[i] = \\min(dp[i], dp[i - c] + 1) \\quad \\forall c \\in \\text{coins}, i \\
   // Exercise the newly delivered focus control after capturing the normal workspace.
   await cdp.send('Page.navigate', { url: `http://${host}:${port}/#notes` });
   await new Promise((resolve) => setTimeout(resolve, 1000));
-  await cdp.send('Runtime.evaluate', { expression: `Array.from(document.querySelectorAll('button')).find(b => ['Zen', 'Zen Mode'].includes(b.textContent.trim()))?.click()` });
+  await cdp.send('Runtime.evaluate', { expression: `Array.from(document.querySelectorAll('button')).find(b => ['Zen', 'Zen Mode', '专注'].includes(b.textContent.trim()))?.click()` });
   await new Promise((resolve) => setTimeout(resolve, 250));
   const focused = await cdp.send('Runtime.evaluate', { expression: `document.querySelector('.notes-master-pane').style.display === 'none'`, returnByValue: true });
   if (!focused.result.value) throw new Error('Notes focus control did not hide the master list');
@@ -406,7 +424,7 @@ $$dp[i] = \\min(dp[i], dp[i - c] + 1) \\quad \\forall c \\in \\text{coins}, i \\
   await new Promise((resolve) => setTimeout(resolve, 250));
   const normal = await cdp.send('Runtime.evaluate', { expression: `document.querySelector('.notes-master-pane').style.display !== 'none'`, returnByValue: true });
   if (!normal.result.value) throw new Error('Notes focus shortcut did not restore the master list');
-  const report = { viewport: '1440x900 at 2x', source: 'isolated synthetic catalog', screenshots: 8, identity: await verifyPage(), interactions: ['catalog import navigation', 'Notes focus button', 'Notes focus keyboard restore'], errors: cdp.errors };
+  const report = { viewport: '1440x900 at 2x', theme, language, source: 'isolated synthetic catalog', screenshots: 8, identity: await verifyPage(), interactions: ['catalog import navigation', 'Notes focus button', 'Notes focus keyboard restore'], errors: cdp.errors };
   fs.writeFileSync(path.join(tempDir, 'capture-report.json'), JSON.stringify(report, null, 2));
   if (cdp.errors.length) throw new Error(`Browser errors: ${JSON.stringify(cdp.errors)}`);
   console.log('  [5/5] Cleaning up processes and temporary files...');
@@ -417,7 +435,7 @@ $$dp[i] = \\min(dp[i], dp[i - c] + 1) \\quad \\forall c \\in \\text{coins}, i \\
 
   console.log(`Synthetic capture profile retained at ${tempDir}`);
 
-  console.log('\n✨ All high-definition screenshots successfully generated in `docs/assets/screenshots/`!');
+  console.log(`\n✨ All high-definition screenshots successfully generated in \`${path.relative(process.cwd(), outputDir) || '.'}\`!`);
 }
 
 main().catch((err) => {
