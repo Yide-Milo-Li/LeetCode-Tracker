@@ -295,6 +295,8 @@
   margin: 0;
 }
 .topic-table-scroll {
+  /* Keep the visually hidden status labels inside the table's scroll area. */
+  position: relative;
   overflow-x: auto;
 }
 .topic-table {

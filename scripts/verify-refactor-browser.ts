@@ -126,9 +126,9 @@ const gemini: IGeminiAssistant = {
       model: 'synthetic-mock',
     };
   },
-  parseOverridePrompt: async () => {
+  parseOverridePrompt: async ({ prompt }) => {
     report.mockCalls++;
-    return { patch: { dailyCount: 3 }, unresolved: [], model: 'synthetic-mock' };
+    return { patch: { dailyCount: prompt === 'Give me one extra problem today.' ? 4 : 3 }, unresolved: [], model: 'synthetic-mock' };
   },
 };
 const app = await buildApp({
@@ -209,6 +209,15 @@ try {
       });
       socket!.send(JSON.stringify({ id, method, params }));
     });
+  const resumeFetch = (method: string, params: Record<string, unknown>) => {
+    if (socket?.readyState !== WebSocket.OPEN) return;
+    void send(method, params).catch(error => {
+      // React may abort a navigation read before CDP resumes it.
+      if (socket?.readyState === WebSocket.OPEN && !String(error).includes('Invalid InterceptionId.')) {
+        report.errors.push({ method, error: String(error) });
+      }
+    });
+  };
   socket.onmessage = (event) => {
     const message = JSON.parse(String(event.data));
     if (message.id) {
@@ -233,8 +242,8 @@ try {
       if (message.params.responseStatusCode) {
         if (dropCreateResponse && request.method === 'POST' && message.params.responseStatusCode === 201) {
           dropCreateResponse = false;
-          void send('Fetch.failRequest', { requestId: message.params.requestId, errorReason: 'ConnectionClosed' });
-        } else void send('Fetch.continueResponse', { requestId: message.params.requestId });
+          resumeFetch('Fetch.failRequest', { requestId: message.params.requestId, errorReason: 'ConnectionClosed' });
+        } else resumeFetch('Fetch.continueResponse', { requestId: message.params.requestId });
         return;
       }
       const selected =
@@ -245,14 +254,14 @@ try {
           : null;
       if (selected)
         void delay(selected.hold ?? 0).then(() =>
-          send('Fetch.fulfillRequest', {
+          resumeFetch('Fetch.fulfillRequest', {
             requestId: message.params.requestId,
             responseCode: selected.status ?? 200,
             responseHeaders: [{ name: 'Content-Type', value: 'application/json' }],
             body: Buffer.from(JSON.stringify(selected.body)).toString('base64'),
           }),
         );
-      else void send('Fetch.continueRequest', { requestId: message.params.requestId });
+      else resumeFetch('Fetch.continueRequest', { requestId: message.params.requestId });
     }
   };
   await send('Page.enable');
@@ -279,7 +288,10 @@ try {
       'DOM timeout: ' + condition + '\n' + (await evaluate('document.body.innerText.slice(-3500)')),
     );
   };
-  const visible = "e => e.getClientRects().length && !e.closest('[hidden], [inert]')";
+  const visible = `e => {
+    const closed = e.closest('details:not([open])');
+    return e.getClientRects().length && !e.closest('[hidden], [inert]') && (!closed || e.closest('summary')?.parentElement === closed);
+  }`;
   /** Click real visible controls by text without invoking application internals. */
   const click = async (label: string, selector = 'button') => {
     // Hit-test the settled control, not coordinates from a moving entrance frame.
@@ -287,7 +299,16 @@ try {
     for (let attempt = 0; attempt < 30; attempt++) {
       try {
         const point = await evaluate(
-          `(() => { const e = [...document.querySelectorAll(${JSON.stringify(selector)})].filter(${visible}).find(e => e.textContent.trim() === ${JSON.stringify(label)} || e.getAttribute('aria-label') === ${JSON.stringify(label)}); if (!e || e.disabled) throw new Error('Missing or disabled control: ' + ${JSON.stringify(label)}); e.scrollIntoView({block:'center'}); const r=e.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`,
+          `(() => {
+            const control = [...document.querySelectorAll(${JSON.stringify(selector)})].filter(${visible})
+              .find(e => e.textContent.trim() === ${JSON.stringify(label)} || e.getAttribute('aria-label') === ${JSON.stringify(label)});
+            if (!control || control.disabled) throw new Error('Missing or disabled control: ' + ${JSON.stringify(label)});
+            control.scrollIntoView({block:'center', inline:'nearest'});
+            const bounds = control.getBoundingClientRect();
+            const x = bounds.x + bounds.width / 2, y = bounds.y + bounds.height / 2;
+            if (!control.contains(document.elementFromPoint(x,y))) throw new Error('Obstructed control: ' + ${JSON.stringify(label)});
+            return {x,y};
+          })()`,
         );
         await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 });
         await send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
@@ -297,7 +318,10 @@ try {
         }
         return;
       } catch (err) {
-        if (attempt === 29) throw err;
+        if (attempt === 29) {
+          const text = await evaluate("(document.querySelector('[role=dialog]') ?? document.body).innerText.slice(-3500)");
+          throw new Error(`${String(err)}\n${text}`, { cause: err });
+        }
         await delay(60);
       }
     }
@@ -313,6 +337,20 @@ try {
     await evaluate('location.hash=' + JSON.stringify(view));
     await until(`document.getElementById('view-${view}') && !document.getElementById('view-${view}').hidden`);
     await delay(200);
+  };
+  /** The current heatmap opens the Records tab and carries the date filter with it. */
+  const checkStatisticsDrilldown = async () => {
+    const cell = '.heatmap-cell:is(.heatmap-cell-1, .heatmap-cell-2, .heatmap-cell-3)';
+    await until(`document.querySelector(${JSON.stringify(cell)})`);
+    const date = await evaluate(`(() => {
+      const button = document.querySelector(${JSON.stringify(cell)});
+      button.focus();
+      return button.dataset.date;
+    })()`);
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    await until(`document.querySelector('#view-records:not([hidden]) .activity-records input[type=date]')?.value === ${JSON.stringify(date)}`);
+    await until("document.querySelector('#view-records:not([hidden]) .activity-table tbody tr button')");
   };
   const screenshot = async (name: string) => {
     await delay(240);
@@ -336,7 +374,8 @@ try {
   });
   await reload();
   await until("document.querySelectorAll('.completion-circle').length === 3");
-  assert.equal(await evaluate("document.querySelectorAll('nav .nav-item').length"), 3);
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('nav[aria-label=\"Main navigation\"] button')].map(button => button.getAttribute('aria-label'))"),
+    ['Today', 'Problems', 'Progress', 'Notes']);
   // Phase 10 regression: exercise actual CSS and browser event timing using isolated fixture data.
   const initialRecords = new Set(store.queryPracticeRecords({ limit: 100 }).items.map((record) => record.id));
   await evaluate("document.querySelector('.completion-circle[aria-pressed=false]').click()");
@@ -581,7 +620,7 @@ try {
   await screenshot('snapshot-corrected-audit');
   await click('Revoke snapshot');
   await click('Confirm revoke');
-  await until("document.querySelector('[role=dialog]')?.innerText.includes('revoked')");
+  await until("document.querySelector('[role=dialog] .detail-grid')?.innerText.includes('Revoked')");
   assert.equal(store.getProgressSnapshot('9001')?.status, 'revoked');
   await screenshot('snapshot-revoked-audit');
   await click('Close');
@@ -655,19 +694,24 @@ try {
   await screenshot('today-adjustment');
   await fill('[role=dialog] textarea', 'Keep the count at three and retain the other rules.');
   await click('Parse with AI');
-  await until(
-    "document.querySelector('[role=dialog] .preview-card') || document.querySelector('[role=dialog] table')",
-  );
+  await until("document.querySelector('[role=dialog] .override-preview-card')?.innerText.includes('Rules unchanged')");
+  assert.equal(await evaluate("document.querySelector('[role=dialog] .modal-footer .btn-primary').disabled"), true);
+  const versionBeforeOverride = store.planning.plans()[0].version;
+  await fill('[role=dialog] textarea', 'Give me one extra problem today.');
+  await click('Parse with AI');
+  await until("document.querySelector('[role=dialog] .modal-footer .btn-primary')?.disabled === false");
   await screenshot('today-adjustment-preview');
   await click('Apply to Unfinished Slots');
   await until("!document.querySelector('[role=dialog]')");
   const beforeReplace = store.planning.plans()[0];
+  assert.equal(beforeReplace.version, versionBeforeOverride + 1);
+  assert.equal(beforeReplace.rules.dailyCount, 4);
   await evaluate(
     "[...document.querySelectorAll('.today-problem:not(.completed) button')].find(e=>e.getAttribute('aria-label')==='Replace'||e.textContent.trim()==='Replace').click()",
   );
-  await until("!document.querySelector('.today-problem .spin')");
-  await delay(200);
-  assert.ok(store.planning.plans()[0].version > beforeReplace.version);
+  await click('Confirm swap');
+  await until(`Array.from(document.querySelectorAll('.action-menu button')).some(button => button.textContent.trim() === 'Versions · v${beforeReplace.version + 1}')`);
+  assert.equal(store.planning.plans()[0].version, beforeReplace.version + 1);
   assert.ok(
     beforeReplace.items
       .filter((item) => item.completed)
@@ -684,16 +728,15 @@ try {
   await screenshot('plan-versions');
   await click('Close');
   const beforeBatch = store.planning.plans()[0].version;
-  await evaluate(
-    "[...document.querySelectorAll('.action-menu button')].find(e=>e.textContent.includes('Replace Unfinished')).click()",
-  );
-  await until("!document.querySelector('.today-problem .spin')");
-  await delay(200);
-  assert.ok(store.planning.plans()[0].version > beforeBatch);
+  if (!await evaluate("document.querySelector('.action-menu').open")) await click('More plan actions', 'summary');
+  await click('Replace Unfinished', '.action-menu[open] button');
+  await until(`Array.from(document.querySelectorAll('.action-menu button')).some(button => button.textContent.trim() === 'Versions · v${beforeBatch + 1}')`);
+  assert.equal(store.planning.plans()[0].version, beforeBatch + 1);
   await navigate('problems');
-  await fill('select', 'Easy');
-  await until("document.querySelectorAll('#view-problems .data-table tbody tr').length && [...document.querySelectorAll('#view-problems .data-table tbody tr')].every(e=>e.innerText.includes('Easy'))");
-  await fill('select', '');
+  const difficultyButtons = '#view-problems [aria-label="Difficulty filter"] button';
+  await click('Easy', difficultyButtons);
+  await until("document.querySelectorAll('#view-problems .data-table tbody tr .difficulty').length && [...document.querySelectorAll('#view-problems .data-table tbody tr .difficulty')].every(badge => badge.textContent === 'Easy')");
+  await click('All Difficulties', difficultyButtons);
   await until("document.querySelector('#view-problems .pagination button[aria-label=Next]') && !document.querySelector('#view-problems .pagination button[aria-label=Next]').disabled");
   const firstProblem = await evaluate("document.querySelector('.problem-title-button').textContent");
   await evaluate("document.querySelector('#view-problems .pagination button[aria-label=Next]').click()");
@@ -725,6 +768,7 @@ try {
         for (const view of [
           'today',
           'problems',
+          'notes',
           'records',
           'statistics',
           'settings',
@@ -739,14 +783,20 @@ try {
             if (!await evaluate(`document.querySelector('.sidebar').classList.contains('${desired}')`)) {
               await click(language === 'zh' ? (expanded ? '展开侧边栏' : '折叠侧边栏') : (expanded ? 'Expand sidebar' : 'Collapse sidebar'));
             }
+            await until(`document.querySelector('.sidebar').getBoundingClientRect().width === ${expanded ? 216 : 64}`);
             const geometry = await evaluate(
               `({ width: innerWidth, scrollWidth: document.documentElement.scrollWidth, sidebarWidth: document.querySelector('.sidebar').getBoundingClientRect().width, dialogs: document.querySelectorAll('[role=dialog]').length, title: document.querySelector('#view-${view} h1')?.textContent || document.querySelector('main h1')?.textContent })`,
             );
             assert.equal(geometry.sidebarWidth, expanded ? 216 : 64);
             assert.ok(geometry.scrollWidth <= (await evaluate('document.documentElement.clientWidth')) + 1,
               'Page overflow: ' + [width, language, theme, view, desired].join('-'));
-            // Layout rectangles can differ from integer CSS pixels by floating-point rounding.
-            const smallTargets = await evaluate("[...document.querySelectorAll('.btn-icon')].filter(e=>e.getClientRects().length&&!e.closest('[hidden],details:not([open])')).map(e=>({name:e.getAttribute('aria-label'),w:e.getBoundingClientRect().width,h:e.getBoundingClientRect().height})).filter(r=>r.w<37.99||r.h<37.99)");
+            // The inline help controls use smaller targets than standalone icon buttons.
+            const smallTargets = await evaluate(`[...document.querySelectorAll('.btn-icon')].filter(${visible}).map(button => {
+              const bounds = button.getBoundingClientRect();
+              const minimum = button.matches('.strategy-capsule .info-trigger') ? 18
+                : button.matches('.bento-card-title .info-trigger') ? 24 : 38;
+              return {name: button.getAttribute('aria-label'), w: bounds.width, h: bounds.height, minimum};
+            }).filter(target => target.w < target.minimum - 0.01 || target.h < target.minimum - 0.01)`);
             assert.deepEqual(smallTargets, [], 'Icon target minimum: ' + JSON.stringify(smallTargets));
             if (!expanded) {
               await evaluate("document.querySelector('nav button').focus()");
@@ -814,8 +864,8 @@ try {
             await click(language === 'zh' ? '新建策略' : 'New Strategy');
             await inspectOverlay('strategy-dialog');
           } else if (view === 'statistics') {
-            await click(language === 'zh' ? '查看完整记录' : 'View full history');
-            await inspectOverlay('history-drawer');
+            await checkStatisticsDrilldown();
+            await navigate('statistics');
           } else if (view === 'progress-import') {
             await click(language === 'zh' ? '浏览当前快照' : 'Browse current snapshots', 'summary');
             await evaluate("document.querySelector('.snapshot-browser .text-link').focus(); document.querySelector('.snapshot-browser .text-link').click()");
@@ -857,7 +907,7 @@ try {
     },
   };
   await reload();
-  await until("document.body.innerText.includes('Short by')");
+  await until(`document.body.innerText.includes('${12 - dailyPlan.items.length} problems short today')`);
   await screenshot('today-shortage-local-fallback');
   const imported = store.getProgressSnapshot('9002')!;
   fault = {
@@ -888,27 +938,26 @@ try {
   );
   await screenshot('completion-snapshot-evidence-only');
   await click('Close');
-  const dashboard = (await app.inject({ method: 'GET', url: '/api/v1/dashboard' })).json();
+  const recent = (await app.inject({ method: 'GET', url: '/api/v1/dashboard/recent' })).json();
   const noKnown = {
-    ...dashboard,
-    overview: { ...dashboard.overview, currentStreak: 0 },
-    trend30Days: dashboard.trend30Days.map((day: any) => ({ ...day, activeCount: 0, completedCount: 0 })),
+    ...recent,
+    days: recent.days.map((day: any) => ({ ...day, activeCount: 0, completedCount: 0 })),
   };
-  fault = { match: '/api/v1/dashboard', method: 'GET', body: noKnown };
+  fault = { match: '/api/v1/dashboard/recent', method: 'GET', body: noKnown };
   await reload();
-  await until("document.body.innerText.includes('No known activity')");
+  await until("document.body.innerText.includes('Records on 0 of 7 days')");
   await screenshot('today-no-known-records');
   fault = {
-    match: '/api/v1/dashboard',
+    match: '/api/v1/dashboard/recent',
     method: 'GET',
-    body: { ...noKnown, dataStatus: { ...noKnown.dataStatus, userTimezone: null } },
+    body: { timezone: null, days: [] },
   };
   await reload();
-  await until("document.body.innerText.includes('Confirm your timezone first')");
-  assert.equal(await evaluate("document.querySelectorAll('.mini-day').length"), 0);
+  await until("document.body.innerText.includes('Set a timezone to assign daily activity')");
+  assert.equal(await evaluate("document.querySelectorAll('.rhythm-day-col').length"), 0);
   await screenshot('today-unassigned-activity-dates');
   fault = {
-    match: '/api/v1/dashboard',
+    match: '/api/v1/dashboard/recent',
     method: 'GET',
     status: 503,
     body: { message: 'Synthetic overview unavailable' },
@@ -966,14 +1015,10 @@ try {
   await reload('statistics');
   await evaluate('window.scrollTo(0,650)');
   await screenshot('statistics-trend-and-distributions');
-  await evaluate(
-    "[...document.querySelectorAll('.workspace-details')].find(e=>e.textContent.includes('Activity data')).open = true; window.scrollTo(0,1900)",
-  );
+  await click('Data sources and coverage', 'summary');
   await screenshot('statistics-coverage-and-history');
-  await click('View full history');
-  await until("document.querySelector('[role=dialog] .activity-records')");
-  await screenshot('statistics-history-drawer');
-  await click('Close');
+  await checkStatisticsDrilldown();
+  await screenshot('statistics-history-drilldown');
   await reload('progress-import');
   await fill('textarea', 'Synthetic formatter failure preserves this input.');
   fault = { match: '/progress-imports/format', method: 'POST', status: 503, body: { message: 'Synthetic formatter unavailable' } };
@@ -1007,8 +1052,8 @@ try {
   await reload();
   // Compare the two surfaces against the same real server projection rather than image heights.
   const sharedProjection = (await app.inject('/api/v1/dashboard')).json();
-  const strip = await evaluate("[...document.querySelectorAll('.mini-day')].map(e=>e.title)");
-  assert.deepEqual(strip, sharedProjection.trend30Days.slice(-7).map((day: any) => day.date + ': ' + day.completedCount));
+  const strip = await evaluate("document.querySelector('.rhythm-chart-wrap')?.getAttribute('aria-label')");
+  assert.deepEqual(strip, sharedProjection.trend30Days.slice(-7).map((day: any) => day.date + ': ' + day.completedCount).join('; '));
   report.flows.push('Today seven-day values exactly equal the Statistics endpoint for the same local dates, including today.');
   await click('Switch language to Chinese');
   await until("document.documentElement.lang === 'zh-CN'");
