@@ -1,23 +1,19 @@
-/** "Data" Settings tab: device sync, cross-device migration bundle export/restore and note-app exports. */
+/** "Data" Settings tab: cross-device migration bundle export/restore and note-app exports. */
 import { Download, Upload, Archive, AlertTriangle } from 'lucide-react';
 import { api } from '../../api.ts';
 import { translations, type Language } from '../../i18n.ts';
 import { ExportLink } from '../ExportLink.tsx';
 import { Feedback, InfoPopover } from '../ui.tsx';
 import type { BundleRestore } from './useBundleRestore.ts';
-import type { DeviceSync } from './useDeviceSync.ts';
-import { SyncSection } from './SyncSection.tsx';
 
 interface DataSectionProps {
   lang: Language;
   /** Restore state owned by the parent so a pending bundle survives tab switches. */
   bundle: BundleRestore;
-  /** Device sync state owned by the parent so an open receive preview survives tab switches. */
-  sync: DeviceSync;
 }
 
 /** Render the Data tab panel; exports are plain links and restores go through `bundle`. */
-export function DataSection({ lang, bundle, sync }: DataSectionProps) {
+export function DataSection({ lang, bundle }: DataSectionProps) {
   const t = translations[lang];
   const zh = lang === 'zh';
   const {
@@ -33,8 +29,6 @@ export function DataSection({ lang, bundle, sync }: DataSectionProps) {
 
   return (
     <div role="tabpanel" id="settings-panel-data" aria-labelledby="settings-tab-data" className="settings-panel">
-      <SyncSection lang={lang} sync={sync} />
-
       <section className="preference-row">
         <div className="preference-label">
           <h2>{zh ? '跨设备迁移' : 'Move to another device'}</h2>

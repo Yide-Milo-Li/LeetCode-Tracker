@@ -2,9 +2,10 @@
 
 ## [Unreleased]
 
+- Reorganize Settings into topic tabs: General (language, timezone), Appearance, Practice & notes (feedback prompt and format-on-save as switches), AI assistant, AI clients (desktop app only: MCP write switch, client picker, configuration and skill install), Sync and Data (migration file, note-app exports).
 - Official desktop installers connect to Google Drive with LCT's production OAuth client. Developers running from source can configure their own Desktop OAuth client in Settings or `.env`.
 
-- Let MCP clients write while the desktop app is running: turn on **Allow AI client writes** under Settings → General → Connect an AI client, and the bundled `leetcode-tracker-mcp` forwards writes to the app through an authenticated loopback bridge. The app refreshes open views after AI client writes, keeps unsaved note drafts, lists recent AI client activity and generates client configuration for the bundled MCP runtime.
+- Let MCP clients write while the desktop app is running: turn on **Allow AI client writes** under Settings → AI clients, and the bundled `leetcode-tracker-mcp` forwards writes to the app through an authenticated loopback bridge. The app refreshes open views after AI client writes, keeps unsaved note drafts, lists recent AI client activity and generates client configuration for the bundled MCP runtime.
 - Add an optional `lct` Skill for Claude Code, Codex and Antigravity. Install it from the bundled MCP CLI or copy the install command in desktop settings, which now also generates Antigravity MCP configuration.
 - Compact MCP tool definitions and responses (25 tools): merge `tracker_create_strategy` and `tracker_update_strategy` into `tracker_save_strategy`; flatten `tracker_edit_today` step schema and return version/count/delta instead of the full plan; emit compact single-line JSON, single-language plan reasons, and non-zero active trend days; default `tracker_list_notes` to `scope: "practiced"`; and remove redundant schema boilerplate, tool lists from `tracker_status`, and extra `tracker_status` / `tracker_get_problems` round-trip guidance.
 - Close MCP write/retry gaps: require a client operation ID for practice creation, recover immutable creation defaults, replay removed/replaced items and rule changes across restarts, support listing notes on unpracticed problems with `scope: "all"`, and preserve whitespace-note hashes.
@@ -15,7 +16,7 @@
 - Require a client operation ID for MCP plan edits and rule changes, as practice creation already does, and make the practice list `order` option (`asc`/`desc`) take effect; it was ignored before.
 - Add MCP prompts `write_note` and `review_weak_topics`, and a `weakTopics` option on `tracker_get_progress` that returns the topics the knowledge profile marks for reinforcement, with outcome counts, durations and the rule behind each.
 - Add MCP tools `tracker_set_timezone`, so clients without a shell can fix `TIMEZONE_REQUIRED`, and `tracker_delete_strategy`. Practice results now include `localDate` in the profile timezone: models had copied the UTC date from `practicedAt` into notes, and the exported mistake log used it too.
-- Add device sync (Settings → Data → Device sync): publish and receive complete snapshots through a sync folder (for example Google Drive for desktop) or directly through your own Google Drive app data folder, with fork detection, preview-then-receive, per-device acknowledgements, snapshot history and safety backups. See [device sync](docs/sync.md).
+- Add device sync (Settings → Sync): publish and receive complete snapshots through a sync folder (for example Google Drive for desktop) or directly through your own Google Drive app data folder, with fork detection, preview-then-receive, per-device acknowledgements, snapshot history and safety backups. See [device sync](docs/sync.md).
 - Fix migration bundle import rejecting profiles in which a Today plan was emptied by removing its last item; daily plan rule snapshots now get a structural check while strategies keep full rule validation.
 
 ## [1.3.1] - 2026-11-17

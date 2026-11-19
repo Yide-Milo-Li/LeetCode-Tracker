@@ -1,5 +1,5 @@
 /**
- * Settings → Data device sync panel: lazy status load, configuration, publish replay identity,
+ * Settings → Sync tab: lazy status load, configuration, publish replay identity,
  * fork choices and the explicit local-changes decision on receive. Synthetic API stubs only.
  */
 import { afterEach, it, mock } from 'node:test';
@@ -70,13 +70,13 @@ function stubSettings() {
   mock.method(api, 'getSettings', async () => ({ language: 'en', theme: 'light', timezone: 'UTC', updatedAt: 1 }) as never);
 }
 
-async function renderData() {
+async function renderSync() {
   await act(async () => {
-    render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} section="data" />);
+    render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} section="sync" />);
   });
 }
 
-it('loads sync status only when the Data tab is open', async () => {
+it('loads sync status only when the Sync tab is open', async () => {
   stubSettings();
   const load = mock.method(api, 'getSyncStatus', async () => status({ configured: false, transport: 'none', classification: null, heads: [] }));
   await act(async () => {
@@ -84,7 +84,7 @@ it('loads sync status only when the Data tab is open', async () => {
   });
   assert.equal(load.mock.callCount(), 0);
   cleanup();
-  await renderData();
+  await renderSync();
   assert.equal(load.mock.callCount(), 1);
   assert.ok(screen.getByText('Device sync'));
 });
@@ -94,7 +94,7 @@ it('saves a sync folder and checks the remote right away', async () => {
   mock.method(api, 'getSyncStatus', async () => status({ configured: false, transport: 'none', folderPath: null, classification: null, heads: [] }));
   const configure = mock.method(api, 'configureSync', async () => status({ classification: null }));
   const check = mock.method(api, 'checkSync', async () => status({ classification: 'empty-remote', heads: [] }));
-  await renderData();
+  await renderSync();
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Sync folder' })); });
   await act(async () => {
     fireEvent.change(screen.getByLabelText(/Sync folder \(absolute path\)/), { target: { value: 'D:\\Sync' } });
@@ -130,7 +130,7 @@ it('refreshes Google Drive when returning to the app after consent', async (t) =
   const open = mock.method(window, 'open', () => null);
   const check = mock.method(api, 'checkSync', async () => ({ ...connected, classification: 'empty-remote' as const }));
 
-  await renderData();
+  await renderSync();
   fireEvent.click(screen.getByRole('button', { name: 'Google Drive' }));
   assert.ok(screen.getByText('Using the LCT OAuth client'));
   assert.equal(screen.queryByLabelText(/OAuth client ID/), null);
@@ -165,7 +165,7 @@ it('lets source users save their own Desktop OAuth client', async () => {
   const save = mock.method(api, 'configureSync', async () => ({
     ...source, google: { ...source.google, clientConfigured: true, customClientAvailable: true, clientSource: 'custom' as const },
   }));
-  await renderData();
+  await renderSync();
   assert.ok(screen.getByText('Developer OAuth settings').closest('details')?.open);
   assert.equal(screen.queryByRole('button', { name: 'Connect Google Drive' }), null);
   fireEvent.change(screen.getByLabelText(/OAuth client ID/), { target: { value: 'dev.apps.example' } });
@@ -185,7 +185,7 @@ it('retries a failed publish with the same operation ID', async () => {
     if (attempt++ === 0) throw new Error('network');
     return { published: true, snapshot: head };
   });
-  await renderData();
+  await renderSync();
   const button = screen.getByRole('button', { name: /Publish this device/ });
   await act(async () => { fireEvent.click(button); });
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Publish this device/ })); });
@@ -214,7 +214,7 @@ for (const code of ['SYNC_PREVIEW_EXPIRED', 'SYNC_PREVIEW_STALE']) it(`requires 
     },
   }));
   const receive = mock.method(api, 'receiveSync', async () => { throw Object.assign(new Error('stop'), { code }); });
-  await renderData();
+  await renderSync();
   assert.ok(screen.getByText(/More than one version changed/));
   assert.ok(screen.getByRole('button', { name: /Keep this device/ }));
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Receive MacBook/ })); });
@@ -244,7 +244,7 @@ it('offers every competing version when several devices published', async () => 
   mock.method(api, 'getSyncStatus', async () => forked);
   mock.method(api, 'checkSync', async () => forked);
   const previews = mock.method(api, 'previewSyncReceive', async () => { throw Object.assign(new Error('stop'), { code: 'SYNC_NOT_READY' }); });
-  await renderData();
+  await renderSync();
   assert.ok(screen.getByText(/2 competing versions/));
   assert.ok(screen.getByRole('button', { name: /Receive MacBook/ }));
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Receive Desktop/ })); });

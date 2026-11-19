@@ -3,7 +3,7 @@ name: lct
 description: Use LeetCode Tracker (LCT) through its MCP tools to view today's plan, log practice, write solution notes, review weak topics, or set up a profile.
 ---
 
-Use the connected LeetCode Tracker MCP and its advertised schemas. Read the text after the skill name as the request, including any arguments the client attaches. Natural-language requests work too. Answer in the user's language. If the tools are missing, direct the user to Settings → General → Connect an AI client to configure MCP.
+Use the connected LeetCode Tracker MCP and its advertised schemas. Read the text after the skill name as the request, including any arguments the client attaches. Natural-language requests work too. Answer in the user's language. If the tools are missing, direct the user to Settings → AI clients to configure MCP.
 
 ## Commands
 

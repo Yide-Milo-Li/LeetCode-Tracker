@@ -81,7 +81,7 @@
   }
 }
 
-/* Settings: four tabbed sections of label/control rows. */
+/* Settings: tabbed sections of label/control rows. */
 .settings-panel .preference-row:first-child {
   border-top: 0;
   padding-top: 4px;

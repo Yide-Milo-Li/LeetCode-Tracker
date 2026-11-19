@@ -28,7 +28,10 @@ Today shows one locally selected encouragement below its heading. The library co
 | Review metrics and activity dates | Progress → Statistics |
 | Change language or timezone | Settings → General |
 | Change interface mode or color palette | Settings → Appearance |
+| Turn swap/remove feedback or note format-on-save on or off | Settings → Practice & notes |
 | Configure an AI provider | Settings → AI assistant |
+| Let local AI clients (MCP) read and write, copy client configuration | Settings → AI clients (desktop app) |
+| Sync between devices through a folder or Google Drive | Settings → Sync |
 | Migrate to another device, export to Obsidian or Notion | Settings → Data |
 
 ## Completing a planned problem

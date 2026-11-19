@@ -223,10 +223,10 @@ export class DeviceSyncService {
     const local = this.localState();
     const { classification } = classifySyncState(this.listing.snapshots, local.baseId, local.dirty);
     if (classification === 'remote-ahead') {
-      return { code: 'SYNC_REMOTE_AHEAD', message: 'Device sync has a newer snapshot. Review it under Settings → Data → Device sync before making more changes.' };
+      return { code: 'SYNC_REMOTE_AHEAD', message: 'Device sync has a newer snapshot. Review it under Settings → Sync before making more changes.' };
     }
     if (classification === 'fork') {
-      return { code: 'SYNC_FORK', message: 'Device sync found divergent snapshots. Review the available versions in Settings → Data → Device sync.' };
+      return { code: 'SYNC_FORK', message: 'Device sync found divergent snapshots. Review the available versions in Settings → Sync.' };
     }
   }
 

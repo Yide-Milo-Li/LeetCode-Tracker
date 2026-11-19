@@ -20,13 +20,13 @@ By default the server uses the desktop app's profile, so if you already use Leet
 
 Override it with `--db <path>` or the `LEETCODE_TRACKER_DB` environment variable. Run `leetcode-tracker-mcp where` to print the path in use.
 
-Reads and previews open a short-lived read-only connection per call. Writes acquire the profile lease when the desktop app is closed. To write while it is running, open **Settings → General → Connect an AI client** and enable **Allow AI client writes**. The setting is off by default and applies to this device. While the app owns the profile, a disabled or unavailable bridge returns `PROFILE_IN_USE`.
+Reads and previews open a short-lived read-only connection per call. Writes acquire the profile lease when the desktop app is closed. To write while it is running, open **Settings → AI clients** and enable **Allow AI client writes**. The setting is off by default and applies to this device. While the app owns the profile, a disabled or unavailable bridge returns `PROFILE_IN_USE`.
 
 Choose Claude Code, Claude Desktop, Codex or Antigravity in the same panel and copy the configuration entry. The generated entry points to the bundled Node executable, MCP script, and current profile. Merge it into the client's configuration file and restart the client. Recent activity is available for the current desktop session.
 
 If a tool reports `AGENT_WRITE_UNCERTAIN`, read the affected data to check whether the change was applied before retrying. Reuse the original operation ID when the tool accepts one.
 
-Forwarded writes count as local changes for device sync. When the latest sync check found a newer or divergent snapshot, the write result includes a warning. Review the available snapshots in **Settings → Data → Device sync**.
+Forwarded writes count as local changes for device sync. When the latest sync check found a newer or divergent snapshot, the write result includes a warning. Review the available snapshots in **Settings → Sync**.
 
 ## Getting started without the desktop app
 
@@ -79,7 +79,7 @@ Add `"--db", "/path/to/tracker.sqlite"` to the arguments to use a different prof
 
 ## Optional LCT shortcuts
 
-Once MCP is connected, you can use LCT in natural language. To add shortcuts, choose your client in the desktop app's **Connect an AI client** panel, copy the command under **Install LCT shortcuts**, and run it in Windows PowerShell or macOS Terminal. Then start a new client session.
+Once MCP is connected, you can use LCT in natural language. To add shortcuts, choose your client under the desktop app's **Settings → AI clients** tab, copy the command under **Install LCT shortcuts**, and run it in Windows PowerShell or macOS Terminal. Then start a new client session.
 
 From a standalone install, use `leetcode-tracker-mcp install-skill --client <client>`. From a source checkout, run `npm run mcp:build` and use `node apps/mcp/dist/leetcode-tracker-mcp.mjs install-skill --client <client>`.
 

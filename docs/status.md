@@ -2,7 +2,7 @@
 
 ## Unreleased — Phase 41 device sync (in progress on `main`)
 
-Device sync through a sync folder or the Google Drive app data folder is implemented in source ([device sync](sync.md)): snapshot envelope contracts, content hashing, fork-aware graph rules, folder and Drive adapters, loopback PKCE OAuth, `/api/v1/sync/*` routes, the Settings → Data panel, a desktop folder picker and the Google consent host allowlist. No schema or bundle format change.
+Device sync through a sync folder or the Google Drive app data folder is implemented in source ([device sync](sync.md)): snapshot envelope contracts, content hashing, fork-aware graph rules, folder and Drive adapters, loopback PKCE OAuth, `/api/v1/sync/*` routes, the Settings → Sync tab, a desktop folder picker and the Google consent host allowlist. No schema or bundle format change.
 
 Automated coverage includes two-device folder sync, fork handling, invalid snapshots, OAuth client selection and a simulated Drive API round trip. Installed-app acceptance verified a Google Drive for desktop folder handoff from macOS to Windows and direct Google Drive authorization and snapshot listing with a custom client on macOS.
 

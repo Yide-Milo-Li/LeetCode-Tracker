@@ -36,7 +36,7 @@ const GOOGLE_AUTH_TIMEOUT_MS = 10 * 60 * 1000;
 const GOOGLE_AUTH_CHECK_MS = 3_000;
 
 /**
- * Load sync status the first time `active` turns true (the Data tab opens) and expose the actions
+ * Load sync status the first time `active` turns true (the Sync tab opens) and expose the actions
  * behind the sync panel.
  *
  * Side effects: a successful receive notifies the workspace, clears practice intents and reloads

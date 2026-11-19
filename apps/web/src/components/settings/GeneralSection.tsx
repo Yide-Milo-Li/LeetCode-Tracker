@@ -1,20 +1,12 @@
-/** "General" Settings tab: language, timezone and behavior preferences. */
+/** "General" Settings tab: language and timezone. */
 import { translations, type Language } from '../../i18n.ts';
 import { useWorkspace } from '../../workspace.tsx';
 import { TimezoneField } from '../TimezoneField.tsx';
-import { DesktopAgentPanel } from './DesktopAgentPanel.tsx';
-import { isTauri } from '../../platform/index.ts';
-import type { DesktopAgentStatus } from '../../../../../packages/contracts/src/desktop-agent.ts';
 
 interface GeneralSectionProps {
   lang: Language;
   onLanguageChange: (lang: Language) => void;
   onTimezoneSaved?: (zone: string | null) => void;
-  promptSwapFeedback: boolean;
-  onPromptSwapFeedbackChange: (enabled: boolean) => void;
-  notesFormatOnSave: boolean;
-  onNotesFormatOnSaveChange: (enabled: boolean) => void;
-  desktopAgent?: DesktopAgentStatus;
 }
 
 /** Render the General tab panel; preference values and their persistence stay with the parent. */
@@ -22,11 +14,6 @@ export function GeneralSection({
   lang,
   onLanguageChange,
   onTimezoneSaved,
-  promptSwapFeedback,
-  onPromptSwapFeedbackChange,
-  notesFormatOnSave,
-  onNotesFormatOnSaveChange,
-  desktopAgent,
 }: GeneralSectionProps) {
   const t = translations[lang];
   const workspace = useWorkspace();
@@ -37,6 +24,7 @@ export function GeneralSection({
       <section className="preference-row">
         <div className="preference-label">
           <h2>{t.langLabel}</h2>
+          <p>{zh ? '界面文字使用的语言，导出到 Obsidian 的笔记骨架也会使用它。' : 'Used for the interface and for note skeletons exported to Obsidian.'}</p>
         </div>
         <div className="segmented-control" aria-label={t.langLabel}>
           <button aria-pressed={lang === 'zh'} onClick={() => onLanguageChange('zh')}>
@@ -59,64 +47,6 @@ export function GeneralSection({
         </div>
         <TimezoneField lang={lang} value={workspace.timezone} onSaved={(zone) => onTimezoneSaved?.(zone)} hideLabel />
       </section>
-
-      <section className="preference-row">
-        <div className="preference-label">
-          <h2>{zh ? '换题或移除时询问原因' : 'Ask for reason when swapping or removing'}</h2>
-          <p>
-            {zh
-              ? '开启后，在今日计划中换题或移除题目时会弹出可选反馈窗口；关闭后直接执行操作。'
-              : 'When enabled, swapping or removing a Today problem opens an optional feedback prompt; when off, the action runs directly.'}
-          </p>
-        </div>
-        <div
-          className="segmented-control"
-          aria-label={zh ? '换题或移除时询问原因' : 'Ask for reason when swapping or removing'}
-        >
-          <button
-            type="button"
-            aria-pressed={promptSwapFeedback}
-            onClick={() => onPromptSwapFeedbackChange(true)}
-          >
-            {zh ? '弹出反馈窗口' : 'Show prompt'}
-          </button>
-          <button
-            type="button"
-            aria-pressed={!promptSwapFeedback}
-            onClick={() => onPromptSwapFeedbackChange(false)}
-          >
-            {zh ? '不弹出' : "Don't show"}
-          </button>
-        </div>
-      </section>
-
-      <section className="preference-row">
-        <div className="preference-label">
-          <h2>{t.notesFormatOnSave}</h2>
-          <p>
-            {zh
-              ? '开启后，保存笔记时会自动整理 Markdown 排版（可在保存后随时撤销）。'
-              : 'Automatically clean up Markdown formatting when saving a note (can be undone immediately after saving).'}
-          </p>
-        </div>
-        <div className="segmented-control" role="group" aria-label={t.notesFormatOnSave}>
-          <button
-            type="button"
-            aria-pressed={notesFormatOnSave}
-            onClick={() => onNotesFormatOnSaveChange(true)}
-          >
-            {zh ? '开启' : 'On'}
-          </button>
-          <button
-            type="button"
-            aria-pressed={!notesFormatOnSave}
-            onClick={() => onNotesFormatOnSaveChange(false)}
-          >
-            {zh ? '关闭' : 'Off'}
-          </button>
-        </div>
-      </section>
-      {isTauri() && <DesktopAgentPanel lang={lang} status={desktopAgent} />}
     </div>
   );
 }

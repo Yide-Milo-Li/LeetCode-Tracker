@@ -8,8 +8,8 @@ Device sync is unreleased. Automated tests cover the sync folder and a simulated
 
 Sync is **one active device at a time** with **complete, immutable snapshots**:
 
-1. On the device you used last, click **Publish this device** (Settings → Data → Device sync).
-2. On whichever device you switch to next, open Settings → Data. It checks the remote store and offers **Receive _device_'s version**.
+1. On the device you used last, click **Publish this device** (Settings → Sync).
+2. On whichever device you switch to next, open Settings → Sync. It checks the remote store and offers **Receive _device_'s version**.
 3. Preview the counts, confirm, and the app replaces local data after a safety backup, then reloads.
 
 Each device also writes a small status file recording the snapshot it currently holds, so every device lists the others as "up to date" or "not on the latest version". Uploading is not reported as a completed handoff.
@@ -40,7 +40,7 @@ The app hashes the business content of the database (row-order independent, excl
 
 Use this when a file sync client already mirrors a folder on both computers, for example Google Drive for desktop (`G:\My Drive` on Windows, `~/Library/CloudStorage/GoogleDrive-…/My Drive` on macOS). No Google sign-in happens inside the app.
 
-1. Settings → Data → Device sync → **Sync folder**.
+1. Settings → Sync → **Sync folder**.
 2. Enter the absolute folder path (the desktop app also offers a folder picker) and **Save sync settings**.
 3. Repeat on every other computer with the folder that mirrors the same location.
 
@@ -52,7 +52,7 @@ LCT stores snapshots in the hidden **app data folder** of your Google Drive usin
 
 ### Official installer
 
-In Settings → Data → Device sync, choose **Google Drive** and click **Connect Google Drive**. The installer uses LCT's production Desktop OAuth client. Select your own Google account and grant access in the system browser. Return to LCT after the browser confirms the connection. LCT updates the status and checks for snapshots automatically. Repeat on each device with the same Google account. Publishing and receiving are separate actions.
+In Settings → Sync, choose **Google Drive** and click **Connect Google Drive**. The installer uses LCT's production Desktop OAuth client. Select your own Google account and grant access in the system browser. Return to LCT after the browser confirms the connection. LCT updates the status and checks for snapshots automatically. Repeat on each device with the same Google account. Publishing and receiving are separate actions.
 
 If you previously used a custom client, the installer asks you to reconnect when it cannot associate your grant with LCT's client. Different Google Cloud projects have separate Drive snapshot histories, even for the same account. To bring an old project's data across, receive the desired snapshot with the old client before upgrading. If the data is in a separate source profile, export it there and preview and import the bundle in the installer. Verify the local data before publishing it to the new project. Connecting alone leaves both histories intact.
 
@@ -61,7 +61,7 @@ If you previously used a custom client, the installer asks you to reconnect when
 1. Create a project in [Google Cloud Console](https://console.cloud.google.com/) and enable the **Google Drive API**.
 2. In Google Auth Platform, configure **Branding**, choose **External** under **Audience** for personal Google accounts, and add `https://www.googleapis.com/auth/drive.appdata` under **Data Access**. In **Testing**, add your account as a test user. Use **In production** for ongoing use. Testing grants for Drive expire after seven days. [Google publishing status](https://support.google.com/cloud/answer/15549945?hl=en)
 3. Under **Clients**, create an OAuth client of type **Desktop app**. LCT uses Google's loopback redirect on an automatically chosen local port. [Google desktop OAuth](https://developers.google.com/identity/protocols/oauth2/native-app)
-4. Under **Settings → Data → Device sync → Google Drive → Developer OAuth settings**, enter the client ID and its desktop client secret if supplied, then **Save and use custom client** and connect. Alternatively, set `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` in the checkout's `.env` and restart the source server. An ID saved in Settings takes precedence. Use the same Google Cloud project on devices that share snapshots.
+4. Under **Settings → Sync → Google Drive → Developer OAuth settings**, enter the client ID and its desktop client secret if supplied, then **Save and use custom client** and connect. Alternatively, set `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` in the checkout's `.env` and restart the source server. An ID saved in Settings takes precedence. Use the same Google Cloud project on devices that share snapshots.
 
 LCT uses an installed-app loopback callback with PKCE and an expiring, single-use state. The refresh token stays in local SQLite settings, unencrypted and excluded from exports. **Disconnect** clears the local token and attempts to revoke the Google grant. Revoking the grant can require other devices on the same account and project to reconnect. [Google token revocation](https://developers.google.com/identity/protocols/oauth2/native-app#tokenrevoke)
 

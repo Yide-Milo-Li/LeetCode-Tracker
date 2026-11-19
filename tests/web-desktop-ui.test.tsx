@@ -51,12 +51,14 @@ it('offers the optional skill alongside the selected client’s MCP configuratio
       instance: 'test-instance', enabled: false, revision: 0, timezone: null, activity: [],
       launch: { command: '/Applications/LCT/node', entry: '/Applications/LCT/mcp.mjs', dbPath: '/Profile/tracker.sqlite' },
     }} />);
-    const client = screen.getByRole('combobox', { name: 'Client' });
+    assert.equal(screen.getByRole('switch', { name: 'Allow AI client writes' }).getAttribute('aria-checked'), 'false');
+    assert.equal(screen.getByRole('button', { name: 'Claude Code' }).getAttribute('aria-pressed'), 'true');
+    const pickClient = (name: string) => fireEvent.click(screen.getByRole('button', { name }));
     const install = () => screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'LCT skill install command' });
     assert.match(install().value, /--client claude-code$/);
-    fireEvent.change(client, { target: { value: 'Codex' } });
+    pickClient('Codex');
     assert.ok(screen.getByText('$lct note 42'));
-    fireEvent.change(client, { target: { value: 'Antigravity' } });
+    pickClient('Antigravity');
     assert.ok(screen.getByText('~/.gemini/config/mcp_config.json'));
     assert.match(install().value, /--client antigravity$/);
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy install command' })); });
@@ -66,7 +68,7 @@ it('offers the optional skill alongside the selected client’s MCP configuratio
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy install command' })); });
     assert.ok(screen.getByText(/Clipboard unavailable/));
     assert.equal(install().selectionEnd, install().value.length);
-    fireEvent.change(client, { target: { value: 'Claude Desktop' } });
+    pickClient('Claude Desktop');
     assert.equal(screen.queryByRole('button', { name: 'Copy install command' }), null);
   } finally {
     cleanup();

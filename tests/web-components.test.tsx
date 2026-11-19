@@ -3,6 +3,7 @@ import { afterEach, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import type { ImportPreview, ImportSummary, CatalogProblem } from '../apps/web/src/api.ts';
+import type { SettingsSection } from '../apps/web/src/components/SettingsView.tsx';
 
 // Install the DOM before React DOM loads so its event handling uses the browser path.
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/' });
@@ -700,7 +701,7 @@ it('renders vendor-specific reasoning effort choices for OpenAI and DeepSeek', a
   assert.equal(payload.deepseekReasoningEffort, 'none');
 });
 
-it('toggles promptSwapFeedback in SettingsView General tab and persists via API', async () => {
+it('toggles promptSwapFeedback in SettingsView Practice tab and persists via API', async () => {
   mock.method(api, 'getImportHistory', async () => ({ total: 0, items: [] }));
   mock.method(api, 'getSettings', async () => ({
     language: 'en',
@@ -718,20 +719,17 @@ it('toggles promptSwapFeedback in SettingsView General tab and persists via API'
   }));
 
   await act(async () => {
-    render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} />);
+    render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} section="practice" />);
   });
 
-  const showBtn = screen.getByRole('button', { name: 'Show prompt' });
-  const hideBtn = screen.getByRole('button', { name: "Don't show" });
-  assert.equal(showBtn.getAttribute('aria-pressed'), 'true');
-  assert.equal(hideBtn.getAttribute('aria-pressed'), 'false');
+  const toggle = screen.getByRole('switch', { name: 'Ask for a reason when swapping or removing' });
+  assert.equal(toggle.getAttribute('aria-checked'), 'true');
 
   await act(async () => {
-    fireEvent.click(hideBtn);
+    fireEvent.click(toggle);
   });
 
-  assert.equal(hideBtn.getAttribute('aria-pressed'), 'true');
-  assert.equal(showBtn.getAttribute('aria-pressed'), 'false');
+  assert.equal(toggle.getAttribute('aria-checked'), 'false');
   assert.equal(writes.mock.callCount(), 1);
   assert.deepEqual(writes.mock.calls[0].arguments[0], { promptSwapFeedback: false });
 });
@@ -807,7 +805,7 @@ it('renders DeepSeek thinking labels in pure Chinese in SettingsView zh mode', a
   assert.ok(optionTexts.every((t) => !t.includes('thinking:')));
 });
 
-it('toggles notesFormatOnSave in SettingsView General tab with On as default', async () => {
+it('toggles notesFormatOnSave in SettingsView Practice tab with On as default', async () => {
   mock.method(api, 'getImportHistory', async () => ({ total: 0, items: [] }));
   mock.method(api, 'getSettings', async () => ({
     language: 'en',
@@ -824,22 +822,44 @@ it('toggles notesFormatOnSave in SettingsView General tab with On as default', a
   }));
 
   await act(async () => {
-    render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} />);
+    render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} section="practice" />);
   });
 
-  const group = screen.getByRole('group', { name: 'Format on save' });
-  const buttons = group.querySelectorAll('button');
-  assert.equal(buttons.length, 2);
-  const [onBtn, offBtn] = buttons;
-  assert.equal(onBtn.getAttribute('aria-pressed'), 'true');
-  assert.equal(offBtn.getAttribute('aria-pressed'), 'false');
+  const toggle = screen.getByRole('switch', { name: 'Format on save' });
+  assert.equal(toggle.getAttribute('aria-checked'), 'true');
 
   await act(async () => {
-    fireEvent.click(offBtn);
+    fireEvent.click(toggle);
   });
 
-  assert.equal(offBtn.getAttribute('aria-pressed'), 'true');
-  assert.equal(onBtn.getAttribute('aria-pressed'), 'false');
+  assert.equal(toggle.getAttribute('aria-checked'), 'false');
   assert.equal(writes.mock.callCount(), 1);
   assert.deepEqual(writes.mock.calls[0].arguments[0], { notesFormatOnSave: false });
+});
+
+it('groups Settings into topic tabs and hides the desktop-only AI clients tab in the browser', async () => {
+  mock.method(api, 'getSettings', async () => ({ language: 'en', theme: 'light', timezone: 'UTC', updatedAt: 1 }));
+  let section: SettingsSection = 'clients';
+  await act(async () => {
+    render(
+      <SettingsView
+        lang="en"
+        currentTheme="light"
+        onLanguageChange={() => {}}
+        onThemeChange={() => {}}
+        section="clients"
+        onSectionChange={(next) => { section = next; }}
+      />,
+    );
+  });
+
+  const tabs = screen.getAllByRole('tab').map((tab) => tab.textContent);
+  assert.deepEqual(tabs, ['General', 'Appearance', 'Practice & notes', 'AI assistant', 'Sync', 'Data']);
+  // The desktop-only tab falls back to General instead of rendering an empty panel.
+  assert.equal(screen.getByRole('tab', { name: 'General' }).getAttribute('aria-selected'), 'true');
+  assert.ok(document.getElementById('settings-panel-general'));
+  assert.equal(screen.queryByRole('switch', { name: 'Format on save' }), null);
+
+  fireEvent.keyDown(screen.getByRole('tab', { name: 'General' }), { key: 'End' });
+  assert.equal(section, 'data');
 });
