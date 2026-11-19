@@ -16,6 +16,11 @@ export class SyncTransportError extends Error {
   }
 }
 
+export interface ListedDelta {
+  text: string;
+  fileHash: string;
+}
+
 /** Identity of the precise revision selected by a listing, when supplied by the transport. */
 export interface SyncBlobEntry {
   name: string;
@@ -25,6 +30,8 @@ export interface SyncBlobEntry {
   revision?: string;
   /** Drive's body checksum and, when available, matching JSON recovered from the listing. */
   jsonContent?: { sha256: string; text?: string };
+  /** A bounded hint from the selected payload file and its independently listed SHA-256. */
+  delta?: ListedDelta;
 }
 
 /** Minimal blob operations; names are validated by {@link isSyncBlobName}. */

@@ -4,6 +4,7 @@ import type { DriveSyncJournal } from '../../../../packages/database/src/drive-s
 import { assertSyncBlobName, isSyncBlobName, SyncTransportError, type SyncBlobEntry, type SyncBlobStore } from './blob-store.ts';
 import { DriveRequestError, DriveRequests } from './drive-request.ts';
 import { collectHistoryHints, isHistoryIndex, packHistoryHints, sha256 } from './drive-history-index.ts';
+import { MAX_DELTA_BYTES } from './drive-snapshot-delta.ts';
 import type { GoogleEndpoints } from './google-oauth.ts';
 
 interface DriveFile {
@@ -13,6 +14,7 @@ interface DriveFile {
   version?: string;
   sha256Checksum?: string;
   description?: string;
+  appProperties?: { lctDeltaSha256?: string };
 }
 
 const MULTIPART_LIMIT = 5 * 1024 * 1024;
@@ -85,6 +87,10 @@ export class GoogleDriveBlobStore implements SyncBlobStore {
         : file.version || file.modifiedTime ? JSON.stringify([file.id, file.version, file.modifiedTime]) : undefined;
       return {
         name: file.name, id: file.id, revision, hasDuplicates: duplicates.has(file.name),
+        delta: file.name.endsWith('.ltsync.gz') && !duplicates.has(file.name) && file.sha256Checksum &&
+          file.description && Buffer.byteLength(file.description) <= MAX_DELTA_BYTES &&
+          file.appProperties?.lctDeltaSha256 === sha256(file.description)
+          ? { text: file.description, fileHash: file.sha256Checksum } : undefined,
         jsonContent: checksum ? { sha256: checksum, text: description ?? hints.get(checksum) } : undefined,
       };
     });
@@ -126,9 +132,12 @@ export class GoogleDriveBlobStore implements SyncBlobStore {
   }
 
   /** Create an immutable blob using its reserved ID. A conflict must match the staged bytes. */
-  async create(name: string, id: string, data: Buffer, session?: UploadSession): Promise<void> {
+  async create(name: string, id: string, data: Buffer, session?: UploadSession, delta?: string): Promise<void> {
     assertSyncBlobName(name);
-    const metadata = JSON.stringify({ id, name, parents: ['appDataFolder'], ...jsonDescription(name, data) });
+    const metadata = JSON.stringify({
+      id, name, parents: ['appDataFolder'],
+      ...(delta ? { description: delta, appProperties: { lctDeltaSha256: sha256(delta) } } : jsonDescription(name, data)),
+    });
     try {
       if (data.length > MULTIPART_LIMIT) {
         if (!session) throw failed('Missing upload checkpoint');
@@ -269,7 +278,7 @@ export class GoogleDriveBlobStore implements SyncBlobStore {
     const files: DriveFile[] = [];
     const params = new URLSearchParams({
       spaces: 'appDataFolder',
-      fields: name ? 'nextPageToken,files(id,name,modifiedTime)' : 'nextPageToken,files(id,name,modifiedTime,version,sha256Checksum,description)',
+      fields: name ? 'nextPageToken,files(id,name,modifiedTime)' : 'nextPageToken,files(id,name,modifiedTime,version,sha256Checksum,description,appProperties)',
       pageSize: '1000', orderBy: 'modifiedTime desc', q: name ? `name = '${name}' and trashed = false` : 'trashed = false',
     });
     do {

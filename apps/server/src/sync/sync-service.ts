@@ -42,6 +42,7 @@ import {
 import { DriveSyncJournal, type StagedUpload } from '../../../../packages/database/src/drive-sync-journal.ts';
 import { DRIVE_BUDGET_MS, DriveRequests, type DriveConnection } from './drive-request.ts';
 import { sha256 } from './drive-history-index.ts';
+import { describeSnapshotDelta, reconstructSnapshot } from './drive-snapshot-delta.ts';
 import { validateMigrationBundle } from '../../../../packages/database/src/migration-bundle.ts';
 import type { CatalogStore } from '../../../../packages/database/src/store.ts';
 import { classifySyncState, findHeads } from '../../../../packages/domain/src/device-sync.ts';
@@ -53,6 +54,7 @@ import {
   snapshotBlobNames,
   type SyncBlobStore,
   type SyncBlobEntry,
+  type ListedDelta,
 } from './blob-store.ts';
 import { FolderBlobStore, validateSyncFolder } from './folder-store.ts';
 import { GoogleDriveBlobStore } from './google-drive-store.ts';
@@ -121,6 +123,7 @@ interface Listing {
   checkedAt: number;
   /** The selected payload ID for reads or a unique device-file ID for writes. */
   fileIds: Map<string, string>;
+  deltas: Map<string, ListedDelta>;
 }
 
 interface PendingPreview {
@@ -419,8 +422,7 @@ export class DeviceSyncService {
   // ---------------------------------------------------------------------------
 
   /**
-   * Download, verify and stage a snapshot. Verifies gzip integrity, envelope consistency,
-   * version compatibility, content hash and bundle references before anything is replaced.
+   * Reconstruct or download the selected snapshot. Validate its contents before staging a preview.
    * Only the most recent preview can be committed.
    */
   async previewReceive(snapshotId: string): Promise<SyncReceivePreview> {
@@ -430,40 +432,13 @@ export class DeviceSyncService {
     const snapshot = listing.snapshots.find(s => s.snapshotId === snapshotId);
     if (!snapshot) throw new DeviceSyncError(404, 'SYNC_NOT_FOUND', 'Snapshot not found');
     if (!snapshot.compatible || !snapshot.envelope) throw new DeviceSyncError(409, 'SYNC_INCOMPATIBLE', 'This snapshot needs a newer app version');
-    const names = snapshotBlobNames(snapshot.createdAt, snapshot.snapshotId);
-    let bytes: Buffer;
-    try {
-      bytes = await blobs.read(names.data, listing.fileIds.get(names.data));
-    } catch (error) {
-      this.requireCurrentRemote(cache);
-      if (error instanceof SyncTransportError && error.code === 'SYNC_NOT_FOUND') {
-        throw new DeviceSyncError(409, 'SYNC_NOT_READY', 'Snapshot data has not finished syncing to this device yet');
-      }
-      throw this.toApiError(error);
-    }
     this.requireCurrentRemote(cache);
-    // Integrity first (transport damage), then content validity (data this build cannot accept).
-    let payload: unknown;
-    try {
-      const decoded = decodeSnapshotFile(bytes);
-      if (decoded.envelope.snapshotId !== snapshot.snapshotId || decoded.envelope.contentHash !== snapshot.envelope.contentHash) {
-        throw new Error('Envelope mismatch');
-      }
-      payload = decoded.payload;
-      const tables = (payload as { tables?: SnapshotBundleV5['tables'] })?.tables;
-      if (!tables || computeContentHash(tables) !== snapshot.envelope.contentHash) throw new Error('Content hash mismatch');
-    } catch {
-      throw new DeviceSyncError(422, 'SYNC_CORRUPT', 'Snapshot is incomplete or corrupted; wait for sync to finish or choose another snapshot');
-    }
-    let bundle: SnapshotBundleV5;
-    try {
-      const validated = validateMigrationBundle(payload);
-      if (validated.version !== DEVICE_SYNC_BUNDLE_VERSION) throw new Error('Unexpected bundle version');
-      bundle = validated as SnapshotBundleV5;
-    } catch (error) {
-      throw new DeviceSyncError(422, 'SYNC_INVALID_DATA', `Snapshot data failed validation: ${summarizeValidationError(error)}`);
-    }
-    const localContentHash = computeContentHash(this.exportBundle().tables);
+    const name = snapshotBlobNames(snapshot.createdAt, snapshot.snapshotId).data;
+    const rebuilt = this.previewDelta(listing.deltas.get(name), snapshot.envelope);
+    const bundle = rebuilt?.bundle ?? await this.downloadBundle(blobs, name, listing.fileIds.get(name), snapshot.envelope, cache);
+    this.requireCurrentRemote(cache);
+    // A full download yields to local edits. Capture the consent baseline after it completes.
+    const localContentHash = rebuilt?.baseHash ?? computeContentHash(this.exportBundle().tables);
     const local = this.localState(localContentHash);
     const db = this.ctx.store.db;
     const count = (table: string) => (db.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get() as { n: number }).n;
@@ -482,6 +457,52 @@ export class DeviceSyncService {
         dailyPlans: pair('daily_plans'),
       },
     };
+  }
+
+  private previewDelta(hint: ListedDelta | undefined, envelope: SyncEnvelope) {
+    if (!hint || envelope.kind !== 'publish' || envelope.supersedes.length ||
+        !envelope.parentId || envelope.parentId !== this.setting(K.baseSnapshotId)) return;
+    const base = this.exportBundle();
+    const baseHash = computeContentHash(base.tables);
+    if (baseHash !== this.setting(K.baseContentHash)) return;
+    const bundle = reconstructSnapshot(hint, base, baseHash, envelope);
+    if (bundle) return { bundle, baseHash };
+  }
+
+  private async downloadBundle(
+    blobs: SyncBlobStore, name: string, id: string | undefined, envelope: SyncEnvelope, cache: typeof this.metaCache,
+  ): Promise<SnapshotBundleV5> {
+    let bytes: Buffer;
+    try {
+      bytes = await blobs.read(name, id);
+    } catch (error) {
+      this.requireCurrentRemote(cache);
+      if (error instanceof SyncTransportError && error.code === 'SYNC_NOT_FOUND') {
+        throw new DeviceSyncError(409, 'SYNC_NOT_READY', 'Snapshot data has not finished syncing to this device yet');
+      }
+      throw this.toApiError(error);
+    }
+    this.requireCurrentRemote(cache);
+    // Integrity first (transport damage), then content validity (data this build cannot accept).
+    let payload: unknown;
+    try {
+      const decoded = decodeSnapshotFile(bytes);
+      if (decoded.envelope.snapshotId !== envelope.snapshotId || decoded.envelope.contentHash !== envelope.contentHash) {
+        throw new Error('Envelope mismatch');
+      }
+      payload = decoded.payload;
+      const tables = (payload as { tables?: SnapshotBundleV5['tables'] })?.tables;
+      if (!tables || computeContentHash(tables) !== envelope.contentHash) throw new Error('Content hash mismatch');
+    } catch {
+      throw new DeviceSyncError(422, 'SYNC_CORRUPT', 'Snapshot is incomplete or corrupted; wait for sync to finish or choose another snapshot');
+    }
+    try {
+      const validated = validateMigrationBundle(payload);
+      if (validated.version !== DEVICE_SYNC_BUNDLE_VERSION) throw new Error('Unexpected bundle version');
+      return validated;
+    } catch (error) {
+      throw new DeviceSyncError(422, 'SYNC_INVALID_DATA', `Snapshot data failed validation: ${summarizeValidationError(error)}`);
+    }
   }
 
   /**
@@ -538,6 +559,12 @@ export class DeviceSyncService {
         [K.baseContentHash]: afterHash,
         [K.lastReceived]: preview.snapshot.snapshotId,
       });
+
+      if (driveScope && preview.snapshot.envelope && afterHash === preview.snapshot.envelope.contentHash) {
+        try {
+          this.journal.saveDeltaBase(driveScope, preview.snapshot.snapshotId, encodeSnapshotFile(preview.snapshot.envelope, after));
+        } catch { /* The next publish can proceed without an optional delta. */ }
+      }
 
       let resolutionSnapshotId: string | null = null;
       const heads = findHeads(this.listing!.snapshots);
@@ -812,7 +839,16 @@ export class DeviceSyncService {
         this.requireCurrentRemote(cache);
       }
       if (revision !== this.listingRevision) return this.readListing(blobs, shareLegacyHistory);
-      this.listing = { snapshots, devices, unreadable, fileIds, checkedAt: this.now() };
+      // Only direct children of the local base can use a delta. Release older descriptions with this listing.
+      const deltas = new Map<string, ListedDelta>();
+      const baseId = this.setting(K.baseSnapshotId);
+      if (baseId && scope) {
+        const children = new Set(snapshots
+          .filter(snapshot => snapshot.parentId === baseId)
+          .map(snapshot => snapshotBlobNames(snapshot.createdAt, snapshot.snapshotId).data));
+        for (const file of entries) if (file.delta && children.has(file.name)) deltas.set(file.name, file.delta);
+      }
+      this.listing = { snapshots, devices, unreadable, fileIds, deltas, checkedAt: this.now() };
       this.lastError = null;
       this.reconnectRequired = false;
       return this.listing;
@@ -929,14 +965,13 @@ export class DeviceSyncService {
     try {
       if (blobs instanceof GoogleDriveBlobStore) {
         const scope = await blobs.scope();
-        let staged = this.journal.upload(scope, intent.operation);
-        if (!staged) {
-          const [dataId, metaId] = await blobs.generateIds(2);
-          staged = { operation: intent.operation, envelope, payload: encodeSnapshotFile(envelope, bundle), dataId, metaId,
-            session: null, dataDone: false, baseId: this.setting(K.baseSnapshotId) };
-          this.journal.stage(scope, intent.purpose, intent.fingerprint, staged);
-        }
-        return await this.sendStaged(blobs, scope, staged);
+        const previous = this.journal.upload(scope, intent.operation);
+        if (previous) return await this.sendStaged(blobs, scope, previous);
+        const [dataId, metaId] = await blobs.generateIds(2);
+        const staged = { operation: intent.operation, envelope, payload: encodeSnapshotFile(envelope, bundle), dataId, metaId,
+          session: null, dataDone: false, baseId: this.setting(K.baseSnapshotId) };
+        this.journal.stage(scope, intent.purpose, intent.fingerprint, staged);
+        return await this.sendStaged(blobs, scope, staged, bundle);
       }
       await blobs.write(names.data, encodeSnapshotFile(envelope, bundle));
       await blobs.write(names.meta, Buffer.from(JSON.stringify(envelope)));
@@ -946,17 +981,34 @@ export class DeviceSyncService {
     }
   }
 
-  private async sendStaged(blobs: GoogleDriveBlobStore, scope: string, staged: StagedUpload): Promise<RemoteSnapshot> {
+  private async sendStaged(
+    blobs: GoogleDriveBlobStore, scope: string, staged: StagedUpload, bundle?: SnapshotBundleV5,
+  ): Promise<RemoteSnapshot> {
     const { operation, envelope } = staged;
     const names = snapshotBlobNames(envelope.createdAt, envelope.snapshotId);
     try {
       if (!staged.dataDone) {
+        let delta: string | undefined;
+        if (envelope.parentId && envelope.kind === 'publish' && !envelope.supersedes.length) {
+          try {
+            const base = this.journal.deltaBase(scope, envelope.parentId);
+            if (base) {
+              const target = bundle ?? decodeSnapshotFile(staged.payload).payload as SnapshotBundleV5;
+              delta = describeSnapshotDelta(base, target, envelope, staged.payload);
+            }
+          } catch { /* A missing or damaged local base cannot prevent publishing. */ }
+        }
         await blobs.create(names.data, staged.dataId, staged.payload, {
           location: staged.session, save: location => this.journal.setSession(scope, operation, location),
-        });
+        }, delta);
         this.journal.dataComplete(scope, operation);
       }
       await blobs.create(names.meta, staged.metaId, Buffer.from(JSON.stringify(envelope)));
+      if (envelope.kind === 'publish' && staged.baseId === this.setting(K.baseSnapshotId)) {
+        try {
+          this.journal.saveDeltaBase(scope, envelope.snapshotId, staged.payload);
+        } catch { /* The full snapshot is already committed on Drive. */ }
+      }
       return this.recordSnapshot(envelope);
     } catch (error) {
       throw this.toApiError(error);

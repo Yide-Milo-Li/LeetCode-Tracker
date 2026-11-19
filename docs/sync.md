@@ -79,7 +79,15 @@ For older snapshots, the first upgraded device can use its local SQLite cache or
 
 In the simulated Drive test, a new device with 100 current or fully indexed snapshots makes one account lookup and one single-page listing, with zero file downloads. Larger histories can require additional listing pages. Local caches, pending upload bytes and upload sessions are isolated by account and OAuth project and excluded from migration exports.
 
-When publishing or receiving, a device updates its acknowledgement by ID if the listing shows one matching file and this installation has already confirmed that ID for the connected account and project. A missing, replaced, or duplicate file triggers a lookup by name. With two established devices and single-page listings, a small snapshot handoff uses two list requests, one payload download, four writes and one ID reservation. Opening sync settings on both devices adds two list requests.
+When publishing or receiving, a device updates its acknowledgement by ID if the listing shows one matching file and this installation has already confirmed that ID for the connected account and project. A missing, replaced, or duplicate file triggers a lookup by name.
+
+### Small changes between devices
+
+Each Drive publish still uploads a complete snapshot. For an ordinary publish, the sender can also attach up to 4 KiB of row changes to the data file’s description in the same upload. A single-row edit can carry just the changed part of a long text field. The sender compares against the previous snapshot saved locally for this account and OAuth project. The cache holds one compressed base per account and project. After an upgrade, the next successful publish or receive establishes that base.
+
+A receiver can use the changes when its local profile still matches the exact parent snapshot. It checks the description checksum, the listed data file’s SHA-256 and the parent identity, then reconstructs the profile in memory. The reconstructed business data must match the committed content hash and pass the usual migration validation. The user still previews and confirms the receive. New devices, unpublished local edits, larger changes and unusable hints use the full download. Older clients can read the same full snapshot.
+
+In the simulated Drive test, an established two-device handoff with a small edit uses two single-page listings, four writes and one ID reservation, with zero media downloads. The full-download path adds one media request. Opening sync settings on both devices adds two listings.
 
 ### Configure the bundled client for distribution
 

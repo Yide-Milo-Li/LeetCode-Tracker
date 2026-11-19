@@ -19,6 +19,9 @@ export class DriveSyncJournal {
   constructor(db: DatabaseSync) {
     this.db = db;
     db.exec(`
+      CREATE TABLE IF NOT EXISTS drive_sync_delta_bases (
+        scope TEXT PRIMARY KEY, snapshot_id TEXT NOT NULL, payload BLOB NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS drive_sync_metadata (
         scope TEXT NOT NULL, name TEXT NOT NULL, revision TEXT NOT NULL, metadata TEXT NOT NULL,
         PRIMARY KEY (scope, name)
@@ -37,6 +40,16 @@ export class DriveSyncJournal {
         PRIMARY KEY (scope, operation)
       );
     `);
+  }
+
+  deltaBase(scope: string, snapshotId: string): Uint8Array | undefined {
+    return this.db.prepare('SELECT payload FROM drive_sync_delta_bases WHERE scope=? AND snapshot_id=?')
+      .get(scope, snapshotId)?.payload as Uint8Array | undefined;
+  }
+
+  saveDeltaBase(scope: string, snapshotId: string, payload: Buffer): void {
+    this.db.prepare('INSERT OR REPLACE INTO drive_sync_delta_bases(scope,snapshot_id,payload) VALUES (?,?,?)')
+      .run(scope, snapshotId, payload);
   }
 
   metadata(scope: string, name: string, revision: string): string | undefined {

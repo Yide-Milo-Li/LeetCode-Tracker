@@ -16,6 +16,7 @@ import { classifySyncState, findHeads, type SyncGraphNode } from '../packages/do
 import { buildApp } from '../apps/server/src/app.ts';
 import { snapshotBlobNames, isSyncBlobName } from '../apps/server/src/sync/blob-store.ts';
 import { DriveRequests, type DriveConnection } from '../apps/server/src/sync/drive-request.ts';
+import { MAX_DELTA_BYTES } from '../apps/server/src/sync/drive-snapshot-delta.ts';
 import { isHistoryIndex } from '../apps/server/src/sync/drive-history-index.ts';
 import { GoogleAccessTokenSource } from '../apps/server/src/sync/google-oauth.ts';
 import { DesktopAgent } from '../apps/server/src/desktop-agent.ts';
@@ -424,9 +425,9 @@ function unpackDriveMultipart(init: RequestInit) {
 
 /** In-memory Google token + Drive v3 endpoints sufficient for the adapter. */
 function fakeGoogle() {
-  const files = new Map<string, { id: string; name: string; data: Buffer; modifiedTime: string; version?: string; description?: string }>();
+  const files = new Map<string, { id: string; name: string; data: Buffer; modifiedTime: string; version?: string; description?: string; appProperties?: { lctDeltaSha256?: string } }>();
   const issued = new Set<string>();
-  const sessions = new Map<string, { id: string; name: string; total: number; received: Buffer }>();
+  const sessions = new Map<string, { id: string; name: string; description?: string; appProperties?: { lctDeltaSha256?: string }; total: number; received: Buffer }>();
   const state = { permissionId: 'account-1', checksums: true, aboutCalls: 0, indexWrites: 0, denyIndex: false,
     generatedIdsCalls: 0, writeCalls: 0, pageSize: 1000, listCalls: 0, nameQueries: 0, mediaGets: [] as string[], revoked: false, refreshCalls: 0, lastTokenBody: '' as string };
   let clock = 0;
@@ -466,6 +467,7 @@ function fakeGoogle() {
         id: file.id, name: file.name, modifiedTime: file.modifiedTime,
         version: fields.includes('version') ? file.version : undefined,
         description: fields.includes('description') ? file.description : undefined,
+        appProperties: fields.includes('appProperties') ? file.appProperties : undefined,
         sha256Checksum: state.checksums && fields.includes('sha256Checksum') ? createHash('sha256').update(file.data).digest('hex') : undefined,
       }));
       state.listCalls++;
@@ -510,10 +512,10 @@ function fakeGoogle() {
       return json({ id: file.id });
     }
     if (url.pathname === '/upload/files' && url.searchParams.get('uploadType') === 'resumable') {
-      const { name, id } = JSON.parse(String(init?.body));
+      const { name, id, description, appProperties } = JSON.parse(String(init?.body));
       if (files.has(id)) return json({}, 409);
       const key = '/upload/session/' + randomUUID();
-      sessions.set(key, { id, name, total: Number(new Headers(init?.headers).get('x-upload-content-length')), received: Buffer.alloc(0) });
+      sessions.set(key, { id, name, description, appProperties, total: Number(new Headers(init?.headers).get('x-upload-content-length')), received: Buffer.alloc(0) });
       return new Response(null, { status: 200, headers: { location: url.origin + key } });
     }
     if (url.pathname.startsWith('/upload/session/') && method === 'PUT') {
@@ -525,7 +527,7 @@ function fakeGoogle() {
         session.received = Buffer.concat([session.received, Buffer.from(init?.body as Uint8Array)]);
       }
       if (session.received.length === session.total) {
-        files.set(session.id, { id: session.id, name: session.name, data: session.received, modifiedTime: stamp() });
+        files.set(session.id, { id: session.id, name: session.name, description: session.description, appProperties: session.appProperties, data: session.received, modifiedTime: stamp() });
         return json({ id: session.id }, 201);
       }
       return new Response(null, { status: 308, headers: session.received.length ? { Range: 'bytes=0-' + (session.received.length - 1) } : {} });
@@ -537,7 +539,7 @@ function fakeGoogle() {
       assert.ok(id);
       if (files.has(id)) return json({}, 409);
       state.writeCalls++;
-      files.set(id, { id, name: metadata.name, data, version: '1', description: metadata.description, modifiedTime: stamp() });
+      files.set(id, { id, name: metadata.name, data, version: '1', description: metadata.description, appProperties: metadata.appProperties, modifiedTime: stamp() });
       return json({ id });
     }
     return json({ error: `unhandled ${method} ${url.pathname}` }, 500);
@@ -1086,7 +1088,12 @@ test('first Drive check lists 100 current or indexed legacy snapshots without a 
     const history = (await B.call('GET', '/api/v1/sync/history')).body.items;
     assert.equal(history.length, 100);
     const envelopes = [...google.files.values()].filter(f => f.name.startsWith('snap-') && f.name.endsWith('.json'));
-    for (const f of google.files.values()) if (f.name.endsWith('.gz')) assert.equal(f.description, undefined);
+    const dataFiles = [...google.files.values()].filter(f => f.name.endsWith('.gz'));
+    assert.equal(dataFiles.filter(f => f.description).length, 99, 'the first snapshot has no parent');
+    for (const f of dataFiles) {
+      assert.ok(Buffer.byteLength(f.description ?? '') <= MAX_DELTA_BYTES);
+      delete f.description; // Old snapshots have ordinary full payloads and no delta hints.
+    }
     for (const f of envelopes) delete f.description; // Simulate immutable files created by older releases.
 
     google.state.denyIndex = true;
@@ -1232,6 +1239,7 @@ test('Drive publish and receive see fresh acknowledgements in one-page listings 
   try {
     await seedMigrationProfile(a.store);
     await receive(await publish());
+    assert.equal(google.state.mediaGets.length, 1, 'a new device downloads the complete snapshot');
     assert.equal(google.state.nameQueries, 2, 'each new device locates its acknowledgement before creating it');
     for (const openSettings of [false, true]) {
       for (const d of [A, B]) assert.equal((await d.call('POST', '/api/v1/sync/check')).status, 200);
@@ -1248,9 +1256,8 @@ test('Drive publish and receive see fresh acknowledgements in one-page listings 
       assert.equal(google.state.nameQueries, 0, 'both devices update the ID from their listing');
       assert.equal(google.state.generatedIdsCalls, 1);
       assert.equal(google.state.writeCalls, 4);
-      const fileNames = google.state.mediaGets.map(id => google.files.get(id)!.name);
-      assert.equal(fileNames.length, 1);
-      assert.ok(fileNames[0].endsWith(snapshotId + '.ltsync.gz'), 'only the selected snapshot payload was downloaded');
+      assert.deepEqual(google.state.mediaGets, [], 'a clean receiver on the parent can reconstruct the full profile');
+      assert.equal(b.store.getProblemNote('1')?.content, '同步 ' + openSettings);
 
       google.state.mediaGets = [];
       const status = await A.call('POST', '/api/v1/sync/check');
@@ -1263,5 +1270,139 @@ test('Drive publish and receive see fresh acknowledgements in one-page listings 
       assert.equal(google.state.listCalls, 1);
       assert.deepEqual(google.state.mediaGets, []);
     }
+  } finally { await A.app.close(); await B.app.close(); a.close(); b.close(); }
+});
+
+test('Drive falls back from unusable deltas and preserves preview consent and full-snapshot integrity', async () => {
+  const google = fakeGoogle();
+  const a = await profile('delta-a'), b = await profile('delta-b');
+  selectDrive(a); selectDrive(b);
+  const options = { fetch: google.fetchImpl, googleEndpoints: google.endpoints };
+  const A = await device(a, options);
+  let B = await device(b, options);
+  const publish = async (sender: typeof A) => {
+    const res = await sender.call('POST', '/api/v1/sync/publish', {});
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    const id = res.body.snapshot.snapshotId as string;
+    const file = [...google.files.values()].find(file => file.name.endsWith(id + '.ltsync.gz'))!;
+    return { id, file };
+  };
+  const preview = async (reader: typeof A, id: string, media: string[]) => {
+    google.state.mediaGets = [];
+    const res = await reader.call('POST', '/api/v1/sync/receive/preview', { snapshotId: id });
+    assert.deepEqual(google.state.mediaGets, media);
+    return res;
+  };
+  const confirm = async (reader: typeof A, prev: Awaited<ReturnType<typeof preview>>, discard = false) => {
+    assert.equal(prev.status, 200, JSON.stringify(prev.body));
+    const res = await reader.call('POST', '/api/v1/sync/receive', {
+      previewId: prev.body.previewId, ...(discard ? { localChanges: 'discard' } : {}),
+    });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(res.body.warning, undefined);
+  };
+  try {
+    await seedMigrationProfile(a.store);
+    const first = await publish(A);
+    await confirm(B, await preview(B, first.id, [first.file.id]));
+    a.store.upsertProblemNote('1', 'small edit');
+    const small = await publish(A);
+    const original = small.file.description!;
+    const parsed = JSON.parse(original);
+    assert.ok(parsed.edits.length);
+    for (const hint of [undefined, '{', 'x'.repeat(MAX_DELTA_BYTES + 1), original.replace('small edit', 'wrong edit'),
+      JSON.stringify({ ...parsed, parentId: randomUUID() }), JSON.stringify({ ...parsed, baseHash: 'wrong' }),
+      JSON.stringify({ ...parsed, fileHash: 'wrong' }), JSON.stringify({ ...parsed, snapshotId: randomUUID() }),
+      JSON.stringify({ ...parsed, edits: [{ table: '__proto__', remove: [], add: [] }] })]) {
+      small.file.description = hint;
+      small.file.appProperties = hint ? { lctDeltaSha256: createHash('sha256').update(hint).digest('hex') } : undefined;
+      assert.equal((await preview(B, small.id, [small.file.id])).status, 200);
+    }
+    small.file.description = original;
+    assert.equal((await preview(B, small.id, [small.file.id])).status, 200, 'a damaged description checksum uses the full file');
+    small.file.appProperties = { lctDeltaSha256: createHash('sha256').update(original).digest('hex') };
+    const bytes = small.file.data;
+    small.file.data = Buffer.from('damaged payload');
+    assert.equal((await preview(B, small.id, [small.file.id])).body.error, 'SYNC_CORRUPT');
+    small.file.data = bytes;
+
+    const ready = await preview(B, small.id, []);
+    assert.equal(ready.status, 200);
+    b.store.upsertProblemNote('1', 'my unsaved change');
+    const stale = await B.call('POST', '/api/v1/sync/receive', { previewId: ready.body.previewId });
+    assert.equal(stale.body.error, 'SYNC_PREVIEW_STALE');
+    const dirty = await preview(B, small.id, [small.file.id]);
+    assert.equal(dirty.body.localDirty, true);
+    assert.equal(b.store.getProblemNote('1')?.content, 'my unsaved change');
+    await confirm(B, dirty, true);
+
+    a.store.upsertProblemNote('1', '大'.repeat(MAX_DELTA_BYTES));
+    const large = await publish(A);
+    assert.equal(large.file.description, undefined);
+    await confirm(B, await preview(B, large.id, [large.file.id]));
+    const editedNote = '大'.repeat(2048) + '📝' + '大'.repeat(2047);
+    a.store.upsertProblemNote('1', editedNote);
+    const tiny = await publish(A);
+    assert.ok(Buffer.byteLength(tiny.file.description!) < 1024, 'editing one character does not repeat the full note');
+    await confirm(B, await preview(B, tiny.id, []));
+    assert.equal(b.store.getProblemNote('1')?.content, editedNote);
+    await B.app.close();
+    await b.reopen();
+    B = await device(b, options);
+    b.db.prepare('DELETE FROM problem_notes WHERE question_id=?').run('1');
+    await b.store.createPracticeRecord({
+      questionFrontendId: '1', practicedAt: '2026-09-02', timePrecision: 'date',
+      completed: true, durationMinutes: 14, operationId: randomUUID(),
+    });
+    const reverse = await publish(B);
+    assert.ok(reverse.file.description, 'a receiver can publish a small deletion after restarting');
+    assert.ok(!reverse.file.description.includes('大'), 'the deleted note is not copied into the hint');
+    await confirm(A, await preview(A, reverse.id, []));
+    assert.equal(a.store.getProblemNote('1'), null);
+    assert.equal(a.db.prepare('SELECT count(*) AS total FROM practice_records').get()?.total, 2);
+    assert.equal(a.store.getSettings().openaiApiKey, 'synthetic-source-secret');
+  } finally { await A.app.close(); await B.app.close(); a.close(); b.close(); }
+});
+
+test('resumed Drive uploads describe the frozen snapshot even after local edits and a restart', async () => {
+  const google = fakeGoogle();
+  const a = await profile('delta-resume-a'), b = await profile('delta-resume-b');
+  selectDrive(a); selectDrive(b);
+  let interrupt = false;
+  const fetchImpl: typeof fetch = async (input, init) => {
+    if (interrupt && init?.method === 'POST' && String(input).includes('uploadType=multipart')) {
+      return new Response(null, { status: 503, headers: { 'Retry-After': '180' } });
+    }
+    return google.fetchImpl(input, init);
+  };
+  const options = { fetch: fetchImpl, googleEndpoints: google.endpoints };
+  let A = await device(a, options);
+  const B = await device(b, options);
+  const receive = async (snapshotId: string, downloads: number) => {
+    google.state.mediaGets = [];
+    const preview = await B.call('POST', '/api/v1/sync/receive/preview', { snapshotId });
+    assert.equal(preview.status, 200);
+    assert.equal(google.state.mediaGets.length, downloads);
+    const received = await B.call('POST', '/api/v1/sync/receive', { previewId: preview.body.previewId });
+    assert.equal(received.status, 200);
+  };
+  try {
+    await seedMigrationProfile(a.store);
+    const first = await A.call('POST', '/api/v1/sync/publish', {});
+    await receive(first.body.snapshot.snapshotId, 1);
+    a.store.upsertProblemNote('1', 'frozen');
+    const operationId = randomUUID();
+    interrupt = true;
+    assert.equal((await A.call('POST', '/api/v1/sync/publish', { operationId })).status, 502);
+    a.store.upsertProblemNote('1', 'edited after interruption');
+    await A.app.close();
+    await a.reopen();
+    A = await device(a, options);
+    interrupt = false;
+    const resumed = await A.call('POST', '/api/v1/sync/publish', { operationId });
+    assert.equal(resumed.status, 200);
+    await receive(resumed.body.snapshot.snapshotId, 0);
+    assert.equal(b.store.getProblemNote('1')?.content, 'frozen');
+    assert.equal((await A.call('GET', '/api/v1/sync/status')).body.localDirty, true);
   } finally { await A.app.close(); await B.app.close(); a.close(); b.close(); }
 });
