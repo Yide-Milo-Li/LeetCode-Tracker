@@ -89,11 +89,13 @@ A device with no unpublished edits can catch up on as many as eight consecutive 
 
 New devices and devices with unpublished edits download the selected full snapshot. The receiver also downloads that snapshot if it is more than eight versions away, the history forks, or any required file or hint is missing or fails validation. Older clients can continue reading the same full snapshots.
 
-When a Drive check finds one newer version that it can reconstruct from verified changes on a clean device, it holds that version in memory for up to one minute. Clicking **Receive** during that minute opens the preview without another listing. The app verifies the local data again when opening the preview and when confirming it. Expired checks, changed sync settings and local edits trigger a fresh lookup. If reconstruction requires a download, the app waits until you click **Receive**.
+When a clean device checks Drive and finds one compatible update, it remembers the selected version for up to one minute. If it can reconstruct that version, clicking **Receive** opens the prepared preview. If it needs the full snapshot, including on a new device, clicking **Receive** downloads the file by its listed ID and verifies the snapshot ID and content hash before opening the preview. Opening settings alone does not download the payload.
+
+An expired check, changed sync settings or local edits require a fresh listing. For full downloads, the receiver also refreshes the listing if snapshot filenames were ambiguous or the remembered file ID is missing. The app checks the local data again when confirming the preview.
 
 Confirming an update acknowledges exactly the version shown. If another device publishes a newer version in the meantime, that version stays available for the next check. A detected fork asks you to choose again. **History → Restore** still lets you deliberately make an older version current.
 
-In the simulated Drive test, both established devices open settings, the sender chooses **Check and publish**, and the receiver opens its prepared update within a minute. A small edit takes two single-page listings (one per device), four writes, one ID reservation and zero media downloads. If the receiver needs the full snapshot, it makes a third listing and downloads the selected payload. Choosing **Check** separately on the sender adds one listing. Devices with a pending publish, a known fork or unreadable metadata still check on open.
+In the simulated Drive test, both established devices open settings, the sender chooses **Check and publish**, and the receiver opens the update within a minute. The complete publish and receive uses two single-page listings (one per device), four writes and one ID reservation. A small edit requires zero media downloads. A full snapshot requires one media download. Choosing **Check** separately on the sender adds one listing. Devices with a pending publish, a known fork or unreadable metadata still check on open.
 
 ### Configure the bundled client for distribution
 

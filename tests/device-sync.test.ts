@@ -1241,8 +1241,8 @@ test('Drive publish and receive see fresh acknowledgements in one-page listings 
     await receive(await publish());
     assert.equal(google.state.mediaGets.length, 1, 'a new device downloads the complete snapshot');
     assert.equal(google.state.nameQueries, 2, 'each new device locates its acknowledgement before creating it');
-    for (const [openSettings, fullDownload, expectedListings] of [
-      [false, false, 2], [true, false, 2], [true, true, 3],
+    for (const [openSettings, fullDownload] of [
+      [false, false], [true, false], [true, true],
     ] as const) {
       for (const d of [A, B]) assert.equal((await d.call('POST', '/api/v1/sync/check')).status, 200);
       const note = fullDownload ? '笔'.repeat(MAX_DELTA_BYTES) : '同步 ' + openSettings;
@@ -1262,7 +1262,7 @@ test('Drive publish and receive see fresh acknowledgements in one-page listings 
       assert.equal(google.state.listCalls, 1, 'publish checks Drive once before uploading');
       if (openSettings) assert.equal((await B.call('POST', '/api/v1/sync/check')).status, 200);
       await receive(snapshotId);
-      assert.equal(google.state.listCalls, expectedListings);
+      assert.equal(google.state.listCalls, 2, 'one listing per device, including when the payload needs downloading');
       assert.equal(google.state.nameQueries, 0, 'both devices update the ID from their listing');
       assert.equal(google.state.generatedIdsCalls, 1);
       assert.equal(google.state.writeCalls, 4);
@@ -1302,7 +1302,7 @@ test('Drive publish and receive see fresh acknowledgements in one-page listings 
   } finally { await A.app.close(); await B.app.close(); a.close(); b.close(); }
 });
 
-test('receiving a checked Drive update acknowledges exactly that version while a third device publishes', async () => {
+for (const fullDownload of [false, true]) test(`a checked Drive update acknowledges the selected version while a third device publishes (download: ${fullDownload})`, async () => {
   const google = fakeGoogle();
   const a = await profile('pin-a'), b = await profile('pin-b'), c = await profile('pin-c');
   for (const p of [a, b, c]) selectDrive(p);
@@ -1328,8 +1328,10 @@ test('receiving a checked Drive update acknowledges exactly that version while a
   try {
     await seedMigrationProfile(a.store);
     await confirm(B, await preview(B, await publish(A)));
-    a.store.upsertProblemNote('1', 'from A');
+    const note = fullDownload ? '大'.repeat(MAX_DELTA_BYTES) : 'from A';
+    a.store.upsertProblemNote('1', note);
     const selected = await publish(A);
+    const payload = [...google.files.values()].find(file => file.name.endsWith(selected + '.ltsync.gz'))!;
     assert.equal((await B.call('POST', '/api/v1/sync/check')).body.heads[0].snapshotId, selected);
     await confirm(C, await preview(C, selected));
     c.store.upsertProblemNote('1', 'newer from C');
@@ -1339,14 +1341,14 @@ test('receiving a checked Drive update acknowledges exactly that version while a
     google.state.mediaGets = [];
     const shown = await preview(B, selected);
     assert.equal(google.state.listCalls, 0);
-    assert.deepEqual(google.state.mediaGets, []);
-    assert.notEqual(b.store.getProblemNote('1')?.content, 'from A', 'opening a preview does not apply it');
+    assert.deepEqual(google.state.mediaGets, fullDownload ? [payload.id] : []);
+    assert.notEqual(b.store.getProblemNote('1')?.content, note, 'opening a preview does not apply it');
     // A subsequent check sees C and prepares another candidate while B's confirmation is open.
     assert.equal((await B.call('POST', '/api/v1/sync/check')).body.heads[0].snapshotId, newer);
     const received = await confirm(B, shown);
     assert.equal(received.snapshotId, selected);
     assert.equal(received.resolutionSnapshotId, null);
-    assert.equal(b.store.getProblemNote('1')?.content, 'from A');
+    assert.equal(b.store.getProblemNote('1')?.content, note);
     const remote = (await B.call('POST', '/api/v1/sync/check')).body;
     assert.equal(remote.classification, 'remote-ahead');
     assert.deepEqual(remote.heads.map((head: { snapshotId: string }) => head.snapshotId), [newer]);
@@ -1362,7 +1364,7 @@ test('receiving a checked Drive update acknowledges exactly that version while a
   }
 });
 
-test('checked Drive previews recheck expired, dirty, reconfigured, and forked state', async () => {
+for (const fullDownload of [false, true]) test(`checked Drive previews recheck expired, dirty, reconfigured, and forked state (download: ${fullDownload})`, async () => {
   const google = fakeGoogle();
   const a = await profile('prepared-a'), b = await profile('prepared-b');
   selectDrive(a); selectDrive(b);
@@ -1377,8 +1379,11 @@ test('checked Drive previews recheck expired, dirty, reconfigured, and forked st
     const first = (await A.call('POST', '/api/v1/sync/publish', {})).body.snapshot.snapshotId;
     await check();
     assert.deepEqual(google.state.mediaGets, [], 'opening settings on a new device does not download a payload');
-    assert.equal((await confirm((await preview(first)).body.previewId)).status, 200);
-    a.store.upsertProblemNote('1', 'checked update');
+    google.state.listCalls = 0;
+    const firstPreview = await preview(first);
+    assert.equal(google.state.listCalls, 0, 'a clean first receive also uses the checked file ID');
+    assert.equal((await confirm(firstPreview.body.previewId)).status, 200);
+    a.store.upsertProblemNote('1', fullDownload ? '大'.repeat(MAX_DELTA_BYTES) : 'checked update');
     const target = (await A.call('POST', '/api/v1/sync/publish', {})).body.snapshot.snapshotId;
     const files = [...google.files.values()];
     const data = files.find(f => f.name.endsWith(target + '.ltsync.gz'))!;
@@ -1391,7 +1396,7 @@ test('checked Drive previews recheck expired, dirty, reconfigured, and forked st
     assert.deepEqual(google.state.mediaGets, [], 'an unusable hint still downloads only on user request');
     google.state.listCalls = 0;
     assert.equal((await preview(target)).status, 200);
-    assert.equal(google.state.listCalls, 1);
+    assert.equal(google.state.listCalls, 0);
     assert.deepEqual(google.state.mediaGets, [data.id]);
     data.description = hint;
 
@@ -1431,6 +1436,92 @@ test('checked Drive previews recheck expired, dirty, reconfigured, and forked st
     assert.deepEqual(google.state.mediaGets, [data.id]);
     assert.equal((await confirm(dirty.body.previewId)).body.error, 'SYNC_LOCAL_CHANGES');
     assert.equal(b.store.getProblemNote('1')?.content, 'my unsaved edit');
+  } finally { await A.app.close(); await B.app.close(); a.close(); b.close(); }
+});
+
+test('a checked Drive download refreshes a missing ID once and validates the selected file before preview', async () => {
+  const google = fakeGoogle();
+  const a = await profile('file-id-a'), b = await profile('file-id-b');
+  selectDrive(a); selectDrive(b);
+  const options = { fetch: google.fetchImpl, googleEndpoints: google.endpoints };
+  const A = await device(a, options), B = await device(b, options);
+  const check = () => B.call('POST', '/api/v1/sync/check');
+  try {
+    await seedMigrationProfile(a.store);
+    const snapshotId = (await A.call('POST', '/api/v1/sync/publish', {})).body.snapshot.snapshotId;
+    const preview = () => B.call('POST', '/api/v1/sync/receive/preview', { snapshotId, updateOnly: true });
+    const data = [...google.files.values()].find(file => file.name.endsWith(snapshotId + '.ltsync.gz'))!;
+    await check();
+    google.files.delete(data.id);
+    const replacement = { ...data, id: randomUUID() };
+    google.files.set(replacement.id, replacement);
+    google.state.listCalls = 0;
+    assert.equal((await preview()).status, 200);
+    assert.equal(google.state.listCalls, 1);
+    assert.deepEqual(google.state.mediaGets, [replacement.id]);
+
+    await check();
+    google.state.listCalls = 0;
+    replacement.data = Buffer.from('damaged download');
+    assert.equal((await preview()).body.error, 'SYNC_CORRUPT');
+    assert.equal(google.state.listCalls, 0);
+    assert.equal(b.store.listProblemNotes().total, 0);
+    replacement.data = data.data;
+
+    google.files.set(data.id, data);
+    await check();
+    google.state.listCalls = 0;
+    assert.equal((await preview()).status, 200);
+    assert.equal(google.state.listCalls, 1, 'ambiguous file names require a fresh listing');
+    google.files.delete(data.id);
+    await check();
+    google.files.delete(replacement.id);
+    assert.equal((await preview()).body.error, 'SYNC_NOT_READY');
+  } finally { await A.app.close(); await B.app.close(); a.close(); b.close(); }
+});
+
+test('a checked download observes configuration changes, forks and local edits during the media request', async () => {
+  const google = fakeGoogle();
+  const a = await profile('inflight-a'), b = await profile('inflight-b');
+  selectDrive(a); selectDrive(b);
+  const options = { fetch: google.fetchImpl, googleEndpoints: google.endpoints };
+  const A = await device(a, options);
+  let duringDownload: (() => Promise<void>) | undefined;
+  const B = await device(b, { ...options, fetch: async (url, init) => {
+    if (duringDownload && new URL(String(url)).searchParams.get('alt') === 'media') {
+      const action = duringDownload;
+      duringDownload = undefined;
+      await action();
+    }
+    return google.fetchImpl(url, init);
+  } });
+  try {
+    await seedMigrationProfile(a.store);
+    const snapshotId = (await A.call('POST', '/api/v1/sync/publish', {})).body.snapshot.snapshotId;
+    const check = () => B.call('POST', '/api/v1/sync/check');
+    const preview = () => B.call('POST', '/api/v1/sync/receive/preview', { snapshotId, updateOnly: true });
+    await check();
+    duringDownload = async () => { await B.call('PUT', '/api/v1/sync/config', { transport: 'gdrive', deviceName: 'renamed' }); };
+    assert.equal((await preview()).body.error, 'SYNC_CONFIG_CHANGED');
+
+    await check();
+    const meta = [...google.files.values()].find(f => f.name.endsWith(snapshotId + '.json'))!;
+    const fork = { ...JSON.parse(meta.description!), snapshotId: randomUUID() };
+    const text = JSON.stringify(fork);
+    const sibling = { ...meta, id: randomUUID(), name: snapshotBlobNames(fork.createdAt, fork.snapshotId).meta,
+      data: Buffer.from(text), description: text };
+    duringDownload = async () => {
+      google.files.set(sibling.id, sibling);
+      assert.equal((await check()).body.heads.length, 2);
+    };
+    assert.equal((await preview()).body.error, 'SYNC_UPDATE_CHANGED');
+    google.files.delete(sibling.id);
+
+    await check();
+    duringDownload = async () => { await seedMigrationProfile(b.store); };
+    const shown = await preview();
+    assert.equal(shown.body.localDirty, true);
+    assert.equal((await B.call('POST', '/api/v1/sync/receive', { previewId: shown.body.previewId })).body.error, 'SYNC_LOCAL_CHANGES');
   } finally { await A.app.close(); await B.app.close(); a.close(); b.close(); }
 });
 

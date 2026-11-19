@@ -120,6 +120,7 @@ interface Listing {
   snapshots: RemoteSnapshot[];
   devices: SyncDeviceState[];
   unreadable: number;
+  ambiguousSnapshotFiles: boolean;
   checkedAt: number;
   /** The selected payload ID for reads or a unique device-file ID for writes. */
   fileIds: Map<string, string>;
@@ -235,9 +236,10 @@ export class DeviceSyncService {
   /** Speculative Drive data is separate from the preview a user has opened for confirmation. */
   private checkedUpdate?: {
     snapshot: RemoteSnapshot;
-    bundle: SnapshotBundleV5;
-    baseHash: string;
-    baseId: string;
+    /** A full download uses the payload ID already held in the checked listing. */
+    bundle?: SnapshotBundleV5;
+    localHash: string;
+    baseId: string | null;
     expiresAt: number;
     timer: NodeJS.Timeout;
   };
@@ -365,20 +367,27 @@ export class DeviceSyncService {
   async check(): Promise<SyncStatus> {
     const blobs = this.requireStore();
     const listing = await this.refreshListing(blobs, true);
-    if (listing === this.listing && listing.deltaChain.length && !this.listingFlight && !this.checkedUpdate) {
-      const heads = findHeads(listing.snapshots);
-      const head = heads[0];
-      const rebuilt = heads.length === 1 && this.previewDelta(listing.deltaChain, head.snapshotId);
-      if (rebuilt) {
-        this.checkedUpdate = {
-          ...rebuilt, snapshot: head,
-          expiresAt: this.now() + CHECKED_UPDATE_TTL_MS,
-          timer: setTimeout(() => this.clearCheckedUpdate(), CHECKED_UPDATE_TTL_MS).unref(),
-        };
-        return this.status(rebuilt.baseHash);
-      }
+    if (!(blobs instanceof GoogleDriveBlobStore) || listing !== this.listing || this.listingFlight ||
+        this.checkedUpdate || listing.unreadable) return this.status();
+
+    const heads = findHeads(listing.snapshots);
+    const head = heads[0];
+    if (heads.length !== 1 || !head.compatible || !head.envelope) return this.status();
+    if (!listing.fileIds.has(snapshotBlobNames(head.createdAt, head.snapshotId).data)) return this.status();
+
+    const rebuilt = this.previewDelta(listing.deltaChain, head.snapshotId);
+    if (!rebuilt && listing.ambiguousSnapshotFiles) return this.status();
+    const localHash = rebuilt?.baseHash ?? computeContentHash(this.exportBundle().tables);
+    const status = this.status(localHash);
+    if (status.classification === 'remote-ahead') {
+      this.checkedUpdate = {
+        snapshot: head, bundle: rebuilt?.bundle,
+        baseId: status.baseSnapshotId, localHash,
+        expiresAt: this.now() + CHECKED_UPDATE_TTL_MS,
+        timer: setTimeout(() => this.clearCheckedUpdate(), CHECKED_UPDATE_TTL_MS).unref(),
+      };
     }
-    return this.status();
+    return status;
   }
 
   /** Every listed snapshot, newest first, for the history view. */
@@ -495,10 +504,20 @@ export class DeviceSyncService {
     const blobs = this.requireStore();
     const checked = this.checkedUpdate;
     if (updateOnly && checked?.snapshot.snapshotId === snapshotId && this.listing && this.now() < checked.expiresAt &&
-        checked.baseId === this.setting(K.baseSnapshotId) && checked.baseHash === this.setting(K.baseContentHash) &&
-        checked.baseHash === computeContentHash(this.exportBundle().tables)) {
+        checked.baseId === this.setting(K.baseSnapshotId) &&
+        (!checked.baseId || checked.localHash === this.setting(K.baseContentHash)) &&
+        checked.localHash === computeContentHash(this.exportBundle().tables)) {
       this.clearCheckedUpdate();
-      return this.stagePreview(this.listing, checked.snapshot, checked.bundle, checked.baseHash, true);
+      if (checked.bundle) {
+        return this.stagePreview(this.listing, checked.snapshot, checked.bundle, checked.localHash, true);
+      }
+      try {
+        return await this.downloadPreview(blobs, this.listing, checked.snapshot, cache, true);
+      } catch (error) {
+        // An immutable file may have been removed and re-created under a different Drive ID.
+        if (!(error instanceof DeviceSyncError && error.code === 'SYNC_NOT_READY')) throw error;
+        this.requireCurrentRemote(cache);
+      }
     }
     const listing = await this.refreshListing(blobs);
     if (updateOnly) {
@@ -511,13 +530,9 @@ export class DeviceSyncService {
     if (!snapshot) throw new DeviceSyncError(404, 'SYNC_NOT_FOUND', 'Snapshot not found');
     if (!snapshot.compatible || !snapshot.envelope) throw new DeviceSyncError(409, 'SYNC_INCOMPATIBLE', 'This snapshot needs a newer app version');
     this.requireCurrentRemote(cache);
-    const name = snapshotBlobNames(snapshot.createdAt, snapshot.snapshotId).data;
     const rebuilt = this.previewDelta(listing.deltaChain, snapshotId);
-    const bundle = rebuilt?.bundle ?? await this.downloadBundle(blobs, name, listing.fileIds.get(name), snapshot.envelope, cache);
-    this.requireCurrentRemote(cache);
-    // A full download yields to local edits. Capture the consent baseline after it completes.
-    const localContentHash = rebuilt?.baseHash ?? computeContentHash(this.exportBundle().tables);
-    return this.stagePreview(listing, snapshot, bundle, localContentHash, updateOnly);
+    if (rebuilt) return this.stagePreview(listing, snapshot, rebuilt.bundle, rebuilt.baseHash, updateOnly);
+    return this.downloadPreview(blobs, listing, snapshot, cache, updateOnly);
   }
 
   private stagePreview(
@@ -557,7 +572,22 @@ export class DeviceSyncService {
       bundle = next;
       hash = envelope.contentHash;
     }
-    return { bundle, baseHash, baseId };
+    return { bundle, baseHash };
+  }
+
+  private async downloadPreview(
+    blobs: SyncBlobStore, listing: Listing, snapshot: RemoteSnapshot,
+    cache: typeof this.metaCache, updateOnly: boolean,
+  ): Promise<SyncReceivePreview> {
+    const name = snapshotBlobNames(snapshot.createdAt, snapshot.snapshotId).data;
+    const baseId = this.setting(K.baseSnapshotId);
+    const bundle = await this.downloadBundle(blobs, name, listing.fileIds.get(name), snapshot.envelope!, cache);
+    this.requireCurrentRemote(cache);
+    // A full download yields to edits, receives and remote checks. Use their latest state for consent.
+    const current = this.listing ?? listing;
+    if (updateOnly && (baseId !== this.setting(K.baseSnapshotId) ||
+        (current !== listing && !this.canReceiveCheckedVersion(current, snapshot.snapshotId)))) throw changedUpdate();
+    return this.stagePreview(current, snapshot, bundle, computeContentHash(this.exportBundle().tables), updateOnly);
   }
 
   private async downloadBundle(
@@ -596,6 +626,12 @@ export class DeviceSyncService {
     }
   }
 
+  private canReceiveCheckedVersion(listing: Listing, snapshotId: string): boolean {
+    if (!listing.snapshots.some(snapshot => snapshot.snapshotId === snapshotId)) return false;
+    const { classification } = classifySyncState(listing.snapshots, snapshotId, false);
+    return classification === 'up-to-date' || classification === 'remote-ahead';
+  }
+
   /**
    * Replace the local profile with the previewed snapshot.
    *
@@ -622,13 +658,9 @@ export class DeviceSyncService {
         throw new DeviceSyncError(409, 'SYNC_LOCAL_CHANGES', 'This device has unpublished changes; choose to archive or discard them');
       }
       const listing = this.listing ?? await this.refreshListing(blobs);
-      const known = new Set(listing.snapshots.map(s => s.snapshotId));
-      if (preview.updateOnly) {
-        const { classification } = classifySyncState(listing.snapshots, preview.snapshot.snapshotId, false);
-        if (!known.has(preview.snapshot.snapshotId) || (classification !== 'up-to-date' && classification !== 'remote-ahead')) {
-          this.preview = null;
-          throw changedUpdate();
-        }
+      if (preview.updateOnly && !this.canReceiveCheckedVersion(listing, preview.snapshot.snapshotId)) {
+        this.preview = null;
+        throw changedUpdate();
       }
       const driveScope = blobs instanceof GoogleDriveBlobStore
         ? await blobs.scope().catch(error => { throw this.toApiError(error); }) : undefined;
@@ -637,7 +669,7 @@ export class DeviceSyncService {
         .update(JSON.stringify([local.baseId, beforeHash, preview.snapshot.snapshotId])).digest('hex');
       let forkSnapshotId: string | null = null;
       if (local.dirty && input.localChanges === 'fork') {
-        const parentId = local.baseId && known.has(local.baseId) ? local.baseId : null;
+        const parentId = listing.snapshots.some(s => s.snapshotId === local.baseId) ? local.baseId : null;
         forkSnapshotId = (await this.upload(blobs, before, beforeHash, { parentId, supersedes: [], kind: 'fork' },
           { operation: archiveOperation, purpose: 'archive', fingerprint: '' })).snapshotId;
       }
@@ -946,7 +978,8 @@ export class DeviceSyncService {
       if (revision !== this.listingRevision) return this.readListing(blobs, shareLegacyHistory);
       const baseId = this.setting(K.baseSnapshotId);
       const deltaChain = baseId && scope && !unreadable ? collectDeltaChain(baseId, snapshots, entries) : [];
-      this.listing = { snapshots, devices, unreadable, fileIds, deltaChain, checkedAt: this.now() };
+      const ambiguousSnapshotFiles = entries.some(file => file.hasDuplicates && file.name.startsWith('snap-'));
+      this.listing = { snapshots, devices, unreadable, ambiguousSnapshotFiles, fileIds, deltaChain, checkedAt: this.now() };
       this.lastError = null;
       this.reconnectRequired = false;
       return this.listing;
