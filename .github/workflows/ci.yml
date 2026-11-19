@@ -49,6 +49,9 @@ jobs:
   desktop-windows:
     name: Windows desktop boundaries and installer
     runs-on: windows-latest
+    env:
+      # Keep the Cargo registry and target directory on the same drive for cache archives.
+      CARGO_HOME: ${{ github.workspace }}\.cargo-ci
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -66,6 +69,11 @@ jobs:
           exit $LASTEXITCODE
       - name: Set up Rust and checking components
         run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+      - name: Cache compiled Rust dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: apps/desktop/src-tauri
+          cache-bin: false
       # Cargo embeds frontend assets; prepare them before native checks.
       - name: Build frontend
         run: npm run build
@@ -182,7 +190,6 @@ jobs:
   desktop-macos-native:
     name: macOS embedded WebView native migration test
     runs-on: macos-latest
-    needs: desktop-macos
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
