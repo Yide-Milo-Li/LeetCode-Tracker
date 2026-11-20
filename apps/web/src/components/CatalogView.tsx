@@ -3,7 +3,7 @@ import { Flag, FolderPlus, ListPlus, Pencil, RotateCcw, Plus, ExternalLink, Down
 import React, { useEffect, useRef, useState } from 'react';
 import type { CatalogListProblem, FavoriteFolder } from '../../../../packages/contracts/src/favorites.ts';
 import type { GoalList } from '../../../../packages/contracts/src/goal-lists.ts';
-import { compareProblemIds } from '../goal-list-input.ts';
+import { compareProblemIds } from '../../../../packages/contracts/src/goal-lists.ts';
 import {
   api,
   type CatalogStats,

@@ -111,6 +111,9 @@ export function registerBatchTools({ register }: Registrar): void {
     },
     async (application, { frontendIds, recentPractices = 3 }) => {
       const zone = await profileZone(application);
+      const { items: favorites } = await application.favorites.memberships(frontendIds);
+      const folders = new Map(favorites.map(favorite => [favorite.frontendId, favorite.folderIds]));
+      const goalLists = await application.goalLists.memberships(frontendIds);
       const problems = [];
       const notFound: string[] = [];
       for (const raw of new Set(frontendIds)) {
@@ -122,6 +125,8 @@ export function registerBatchTools({ register }: Registrar): void {
         const practice = await application.practice.query({ questionFrontendId: id, limit: Math.max(1, recentPractices) });
         problems.push({
           frontendId: id,
+          favoriteFolderIds: folders.get(id) ?? null,
+          goalListIds: goalLists.get(id) ?? [],
           title: problem.title,
           difficulty: problem.difficulty,
           tags: problem.topicTags.map(tag => tag.name),

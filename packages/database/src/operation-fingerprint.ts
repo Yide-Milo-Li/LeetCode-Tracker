@@ -16,3 +16,9 @@ export function operationFingerprint(db: DatabaseSync, table: 'planning_operatio
   const row = db.prepare(`SELECT fingerprint FROM ${table} WHERE id=?`).get(id) as { fingerprint: string } | undefined;
   return row?.fingerprint ?? null;
 }
+
+/** Encode a SHA-256 digest as an RFC 9562 custom (version 8) UUID. */
+export function uuidFromFingerprint(hex: string): string {
+  const variant = ((parseInt(hex[16], 16) & 0x3) | 0x8).toString(16);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-8${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}

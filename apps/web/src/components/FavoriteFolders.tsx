@@ -224,7 +224,7 @@ export function FavoriteProblemEditor({ target: { problem, frontendIds }, librar
     </Feedback> : !library ? <p role="status">{zh ? '正在读取收藏夹…' : 'Loading folders…'}</p> :
       <form id={formId} className="favorite-form" aria-label={title} onChange={clearError} onSubmit={event => {
         event.preventDefault();
-        save(library.folders.filter(folder => selectedFolders.has(folder.id)).map(folder => folder.id));
+        save(selected);
       }}>
         {(!frontendIds || library.folders.length > 0) && <fieldset className="favorite-choices" disabled={busy}>
           <legend>{zh ? '收藏夹（可多选）' : 'Folders (optional)'}</legend>

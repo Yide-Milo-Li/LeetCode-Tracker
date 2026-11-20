@@ -32,7 +32,7 @@ export function createFavoriteOperations({ store, writeLock }: ApplicationContex
   }
   return {
     library: async () => readFavoriteLibrary(db),
-    memberships: async () => ({ items: readFavoriteMemberships(db) }),
+    memberships: async (frontendIds?: string[]) => ({ items: readFavoriteMemberships(db, frontendIds) }),
     saveFolder(input: unknown) {
       const folder = parse(saveFavoriteFolderSchema, input);
       return write(() => {

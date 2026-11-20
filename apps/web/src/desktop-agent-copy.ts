@@ -41,6 +41,14 @@ export function activityLabel({ tool, count }: DesktopAgentActivity, lang: Langu
   switch (tool) {
     case 'tracker_create_practices':
       return zh ? `AI 客户端记录了 ${count ?? 1} 条练习。` : `An AI client recorded ${count ?? 1} practice ${(count ?? 1) === 1 ? 'attempt' : 'attempts'}.`;
+    case 'tracker_set_favorite':
+    case 'tracker_add_favorites':
+    case 'tracker_remove_favorites':
+    case 'tracker_save_favorite_folder':
+    case 'tracker_delete_favorite_folder':
+      return zh ? 'AI 客户端更新了收藏。' : 'An AI client updated your favorites.';
+    case 'tracker_set_goal_membership':
+    case 'tracker_add_to_goal_lists':
     case 'tracker_create_goal_list':
     case 'tracker_update_goal_list':
     case 'tracker_edit_goal_item':

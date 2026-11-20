@@ -1,16 +1,6 @@
 import { GOAL_PROBLEM_ID_MAX_LENGTH } from '../../../packages/contracts/src/goal-lists.ts';
 import type { Language } from './i18n.ts';
 
-const problemIdOrder = new Intl.Collator('en', { numeric: true });
-
-/** Give catalog selections a natural order with deterministic ties for IDs such as "2" and "002". */
-export function compareProblemIds(left: string, right: string) {
-  const leftNumeric = /^\d+$/u.test(left);
-  const rightNumeric = /^\d+$/u.test(right);
-  if (leftNumeric !== rightNumeric) return leftNumeric ? -1 : 1;
-  return problemIdOrder.compare(left, right) || left.length - right.length || (left < right ? -1 : left > right ? 1 : 0);
-}
-
 /** Keep imported string IDs containing separators or a literal "#" lossless in the bulk editor. */
 export function formatGoalIds(ids: string[]) {
   return ids.map(id => /^[#"]|[,，、\r\n]/u.test(id) || id !== id.trim() ? JSON.stringify(id) : id).join('\n');

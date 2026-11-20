@@ -15,6 +15,7 @@ export const READ_TOOL_NAMES = [
   'tracker_search_problems',
   'tracker_get_today',
   'tracker_get_goal_lists',
+  'tracker_get_favorite_folders',
   'tracker_list_practices',
   'tracker_list_notes',
   'tracker_get_progress',
@@ -40,6 +41,13 @@ export const WRITE_TOOL_NAMES = [
   'tracker_update_goal_list',
   'tracker_edit_goal_item',
   'tracker_delete_goal_list',
+  'tracker_set_goal_membership',
+  'tracker_add_to_goal_lists',
+  'tracker_save_favorite_folder',
+  'tracker_delete_favorite_folder',
+  'tracker_set_favorite',
+  'tracker_add_favorites',
+  'tracker_remove_favorites',
   'tracker_export_notes',
   'tracker_import_problems',
   'tracker_delete_strategy',
@@ -93,7 +101,9 @@ export function toolError(error: unknown): AgentResult {
   } else {
     console.error('[leetcode-tracker-mcp] unexpected tool failure:', error);
   }
-  return { isError: true, structuredContent: { error: code, message }, content: [{ type: 'text', text: `${code}: ${message}` }] };
+  const details = error instanceof ApplicationError ? error.details : {};
+  const missing = Array.isArray(details.frontendIds) ? { frontendIds: details.frontendIds.slice(0, 100), totalMissing: details.frontendIds.length } : {};
+  return { isError: true, structuredContent: { error: code, message, ...missing }, content: [{ type: 'text', text: `${code}: ${message}` }] };
 }
 
 function stripSchemaNoise(node: unknown): unknown {

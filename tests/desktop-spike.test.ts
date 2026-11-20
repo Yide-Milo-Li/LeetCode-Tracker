@@ -119,10 +119,21 @@ test('A stdio client follows the desktop lease and can use only the opted-in wri
     ] }).then(result => assert.equal(result.structuredContent.error, 'NOTE_CHANGED'));
     assert.equal((await getStatus() as { revision: number }).revision, 2, 'conflicts do not publish activity');
 
-    const goal = (await client.call('tracker_create_goal_list', { name: 'Shared list', frontendIds: ['1'] })).structuredContent;
+    const goal = (await client.call('tracker_create_goal_list', { id: randomUUID(), name: 'Shared list', frontendIds: ['1'] })).structuredContent;
     const goalUrl = url('/api/v1/goal-lists/' + goal.id);
     const visibleList = await fetch(goalUrl, { headers: desktopHeaders });
-    assert.deepEqual(await visibleList.json(), goal);
+    const visible = await visibleList.json() as { id: string; version: number; items: unknown[] };
+    assert.equal(visible.id, goal.id);
+    assert.equal(visible.version, goal.version);
+    assert.equal(visible.items.length, goal.total);
+    const beforeStar = (await getStatus() as { revision: number }).revision;
+    const stars = { frontendIds: ['1'], folderIds: [] };
+    assert.equal((await client.call('tracker_add_favorites', stars)).structuredContent.count, 1);
+    assert.equal((await getStatus() as { revision: number }).revision, beforeStar + 1);
+    const starred = await fetch(url('/api/v1/catalog?favoriteScope=all'), { headers: desktopHeaders });
+    assert.deepEqual((await starred.json() as { items: { favoriteFolderIds: string[] }[] }).items[0].favoriteFolderIds, []);
+    await client.call('tracker_add_favorites', stars);
+    assert.equal((await getStatus() as { revision: number }).revision, beforeStar + 1, 'replays do not announce a second write');
     assert.equal((await fetch(goalUrl + '/items', { method: 'PATCH', headers: desktopHeaders,
       body: JSON.stringify({ expectedVersion: goal.version, edit: { action: 'setCompleted', frontendId: '1', completed: true } }),
     })).status, 200);

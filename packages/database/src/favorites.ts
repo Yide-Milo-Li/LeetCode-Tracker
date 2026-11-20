@@ -7,9 +7,12 @@ export const FAVORITE_FOLDER_PREFIX = 'favorite:v1:folder:';
 export const FAVORITE_PROBLEM_PREFIX = 'favorite:v1:problem:';
 
 /** Read saved identifiers and their folders without loading or paginating the problem catalog. */
-export function readFavoriteMemberships(db: DatabaseSync): FavoriteMembership[] {
-  return db.prepare('SELECT key, value FROM catalog_meta WHERE key GLOB ?').all(FAVORITE_PROBLEM_PREFIX + '*')
-    .map(row => ({ frontendId: String(row.key).slice(FAVORITE_PROBLEM_PREFIX.length), folderIds: JSON.parse(String(row.value)) }));
+export function readFavoriteMemberships(db: DatabaseSync, frontendIds?: string[]): FavoriteMembership[] {
+  const rows = frontendIds
+    ? db.prepare('SELECT key, value FROM catalog_meta WHERE key IN (SELECT ? || value FROM json_each(?))')
+        .all(FAVORITE_PROBLEM_PREFIX, JSON.stringify(frontendIds))
+    : db.prepare('SELECT key, value FROM catalog_meta WHERE key GLOB ?').all(FAVORITE_PROBLEM_PREFIX + '*');
+  return rows.map(row => ({ frontendId: String(row.key).slice(FAVORITE_PROBLEM_PREFIX.length), folderIds: JSON.parse(String(row.value)) }));
 }
 
 export function readFavoriteFolders(db: DatabaseSync): FavoriteFolder[] {

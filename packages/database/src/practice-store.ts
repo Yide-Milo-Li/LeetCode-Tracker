@@ -4,10 +4,8 @@
  */
 import type { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
-import { evidenceAfter } from '../../domain/src/recommendations.ts';
-import type { DailyPlan } from '../../contracts/src/recommendations.ts';
-import { checkGoalEntries } from './goal-lists.ts';
-import { isEventTime, isTimeZone, localDate } from '../../contracts/src/time.ts';
+import { reconcileGoalEvidence } from './goal-lists.ts';
+import { isEventTime } from '../../contracts/src/time.ts';
 import {
   createPracticeRecordSchema,
   updatePracticeRecordSchema,
@@ -302,14 +300,11 @@ export function insertPracticeRow(
     ).run(validated.operationId, fingerprint, id);
   }
 
-  if (validated.completed && defaultTimezone && isTimeZone(defaultTimezone)) {
-    const row = db.prepare('SELECT payload_json FROM daily_plans WHERE plan_date=?').get(localDate(now, defaultTimezone));
-    const plan: DailyPlan | undefined = row && JSON.parse(String(row.payload_json));
-    const item = plan?.items.find(item => item.problem.questionId === problem.questionId);
-    const evidence = { id, questionId: problem.questionId, at: validated.practicedAt, precision,
-      zone: validated.sourceTimezone ?? defaultTimezone, recordedAt: now };
-    if (item && evidenceAfter(evidence, item.addedAt, now)) checkGoalEntries(db, problem.questionFrontendId);
-  }
+  const eventId = 'manual:' + id;
+  reconcileGoalEvidence(db, problem.questionId, now, validated.completed ? { successId: eventId } : { unfinished: {
+    id: eventId, questionId: problem.questionId, at: validated.practicedAt, precision,
+    zone: validated.sourceTimezone ?? defaultTimezone, recordedAt: now,
+  } });
   incrementPracticeRevision(db);
   return { id, replayed: false };
 }
@@ -417,6 +412,11 @@ export function updatePracticeRecordTransaction(
       );
     }
 
+    if (finalCompleted !== existing.completed || practicedAt !== existing.practicedAt ||
+        timePrecision !== existing.timePrecision ||
+        (validated.sourceTimezone !== undefined && validated.sourceTimezone !== existing.sourceTimezone)) {
+      reconcileGoalEvidence(db, existing.questionId, now, { successId: 'manual:' + id });
+    }
     incrementPracticeRevision(db);
     db.exec('COMMIT;');
   } catch (err) {
@@ -428,7 +428,7 @@ export function updatePracticeRecordTransaction(
 /**
  * Revoke an active practice record within a transaction.
  */
-export function revokePracticeRecordTransaction(db: DatabaseSync, id: string): void {
+export function revokePracticeRecordTransaction(db: DatabaseSync, id: string, questionId: string): void {
   const now = Date.now();
   db.exec('BEGIN IMMEDIATE;');
   try {
@@ -442,6 +442,7 @@ export function revokePracticeRecordTransaction(db: DatabaseSync, id: string): v
     `
     ).run(now, now, id);
 
+    reconcileGoalEvidence(db, questionId, now);
     incrementPracticeRevision(db);
     db.exec('COMMIT;');
   } catch (err) {

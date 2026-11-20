@@ -565,6 +565,26 @@ it('saves a catalog problem in two folders and browses each from the Favorites n
     assert.equal(records.length, 0);
 }));
 
+it('preserves a folder missing from the open Favorites directory when saving a fresh problem row', () => withProblemCatalog(async () => {
+  const a = { id: crypto.randomUUID(), name: 'Arrays' };
+  const b = { id: crypto.randomUUID(), name: 'Weekend' };
+  await api.saveFavoriteFolder(a, null);
+  location.hash = 'favorites';
+  await act(async () => { render(<App />); });
+  await screen.findByRole('button', { name: 'Arrays 0' });
+  await api.saveFavoriteFolder(b, null);
+  await api.addFavorites({ frontendIds: ['901'], folderIds: [a.id, b.id] });
+  const view = within(document.getElementById('view-favorites')!);
+  await act(async () => { fireEvent.change(view.getByRole('searchbox'), { target: { value: '901' } }); });
+  const star = await view.findByRole('button', { name: 'Manage favorite #901' });
+  await act(async () => { fireEvent.click(star); });
+  const dialog = within(await screen.findByRole('dialog', { name: 'Manage favorite' }));
+  assert.ok(!dialog.queryByRole('checkbox', { name: 'Weekend' }), 'folder directory is stale');
+  await act(async () => { fireEvent.click(dialog.getByRole('button', { name: 'Save favorite' })); });
+  await waitFor(() => assert.ok(!screen.queryByRole('dialog'), 'favorite save closes the editor'));
+  assert.deepEqual((await api.getFavoriteMemberships())[0].folderIds, [a.id, b.id].sort());
+}));
+
 it('adds a cross-page catalog selection to several existing goals and recovers if a destination is deleted', () => withProblemCatalog(async () => {
   const content = Array.from({ length: 20 }, (_, i) => JSON.stringify({ id: String(i + 1), title: `Task ${i + 1}`, difficulty: 'Easy' })).join('\n');
   const preview = await api.previewImport(content);

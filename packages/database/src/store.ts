@@ -460,7 +460,7 @@ export class CatalogStore {
         await this.backupManager.performPreImportBackup(this.db);
       }
 
-      revokePracticeRecordTransaction(this.db, id);
+      revokePracticeRecordTransaction(this.db, id, existing.questionId);
       return this.getPracticeRecord(id)!;
     });
 

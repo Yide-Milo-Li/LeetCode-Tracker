@@ -1,4 +1,8 @@
 import type { DatabaseSync } from 'node:sqlite';
+import type { DailyPlan, Evidence } from '../../contracts/src/recommendations.ts';
+import { isTimeZone, localDate } from '../../contracts/src/time.ts';
+import { evidenceAfter } from '../../domain/src/recommendations.ts';
+import { readPlanEvidence } from './planning-evidence.ts';
 import { GOAL_LIST_PREFIX, storedGoalListSchema, type StoredGoalList } from '../../contracts/src/goal-lists.ts';
 
 /** Keep ordered membership and its checklist state together in the portable metadata table. */
@@ -67,12 +71,41 @@ export function validateGoalLists(rows: { key: string; value: string }[], proble
   }
 }
 
-/** Update each containing list once, preserving order and completed items. Called inside a write transaction. */
-export function checkGoalEntries(db: DatabaseSync, frontendId: string) {
-  for (const list of readGoalLists(db)) {
-    const item = list.items.find(item => item.frontendId === frontendId);
-    if (!item || item.completed) continue;
-    item.completed = true;
+/** Persist evidence changes in the same transaction as the practice or snapshot edit.
+ * A checked entry without a link is manual (also the safe interpretation of older profiles).
+ * Keep the assignment boundary after revocation so a later correction can restore its check.
+ */
+export function reconcileGoalEvidence(db: DatabaseSync, questionId: string, now: number,
+  change: { successId?: string; unfinished?: Evidence } = {}) {
+  const problem = db.prepare('SELECT frontend_question_id AS id FROM problems WHERE question_id=?').get(questionId);
+  if (!problem) return;
+  const rows = db.prepare(`SELECT value FROM catalog_meta AS list WHERE key GLOB ?
+    AND EXISTS (SELECT 1 FROM json_each(list.value, '$.items') WHERE value->>'frontendId' = ?)`)
+    .all(GOAL_LIST_PREFIX + '*', problem.id);
+  if (!rows.length) return;
+  const evidence = readPlanEvidence(db, [questionId]);
+  const changed = change.unfinished ?? evidence.find(event => event.id === change.successId);
+  let newBoundary: number | undefined;
+  if (changed) {
+    const zone = db.prepare("SELECT value FROM settings WHERE key='timezone'").get()?.value;
+    if (typeof zone === 'string' && isTimeZone(zone)) {
+      const row = db.prepare('SELECT payload_json FROM daily_plans WHERE plan_date=?').get(localDate(now, zone));
+      const plan: DailyPlan | undefined = row && JSON.parse(String(row.payload_json));
+      const assignment = plan?.items.find(item => item.problem.questionId === questionId);
+      if (assignment && evidenceAfter(changed, assignment.addedAt, now)) newBoundary = assignment.addedAt;
+    }
+  }
+  for (const row of rows) {
+    const list: StoredGoalList = JSON.parse(String(row.value));
+    const item = list.items.find(item => item.frontendId === problem.id)!;
+    const boundary = item.linkedAfter ?? (!item.completed ? newBoundary : undefined);
+    if (boundary === undefined) continue;
+    const completed = evidence.some(event => evidenceAfter(event, boundary, now));
+    // An unfinished attempt can remember its assignment, but cannot check a reopened entry.
+    if (change.unfinished && item.linkedAfter === undefined && completed) continue;
+    if (completed === item.completed && item.linkedAfter === boundary) continue;
+    item.linkedAfter = boundary;
+    item.completed = completed;
     list.version++;
     saveGoalList(db, list);
   }

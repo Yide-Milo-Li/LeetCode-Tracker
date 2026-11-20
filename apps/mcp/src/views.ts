@@ -1,4 +1,5 @@
 /** Compact, model-facing shapes shared by read and write tools. */
+import { uuidFromFingerprint } from '../../../packages/database/src/operation-fingerprint.ts';
 import { createHash } from 'node:crypto';
 import type { DailyPlan, PlanItem } from '../../../packages/contracts/src/recommendations.ts';
 import type { PracticeRecord } from '../../../packages/contracts/src/practice.ts';
@@ -26,8 +27,7 @@ export function noteState(content: string | null | undefined): NoteState {
  */
 export function stepOperationId(batchOperationId: string, index: number): string {
   const hex = createHash('sha256').update(`${batchOperationId}:${index}`, 'utf8').digest('hex');
-  const variant = ((parseInt(hex[16], 16) & 0x3) | 0x8).toString(16);
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-8${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+  return uuidFromFingerprint(hex);
 }
 
 export async function profileLang(application: { settings: { get(): Promise<{ language?: string | null }> } }): Promise<'en' | 'zh'> {

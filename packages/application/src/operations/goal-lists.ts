@@ -1,11 +1,12 @@
-import { randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import {
   GOAL_LIST_PREFIX, createGoalListSchema, updateGoalListSchema, editGoalItemSchema, deleteGoalListSchema,
-  goalListSummary, goalListIdSchema, problemGoalMembershipSchema, addProblemsToGoalListsSchema,
+  compareProblemIds, goalListSummary, goalListIdSchema, problemGoalMembershipSchema, addProblemsToGoalListsSchema,
   type EditGoalItem, type GoalList, type StoredGoalList,
 } from '../../../contracts/src/goal-lists.ts';
 import { goalCatalog, readGoalLists, readGoalListsById, readGoalListPage, readGoalMemberships, saveGoalList } from '../../../database/src/goal-lists.ts';
+import { uuidFromFingerprint } from '../../../database/src/operation-fingerprint.ts';
 import { completePlanItem, currentPlan } from '../planned-completion.ts';
 import type { ApplicationContext } from '../context.ts';
 import { fail } from '../errors.ts';
@@ -24,7 +25,10 @@ function applyItemEdit(items: StoredGoalList['items'], edit: EditGoalItem['edit'
     case 'replace':
       if (edit.newFrontendId !== edit.frontendId) items[index] = { frontendId: edit.newFrontendId, completed: false };
       break;
-    case 'setCompleted': items[index].completed = edit.completed; break;
+    case 'setCompleted':
+      items[index].completed = edit.completed;
+      delete items[index].linkedAfter;
+      break;
     case 'add':
     case 'move': {
       if (edit.action === 'move' && edit.beforeId === edit.frontendId) break;
@@ -75,16 +79,53 @@ export function createGoalListOperations({ store, writeLock }: ApplicationContex
     return view;
   }
 
+  function createList(clientId: string | undefined, name: string, frontendIds: string[]) {
+    const fingerprint = createHash('sha256').update(JSON.stringify(['goal-create-v1', name, frontendIds])).digest('hex');
+    // The same inputs identify a creation for legacy clients that omit the UUID.
+    const id = clientId ?? uuidFromFingerprint(fingerprint);
+    const key = 'goal-create:' + id;
+    const receipt = db.prepare('SELECT fingerprint FROM planning_operations WHERE id=?').get(key);
+    if (receipt) {
+      if (receipt.fingerprint !== fingerprint) fail(409, { error: 'GOAL_LIST_EXISTS' });
+      return views([get(id)])[0]; // A retry after deletion must never recreate the list.
+    }
+    const [existing] = readGoalLists(db, id);
+    if (existing && (existing.version !== 1 || existing.name !== name || existing.items.length !== frontendIds.length ||
+        existing.items.some((item, index) => item.frontendId !== frontendIds[index]))) {
+      fail(409, { error: 'GOAL_LIST_EXISTS' });
+    }
+    const created = existing ? views([existing])[0] : save({
+      id, name, version: 1, items: frontendIds.map(frontendId => ({ frontendId, completed: false })),
+    });
+    db.prepare('INSERT INTO planning_operations(id,fingerprint,result_json) VALUES(?,?,?)').run(key, fingerprint, JSON.stringify({ id }));
+    return created;
+  }
+
   return {
     list: async (id?: string) => ({ items: views(id === undefined ? readGoalLists(db) : [get(id)]) }),
     memberships: async (frontendIds: string[]) => readGoalMemberships(db, frontendIds),
-    async summaries(page: number, limit: number) {
+    async summaries(page: number, limit: number, pendingPreview = 0) {
       const { total, lists } = readGoalListPage(db, page, limit);
-      return { items: lists.map(goalListSummary), total, page, nextPage: page * limit < total ? page + 1 : null };
+      const items = lists.map(list => {
+        const summary = goalListSummary(list);
+        if (!pendingPreview) return summary;
+        const preview = list.items.filter(item => !item.completed).slice(0, pendingPreview);
+        const catalog = goalCatalog(db, preview.map(item => item.frontendId));
+        return { ...summary, pending: preview.map(({ frontendId }) => ({ frontendId, title: catalog.get(frontendId)!.title })) };
+      });
+      return { items, total, page, nextPage: page * limit < total ? page + 1 : null };
+    },
+    async entries(id: string, page: number, limit: number, pendingOnly: boolean, expectedVersion?: number) {
+      const list = expectedVersion === undefined ? get(id) : current(id, expectedVersion);
+      const matching = pendingOnly ? list.items.filter(item => !item.completed) : list.items;
+      const slice = matching.slice((page - 1) * limit, page * limit);
+      const entries = views([{ ...list, items: slice }])[0].items;
+      return { items: [{ ...goalListSummary(list), items: entries }], total: matching.length, page,
+        nextPage: page * limit < matching.length ? page + 1 : null };
     },
     addProblems(input: unknown, includeLists = true) {
       const { frontendIds, listIds } = parse(addProblemsToGoalListsSchema, input);
-      const ids = [...new Set(frontendIds)];
+      const ids = [...new Set(frontendIds)].sort(compareProblemIds);
       const destinations = new Set(listIds);
       return transaction(() => {
         const selected = readGoalListsById(db, destinations);
@@ -135,37 +176,36 @@ export function createGoalListOperations({ store, writeLock }: ApplicationContex
           if (!includeLists) changed.push(goalListSummary(list));
         }
         if (newList && !known.has(newList.id)) {
-          const created = save({ ...newList, version: 1, items: [{ frontendId, completed: false }] });
+          const created = createList(newList.id, newList.name, [frontendId]);
           if (!includeLists) changed.push(goalListSummary(created));
         }
         return includeLists ? { items: views(readGoalLists(db)) } : { items: [], changed, problem };
       });
     },
     create(input: unknown) {
-      const { id = randomUUID(), name, frontendIds } = parse(createGoalListSchema, input);
-      return transaction(() => {
-        if (readGoalLists(db, id).length) fail(409, { error: 'GOAL_LIST_EXISTS', message: 'A list with this ID already exists.' });
-        return save({ id, name, version: 1, items: frontendIds.map(frontendId => ({ frontendId, completed: false })) });
-      });
+      const { id, name, frontendIds } = parse(createGoalListSchema, input);
+      return transaction(() => createList(id, name, frontendIds));
     },
     update(id: string, input: unknown) {
       const { expectedVersion, name, items } = parse(updateGoalListSchema, input);
       if (name === undefined && items === undefined) fail(400, { error: 'INVALID_INPUT', message: 'Provide a name or ordered items.' });
       return transaction(() => {
         const goal = current(id, expectedVersion);
-        const previous = new Map(goal.items.map(item => [item.frontendId, item.completed]));
-        const nextItems = items?.map(({ frontendId, completed }) => ({
-          frontendId, completed: completed ?? previous.get(frontendId) ?? false,
-        })) ?? goal.items;
-        const updated = save({ ...goal, version: goal.version + 1, name: name ?? goal.name, items: nextItems });
-        const newlyChecked = new Set(nextItems.filter(item => item.completed && !previous.get(item.frontendId)).map(item => item.frontendId));
-        if (newlyChecked.size) {
-          const now = Date.now();
-          const plan = currentPlan(store, now);
-          if (plan) for (const item of plan.items) {
-            if (newlyChecked.has(item.problem.questionFrontendId)) completePlanItem(store, plan, item, now);
-          }
-        }
+        const previous = new Map(goal.items.map(item => [item.frontendId, item]));
+        const newlyChecked = new Set<string>();
+        const nextItems = items?.map(({ frontendId, completed }) => {
+          const old = previous.get(frontendId);
+          if (old && (completed === undefined || old.completed === completed)) return old;
+          if (completed) newlyChecked.add(frontendId);
+          return { frontendId, completed: completed ?? false };
+        }) ?? goal.items;
+        const now = Date.now();
+        const plan = newlyChecked.size ? currentPlan(store, now) : null;
+        const assignments = plan?.items.filter(item => newlyChecked.has(item.problem.questionFrontendId)) ?? [];
+        const boundaries = new Map(assignments.map(a => [a.problem.questionFrontendId, a.addedAt]));
+        const updated = save({ ...goal, version: goal.version + 1, name: name ?? goal.name,
+          items: nextItems.map(item => boundaries.has(item.frontendId) ? { ...item, linkedAfter: boundaries.get(item.frontendId) } : item) });
+        if (plan) for (const assignment of assignments) completePlanItem(store, plan, assignment, now);
         return updated;
       });
     },
@@ -173,16 +213,21 @@ export function createGoalListOperations({ store, writeLock }: ApplicationContex
       const { expectedVersion, edit } = parse(editGoalItemSchema, input);
       return transaction(() => {
         const goal = get(id);
-        const alreadyChecked = edit.action === 'setCompleted' && edit.completed &&
-          goal.items.some(item => item.frontendId === edit.frontendId && item.completed);
-        if (alreadyChecked) return views([goal])[0];
+        const now = Date.now();
+        const checking = edit.action === 'setCompleted' && edit.completed;
+        const plan = checking ? currentPlan(store, now) : null;
+        const assignment = plan?.items.find(item => item.problem.questionFrontendId === edit.frontendId);
+        const entry = goal.items.find(item => item.frontendId === edit.frontendId);
+        if (checking && entry?.completed) {
+          const view = views([goal])[0];
+          if (!assignment?.completed || entry.linkedAfter !== assignment.addedAt) return view;
+          const manual = assignment.evidenceIds.find(id => id.startsWith('manual:'));
+          return { ...view, linkedPractice: manual ? store.getPracticeRecord(manual.slice('manual:'.length)) : null };
+        }
         if (goal.version !== expectedVersion) fail(409, { error: 'STALE_GOAL_LIST' });
         applyItemEdit(goal.items, edit);
+        if (assignment && entry) entry.linkedAfter = assignment.addedAt;
         const updated = save({ ...goal, version: goal.version + 1 });
-        if (edit.action !== 'setCompleted' || !edit.completed) return updated;
-        const now = Date.now();
-        const plan = currentPlan(store, now);
-        const assignment = plan?.items.find(item => item.problem.questionFrontendId === edit.frontendId);
         if (!plan || !assignment) return updated;
         const linkedPractice = completePlanItem(store, plan, assignment, now);
         return { ...updated, linkedPractice };

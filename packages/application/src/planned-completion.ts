@@ -2,7 +2,7 @@ import type { CreatePracticeRecordInput } from '../../contracts/src/practice.ts'
 import type { DailyPlan, PlanItem } from '../../contracts/src/recommendations.ts';
 import { isTimeZone, localDate } from '../../contracts/src/time.ts';
 import { evidenceAfter } from '../../domain/src/recommendations.ts';
-import { checkGoalEntries } from '../../database/src/goal-lists.ts';
+import { reconcileGoalEvidence } from '../../database/src/goal-lists.ts';
 import { PlanningStore } from '../../database/src/planning-store.ts';
 import { insertPracticeRow, practiceFingerprint, replayPracticeOperation } from '../../database/src/practice-store.ts';
 import type { CatalogStore } from '../../database/src/store.ts';
@@ -24,7 +24,7 @@ export function completePlanItem(store: CatalogStore, plan: DailyPlan, item: Pla
   if (replay) return replay;
 
   if (item.completed) {
-    checkGoalEntries(store.db, problem.questionFrontendId);
+    reconcileGoalEvidence(store.db, problem.questionId, now, { successId: item.evidenceIds[0] });
     const manual = item.evidenceIds.find(id => id.startsWith('manual:'));
     if (!manual) return null;
     const id = manual.slice('manual:'.length);

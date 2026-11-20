@@ -845,7 +845,7 @@ it('appends missing problems to existing goal lists atomically and safely replay
     assert.equal((await add(['4'], [])).statusCode, 400);
     assert.equal(store.getPlanningRevision(), revision);
 
-    const ids = ['2', '3', '4', '3'];
+    const ids = ['4', '3', '2', '3'];
     const saved = await add(ids, targets);
     assert.equal(saved.statusCode, 200, saved.body);
     const { items, added } = saved.json<{ items: GoalList[]; added: number }>();
@@ -1040,6 +1040,61 @@ it('shares one recorded solve across strategy and goal clicks, including concurr
     await assertProgress(3);
     assert.equal((await check(2, next)).statusCode, 200);
     await assertProgress(3);
+
+    const state = async () => {
+      const today = (await app.inject({ method: 'GET', url: '/api/v1/daily-plans?date=' + plan.date })).json().items[0];
+      const goal = (await app.inject({ method: 'GET', url })).json();
+      return [today, goal].map(value => value.items.map((item: { completed: boolean }) => item.completed));
+    };
+    const legacyId = randomUUID();
+    db.prepare('INSERT INTO catalog_meta(key,value) VALUES(?,?)').run('goal-list:v1:' + legacyId,
+      JSON.stringify({ id: legacyId, name: 'Pre-upgrade', version: 4, items: [{ frontendId: ids[0], completed: true }] }));
+    const linked = first.json().linkedPractice;
+    assert.equal((await check(0, 1)).json().linkedPractice.id, linked.id, 'retry recovers the linked record');
+    const additional = await store.createPracticeRecord({ questionFrontendId: ids[0], completed: true, practicedAt: new Date().toISOString() });
+    await store.revokePracticeRecord(linked.id);
+    assert.deepEqual(await state(), [[true, true, true], [true, true, true]], 'a second valid record still supports both checks');
+    await store.updatePracticeRecord(additional.id, { completed: false });
+    assert.deepEqual(await state(), [[false, true, true], [false, true, true]]);
+    await store.updatePracticeRecord(additional.id, { completed: true });
+    assert.deepEqual(await state(), [[true, true, true], [true, true, true]]);
+    const preview = store.previewProgressImport({ candidates: [{ frontendId: ids[0], lastSubmitted: new Date().toISOString(),
+      lastResult: 'Accepted', submissions: 1 }] });
+    await store.commitProgressImport(preview.previewId, preview);
+    await store.revokePracticeRecord(additional.id);
+    assert.deepEqual(await state(), [[true, true, true], [true, true, true]], 'imported success still supports the goal');
+    await store.updateProgressSnapshot(ids[0], { lastResult: 'Wrong Answer' });
+    assert.deepEqual(await state(), [[false, true, true], [false, true, true]]);
+    await store.updateProgressSnapshot(ids[0], { lastResult: 'Accepted' });
+    assert.deepEqual(await state(), [[true, true, true], [true, true, true]]);
+    await store.revokeProgressSnapshot(ids[0]);
+    assert.deepEqual(await state(), [[false, true, true], [false, true, true]]);
+    const old = (await app.inject({ method: 'GET', url: '/api/v1/goal-lists/' + legacyId })).json();
+    assert.equal(old.items[0].completed, true);
+    assert.equal(old.version, 4, 'evidence changes preserve an old check of unknown origin');
+    assert.equal(validateMigrationBundle(store.exportMigrationBundle(5)).version, 5);
+    const corrected = await store.createPracticeRecord({ questionFrontendId: ids[0], completed: false, practicedAt: new Date().toISOString() });
+    const fresh = (await app.inject({ method: 'POST', url: '/api/v1/goal-lists', payload: { name: 'New', frontendIds: [ids[0]] } })).json();
+    await store.updatePracticeRecord(corrected.id, { completed: true });
+    const freshUrl = '/api/v1/goal-lists/' + fresh.id;
+    const readFresh = async () => (await app.inject({ method: 'GET', url: freshUrl })).json();
+    assert.equal((await readFresh()).items[0].completed, true, 'first qualifying correction links a new entry');
+    const lateList = (await app.inject({ method: 'POST', url: '/api/v1/goal-lists',
+      payload: { name: 'Correct later', frontendIds: [ids[0]] } })).json();
+    await store.updatePracticeRecord(corrected.id, { completed: false });
+    const unfinished = await store.createPracticeRecord({ questionFrontendId: ids[0], completed: false, practicedAt: new Date().toISOString() });
+    const later = new Date(Date.now() + 86400000);
+    mock.timers.setTime(later.getTime());
+    await store.revokePracticeRecord(corrected.id);
+    assert.equal((await readFresh()).items[0].completed, false, 'a later-day correction retains its original assignment boundary');
+    await store.updatePracticeRecord(unfinished.id, { completed: true });
+    assert.equal((await app.inject({ method: 'GET', url: '/api/v1/goal-lists/' + lateList.id })).json().items[0].completed, true);
+    await store.revokePracticeRecord(unfinished.id);
+    await app.inject({ method: 'PATCH', url: freshUrl + '/items', payload: { expectedVersion: (await readFresh()).version,
+      edit: { action: 'setCompleted', frontendId: ids[0], completed: true } } });
+    const manual = await store.createPracticeRecord({ questionFrontendId: ids[0], completed: true, practicedAt: later.toISOString() });
+    await store.revokePracticeRecord(manual.id);
+    assert.equal((await readFresh()).items[0].completed, true, 'manual and legacy checks carry no evidence dependency');
   } finally { await app.close(); db.close(); }
 });
 

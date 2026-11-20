@@ -2,6 +2,7 @@
  * Catalog queries, tag aggregation, user settings, and dashboard raw data queries.
  * Read-only querying and atomic settings updates.
  */
+import { reconcileGoalEvidence } from './goal-lists.ts';
 import type { DatabaseSync } from 'node:sqlite';
 import { FAVORITE_PROBLEM_PREFIX } from './favorites.ts';
 import type { CatalogListProblem } from '../../contracts/src/favorites.ts';
@@ -668,6 +669,10 @@ export function recordSnapshotSuccessEntry(
       now
     );
   }
+  const id = `snapshot:${questionId}:${version}`;
+  reconcileGoalEvidence(db, questionId, now, result === 'Accepted' ? { successId: id } : {
+    unfinished: { id, questionId, at, precision, zone, recordedAt: now },
+  });
 }
 
 /**
