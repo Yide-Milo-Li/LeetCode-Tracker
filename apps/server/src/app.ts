@@ -24,7 +24,7 @@ import { createTrackerApplication } from '../../../packages/application/src/appl
 import { localModelService } from '../../mcp/src/profile.ts';
 
 /** Version reported by health checks and written into sync snapshots. */
-export const APP_VERSION = '1.4.1';
+export const APP_VERSION = '1.5.0';
 
 /** Options for building Fastify app. */
 export interface AppOptions {
@@ -151,7 +151,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   app.addHook('onResponse', async (request, reply) => {
     if (reply.statusCode < 200 || reply.statusCode >= 300 ||
         !['POST', 'PATCH', 'PUT', 'DELETE'].includes(request.method) ||
-        request.url.startsWith('/api/v1/sync/')) return;
+        request.url.startsWith('/api/v1/sync/') || request.routeOptions.url === '/api/v1/goal-lists/memberships/lookup') return;
     deviceSync.observeLocalWrite();
   });
   registerAllRoutes(app, {

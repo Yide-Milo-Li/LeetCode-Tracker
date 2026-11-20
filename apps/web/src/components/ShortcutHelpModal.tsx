@@ -22,6 +22,7 @@ export function ShortcutHelpModal({ lang, onClose }: ShortcutHelpModalProps) {
         { key: '2', desc: zh ? '切换至「题库」' : 'Navigate to Problems' },
         { key: '3', desc: zh ? '切换至「进展」' : 'Navigate to Progress' },
         { key: '4', desc: zh ? '切换至「复盘」' : 'Navigate to Notes' },
+        { key: '5', desc: zh ? '切换至「收藏夹」' : 'Navigate to Favorites' },
       ],
     },
     {

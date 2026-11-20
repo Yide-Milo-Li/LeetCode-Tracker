@@ -20,14 +20,16 @@ Use a positive integer daily count and nonnegative integer difficulty counts tot
 
 ## User interface
 
-The four primary destinations are Today (default), Problems, Progress and Notes. Settings stays at the sidebar bottom. Desktop windows at 1024, 1440 and 1920 pixels, English/Chinese, light/dark/system themes and keyboard access are supported. Mobile UI is outside scope.
+The primary destinations are Today (default), Problems, Progress, Notes and Favorites. Settings stays at the sidebar bottom. Desktop windows at 1024, 1440 and 1920 pixels, English/Chinese, light/dark/system themes and keyboard access are supported. Mobile UI is outside scope.
 
 - Today shows seven calendar days including today in the configured timezone, the activity streak, generated-plan progress and actionable problems. Study schedule is a child workspace; Adjust today affects only the current plan. Keep replacement, versions, shortages, rest/setup and local fallback visible.
+- Users can create ordered goal lists from catalog selections or pasted IDs and add the same selection to several lists without resetting order or completion. Goal-only checks are local to the list. Shared plan completions use one practice record and follow subsequent corrections or revocation of qualifying evidence.
 - An empty completion circle saves an actual-time manual record immediately. Only after persistence does it offer optional positive-integer duration and notes. Skip, close, Escape and backdrop dismissal preserve the record. Details update the same ID. Initial failure is unchecked; failed detail edits preserve both completion and input.
 - A checked circle opens exact completion evidence. Revoking one manual record retains audit and all other records/snapshots. Existing evidence rules determine the resulting completion state.
 - Progress defaults to Statistics, with Records as its other tab. Top actions open Import progress and Manual record. Manual entry searches the local catalog first, supports historical and date-only practice, and uses the same record editor. Missing problems lead to catalog import.
 - Progress import has paste, candidate review, per-problem conflict resolution, explicit confirmation and result steps. The selected AI provider organizes candidates only; server matching, semantic validation, deduplication and atomic commit remain authoritative. Current snapshots and their audit versions remain distinct from real submission history.
 - Problems preserves search, filters, pagination and metadata details, with contextual practice entry. Import problems is a separate JSONL workspace with upload/paste, preview, errors, results and paginated import history.
+- Favorites shows saved problems across the catalog or within a selected folder. A problem can belong to multiple folders. Removing a folder keeps its problems in All favorites.
 - Settings exposes language, theme/high contrast, timezone, provider configuration and export actions. Choosing a timezone or accepting the device suggestion saves the preference. Provider saves and connection probes remain distinct actions.
 
 Use warm neutral surfaces, sage emphasis, offline sans-serif fonts, readable 14–16 px body text and consistent CSS tokens. Provide localized labels, focus trapping/restoration and reduced-motion support. Loading must not fabricate progress or overwrite drafts. Details, filters and scroll survive ordinary workspace navigation.

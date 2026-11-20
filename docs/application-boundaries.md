@@ -21,6 +21,14 @@ Existing contracts validate inputs inside each application method. Outputs are i
 | `GET /api/v1/catalog` | `catalog.query` | query; no params | Catalog preview/commit and history | server-api |
 | `GET /api/v1/catalog/tags` | `catalog.tags` | none; no params | Catalog preview/commit and history | server-api |
 | `GET /api/v1/catalog/stats` | `catalog.stats` | none; no params | Catalog preview/commit and history | server-api |
+| `GET /api/v1/favorites` | `favorites.library` | none | Favorite folder counts | server-api |
+| `PUT` or `DELETE /api/v1/favorites/folders` | `favorites.saveFolder` or `favorites.deleteFolder` | body | Folder edits and membership cleanup | server-api; mcp-write |
+| `PUT /api/v1/favorites/problems` | `favorites.saveProblem` | body | Guarded star and folder membership edit | server-api; mcp-write |
+| `PUT` or `DELETE /api/v1/favorites/problems/batch` | `favorites.addProblems` or `favorites.removeProblems` | body | Atomic selection changes | server-api; mcp-write |
+| `GET /api/v1/goal-lists/summaries` | `goalLists.summaries` | page and limit | Paged names and counts | server-planning-api |
+| `PUT /api/v1/goal-lists/memberships` | `goalLists.setProblemMembership` | body | Guarded membership replacement | server-planning-api; mcp-write |
+| `PUT /api/v1/goal-lists/memberships/batch` | `goalLists.addProblems` | body | Atomic append to several goal lists | server-planning-api; mcp-write |
+| `PATCH /api/v1/goal-lists/:id/items` | `goalLists.editItem` | body and id | Versioned item edit and linked practice | server-planning-api; mcp-write |
 | `POST /api/v1/practice-records` | `practice.create` | body; no params | Versioned practice writes and replay | server-practice-api; practice-reliability |
 | `GET /api/v1/practice-records` | `practice.query` | query; no params | Versioned practice writes and replay | server-practice-api; practice-reliability |
 | `GET /api/v1/practice-records/:id` | `practice.read` | none; id | Versioned practice writes and replay | server-practice-api; practice-reliability |

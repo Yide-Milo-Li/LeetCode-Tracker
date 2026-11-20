@@ -2,7 +2,10 @@
  * Catalog queries, tag aggregation, user settings, and dashboard raw data queries.
  * Read-only querying and atomic settings updates.
  */
+import { reconcileGoalEvidence } from './goal-lists.ts';
 import type { DatabaseSync } from 'node:sqlite';
+import { FAVORITE_PROBLEM_PREFIX } from './favorites.ts';
+import type { CatalogListProblem } from '../../contracts/src/favorites.ts';
 import {
   catalogProblemSchema,
   catalogQuerySchema,
@@ -97,11 +100,23 @@ export function queryCatalogProblems(
   total: number;
   page: number;
   limit: number;
-  items: CatalogProblem[];
+  items: CatalogListProblem[];
 } {
   const q = catalogQuerySchema.parse(queryInput);
   const conditions: string[] = [];
   const params: (string | number)[] = [];
+  const scope = q.favoriteScope;
+  const favoriteJoin = scope
+    ? `LEFT JOIN catalog_meta AS favorite ON favorite.key = '${FAVORITE_PROBLEM_PREFIX}' || p.frontend_question_id`
+    : '';
+  const filterFavorites = scope !== undefined && scope !== 'catalog';
+  if (filterFavorites) {
+    conditions.push('favorite.key IS NOT NULL');
+    if (scope !== 'all') {
+      conditions.push('EXISTS (SELECT 1 FROM json_each(favorite.value) WHERE value=?)');
+      params.push(scope);
+    }
+  }
 
   if (q.difficulty) {
     conditions.push('p.difficulty = ?');
@@ -129,7 +144,7 @@ export function queryCatalogProblems(
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
   const countRow = db
-    .prepare(`SELECT count(*) as total FROM problems p ${whereClause}`)
+    .prepare(`SELECT count(*) as total FROM problems p ${filterFavorites ? favoriteJoin : ''} ${whereClause}`)
     .get(...params) as { total: number };
   const total = countRow.total;
 
@@ -138,7 +153,8 @@ export function queryCatalogProblems(
     .prepare(
       `
     SELECT p.question_id, p.frontend_question_id, p.title, p.title_slug, p.url, p.difficulty, p.is_paid_only, p.source
-    FROM problems p
+      ${favoriteJoin ? ', favorite.value AS folder_ids' : ''}
+    FROM problems p ${favoriteJoin}
     ${whereClause}
     ORDER BY cast(p.frontend_question_id as integer) ASC, p.frontend_question_id ASC
     LIMIT ? OFFSET ?
@@ -153,6 +169,7 @@ export function queryCatalogProblems(
     difficulty: 'Easy' | 'Medium' | 'Hard';
     is_paid_only: number;
     source: string;
+    folder_ids?: string | null;
   }>;
 
   const tagsById = new Map<string, TopicTag[]>();
@@ -170,7 +187,7 @@ export function queryCatalogProblems(
       tagsById.set(question_id, list);
     }
   }
-  const items: CatalogProblem[] = rows.map(r => ({
+  const items: CatalogListProblem[] = rows.map(r => ({
     questionId: r.question_id,
     questionFrontendId: r.frontend_question_id,
     title: r.title,
@@ -180,6 +197,7 @@ export function queryCatalogProblems(
     isPaidOnly: Boolean(r.is_paid_only),
     topicTags: tagsById.get(r.question_id) ?? [],
     source: r.source,
+    ...(r.folder_ids ? { favoriteFolderIds: JSON.parse(r.folder_ids) as string[] } : {}),
   }));
 
   return { total, page: q.page, limit: q.limit, items };
@@ -651,6 +669,10 @@ export function recordSnapshotSuccessEntry(
       now
     );
   }
+  const id = `snapshot:${questionId}:${version}`;
+  reconcileGoalEvidence(db, questionId, now, result === 'Accepted' ? { successId: id } : {
+    unfinished: { id, questionId, at, precision, zone, recordedAt: now },
+  });
 }
 
 /**

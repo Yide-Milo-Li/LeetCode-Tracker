@@ -3,12 +3,12 @@ import { ExternalLink, Download, Maximize2, Minimize2 } from 'lucide-react';
 import { api, type ProblemNoteSummary } from '../../api.ts';
 import { translations, type Language } from '../../i18n.ts';
 import { ExportLink } from '../ExportLink.tsx';
-import { QuickCopyButtons } from '../QuickCopyButtons.tsx';
+import { CopyNotionCard } from '../CopyNotionCard.tsx';
 
 interface NoteProblemHeaderProps {
   lang: Language;
   summary: ProblemNoteSummary;
-  /** Current editor draft, offered by the quick copy menu. */
+  /** Current editor draft included when copying to Notion. */
   noteContent: string;
   zenMode: boolean;
   onToggleZen: () => void;
@@ -78,7 +78,7 @@ export function NoteProblemHeader({ lang, summary, noteContent, zenMode, onToggl
 
       {/* Actions: Quick Copy, single Markdown download, and Zen Mode */}
       <div className="nw-header-tools">
-        <QuickCopyButtons
+        <CopyNotionCard
           lang={lang}
           problem={{
             frontendId: summary.questionFrontendId,
@@ -86,14 +86,12 @@ export function NoteProblemHeader({ lang, summary, noteContent, zenMode, onToggl
             url: summary.url,
             difficulty: summary.difficulty,
             tags: summary.tags,
-            slug: summary.titleSlug,
           }}
           record={{
             durationMinutes: null,
             notes: summary.latestPracticeNotes,
           }}
           customNote={noteContent}
-          align="right"
         />
 
         <ExportLink

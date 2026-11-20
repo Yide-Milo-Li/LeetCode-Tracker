@@ -673,7 +673,7 @@ try {
   await fill('[aria-label="Easy count"]', '2');
   await fill('[aria-label="Medium count"]', '0');
   await fill('[aria-label="Hard count"]', '0');
-  await click('New Problems Only (No Review)', 'label');
+  await click('New problems only', 'label');
   await evaluate("document.querySelector('.weekday-select-btn').click()");
   await click('Save Strategy');
   await until("document.querySelector('[role=dialog] .alert-danger')");
@@ -794,7 +794,7 @@ try {
             const smallTargets = await evaluate(`[...document.querySelectorAll('.btn-icon')].filter(${visible}).map(button => {
               const bounds = button.getBoundingClientRect();
               const minimum = button.matches('.strategy-capsule .info-trigger') ? 18
-                : button.matches('.bento-card-title .info-trigger') ? 24 : 38;
+                : button.matches('.week-title .info-trigger') ? 24 : 38;
               return {name: button.getAttribute('aria-label'), w: bounds.width, h: bounds.height, minimum};
             }).filter(target => target.w < target.minimum - 0.01 || target.h < target.minimum - 0.01)`);
             assert.deepEqual(smallTargets, [], 'Icon target minimum: ' + JSON.stringify(smallTargets));
@@ -945,7 +945,7 @@ try {
   };
   fault = { match: '/api/v1/dashboard/recent', method: 'GET', body: noKnown };
   await reload();
-  await until("document.body.innerText.includes('Records on 0 of 7 days')");
+  await until("document.body.innerText.includes('Solved on 0 of 7 days')");
   await screenshot('today-no-known-records');
   fault = {
     match: '/api/v1/dashboard/recent',
@@ -954,7 +954,7 @@ try {
   };
   await reload();
   await until("document.body.innerText.includes('Set a timezone to assign daily activity')");
-  assert.equal(await evaluate("document.querySelectorAll('.rhythm-day-col').length"), 0);
+  assert.equal(await evaluate("document.querySelectorAll('.week-chart li').length"), 0);
   await screenshot('today-unassigned-activity-dates');
   fault = {
     match: '/api/v1/dashboard/recent',
@@ -1052,8 +1052,8 @@ try {
   await reload();
   // Compare the two surfaces against the same real server projection rather than image heights.
   const sharedProjection = (await app.inject('/api/v1/dashboard')).json();
-  const strip = await evaluate("document.querySelector('.rhythm-chart-wrap')?.getAttribute('aria-label')");
-  assert.deepEqual(strip, sharedProjection.trend30Days.slice(-7).map((day: any) => day.date + ': ' + day.completedCount).join('; '));
+  const week = await evaluate("Array.from(document.querySelectorAll('.week-chart li'), el => [el.querySelector('time').dateTime, Number(el.querySelector('.week-count').textContent)])");
+  assert.deepEqual(week, sharedProjection.trend30Days.slice(-7).map((day: any) => [day.date, day.completedCount]));
   report.flows.push('Today seven-day values exactly equal the Statistics endpoint for the same local dates, including today.');
   await click('Switch language to Chinese');
   await until("document.documentElement.lang === 'zh-CN'");

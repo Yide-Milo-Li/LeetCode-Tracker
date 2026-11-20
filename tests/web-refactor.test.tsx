@@ -1,4 +1,5 @@
 /** Synthetic desktop regressions for durable completion, exact edits, navigation and import ownership. */
+import { mockGoalReads } from './fixtures/web-goals.ts';
 import { afterEach, beforeEach, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
@@ -34,8 +35,13 @@ Object.defineProperty(window, 'matchMedia', {
   }),
 });
 const React = await import('react');
-const { render, renderHook, fireEvent, screen, act, cleanup, within } = await import('@testing-library/react');
-const { api } = await import('../apps/web/src/api.ts');
+const { render, renderHook, fireEvent, screen, act, cleanup, waitFor, within } = await import('@testing-library/react');
+const { api, ApiError } = await import('../apps/web/src/api.ts');
+const queryCatalogOverHttp = api.getCatalog;
+const readFavoritesOverHttp = api.getFavoriteMemberships;
+const goalReadsOverHttp = {
+  getGoalListSummaries: api.getGoalListSummaries, getGoalList: api.getGoalList, getGoalMemberships: api.getGoalMemberships,
+};
 const { brandIconUrl } = await import('../apps/web/src/brand-icons.ts');
 const { usePreferences } = await import('../apps/web/src/hooks/usePreferences.ts');
 const { App } = await import('../apps/web/src/App.tsx');
@@ -148,6 +154,8 @@ beforeEach(() => {
   };
   mock.method(globalThis, 'setInterval', () => 1 as any);
   mock.method(globalThis, 'clearInterval', () => {});
+  mockGoalReads(api);
+  mock.method(api, 'getFavoriteMemberships', async () => []);
   mock.method(api, 'getSettings', async () => preferences);
   mock.method(api, 'updateSettings', async (patch: Partial<typeof preferences>) => {
     preferences = { ...preferences, ...patch };
@@ -338,6 +346,35 @@ it('clearing an in-flight manual search removes its spinner and ignores the old 
   assert.equal(screen.queryByRole('button', { name: /Synthetic Search Window/ }), null);
 });
 
+it('defers hidden catalog and favorite reads until returning and keeps catalog filters', async t => {
+  const reads: string[] = [];
+  t.mock.method(api, 'getCatalog', async (query: Parameters<typeof api.getCatalog>[0]) => {
+    reads.push(query?.favoriteScope ?? 'catalog');
+    return { items: [problem], total: 1, page: 1, limit: 50 };
+  });
+  const folders = t.mock.method(api, 'getFavoriteLibrary', async () => ({ total: 1, folders: [] }));
+  const click = async (name: string) => { await act(async () => { fireEvent.click(screen.getByRole('button', { name })); }); };
+  location.hash = 'problems';
+  await act(async () => { render(<App />); });
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'Synthetic' } });
+  await click('Favorites');
+  await click('Today');
+  reads.length = 0;
+  const before = folders.mock.callCount();
+  await click('Mark complete: ' + problem.title);
+  assert.deepEqual(reads, []);
+  assert.equal(folders.mock.callCount(), before);
+  fireEvent.keyDown(document, { key: 'Escape' });
+  await click('Problems');
+  assert.deepEqual(reads, ['catalog']);
+  assert.equal((screen.getByRole('searchbox') as HTMLInputElement).value, 'Synthetic');
+  await click('Favorites');
+  assert.deepEqual(reads, ['catalog', 'all']);
+  assert.equal(folders.mock.callCount(), before + 1);
+  await click('Problems');
+  assert.equal(reads.length, 2);
+});
+
 it('a detail failure after closing offers the original draft without losing completion', async () => {
   const pending = deferred<PracticeRecord>();
   const patch = mock.method(api, 'updatePracticeRecord', () => pending.promise);
@@ -413,6 +450,283 @@ it('the Today retry reloads strategy names after a strategy request failure', as
   assert.match(document.body.textContent!, /Recovered schedule/);
 });
 
+async function withProblemCatalog(run: () => Promise<void>) {
+  const { DatabaseSync } = await import('node:sqlite');
+  const { CatalogStore } = await import('../packages/database/src/store.ts');
+  const { buildApp } = await import('../apps/server/src/app.ts');
+  const db = new DatabaseSync(':memory:');
+  const store = new CatalogStore(db, { skipBackup: true });
+  const server = await buildApp({ store, disableStatic: true });
+  try {
+    await store.importJsonl(JSON.stringify({ id: '901', title: problem.title, difficulty: 'Easy' }));
+    mock.method(api, 'getCatalog', queryCatalogOverHttp);
+    mock.method(api, 'getFavoriteMemberships', readFavoritesOverHttp);
+    mock.method(api, 'getGoalListSummaries', goalReadsOverHttp.getGoalListSummaries);
+    mock.method(api, 'getGoalList', goalReadsOverHttp.getGoalList);
+    mock.method(api, 'getGoalMemberships', goalReadsOverHttp.getGoalMemberships);
+    mock.method(globalThis, 'fetch', async (url: string, options: RequestInit = {}) => {
+      const { pathname, search } = new URL(url);
+      const reply = await server.inject({ method: (options.method ?? 'GET') as 'GET' | 'PUT' | 'POST' | 'PATCH' | 'DELETE',
+        url: pathname + search, payload: options.body as string | undefined, headers: Object.fromEntries(new Headers(options.headers)) });
+      return new Response(reply.body, { status: reply.statusCode });
+    });
+    await run();
+  } finally {
+    await server.close();
+    db.close();
+  }
+}
+
+it('saves a catalog problem in two folders and browses each from the Favorites navigation', () => withProblemCatalog(async () => {
+    await api.createGoalList({ name: 'Interview', frontendIds: ['901'] });
+    const click = async (name: string | RegExp, inDialog = false) => {
+      const scope = inDialog ? within(await screen.findByRole('dialog')) : screen;
+      const button = await scope.findByRole('button', { name });
+      await act(async () => { fireEvent.click(button); });
+    };
+    location.hash = 'problems';
+    await act(async () => { render(<App />); });
+    await click('Favorites');
+    assert.equal(location.hash, '#favorites');
+    await click('New folder');
+    fireEvent.change(screen.getByLabelText('Folder name'), { target: { value: 'Trees' } });
+    await click('Save', true);
+    assert.equal((await screen.findByRole('button', { name: 'Trees 0' })).getAttribute('aria-pressed'), 'true');
+    await click('Problems');
+    await click('Save #901 to favorites');
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Trees' }));
+    await click('New folder', true);
+    fireEvent.change(screen.getByLabelText('New folder name'), { target: { value: 'Review' } });
+    await click('Save favorite', true);
+    assert.ok(await screen.findByRole('button', { name: 'Manage favorite #901' }));
+    await click('Favorites');
+    await click('Review 1');
+    assert.ok(await screen.findByRole('button', { name: problem.title }));
+    await click('Manage favorite #901');
+    assert.ok((await screen.findByRole('checkbox', { name: 'Review' }) as HTMLInputElement).checked);
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Trees' }));
+    await click('Save favorite', true);
+    await click('Trees 0');
+    assert.ok(await screen.findByRole('heading', { name: 'This folder is empty' }));
+    await click('All favorites 1');
+    await click(problem.title);
+    await click('Manage favorite', true);
+    assert.equal(screen.getAllByRole('dialog').length, 1);
+    await click('Remove from favorites', true);
+    assert.ok(await screen.findByRole('heading', { name: 'No favorites yet' }));
+    await click('Problems');
+    assert.ok(await screen.findByRole('button', { name: 'Save #901 to favorites' }));
+    await click('Today');
+    const goalTasks = within(screen.getByRole('region', { name: 'Goal lists' }));
+    const dailyTasks = within(screen.getByRole('region', { name: 'Strategy tasks' }));
+    const savedName = 'Manage favorite #901 ' + problem.title;
+    const unsavedName = 'Save to favorites #901 ' + problem.title;
+    const openStar = async (tasks: typeof goalTasks, name: string) => {
+      const star = await tasks.findByRole('button', { name });
+      await waitFor(() => assert.equal(star.getAttribute('aria-disabled'), 'false'));
+      assert.equal(star.getAttribute('aria-haspopup'), 'dialog');
+      await act(async () => { star.focus(); fireEvent.click(star); });
+      return within(await screen.findByRole('dialog'));
+    };
+    let editor = await openStar(goalTasks, unsavedName);
+    fireEvent.click(await editor.findByRole('checkbox', { name: 'Trees' }));
+    await click('Cancel', true);
+    assert.deepEqual(await api.getFavoriteMemberships(), []);
+    editor = await openStar(goalTasks, unsavedName);
+    for (const folder of ['Trees', 'Review']) fireEvent.click(await editor.findByRole('checkbox', { name: folder }));
+    await click('Save favorite', true);
+    assert.ok(await dailyTasks.findByRole('button', { name: savedName }));
+    await click('Favorites');
+    assert.ok(await screen.findByRole('button', { name: 'All favorites 1' }));
+    assert.ok(await screen.findByRole('button', { name: 'Trees 1' }));
+    assert.ok(await screen.findByRole('button', { name: 'Review 1' }));
+    await click('Today');
+    editor = await openStar(dailyTasks, savedName);
+    for (const folder of ['Trees', 'Review']) {
+      const choice = await editor.findByRole<HTMLInputElement>('checkbox', { name: folder });
+      assert.ok(choice.checked);
+      fireEvent.click(choice);
+    }
+    await click('Save favorite', true);
+    await waitFor(async () => assert.deepEqual(await api.getFavoriteMemberships(), [{ frontendId: '901', folderIds: [] }]));
+    editor = await openStar(goalTasks, savedName);
+    assert.equal((await editor.findByRole<HTMLInputElement>('checkbox', { name: 'Trees' })).checked, false);
+    await click('New folder', true);
+    fireEvent.change(editor.getByLabelText('New folder name'), { target: { value: 'Weekend' } });
+    await click('Save favorite', true);
+    await click('Favorites');
+    assert.ok(await screen.findByRole('button', { name: 'Weekend 1' }));
+    await click('Today');
+    await openStar(dailyTasks, savedName);
+    await click('Remove from favorites', true);
+    assert.ok(await goalTasks.findByRole('button', { name: unsavedName }));
+    await click('Favorites');
+    assert.ok(await screen.findByRole('heading', { name: 'No favorites yet' }));
+    assert.equal(records.length, 0);
+}));
+
+it('preserves a folder missing from the open Favorites directory when saving a fresh problem row', () => withProblemCatalog(async () => {
+  const a = { id: crypto.randomUUID(), name: 'Arrays' };
+  const b = { id: crypto.randomUUID(), name: 'Weekend' };
+  await api.saveFavoriteFolder(a, null);
+  location.hash = 'favorites';
+  await act(async () => { render(<App />); });
+  await screen.findByRole('button', { name: 'Arrays 0' });
+  await api.saveFavoriteFolder(b, null);
+  await api.addFavorites({ frontendIds: ['901'], folderIds: [a.id, b.id] });
+  const view = within(document.getElementById('view-favorites')!);
+  await act(async () => { fireEvent.change(view.getByRole('searchbox'), { target: { value: '901' } }); });
+  const star = await view.findByRole('button', { name: 'Manage favorite #901' });
+  await act(async () => { fireEvent.click(star); });
+  const dialog = within(await screen.findByRole('dialog', { name: 'Manage favorite' }));
+  assert.ok(!dialog.queryByRole('checkbox', { name: 'Weekend' }), 'folder directory is stale');
+  await act(async () => { fireEvent.click(dialog.getByRole('button', { name: 'Save favorite' })); });
+  await waitFor(() => assert.ok(!screen.queryByRole('dialog'), 'favorite save closes the editor'));
+  assert.deepEqual((await api.getFavoriteMemberships())[0].folderIds, [a.id, b.id].sort());
+}));
+
+it('adds a cross-page catalog selection to several existing goals and recovers if a destination is deleted', () => withProblemCatalog(async () => {
+  const content = Array.from({ length: 20 }, (_, i) => JSON.stringify({ id: String(i + 1), title: `Task ${i + 1}`, difficulty: 'Easy' })).join('\n');
+  const preview = await api.previewImport(content);
+  await api.commitImport(preview.previewId);
+  const first = await api.createGoalList({ name: 'A review', frontendIds: ['901', '1'] });
+  const second = await api.createGoalList({ name: 'B practice', frontendIds: ['11'] });
+  const removed = await api.createGoalList({ name: 'C temporary', frontendIds: [] });
+  await api.editGoalItem(first.id, { expectedVersion: first.version, edit: { action: 'setCompleted', frontendId: '901', completed: true } });
+  location.hash = 'problems';
+  await act(async () => { render(<App />); });
+  const click = async (button: HTMLElement) => { await act(async () => { fireEvent.click(button); }); };
+  const open = async () => {
+    await click(await within(screen.getByRole('group', { name: 'Bulk actions' })).findByRole('button', { name: 'Add to goal lists' }));
+    return within(await screen.findByRole('dialog', { name: 'Add to goal lists' }));
+  };
+  await act(async () => { fireEvent.change(screen.getByLabelText('Page size'), { target: { value: '20' } }); });
+  const next = screen.getByRole('button', { name: 'Next' });
+  await waitFor(() => assert.ok(!next.hasAttribute('disabled')));
+  await click(next);
+  await click(await screen.findByRole('checkbox', { name: 'Select #901 ' + problem.title }));
+  await click(screen.getByRole('button', { name: 'Previous' }));
+  await click(await screen.findByRole('checkbox', { name: 'Select #10 Task 10' }));
+  await click(screen.getByRole('checkbox', { name: 'Select #2 Task 2' }));
+  let dialog = await open();
+  assert.ok(dialog.getByRole('button', { name: 'Add to selected lists' }).hasAttribute('disabled'));
+  await click(dialog.getByLabelText('B practice'));
+  await click(dialog.getByRole('button', { name: 'Cancel' }));
+  assert.ok(screen.getByText('3 selected'));
+  assert.equal((await api.getGoalLists()).find(list => list.id === second.id)?.items.length, 1);
+  dialog = await open();
+  for (const name of ['A review', 'B practice', 'C temporary']) await click(dialog.getByLabelText(name));
+  await api.deleteGoalList(removed.id, removed.version);
+  await click(dialog.getByRole('button', { name: 'Add to selected lists' }));
+  await dialog.findByRole('alert');
+  await waitFor(() => assert.ok(!dialog.queryByLabelText('C temporary')));
+  assert.ok(dialog.getByRole<HTMLInputElement>('checkbox', { name: 'A review' }).checked);
+  assert.ok(dialog.getByRole<HTMLInputElement>('checkbox', { name: 'B practice' }).checked);
+  assert.equal((await api.getGoalLists()).find(list => list.id === second.id)?.items.length, 1);
+  await click(dialog.getByRole('button', { name: 'Add to selected lists' }));
+  await screen.findByText('3 problems are now in 2 selected goal lists.');
+  assert.ok(!screen.queryByRole('group', { name: 'Bulk actions' }));
+  const lists = await api.getGoalLists();
+  assert.deepEqual(lists.find(list => list.id === first.id)?.items.map(item => [item.frontendId, item.completed]),
+    [['901', true], ['1', false], ['2', false], ['10', false]]);
+  assert.deepEqual(lists.find(list => list.id === second.id)?.items.map(item => item.frontendId), ['11', '2', '10', '901']);
+  assert.ok(screen.getByRole('button', { name: 'Manage goal lists #2 Task 2' }));
+  await click(screen.getByRole('button', { name: 'Today' }));
+  assert.ok(await screen.findByRole('button', { name: 'Complete #10 Task 10' }));
+}));
+
+it('manages independent flags and stars on each catalog, favorite, strategy and goal-list row', () => withProblemCatalog(async () => {
+  const add = 'Add to goal lists #901 ' + problem.title;
+  const manage = 'Manage goal lists #901 ' + problem.title;
+  const click = async (name: string, scope: Pick<typeof screen, 'findByRole'> = screen) => {
+    const button = await scope.findByRole('button', { name });
+    await act(async () => { button.focus(); fireEvent.click(button); });
+  };
+  const dialog = () => within(screen.getByRole('dialog'));
+  location.hash = 'problems';
+  await act(async () => { render(<App />); });
+  assert.ok((await screen.findByRole('button', { name: 'Save #901 to favorites' })).querySelector('svg.lucide-star'));
+  await click(add);
+  fireEvent.change(dialog().getByLabelText('New goal list name'), { target: { value: 'A first list' } });
+  await click('Save goal lists', dialog());
+  const flag = await screen.findByRole('button', { name: manage });
+  assert.equal(flag.querySelector('svg.lucide-flag')?.getAttribute('fill'), 'currentColor');
+  await click(manage);
+  assert.ok(dialog().getByRole<HTMLInputElement>('checkbox', { name: 'A first list' }).checked);
+  await click('New goal list', dialog());
+  fireEvent.change(dialog().getByLabelText('New goal list name'), { target: { value: 'B second list' } });
+  await click('Save goal lists', dialog());
+  await waitFor(() => assert.ok(!screen.queryByRole('dialog')));
+  await click('Save #901 to favorites');
+  await click('Save favorite', dialog());
+  await screen.findByRole('button', { name: 'Manage favorite #901' });
+  await click('Today');
+  const goals = within(screen.getByRole('region', { name: 'Goal lists' }));
+  const strategy = within(screen.getByRole('region', { name: 'Strategy tasks' }));
+  assert.ok(await goals.findByRole('button', { name: 'Manage favorite #901 ' + problem.title }));
+  assert.ok(await strategy.findByRole('button', { name: manage }));
+  await click(manage, goals);
+  const first = dialog().getByRole<HTMLInputElement>('checkbox', { name: 'A first list' });
+  assert.ok(first.checked);
+  assert.ok(dialog().getByRole<HTMLInputElement>('checkbox', { name: 'B second list' }).checked);
+  fireEvent.click(first);
+  await click('Cancel', dialog());
+  await click(manage, goals);
+  assert.ok(dialog().getByRole<HTMLInputElement>('checkbox', { name: 'A first list' }).checked);
+  fireEvent.click(dialog().getByLabelText('A first list'));
+  await click('Save goal lists', dialog());
+  assert.ok(await goals.findByText('This list is empty.'));
+  assert.equal(document.activeElement?.getAttribute('aria-label'), 'Edit A first list');
+  await click('Favorites');
+  assert.ok(await screen.findByRole('button', { name: manage }));
+  await click(problem.title);
+  await click(manage, dialog());
+  assert.equal(screen.getAllByRole('dialog').length, 1);
+  assert.equal(dialog().getByRole<HTMLInputElement>('checkbox', { name: 'A first list' }).checked, false);
+  fireEvent.click(dialog().getByLabelText('B second list'));
+  await click('Save goal lists', dialog());
+  assert.ok(await screen.findByRole('button', { name: add }));
+  assert.ok(screen.getByRole('button', { name: 'Manage favorite #901' }));
+  await click('Today');
+  assert.ok(await strategy.findByRole('button', { name: add }));
+  assert.equal(records.length, 0);
+}));
+
+it('guards duplicate saves from the Today folder chooser and reloads membership after a concurrent edit', async () => {
+  const frontendId = problem.questionFrontendId;
+  mockGoalReads(api, () => [{ id: 'goal', name: 'Review', version: 1,
+    items: [{ frontendId, title: problem.title, url: problem.url, completed: false }] }]);
+  const trees = { id: crypto.randomUUID(), name: 'Trees', count: 1 };
+  const review = { id: crypto.randomUUID(), name: 'Review', count: 0 };
+  let folderIds = [trees.id];
+  mock.method(api, 'getFavoriteLibrary', async () => ({ total: 1, folders: [trees, review] }));
+  const reads = mock.method(api, 'getFavoriteMemberships', async () => [{ frontendId, folderIds }]);
+  const write = deferred<{ folderIds: string[] | null }>();
+  const writes = mock.method(api, 'saveFavorite', () => write.promise);
+  await act(async () => { render(<App />); });
+  const name = 'Manage favorite #' + frontendId + ' ' + problem.title;
+  const stars = screen.getAllByRole('button', { name });
+  assert.equal(stars.length, 2);
+  const readsBeforeClick = reads.mock.callCount();
+  await act(async () => { fireEvent.click(stars[0]); });
+  assert.equal(writes.mock.callCount(), 0);
+  fireEvent.click(await screen.findByRole('checkbox', { name: 'Review' }));
+  const save = screen.getByRole('button', { name: 'Save favorite' });
+  act(() => { fireEvent.click(save); fireEvent.click(save); });
+  assert.equal(writes.mock.callCount(), 1);
+  assert.deepEqual(writes.mock.calls[0].arguments, [{ frontendId, expectedFolderIds: [trees.id], folderIds: [trees.id, review.id], newFolder: undefined }]);
+  assert.ok(save.hasAttribute('disabled'));
+  folderIds = [review.id];
+  await act(async () => { write.reject(new ApiError(409, 'STALE_FAVORITE', 'Favorite changed')); });
+  assert.match(screen.getByRole('alert').textContent!, /changed elsewhere/);
+  assert.equal(reads.mock.callCount(), readsBeforeClick + 1);
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  await act(async () => { fireEvent.click(stars[1]); });
+  assert.ok((await screen.findByRole<HTMLInputElement>('checkbox', { name: 'Review' })).checked);
+  assert.equal(screen.getByRole<HTMLInputElement>('checkbox', { name: 'Trees' }).checked, false);
+  assert.equal(records.length, 0);
+});
+
 it('problem detail uses the shared editor within one drawer and restores the inner trigger', async () => {
   location.hash = 'problems';
   await act(async () => { render(<App />); });
@@ -454,7 +768,8 @@ it('saves completion before optional details, blocks double clicks and preserves
   await act(async () => {
     render(<App />);
   });
-  assert.equal(within(screen.getByRole('navigation')).getAllByRole('button').length, 4);
+  assert.deepEqual(within(screen.getByRole('navigation')).getAllByRole('button').map(button => button.getAttribute('aria-label')),
+    ['Today', 'Problems', 'Progress', 'Notes', 'Favorites']);
   const circle = screen.getByRole('button', { name: 'Mark complete: ' + problem.title });
   circle.focus();
   const started = Date.now();

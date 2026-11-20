@@ -73,7 +73,7 @@ export {
   UnsupportedSchemaVersionError,
 } from './schema.ts';
 import { CURRENT_SCHEMA_VERSION } from './schema.ts';
-import { initOrMigrateSchema } from './migrations.ts';
+import { ensureActivityIndexes, initOrMigrateSchema } from './migrations.ts';
 
 // Catalog import exports
 export {
@@ -167,6 +167,7 @@ export class CatalogStore {
       await manager.performMigrationBackup(db, version, CURRENT_SCHEMA_VERSION);
     }
     const store = new CatalogStore(db, { ...options, skipBackup: true });
+    if (version === CURRENT_SCHEMA_VERSION) ensureActivityIndexes(db);
     store.backupManager = manager;
     return store;
   }
@@ -186,6 +187,21 @@ export class CatalogStore {
     });
     this.writeQueue = run.then(() => {}, () => {});
     return run;
+  }
+
+  /** Acquire the store write queue and commit related changes as one SQLite transaction. */
+  public protectedTransaction<T>(write: () => T): Promise<T> {
+    return this.protectedWrite(() => {
+      this.db.exec('BEGIN IMMEDIATE');
+      try {
+        const result = write();
+        this.db.exec('COMMIT');
+        return result;
+      } catch (error) {
+        this.db.exec('ROLLBACK');
+        throw error;
+      }
+    });
   }
 
   // ==========================================
@@ -275,12 +291,7 @@ export class CatalogStore {
   }
 
   /** Query filtered and paginated catalog problems. */
-  public queryCatalog(queryInput: CatalogQueryInput = {}): {
-    total: number;
-    page: number;
-    limit: number;
-    items: CatalogProblem[];
-  } {
+  public queryCatalog(queryInput: CatalogQueryInput = {}) {
     return queryCatalogProblems(this.db, queryInput);
   }
 
@@ -449,7 +460,7 @@ export class CatalogStore {
         await this.backupManager.performPreImportBackup(this.db);
       }
 
-      revokePracticeRecordTransaction(this.db, id);
+      revokePracticeRecordTransaction(this.db, id, existing.questionId);
       return this.getPracticeRecord(id)!;
     });
 
@@ -750,7 +761,7 @@ export class CatalogStore {
 
   /** Export catalog and all saved business history for another device. */
   public exportMigrationBundle(versionOrOptions: 2 | 3 | 5 | { formatVersion?: 2 | 3 | 5 } = 5): SnapshotBundleV2 | SnapshotBundleV3 | SnapshotBundleV5 {
-    return exportMigrationBundle(this.db, '1.4.1', versionOrOptions);
+    return exportMigrationBundle(this.db, '1.5.0', versionOrOptions);
   }
 
   /** Atomically restore database state from a SnapshotBundle with automatic safety backup. */

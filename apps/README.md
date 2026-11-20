@@ -9,6 +9,8 @@ Users provide problem records in JSON Lines (`.jsonl`) format. The application c
 - **`apps/server`**: Local Fastify API service listening strictly on loopback (`127.0.0.1`). Provides `/api/v1` endpoints for preflight preview, transactional import commit, catalog querying, tag listing, aggregated statistics, user preference persistence, and production static asset serving.
 - **`apps/web`**: React/TypeScript/Vite desktop client with Today, Problems, Progress and Notes navigation, bottom Settings, CSS token themes, Recharts analysis and Lucide icons. Today integrates completion and seven-day activity; Progress defaults to Statistics; Notes includes split preview, formatting, focus mode, and unsaved-draft switching protection. Contextual workspaces provide study schedules, catalog import and progress import. Shared practice forms and accessible overlays handle immediate completion, later metadata editing, exact-record revocation and historical manual entry. Local hash navigation retains mounted drafts, filters and scroll without a router or state library.
 
+Version 1.5.0 adds Favorites to desktop navigation and ordered goal lists to Today. The server and MCP adapters expose the same operations for favorite folders and goal membership. [Application boundaries](../docs/application-boundaries.md)
+
 ## Running applications
 
 - Development mode (Vite dev server with API proxy):

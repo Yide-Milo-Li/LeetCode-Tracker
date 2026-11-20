@@ -9,7 +9,7 @@ import { readFile, stat } from 'node:fs/promises';
 import * as path from 'node:path';
 import { z } from 'zod';
 import { isTimeZone, localDate } from '../../../packages/contracts/src/time.ts';
-import type { CatalogProblem } from '../../../packages/contracts/src/sync.ts';
+import { catalogQuerySchema } from '../../../packages/contracts/src/sync.ts';
 import { ApplicationError } from '../../../packages/application/src/errors.ts';
 import { ProfileError, type TrackerProfile } from './profile.ts';
 import { importCatalog, TIMEZONE_HINT } from './operations.ts';
@@ -19,6 +19,8 @@ import { practiceView, profileLang, profileZone, summarizePlan, weakTopicsView }
 import { registerWriteTools } from './write-tools.ts';
 import { registerNoteTools } from './note-tools.ts';
 import { registerBatchTools } from './batch-tools.ts';
+import { registerFavoriteTools } from './favorite-tools.ts';
+import { registerGoalListTools } from './goal-list-tools.ts';
 import { registerCatalogTools } from './catalog-tools.ts';
 
 /** Both transports use the same tool definitions and handlers. */
@@ -26,6 +28,8 @@ export function createTrackerToolRegistry(profile: Pick<TrackerProfile, 'exists'
   const registrar = createRegistrar(profile);
   const server = { registerTool: registrar.register };
   registerWriteTools(registrar);
+  registerGoalListTools(registrar);
+  registerFavoriteTools(registrar);
   registerNoteTools(registrar);
   registerBatchTools(registrar);
   registerCatalogTools(registrar);
@@ -104,14 +108,15 @@ export function createTrackerToolRegistry(profile: Pick<TrackerProfile, 'exists'
     {
       description: 'Search or filter problems from the LeetCode catalog by keyword query, difficulty, or tag.',
       inputSchema: z.object({
-        query: z.string().optional().describe('Search keyword in problem title or frontend ID'),
+        query: z.string().optional().describe('Problem title or frontend ID'),
+        favoriteScope: catalogQuerySchema.shape.favoriteScope.describe('catalog (default), all starred problems, or a favorite folder UUID'),
         difficulty: z.enum(['Easy', 'Medium', 'Hard']).optional().describe('Difficulty filter'),
         tag: z.string().optional().describe('Topic tag slug or name (e.g. "array", "dynamic-programming")'),
         page: z.number().int().min(1).optional().default(1).describe('Page number, 1-indexed (default 1)'),
         limit: z.number().int().min(1).max(100).optional().default(20).describe('Items per page, max 100 (default 20)'),
       }),
     },
-    async (application, { query, difficulty, tag, page = 1, limit = 20 }) => {
+    async (application, { query, difficulty, tag, favoriteScope = 'catalog', page = 1, limit = 20 }) => {
 
       const catalogResult = await application.catalog.query({
         page,
@@ -119,15 +124,16 @@ export function createTrackerToolRegistry(profile: Pick<TrackerProfile, 'exists'
         search: query,
         difficulty,
         tag,
-        premium: 'all',
+        premium: 'all', favoriteScope,
       });
 
-      const simplified = catalogResult.items.map((it: CatalogProblem) => ({
+      const simplified = catalogResult.items.map(it => ({
         frontendId: it.questionFrontendId,
         title: it.title,
         difficulty: it.difficulty,
         tags: it.topicTags.map((t) => t.name),
         isPaidOnly: it.isPaidOnly,
+        favoriteFolderIds: it.favoriteFolderIds ?? null,
       }));
 
       return json({
@@ -144,26 +150,19 @@ export function createTrackerToolRegistry(profile: Pick<TrackerProfile, 'exists'
   server.registerTool(
     'tracker_get_today',
     {
-      description: 'Read a stored daily plan with frontend IDs, reasons, completion and version for edits. Generate one with tracker_create_today.',
+      description: 'Read the daily plan and its version. Today includes up to 8 goal summaries with 3 pending entries each. Use tracker_get_goal_lists for more.',
       inputSchema: z.object({
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Explicit date in YYYY-MM-DD format (defaults to current date in configured timezone)'),
       }),
     },
     async (application, { date }) => {
 
-      let targetDate = date;
-      if (!targetDate) {
-        const settings = await application.settings.get();
-        const tz = settings.timezone;
-        if (!tz || !isTimeZone(tz)) {
-          return json({
-            hasPlan: false,
-            error: 'TIMEZONE_NOT_CONFIGURED',
-            message: TIMEZONE_HINT,
-          });
-        }
-        targetDate = localDate(Date.now(), tz);
-      }
+      const zone = await profileZone(application);
+      const today = zone ? localDate(Date.now(), zone) : undefined;
+      const targetDate = date ?? today;
+      const overview = !date || date === today ? await application.goalLists.summaries(1, 8, 3) : null;
+      const goals = overview?.total ? { goalLists: overview.items, goalListCount: overview.total } : {};
+      if (!targetDate) return json({ hasPlan: false, error: 'TIMEZONE_NOT_CONFIGURED', message: TIMEZONE_HINT, ...goals });
 
       const plansResult = await application.planning.plans({ date: targetDate });
       const plan = plansResult.items[0] ?? null;
@@ -172,11 +171,12 @@ export function createTrackerToolRegistry(profile: Pick<TrackerProfile, 'exists'
         return json({
           hasPlan: false,
           date: targetDate,
+          ...goals,
           message: `No study plan has been generated for date "${targetDate}" yet.`,
         });
       }
 
-      return json(summarizePlan(plan, await profileLang(application)));
+      return json({ ...summarizePlan(plan, await profileLang(application)), ...goals });
     },
   );
 

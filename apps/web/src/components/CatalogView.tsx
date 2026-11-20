@@ -1,15 +1,17 @@
 /** Local catalog discovery, filtering, metadata details and contextual manual recording. */
-import { RotateCcw, Plus, ExternalLink, Download, Upload } from 'lucide-react';
+import { Flag, FolderPlus, ListPlus, Pencil, RotateCcw, Plus, ExternalLink, Download, Star, StarOff, Upload } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
+import type { CatalogListProblem, FavoriteFolder } from '../../../../packages/contracts/src/favorites.ts';
+import type { GoalList } from '../../../../packages/contracts/src/goal-lists.ts';
+import { compareProblemIds } from '../../../../packages/contracts/src/goal-lists.ts';
 import {
   api,
-  type CatalogProblem,
   type CatalogStats,
   type CatalogQuery,
   type TopicTag,
   type PracticeStats,
 } from '../api.ts';
-import { translations, type Language } from '../i18n.ts';
+import { formatCount, translations, type Language } from '../i18n.ts';
 import { formatInstant } from '../date-format.ts';
 import { localizeApiError } from '../error-i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
@@ -17,6 +19,10 @@ import { Dialog, Feedback, Field, PageHeader, Pagination, IconButton, Tooltip } 
 import { PracticeEditor, PracticeHistory } from './PracticeWorkspace.tsx';
 import { PracticeTimerButton } from './PracticeTimer.tsx';
 import { ExportLink } from './ExportLink.tsx';
+import { FavoriteFolderEditor, FavoriteFolderPicker, FavoriteProblemEditor, FavoriteStarButton, RemoveFavoritesDialog, type FavoriteEditorTarget } from './FavoriteFolders.tsx';
+import { GoalListEditor } from './GoalListEditor.tsx';
+import { AddToGoalListsDialog, GoalListsScope, ProblemGoalButton, useSharedGoalLists } from './ProblemGoalLists.tsx';
+import { useAsyncResource } from '../hooks/useAsyncResource.ts';
 
 /** Render only HTTP(S) links from user-provided catalog metadata. */
 function safeUrl(value: string): string | undefined {
@@ -28,21 +34,49 @@ function safeUrl(value: string): string | undefined {
   }
 }
 
-/** Retain filter state and reject out-of-order responses while catalog/import mutations refresh current data. */
-export function CatalogView({
-  lang,
-  onNavigateSettings,
-}: {
+type BulkResult = { kind: 'goal'; name: string } | { kind: 'favorites' | 'removed'; count: number }
+  | { kind: 'goalLists'; count: number; listCount: number; added: number };
+
+function bulkResultText(result: BulkResult, lang: Language) {
+  const zh = lang === 'zh';
+  if (result.kind === 'goal') return zh ? `已创建「${result.name}」，可在「今日」的目标题单中查看。`
+    : `Created “${result.name}”. Find it in Goal lists on Today.`;
+  const quantity = `${formatCount(result.count, lang)} ${result.count === 1 ? 'problem' : 'problems'}`;
+  if (result.kind === 'goalLists') {
+    if (!result.added) return zh ? '所选题单都已包含这些题目。' : 'All selected lists already contained these problems.';
+    return zh ? `${formatCount(result.count, lang)} 道题均已加入所选的 ${formatCount(result.listCount, lang)} 个目标题单。`
+      : `${quantity} ${result.count === 1 ? 'is' : 'are'} now in ${formatCount(result.listCount, lang)} selected goal ${result.listCount === 1 ? 'list' : 'lists'}.`;
+  }
+  if (result.kind === 'favorites') return zh ? `已收藏 ${formatCount(result.count, lang)} 道题。` : `Saved ${quantity} to favorites.`;
+  if (!result.count) return zh ? '所选题目已全部取消收藏。' : 'The selected problems are already out of your favorites.';
+  return zh ? `已取消收藏 ${formatCount(result.count, lang)} 道题。` : `Removed ${quantity} from favorites.`;
+}
+
+interface CatalogViewProps {
   lang: Language;
   onNavigateSettings: () => void;
-}) {
+  favoritesOnly?: boolean;
+  favoriteRevision?: number;
+  onFavoritesChanged?: () => void;
+  onGoalListCreated?: () => void;
+}
+
+export function CatalogView(props: CatalogViewProps) {
+  return <GoalListsScope lang={props.lang} showSelected={false} onCreated={props.onGoalListCreated}><CatalogWorkspace {...props} /></GoalListsScope>;
+}
+
+/** Retain filter state and reject out-of-order responses while catalog/import mutations refresh current data. */
+function CatalogWorkspace({ lang, onNavigateSettings, favoritesOnly = false, favoriteRevision: ownFavoriteRevision,
+  onFavoritesChanged, onGoalListCreated }: CatalogViewProps) {
   const t = translations[lang];
   const zh = lang === 'zh';
   const workspace = useWorkspace();
+  const favoriteRevision = ownFavoriteRevision ?? workspace.favoriteRevision ?? 0;
+  const goals = useSharedGoalLists();
   const [stats, setStats] = useState<CatalogStats | null>(null);
   const [tags, setTags] = useState<TopicTag[]>([]);
   const [practiceStats, setPracticeStats] = useState<PracticeStats | null>(null);
-  const [items, setItems] = useState<CatalogProblem[]>([]);
+  const [items, setItems] = useState<CatalogListProblem[]>([]);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState('');
   const [difficulty, setDifficulty] = useState<CatalogQuery['difficulty']>();
@@ -55,8 +89,34 @@ export function CatalogView({
   const [error, setError] = useState('');
   const [overviewError, setOverviewError] = useState('');
   const [retry, setRetry] = useState(0);
-  const [selected, setSelected] = useState<CatalogProblem | null>(null);
+  const [selected, setSelected] = useState<CatalogListProblem | null>(null);
+  const [checkedProblems, setCheckedProblems] = useState(() => new Map<string, CatalogListProblem>());
+  const [goalDraft, setGoalDraft] = useState<GoalList['items'] | null>(null);
+  const [goalAddIds, setGoalAddIds] = useState<string[] | null>(null);
+  const [removal, setRemoval] = useState<CatalogListProblem[] | null>(null);
+  const [bulkResult, setBulkResult] = useState<BulkResult | null>(null);
+  const bulkNotice = useRef<HTMLDivElement>(null);
+  const pageCheckbox = useRef<HTMLInputElement>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const checkedOnPage = items.filter(problem => checkedProblems.has(problem.questionFrontendId)).length;
+  const allOnPage = items.length > 0 && checkedOnPage === items.length;
+  useEffect(() => {
+    if (bulkResult) bulkNotice.current?.focus({ preventScroll: true });
+  }, [bulkResult]);
   const [recording, setRecording] = useState(false);
+  const [favoriteTarget, setFavoriteTarget] = useState<FavoriteEditorTarget | null>(null);
+  const [folderEditor, setFolderEditor] = useState<FavoriteFolder | 'new' | null>(null);
+  const [folderId, setFolderId] = useState('all');
+  const [announcement, setAnnouncement] = useState('');
+  const needsFolders = favoritesOnly || favoriteTarget !== null;
+  const library = useAsyncResource(signal => needsFolders ? api.getFavoriteLibrary({ signal }) : Promise.resolve(null),
+    [needsFolders, workspace.revision, favoriteRevision, retry]);
+  const folder = library.data?.folders.find(item => item.id === folderId);
+  const favoriteScope = favoritesOnly ? folder?.id ?? 'all' : 'catalog';
+  function refreshFavorites() {
+    if (onFavoritesChanged) onFavoritesChanged();
+    else setRetry(value => value + 1);
+  }
 
   const detailBody = useRef<HTMLDivElement>(null);
   const recordTrigger = useRef<HTMLButtonElement>(null);
@@ -68,6 +128,7 @@ export function CatalogView({
     wasRecording.current = recording;
   }, [recording]);
   useEffect(() => {
+    if (favoritesOnly) return;
     let active = true;
     setOverviewLoading(true);
     Promise.all([api.getCatalogStats(), api.getAllTags(), api.getPracticeStats()])
@@ -88,7 +149,7 @@ export function CatalogView({
     return () => {
       active = false;
     };
-  }, [workspace.revision, retry]);
+  }, [favoritesOnly, workspace.revision, retry]);
   useEffect(() => {
     let active = true;
     setLoading(true);
@@ -101,6 +162,7 @@ export function CatalogView({
         difficulty,
         tag: tag || undefined,
         premium,
+        favoriteScope,
       })
       .then((data) => {
         if (active) {
@@ -119,7 +181,7 @@ export function CatalogView({
     return () => {
       active = false;
     };
-  }, [search, difficulty, tag, premium, page, limit, workspace.revision, retry]);
+  }, [search, difficulty, tag, premium, favoriteScope, page, limit, workspace.revision, favoriteRevision, retry]);
   /** Reset all query dimensions together, including the current page. */
   function reset() {
     setSearch('');
@@ -128,11 +190,39 @@ export function CatalogView({
     setPremium('all');
     setPage(1);
   }
+  function checkProblems(problems: CatalogListProblem[], checked: boolean) {
+    setBulkResult(null);
+    setCheckedProblems(previous => {
+      const next = new Map(previous);
+      for (const problem of problems) {
+        if (checked) next.set(problem.questionFrontendId, problem);
+        else next.delete(problem.questionFrontendId);
+      }
+      return next;
+    });
+  }
+  function createFromSelection() {
+    const items = Array.from(checkedProblems.values(), problem => ({
+      frontendId: problem.questionFrontendId, title: problem.title, url: problem.url, completed: false,
+    }));
+    setGoalDraft(items.sort((a, b) => compareProblemIds(a.frontendId, b.frontendId)));
+  }
+  function focusSelection() {
+    const input = pageCheckbox.current;
+    (input && !input.disabled ? input : searchInput.current)?.focus();
+  }
   return (
-    <div className="catalog-view">
+    <div className={favoritesOnly ? 'catalog-view favorite-library' : 'catalog-view'}>
       <PageHeader
-        title={zh ? '题库' : 'Problems'}
-        actions={
+        title={favoritesOnly ? (zh ? '我的收藏夹' : 'Favorites') : (zh ? '题库' : 'Problems')}
+        actions={favoritesOnly ? <>
+          {folder && <button className="btn btn-secondary" onClick={() => setFolderEditor(folder)}>
+            <Pencil size={15} aria-hidden="true" />{zh ? '编辑收藏夹' : 'Edit folder'}
+          </button>}
+          <button className="btn btn-primary" onClick={() => setFolderEditor('new')}>
+            <FolderPlus size={16} aria-hidden="true" />{zh ? '新建收藏夹' : 'New folder'}
+          </button>
+        </> :
           <div className="action-row">
             <ExportLink
               lang={lang}
@@ -151,12 +241,17 @@ export function CatalogView({
           </div>
         }
       />
+      <span className="visually-hidden" role="status">{announcement}</span>
+      {favoritesOnly && (library.error ? <Feedback retry={{ label: t.retry, run: refreshFavorites }}>
+        {localizeApiError(library.error, lang)}
+      </Feedback> : library.data ? <FavoriteFolderPicker library={library.data} lang={lang} selected={favoriteScope}
+        onSelect={id => { setFolderId(id); setPage(1); }} /> : <p role="status">{zh ? '正在读取收藏夹…' : 'Loading folders…'}</p>)}
       {(error || overviewError) && (
         <Feedback retry={{ label: t.retry, run: () => setRetry((n) => n + 1) }}>
           {error || overviewError}
         </Feedback>
       )}
-      {overviewLoading && !stats ? (
+      {!favoritesOnly && (overviewLoading && !stats ? (
         <p role="status">{t.loadingOverview}</p>
       ) : (
         stats && (
@@ -213,11 +308,12 @@ export function CatalogView({
             </details>
           </div>
         )
-      )}
+      ))}
       <div className="filter-toolbar">
         <Field label={zh ? '搜索题目' : 'Search problems'}>
           <input
-            id="catalog-search-input"
+            ref={searchInput}
+            id={favoritesOnly ? 'favorites-search-input' : 'catalog-search-input'}
             type="search"
             value={search}
             placeholder={t.searchPlaceholder}
@@ -227,7 +323,7 @@ export function CatalogView({
             }}
           />
         </Field>
-        <div className="segmented-pills" role="radiogroup" aria-label={zh ? '难度筛选' : 'Difficulty filter'}>
+        {!favoritesOnly && <><div className="segmented-pills" role="radiogroup" aria-label={zh ? '难度筛选' : 'Difficulty filter'}>
           {(['all', 'Easy', 'Medium', 'Hard'] as const).map((diff) => (
             <button
               key={diff}
@@ -271,10 +367,17 @@ export function CatalogView({
             <option value="true">{t.premiumOnly}</option>
           </select>
         </Field>
-        <IconButton icon={RotateCcw} label={zh ? '重置' : 'Reset'} onClick={reset} />
+        <IconButton icon={RotateCcw} label={zh ? '重置' : 'Reset'} onClick={reset} /></>}
       </div>
       {loading && <p role="status">{t.loadingCatalog}</p>}
-      {!loading && !error && !overviewError && stats?.totalProblems === 0 ? (
+      {!loading && !error && favoritesOnly && !items.length && !search.trim() ? (
+        <section className="empty-state">
+          <h2>{folder ? (zh ? '这个收藏夹还没有题目' : 'This folder is empty') : (zh ? '还没有收藏题目' : 'No favorites yet')}</h2>
+          <p>{folder ? (zh ? '在题库中点击题目旁的星标，再勾选这个收藏夹。' : 'Click the star beside a problem in the catalog and select this folder.')
+            : (zh ? '在题库中点击题目旁的星标即可收藏。' : 'Use the star beside a problem in the catalog to save it here.')}</p>
+          <button className="btn btn-secondary" onClick={() => workspace.navigate('problems')}>{zh ? '浏览题库' : 'Browse problems'}</button>
+        </section>
+      ) : !loading && !error && !overviewError && stats?.totalProblems === 0 ? (
         <section className="empty-state">
           <h2>{t.noProblemsInDb}</h2>
           <p>
@@ -298,7 +401,18 @@ export function CatalogView({
           <table className="data-table problem-table">
             <thead>
               <tr>
-                <th>{zh ? '题号' : 'No.'}</th>
+                <th scope="col">
+                  <label className="catalog-row-check" title={zh ? '全选或取消选择本页题目' : 'Select or deselect this page'}>
+                    <input type="checkbox" aria-label={zh ? '全选本页题目' : 'Select all problems on this page'}
+                      ref={node => {
+                        pageCheckbox.current = node;
+                        if (node) node.indeterminate = checkedOnPage > 0 && !allOnPage;
+                      }}
+                      checked={allOnPage} disabled={loading || !!error || !items.length}
+                      onChange={e => checkProblems(items, e.target.checked)} />
+                    {zh ? '题号' : 'No.'}
+                  </label>
+                </th>
                 <th>{zh ? '题目' : 'Problem'}</th>
                 <th>{zh ? '难度' : 'Difficulty'}</th>
                 <th>{zh ? '标签' : 'Tags'}</th>
@@ -307,10 +421,17 @@ export function CatalogView({
             </thead>
             <tbody>
               {items.map((problem) => (
-                <tr key={problem.questionId}>
-                  <td className="muted">{problem.questionFrontendId}</td>
+                <tr key={problem.questionId} className={checkedProblems.has(problem.questionFrontendId) ? 'is-selected' : undefined}>
+                  <td className="muted">
+                    <label className="catalog-row-check">
+                      <input type="checkbox" checked={checkedProblems.has(problem.questionFrontendId)} disabled={loading || !!error}
+                        aria-label={zh ? `选择 #${problem.questionFrontendId} ${problem.title}` : `Select #${problem.questionFrontendId} ${problem.title}`}
+                        onChange={e => checkProblems([problem], e.target.checked)} />
+                      <span>{problem.questionFrontendId}</span>
+                    </label>
+                  </td>
                   <td>
-                    <button className="problem-title-button" onClick={() => setSelected(problem)}>
+                    <button className="problem-title-button" title={problem.title} onClick={() => setSelected(problem)}>
                       {problem.title}
                     </button>
                     {problem.isPaidOnly && <small className="pending-label">{t.statPremium}</small>}
@@ -334,6 +455,12 @@ export function CatalogView({
                   </td>
                   <td>
                     <div className="action-row">
+                      <FavoriteStarButton saved={problem.favoriteFolderIds !== undefined}
+                        label={problem.favoriteFolderIds
+                          ? (zh ? `管理 #${problem.questionFrontendId} 的收藏` : `Manage favorite #${problem.questionFrontendId}`)
+                          : (zh ? `收藏 #${problem.questionFrontendId}` : `Save #${problem.questionFrontendId} to favorites`)}
+                        onClick={() => setFavoriteTarget({ problem })} />
+                      <ProblemGoalButton frontendId={problem.questionFrontendId} title={problem.title} />
                       <IconButton icon={Plus} label={t.logPractice}
                         onClick={() => workspace.openPractice({ mode: 'manual', problem })} />
                       <PracticeTimerButton lang={lang} frontendId={problem.questionFrontendId} title={problem.title} />
@@ -367,6 +494,58 @@ export function CatalogView({
           setPage(1);
         }}
       />
+      {checkedProblems.size > 0 && (
+        <div className="catalog-bulk-actions" role="group" aria-label={zh ? '批量操作' : 'Bulk actions'}>
+          <div className="catalog-selection-count">
+            <strong role="status">{zh ? `已选 ${formatCount(checkedProblems.size, lang)} 题` : `${formatCount(checkedProblems.size, lang)} selected`}</strong>
+            <button type="button" className="text-link" onClick={() => { setCheckedProblems(new Map()); focusSelection(); }}>
+              {zh ? '清空选择' : 'Clear selection'}
+            </button>
+          </div>
+          <div className="action-row">
+            {favoritesOnly ? <button type="button" className="btn btn-secondary btn-sm"
+              onClick={() => setRemoval([...checkedProblems.values()])}>
+              <StarOff size={16} aria-hidden="true" />{zh ? '取消收藏' : 'Unfavorite'}
+            </button> : <button type="button" className="btn btn-secondary btn-sm"
+              onClick={() => setFavoriteTarget({ frontendIds: [...checkedProblems.keys()] })}>
+              <Star size={16} aria-hidden="true" />{zh ? '收藏' : 'Favorite'}
+            </button>}
+            <button type="button" className="btn btn-secondary btn-sm" aria-haspopup="dialog"
+              onClick={() => setGoalAddIds([...checkedProblems.keys()].sort(compareProblemIds))}>
+              <Flag size={16} aria-hidden="true" />{zh ? '加入目标题单' : 'Add to goal lists'}
+            </button>
+            <button type="button" className="btn btn-primary btn-sm" onClick={createFromSelection}>
+              <ListPlus size={16} aria-hidden="true" />{zh ? '创建题单' : 'Create goal list'}
+            </button>
+          </div>
+        </div>
+      )}
+      {bulkResult && <div className="catalog-bulk-result" ref={bulkNotice} tabIndex={-1}><Feedback tone="success" dismiss={{
+        label: zh ? '关闭提示' : 'Dismiss', run: () => setBulkResult(null), restoreFocus: focusSelection,
+      }}>{bulkResultText(bulkResult, lang)}</Feedback></div>}
+      {goalAddIds && <AddToGoalListsDialog frontendIds={goalAddIds} lang={lang} onClose={() => setGoalAddIds(null)}
+        onCreate={() => { setGoalAddIds(null); createFromSelection(); }}
+        onAdded={(listCount, added) => {
+          setBulkResult({ kind: 'goalLists', count: goalAddIds.length, listCount, added });
+          setGoalAddIds(null);
+          setCheckedProblems(new Map());
+        }} />}
+      {removal && <RemoveFavoritesDialog problems={removal} library={library.data} lang={lang}
+        onClose={() => setRemoval(null)} onRefresh={refreshFavorites} onRemoved={count => {
+          setRemoval(null);
+          setCheckedProblems(new Map());
+          setBulkResult({ kind: 'removed', count });
+          refreshFavorites();
+        }} />}
+      {goalDraft && <GoalListEditor goal={null} initialItems={goalDraft} lang={lang} onClose={() => setGoalDraft(null)}
+        onSaved={(_id, goal) => {
+          if (!goal) return;
+          setBulkResult({ kind: 'goal', name: goal.name });
+          setGoalDraft(null);
+          setCheckedProblems(new Map());
+          goals.saved(goal.id, goal);
+          onGoalListCreated?.();
+        }} />}
       {selected && (
         <Dialog
           title={recording ? t.logPractice : zh ? '题目详情' : 'Problem details'}
@@ -398,6 +577,16 @@ export function CatalogView({
             <dd>{selected.questionId}</dd>
           </dl>
           <div className="action-row">
+            <button className={'btn btn-secondary' + (selected.favoriteFolderIds ? ' is-favorite' : '')}
+              aria-haspopup="dialog"
+              onClick={() => {
+                setFavoriteTarget({ problem: items.find(item => item.questionId === selected.questionId) ?? selected });
+                setSelected(null);
+              }}>
+              <Star size={16} aria-hidden="true" />
+              {selected.favoriteFolderIds ? (zh ? '管理收藏' : 'Manage favorite') : (zh ? '收藏题目' : 'Save to favorites')}
+            </button>
+            <ProblemGoalButton frontendId={selected.questionFrontendId} title={selected.title} withText onOpen={() => setSelected(null)} />
             {safeUrl(selected.url) && (
               <a
                 className="btn btn-secondary"
@@ -423,6 +612,30 @@ export function CatalogView({
           </div>
         </Dialog>
       )}
+      {favoriteTarget && <FavoriteProblemEditor target={favoriteTarget}
+        library={library.data} loadError={library.error} lang={lang} onClose={() => setFavoriteTarget(null)}
+        onRefresh={refreshFavorites} onSaved={action => {
+          if (favoriteTarget.frontendIds) {
+            setBulkResult({ kind: 'favorites', count: favoriteTarget.frontendIds.length });
+            setCheckedProblems(new Map());
+          } else {
+            if (favoritesOnly && action === 'removed') {
+              const checked = checkedProblems.get(favoriteTarget.problem.questionFrontendId);
+              if (checked) checkProblems([checked], false);
+            }
+            setAnnouncement(action === 'removed' ? (zh ? '已取消收藏。' : 'Favorite removed.') : (zh ? '收藏已保存。' : 'Favorite saved.'));
+          }
+          setFavoriteTarget(null);
+          refreshFavorites();
+        }} />}
+      {folderEditor && <FavoriteFolderEditor folder={folderEditor === 'new' ? null : folderEditor} lang={lang}
+        onClose={() => setFolderEditor(null)} onRefresh={refreshFavorites} onSaved={id => {
+          setFolderEditor(null);
+          setFolderId(id);
+          setPage(1);
+          setAnnouncement(id === 'all' ? (zh ? '收藏夹已删除。' : 'Folder deleted.') : (zh ? '收藏夹已保存。' : 'Folder saved.'));
+          refreshFavorites();
+        }} />}
     </div>
   );
 }

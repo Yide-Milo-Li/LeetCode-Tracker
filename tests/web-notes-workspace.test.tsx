@@ -1,7 +1,7 @@
 /**
  * Web UI component tests for Phase 14:
  * - NotesWorkspace master-detail view, search, filters, note saving, practice timeline
- * - QuickCopyButtons (Obsidian callout and Notion rich card clipboard copies)
+ * - CopyNotionCard (Notion card clipboard copy)
  * - QuickNoteDrawer (review problem inspection, jump to workspace)
  */
 import { afterEach, beforeEach, it, describe, mock } from 'node:test';
@@ -43,7 +43,7 @@ const React = await import('react');
 const { render, fireEvent, screen, act, cleanup } = await import('@testing-library/react');
 const { api, ApiError } = await import('../apps/web/src/api.ts');
 const { NotesWorkspace } = await import('../apps/web/src/components/NotesWorkspace.tsx');
-const { QuickCopyButtons } = await import('../apps/web/src/components/QuickCopyButtons.tsx');
+const { CopyNotionCard } = await import('../apps/web/src/components/CopyNotionCard.tsx');
 const { QuickNoteDrawer } = await import('../apps/web/src/components/QuickNoteDrawer.tsx');
 const { TodayProblemRow } = await import('../apps/web/src/components/TodayProblemRow.tsx');
 const { WorkspaceContext } = await import('../apps/web/src/workspace.tsx');
@@ -1180,50 +1180,19 @@ describe('NotesWorkspace unsaved changes guard', () => {
   });
 });
 
-describe('QuickCopyButtons Component', () => {
+describe('CopyNotionCard Component', () => {
   const sampleProblem = {
     frontendId: '1',
     title: 'Two Sum',
     url: 'https://leetcode.com/problems/two-sum/',
     difficulty: 'Easy',
     tags: ['array', 'hash-table'],
-    slug: 'two-sum',
   };
-
-  it('copies Obsidian callout with wikilink to clipboard', async () => {
-    await act(async () => {
-      render(
-        <QuickCopyButtons
-          lang="zh"
-          problem={sampleProblem}
-          record={{ durationMinutes: 15, notes: 'Easy hash map' }}
-          customNote="Custom solution notes"
-        />
-      );
-    });
-
-    // Click dropdown trigger to open options
-    const copyTrigger = screen.getByRole('button', { name: /复制/i });
-    await act(async () => {
-      fireEvent.click(copyTrigger);
-    });
-
-    const obsidianBtn = screen.getByRole('button', { name: /复制为 Obsidian 卡片/i });
-    await act(async () => {
-      fireEvent.click(obsidianBtn);
-    });
-
-    assert.ok(lastCopiedText.includes('> [!example] [1. Two Sum](https://leetcode.com/problems/two-sum/)'));
-    assert.ok(lastCopiedText.includes('**难度**: `Easy`'));
-    assert.ok(lastCopiedText.includes('**双链索引**: [[0001-two-sum]]'));
-    assert.ok(lastCopiedText.includes('#leetcode/array'));
-    assert.ok(lastCopiedText.includes('Custom solution notes'));
-  });
 
   it('copies Notion rich card text to clipboard', async () => {
     await act(async () => {
       render(
-        <QuickCopyButtons
+        <CopyNotionCard
           lang="en"
           problem={sampleProblem}
           record={{ durationMinutes: 20, notes: 'Array one pass' }}
@@ -1231,11 +1200,6 @@ describe('QuickCopyButtons Component', () => {
       );
     });
 
-    // Click dropdown trigger to open options
-    const copyTrigger = screen.getByRole('button', { name: /Copy/i });
-    await act(async () => {
-      fireEvent.click(copyTrigger);
-    });
 
     const notionBtn = screen.getByRole('button', { name: /Copy for Notion/i });
     await act(async () => {
@@ -1247,66 +1211,7 @@ describe('QuickCopyButtons Component', () => {
     assert.ok(lastCopiedText.includes('Array one pass'));
   });
 
-  it('exposes a disclosure (not an ARIA menu) that closes on Escape and returns focus', async () => {
-    await act(async () => {
-      render(<QuickCopyButtons lang="en" problem={sampleProblem} />);
-    });
-    const trigger = screen.getByRole('button', { name: /Copy/i });
-    assert.equal(trigger.getAttribute('aria-haspopup'), null);
-    assert.equal(trigger.getAttribute('aria-expanded'), 'false');
 
-    await act(async () => {
-      fireEvent.click(trigger);
-    });
-    const panel = document.querySelector('.notes-dropdown-menu');
-    assert.ok(panel);
-    assert.equal(panel.getAttribute('role'), null);
-    assert.equal(screen.queryAllByRole('menuitem').length, 0);
-    assert.equal(trigger.getAttribute('aria-expanded'), 'true');
-    assert.equal(trigger.getAttribute('aria-controls'), panel.id);
-
-    await act(async () => {
-      fireEvent.keyDown(panel, { key: 'Escape' });
-    });
-    assert.equal(document.querySelector('.notes-dropdown-menu'), null);
-    assert.equal(trigger.getAttribute('aria-expanded'), 'false');
-    assert.equal(document.activeElement, trigger);
-  });
-
-  it('respects align prop for dropdown menu position', async () => {
-    // Default / left alignment
-    const { unmount } = render(
-      <QuickCopyButtons
-        lang="en"
-        problem={sampleProblem}
-        align="left"
-      />
-    );
-    const copyTrigger = screen.getByRole('button', { name: /Copy/i });
-    await act(async () => {
-      fireEvent.click(copyTrigger);
-    });
-    const menuLeft = document.querySelector('.notes-dropdown-menu');
-    assert.ok(menuLeft);
-    assert.ok(!menuLeft.classList.contains('notes-dropdown-menu-right'));
-    unmount();
-
-    // Right alignment
-    render(
-      <QuickCopyButtons
-        lang="en"
-        problem={sampleProblem}
-        align="right"
-      />
-    );
-    const copyTriggerRight = screen.getByRole('button', { name: /Copy/i });
-    await act(async () => {
-      fireEvent.click(copyTriggerRight);
-    });
-    const menuRight = document.querySelector('.notes-dropdown-menu');
-    assert.ok(menuRight);
-    assert.ok(menuRight.classList.contains('notes-dropdown-menu-right'));
-  });
 });
 
 describe('QuickNoteDrawer Component', () => {
@@ -1319,7 +1224,7 @@ describe('QuickNoteDrawer Component', () => {
       <WorkspaceContext.Provider value={{ revision: 0, desktopAgentRevision, timezone: null, navigate() {}, openPractice() {}, notifyMutation() {} }}>
         <QuickNoteDrawer
           lang="en"
-          problem={{ frontendId: '1', title: 'Problem A', url: 'https://example.com/1', difficulty: 'Easy', tags: [], slug: 'problem-a' }}
+          problem={{ frontendId: '1', title: 'Problem A', url: 'https://example.com/1', difficulty: 'Easy', tags: [] }}
           onClose={() => {}}
           onOpenWorkspace={() => {}}
         />
@@ -1328,7 +1233,6 @@ describe('QuickNoteDrawer Component', () => {
     let rerender!: ReturnType<typeof render>['rerender'];
     await act(async () => { ({ rerender } = render(drawer(0))); });
     assert.ok(screen.getByText('Original note'));
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy' })); });
     response = slow.promise;
     await act(async () => { rerender(drawer(1)); });
     assert.equal((screen.getByRole('button', { name: /Copy for Notion/ }) as HTMLButtonElement).disabled, true);
@@ -1364,7 +1268,6 @@ describe('QuickNoteDrawer Component', () => {
             url: 'https://leetcode.com/problems/two-sum/',
             difficulty: 'Easy',
             tags: ['Array'],
-            slug: 'two-sum',
           }}
           latestPracticeNotes="Last practice: AC in 10 mins"
           onClose={() => {
@@ -1392,7 +1295,7 @@ describe('QuickNoteDrawer Component', () => {
     assert.equal(closed, true);
   });
 
-  it('displays unfilled template notice and falls back to practice log in QuickCopyButtons', async () => {
+  it('displays unfilled template notice and falls back to practice log in CopyNotionCard', async () => {
     mock.method(api, 'getNote', async () => ({
       note: {
         questionFrontendId: '1',
@@ -1411,7 +1314,6 @@ describe('QuickNoteDrawer Component', () => {
             url: 'https://leetcode.com/problems/two-sum/',
             difficulty: 'Easy',
             tags: ['Array'],
-            slug: 'two-sum',
           }}
           latestPracticeNotes="Practice log reflection: Hash map O(N)"
           onClose={() => {}}
@@ -1423,11 +1325,6 @@ describe('QuickNoteDrawer Component', () => {
     // Unfilled template badge shown
     assert.ok(screen.getByText(/Template Unedited/i));
 
-    // When copying Notion card, open dropdown first then copy
-    const copyTrigger = screen.getByRole('button', { name: /Copy/i });
-    await act(async () => {
-      fireEvent.click(copyTrigger);
-    });
     const notionBtn = screen.getByRole('button', { name: /Copy for Notion/i });
     await act(async () => {
       fireEvent.click(notionBtn);

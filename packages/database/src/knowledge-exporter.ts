@@ -27,12 +27,11 @@ export interface ProblemExportData {
 
 import {
   formatProblemFilename,
-  formatObsidianCallout,
   formatNotionCard,
   hasMeaningfulNoteContent,
   NOTE_TEMPLATES,
 } from '../../contracts/src/notes.ts';
-export { formatProblemFilename, formatObsidianCallout, formatNotionCard };
+export { formatProblemFilename, formatNotionCard };
 
 /**
  * Generate a complete Markdown note for a problem with YAML frontmatter,

@@ -1,5 +1,15 @@
 # Implementation status
 
+## Release 1.5.0
+
+Version 1.5.0 adds ordered goal lists, favorite folders, shared practice completion, and a Today activity overview. [Release notes](releases/1.5.0.md)
+
+Candidate source `be77c6f` passed 695 application, renderer and bundled-sidecar tests and 15 Rust tests on Apple Silicon. TypeScript, the production build, Rust formatting and Clippy also passed. The local `.app` and `.dmg` were built with version 1.5.0 and a separate app identifier. The original app inside the DMG passed strict macOS signature verification. The eight README captures use an isolated synthetic catalog.
+
+Native macOS checks used a synthetic profile to create and reorder goals, add a cross-page selection to two lists, check and revoke a shared practice, and open the day's Records from the activity chart. A goal-only check left daily progress untouched. Folder creation, renaming and paging worked with 13 folders and 60 starred problems. The packaged MCP server wrote a 130-item checklist, and the native app read it back in saved order after restarting. The app also showed the review settings in English and Chinese and published a synthetic snapshot to a local sync folder.
+
+A separate profile created by the published 1.4.1 bundled runtime opened in the 1.5.0 candidate with its catalog, practice record and note intact. Hosted CI reports packaging, migration and updater-signature results separately. [1.5.0 tag CI](https://github.com/Yide-Milo-Li/LeetCode-Tracker/actions/workflows/ci.yml?query=branch%3Av1.5.0)
+
 ## Release 1.4.1
 
 The macOS Dock keeps the selected palette after the first quit. This release also adds automatic sync for devices with a configured target and repairs relative dates in LeetCode progress imports. [Release notes](releases/1.4.1.md)

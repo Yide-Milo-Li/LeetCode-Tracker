@@ -52,9 +52,10 @@ export function useNotesList({ selectedId, setSelectedId, externalRevision }: Us
       if (matched) {
         setSelectedSummary(matched);
       } else {
-        // If not in current items page (e.g. jumped from external view), fetch summary asynchronously
+        setSelectedSummary(current => current?.questionFrontendId === selectedId ? current : null);
+        // A Today link can target an unpracticed problem outside the filtered list.
         api
-          .listNotes({ search: selectedId, limit: 1 })
+          .listNotes({ frontendId: selectedId, scope: 'all', limit: 1 })
           .then((res) => {
             if (!active) return;
             const found = res.items.find((it) => it.questionFrontendId === selectedId);

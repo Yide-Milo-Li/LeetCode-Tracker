@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { acquireDatabaseLease } from '../packages/database/src/lease.ts';
 import { StdioClient } from './fixtures/mcp-stdio-client.ts';
 
@@ -619,4 +619,145 @@ test('Phase 48: today reports the review backlog and a typed append pulls one re
     await client.close();
     p.cleanup();
   }
+});
+
+test('ordered goal CRUD preserves progress, pages pending entries and safely replays creation over stdio', async () => {
+  const w = profileWithCatalog();
+  const { client } = await StdioClient.start(entry, w.dbPath);
+  try {
+    const id = randomUUID();
+    const frontendIds = Array.from({ length: 24 }, (_, i) => String(i + 1)).reverse();
+    const input = { id, name: 'Practice in order', frontendIds };
+    const saved = (await client.call('tracker_create_goal_list', input)).structuredContent;
+    const read = async () => (await client.call('tracker_get_goal_lists', { id })).structuredContent.items[0];
+    assert.equal(saved.total, frontendIds.length);
+    assert.deepEqual((await read()).items.map((item: { frontendId: string }) => item.frontendId), frontendIds);
+    assert.deepEqual((await client.call('tracker_create_goal_list', input)).structuredContent, saved);
+    assert.equal(errorCode(await client.call('tracker_create_goal_list', { ...input, frontendIds: [] })), 'GOAL_LIST_EXISTS');
+    const anonymous = { name: input.name, frontendIds };
+    const duplicate = (await client.call('tracker_create_goal_list', anonymous)).structuredContent;
+    assert.notEqual(duplicate.id, id);
+    assert.deepEqual((await client.call('tracker_create_goal_list', anonymous)).structuredContent, duplicate);
+    await client.call('tracker_delete_goal_list', { id: duplicate.id, expectedVersion: duplicate.version });
+    const change = async (expectedVersion: number, edit: Record<string, unknown>) => {
+      const result = await client.call('tracker_edit_goal_item', { id, expectedVersion, edit });
+      assert.ok(!result.isError, result.content[0].text);
+      return result.structuredContent;
+    };
+    await change(1, { action: 'setCompleted', frontendId: '22', completed: true });
+    const daily = (await client.call('tracker_get_today')).structuredContent;
+    assert.equal(daily.hasPlan, false);
+    assert.deepEqual(daily.goalLists[0].pending.map((i: { frontendId: string }) => i.frontendId), frontendIds.filter(id => id !== '22').slice(0, 3));
+    assert.equal(daily.goalLists[0].completedCount, 1);
+    const remaining: string[] = [];
+    let page: number | null = 1;
+    do {
+      const result: { items: { items: { frontendId: string }[] }[]; nextPage: number | null } =
+        (await client.call('tracker_get_goal_lists', { id, pendingOnly: true, page, limit: 7, expectedVersion: 2 })).structuredContent;
+      remaining.push(...result.items[0].items.map((i: { frontendId: string }) => i.frontendId));
+      page = result.nextPage;
+    } while (page !== null);
+    assert.deepEqual(remaining, frontendIds.filter(id => id !== '22'));
+    assert.equal((await client.call('tracker_get_today', { date: '2000-01-01' })).structuredContent.goalLists, undefined);
+    const moved = await change(2, { action: 'move', frontendId: '22', beforeId: '24' });
+    assert.equal(moved.item.completed, true);
+    assert.equal(errorCode(await client.call('tracker_get_goal_lists', { id, page: 2, expectedVersion: 2 })), 'STALE_GOAL_LIST');
+    assert.equal((await read()).items[0].frontendId, '22');
+    const reopened = await change(3, { action: 'setCompleted', frontendId: '22', completed: false });
+    assert.equal(reopened.item.frontendId, '22');
+    assert.equal(reopened.item.completed, false);
+    const replaced = await change(4, { action: 'replace', frontendId: '22', newFrontendId: '25' });
+    assert.equal(replaced.item.frontendId, '25');
+    await change(5, { action: 'remove', frontendId: '25' });
+    const appended = await change(6, { action: 'add', frontendId: '26' });
+    assert.equal(appended.item.frontendId, '26');
+    assert.equal((await read()).items.at(-1).frontendId, '26');
+    assert.equal(errorCode(await client.call('tracker_edit_goal_item', { id, expectedVersion: 7,
+      edit: { action: 'move', frontendId: '26', beforeId: 'missing' } })), 'GOAL_ITEM_NOT_FOUND');
+    const updated = await client.call('tracker_update_goal_list', { id, expectedVersion: 7, name: 'Done', items: [] });
+    assert.equal(updated.structuredContent.total, 0);
+    assert.deepEqual((await read()).items, []);
+    assert.deepEqual((await client.call('tracker_create_goal_list', input)).structuredContent, updated.structuredContent);
+    const result = await client.call('tracker_get_goal_lists', { id });
+    assert.equal(result.structuredContent.items[0].name, 'Done');
+    await client.call('tracker_delete_goal_list', { id, expectedVersion: 8 });
+    assert.equal(errorCode(await client.call('tracker_create_goal_list', input)), 'GOAL_LIST_NOT_FOUND');
+    assert.deepEqual((await client.call('tracker_get_goal_lists')).structuredContent.items, []);
+  } finally { await client.close(); w.cleanup(); }
+});
+
+test('favorites, flags and cross-list batches round-trip through stdio with guarded atomic writes', async () => {
+  const w = profileWithCatalog();
+  const { client } = await StdioClient.start(entry, w.dbPath);
+  const call = async (name: string, args: Record<string, unknown> = {}) => {
+    const result = await client.call(name, args);
+    assert.ok(!result.isError, result.content[0].text);
+    return result.structuredContent;
+  };
+  const lookup = async (id: string) => (await call('tracker_get_problems', { frontendIds: [id] })).problems[0];
+  const readList = async (id: string) => (await call('tracker_get_goal_lists', { id })).items[0];
+  try {
+    const a = randomUUID(), b = randomUUID();
+    await call('tracker_save_favorite_folder', { id: a, name: 'Arrays', expectedName: null });
+    await call('tracker_set_favorite', { frontendId: '2', expectedFolderIds: null, folderIds: [a] });
+    const bulk = { frontendIds: ['10', '2'], folderIds: [b], newFolder: { id: b, name: 'Trees' } };
+    await call('tracker_add_favorites', bulk);
+    await call('tracker_add_favorites', bulk);
+    assert.deepEqual((await lookup('2')).favoriteFolderIds, [a, b].sort());
+    assert.deepEqual((await call('tracker_search_problems', { favoriteScope: b })).problems.map((p: { frontendId: string }) => p.frontendId), ['2', '10']);
+    assert.equal((await call('tracker_get_favorite_folders')).totalFavorites, 2);
+    const expected = [{ frontendId: '10', folderIds: [b] }, { frontendId: '2', folderIds: [a] }];
+    assert.equal(errorCode(await client.call('tracker_remove_favorites', { expected })), 'STALE_FAVORITES');
+    assert.deepEqual((await lookup('10')).favoriteFolderIds, [b], 'first removal rolled back');
+    await call('tracker_save_favorite_folder', { id: b, expectedName: 'Trees', name: 'Weekend' });
+    await call('tracker_delete_favorite_folder', { id: b, name: 'Weekend' });
+    assert.deepEqual((await lookup('10')).favoriteFolderIds, [], 'still starred without folders');
+    await call('tracker_remove_favorites', { expected: [{ frontendId: '10', folderIds: [] }, { frontendId: '2', folderIds: [a] }] });
+    assert.equal((await lookup('2')).favoriteFolderIds, null);
+
+    const first = randomUUID(), second = randomUUID();
+    await call('tracker_create_goal_list', { id: first, name: 'First', frontendIds: ['3', '1'] });
+    await call('tracker_edit_goal_item', { id: first, expectedVersion: 1, edit: { action: 'setCompleted', frontendId: '1', completed: true } });
+    await call('tracker_set_goal_membership', { frontendId: '3', expectedListIds: [first], listIds: [first, second], newList: { id: second, name: 'Second' } });
+    assert.deepEqual((await lookup('3')).goalListIds, [first, second].sort());
+    const batch = { frontendIds: ['10', '1', '2'], listIds: [first, second] };
+    assert.equal(errorCode(await client.call('tracker_add_to_goal_lists', { ...batch, listIds: [first, randomUUID()] })), 'GOAL_LIST_NOT_FOUND');
+    assert.equal((await readList(first)).version, 2);
+    assert.equal((await call('tracker_add_to_goal_lists', batch)).added, 5);
+    assert.equal((await call('tracker_add_to_goal_lists', batch)).added, 0);
+    assert.deepEqual((await readList(first)).items.map((i: { frontendId: string; completed: boolean }) => [i.frontendId, i.completed]),
+      [['3', false], ['1', true], ['2', false], ['10', false]]);
+    assert.deepEqual((await readList(second)).items.map((i: { frontendId: string }) => i.frontendId), ['3', '1', '2', '10']);
+    assert.equal(errorCode(await client.call('tracker_set_goal_membership', { frontendId: '3', expectedListIds: [first], listIds: [] })), 'STALE_GOAL_MEMBERSHIP');
+    await call('tracker_set_goal_membership', { frontendId: '3', expectedListIds: [first, second], listIds: [] });
+    assert.deepEqual((await lookup('3')).goalListIds, []);
+  } finally { await client.close(); w.cleanup(); }
+});
+
+test('large goal writes and Today return bounded results and every pending entry is reachable', async () => {
+  const w = profileWithCatalog();
+  const ids = Array.from({ length: 3000 }, (_, i) => String(i + 1));
+  let client: StdioClient | undefined;
+  try {
+    const path = join(dirname(w.dbPath), 'large.jsonl');
+    writeFileSync(path, ids.map(id => JSON.stringify({ id, title: 'Practice Problem ' + id, difficulty: 'Easy' })).join('\n'));
+    assert.equal(spawnSync(process.execPath, [entry, 'import', path, '--db', w.dbPath]).status, 0);
+    ({ client } = await StdioClient.start(entry, w.dbPath));
+    const input = { name: 'Large goal', frontendIds: ids };
+    const created = await client.call('tracker_create_goal_list', input);
+    const { id, version } = created.structuredContent;
+    assert.equal(created.structuredContent.total, 3000);
+    const edited = await client.call('tracker_edit_goal_item', { id, expectedVersion: version, edit: { action: 'setCompleted', frontendId: '1', completed: true } });
+    const today = await client.call('tracker_get_today');
+    assert.equal(edited.structuredContent.item.frontendId, '1');
+    assert.equal(today.structuredContent.goalLists[0].total, 3000);
+    for (const result of [created, edited, today]) assert.ok(Buffer.byteLength(result.content[0].text) < 2000);
+    await client.close();
+    ({ client } = await StdioClient.start(entry, w.dbPath));
+    assert.equal((await client.call('tracker_create_goal_list', input)).structuredContent.version, 2, 'id-less replay survives restart and later edits');
+    const tail = (await client.call('tracker_get_goal_lists', { id, page: 30, limit: 100, pendingOnly: true })).structuredContent;
+    assert.equal(tail.nextPage, null);
+    assert.equal(tail.total, 2999);
+    assert.deepEqual(tail.items[0].items.map((item: { frontendId: string }) => item.frontendId), ids.slice(2901));
+  } finally { if (client) await client.close(); w.cleanup(); }
 });

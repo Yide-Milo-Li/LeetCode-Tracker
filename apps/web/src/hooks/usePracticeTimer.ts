@@ -26,7 +26,7 @@ export interface PracticeTimer {
   cancel: () => void;
 }
 
-export function usePracticeTimer(nowOverride?: number): PracticeTimer {
+export function usePracticeTimer(nowOverride?: number, frontendId?: string): PracticeTimer {
   const [active, setActive] = useState<PracticeTimerState | null>(() => loadActiveTimer());
   const [now, setNow] = useState(() => Date.now());
 
@@ -36,10 +36,10 @@ export function usePracticeTimer(nowOverride?: number): PracticeTimer {
   }, []);
 
   useEffect(() => {
-    if (!active || nowOverride !== undefined) return;
+    if (!active || (frontendId && active.frontendId !== frontendId) || nowOverride !== undefined) return;
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
-  }, [active, nowOverride]);
+  }, [active, nowOverride, frontendId]);
 
   const tick = nowOverride ?? now;
   const elapsedSeconds = active ? getElapsedSeconds(active, tick) : 0;

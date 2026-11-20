@@ -33,9 +33,10 @@ afterEach(() => {
 const baseSettings = { language: 'en' as const, theme: 'light' as const, timezone: null, updatedAt: 1 };
 
 /** Stub the three facts the gate checks. */
-function stubStatus({ timezone = null as string | null, problems = 0, scheduled = false } = {}) {
+function stubStatus({ timezone = null as string | null, problems = 0, scheduled = false, goals = false } = {}) {
   mock.method(api, 'getSettings', async () => ({ ...baseSettings, timezone }));
   mock.method(api, 'getCatalogStats', async () => ({ totalProblems: problems }) as never);
+  mock.method(api, 'getGoalListSummaries', async () => ({ items: goals ? [{ id: 'list' }] : [], nextPage: null }));
   mock.method(api, 'getStrategies', async () =>
     scheduled ? ([{ id: 's1', version: 1, deleted: false, weekdays: [1], name: 'x', rules: {} }] as never) : [],
   );
@@ -145,4 +146,10 @@ it('builds a weekday preset that passes the shared strategy contract', () => {
     assert.equal(parsed.data?.rules.dailyCount, 3);
     assert.equal(parsed.data?.rules.reviewCount, 1);
   }
+});
+
+it('shows Today immediately for a manual goal list without a weekly schedule or timezone', async () => {
+  stubStatus({ goals: true });
+  await renderGate();
+  assert.ok(screen.getByText('Today view'));
 });

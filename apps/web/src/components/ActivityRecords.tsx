@@ -33,47 +33,17 @@ export function ActivityRecords({
   const [retry, setRetry] = useState(0);
   const [snapshot, setSnapshot] = useState<RecentActivityItem | null>(null);
   const [opening, setOpening] = useState<string | null>(null);
-  const [dayNotes, setDayNotes] = useState<Array<{ id: string; title: string; notes: string }>>([]);
+  const [notes, setNotes] = useState<{ date: string; items: Awaited<ReturnType<typeof api.getDashboardDayNotes>> }>();
+  const dayNotes = notes?.date === date ? notes.items : [];
 
   useEffect(() => {
-    if (!date) {
-      setDayNotes([]);
-      return;
-    }
-    let active = true;
-    api
-      .getPracticeRecords({ page: 1, limit: 100 })
-      .then((res) => {
-        if (!active) return;
-        const matching = res.items.filter((r) => {
-          const recDate =
-            r.timePrecision === 'date'
-              ? r.practicedAt
-              : workspace.timezone
-                ? new Intl.DateTimeFormat('en-CA', {
-                    timeZone: workspace.timezone,
-                    year: 'numeric',
-                    month: '2-digit',
-                    day: '2-digit',
-                  }).format(new Date(r.practicedAt))
-                : r.practicedAt.slice(0, 10);
-          return recDate === date && Boolean(r.notes?.trim());
-        });
-        setDayNotes(
-          matching.map((r) => ({
-            id: r.id,
-            title: `#${r.questionFrontendId} ${r.problemTitle}`,
-            notes: r.notes || '',
-          })),
-        );
-      })
-      .catch(() => {
-        if (active) setDayNotes([]);
-      });
-    return () => {
-      active = false;
-    };
-  }, [date, workspace.timezone, workspace.revision]);
+    if (!date) return;
+    const controller = new AbortController();
+    api.getDashboardDayNotes(date, { signal: controller.signal }).then(items => {
+      if (!controller.signal.aborted) setNotes({ date, items });
+    }).catch(() => { if (!controller.signal.aborted) setNotes(undefined); });
+    return () => controller.abort();
+  }, [date, workspace.timezone, workspace.revision, retry]);
   useEffect(() => {
     if (!filterRequest) return;
     setDate(filterRequest.date ?? '');
@@ -82,26 +52,24 @@ export function ActivityRecords({
     setPage(1);
   }, [filterRequest]);
   useEffect(() => {
-    let active = true;
+    const controller = new AbortController();
     setLoading(true);
     setError('');
     api
-      .getDashboardActivities({ date: date || undefined, source, pendingDate: pending, page, limit })
+      .getDashboardActivities({ date: date || undefined, source, pendingDate: pending, page, limit }, { signal: controller.signal })
       .then((result) => {
-        if (active) {
+        if (!controller.signal.aborted) {
           setData(result);
           if (page > Math.max(1, result.totalPages)) setPage(Math.max(1, result.totalPages));
         }
       })
       .catch((err) => {
-        if (active) setError(localizeApiError(err, lang));
+        if (!controller.signal.aborted) setError(localizeApiError(err, lang));
       })
       .finally(() => {
-        if (active) setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       });
-    return () => {
-      active = false;
-    };
+    return () => controller.abort();
   }, [date, source, pending, page, limit, workspace.revision, retry]);
   /** Manual rows resolve exact IDs; snapshots open observations and version audits. */
   async function details(item: RecentActivityItem) {

@@ -1,4 +1,5 @@
 /** Rendered DOM regressions for delayed import responses and failed catalog requests. */
+import { mockGoalReads } from './fixtures/web-goals.ts';
 import { afterEach, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
@@ -10,7 +11,7 @@ const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http:
 Object.assign(globalThis, { window: dom.window, document: dom.window.document, HTMLElement: dom.window.HTMLElement, FileReader: dom.window.FileReader, IS_REACT_ACT_ENVIRONMENT: true });
 Object.defineProperty(globalThis, 'navigator', { configurable: true, value: dom.window.navigator });
 const React = await import('react');
-const { render, fireEvent, screen, act, cleanup } = await import('@testing-library/react');
+const { render, fireEvent, screen, within, act, cleanup } = await import('@testing-library/react');
 const { api, ApiError } = await import('../apps/web/src/api.ts');
 const { localizeApiError, localizePlanningIssue } = await import('../apps/web/src/error-i18n.ts');
 const {
@@ -276,6 +277,248 @@ it('handles pagination navigation and disables boundary controls correctly', asy
   assert.equal(prevBtn.hasAttribute('disabled'), false);
   assert.ok(nextBtn.hasAttribute('disabled'));
   assert.deepEqual(pageQueries, [1, 2]);
+});
+
+it('builds a goal list in natural ID order from selections across catalog pages and filters', async () => {
+  overview();
+  mockGoalReads(api);
+  const first = ['100', 'LCR 10', '9007199254740993'];
+  const second = ['002', '10', 'LCR 2', '9007199254740992', '2'];
+  const nextPage = deferred<ReturnType<typeof results>>();
+  const pageOf = (ids: string[], page: number) => ({
+    items: ids.map(id => ({ ...results('Title ' + id).items[0], questionFrontendId: id })),
+    total: 51, page, limit: 50,
+  });
+  mock.method(api, 'getCatalog', async ({ page, search }: { page: number; search?: string }) => {
+    if (search) return { ...pageOf(search === 'none' ? [] : ['2', '100'], 1), total: search === 'none' ? 0 : 2 };
+    return page === 1 ? pageOf(first, 1) : nextPage.promise;
+  });
+  const create = mock.method(api, 'createGoalList', async (input: Parameters<typeof api.createGoalList>[0]) => ({
+    id: input.id!, version: 1, name: input.name,
+    items: input.frontendIds.map(frontendId => ({ frontendId, title: 'Title ' + frontendId, url: '', completed: false })),
+  }));
+  const onCreated = mock.fn();
+  await act(async () => { render(<CatalogView lang="en" onNavigateSettings={() => {}} onGoalListCreated={onCreated} />); });
+  const pageBox = () => screen.getByRole('checkbox', { name: 'Select all problems on this page' }) as HTMLInputElement;
+  const box = (id: string) => screen.getByRole('checkbox', { name: `Select #${id} Title ${id}` }) as HTMLInputElement;
+  const button = (name: string) => screen.getByRole('button', { name });
+  assert.equal(screen.queryByRole('group', { name: 'Bulk actions' }), null);
+  fireEvent.click(box('LCR 10'));
+  assert.ok(pageBox().indeterminate);
+  fireEvent.click(pageBox());
+  assert.ok(pageBox().checked);
+  fireEvent.click(button('Next'));
+  assert.ok(pageBox().disabled, 'Stale page rows cannot be selected while the next page loads');
+  await act(async () => nextPage.resolve(pageOf(second, 2)));
+  assert.equal(pageBox().checked, false);
+  fireEvent.click(pageBox());
+  fireEvent.click(pageBox());
+  assert.ok(screen.getByText('3 selected'), 'Deselecting page two should retain all of page one');
+  fireEvent.click(pageBox());
+  await act(async () => { fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'overlap' } }); });
+  assert.ok(pageBox().checked);
+  fireEvent.click(box('100'));
+  assert.ok(pageBox().indeterminate);
+  await act(async () => { fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'none' } }); });
+  assert.ok(screen.getByText('7 selected'));
+  fireEvent.click(button('Add to goal lists'));
+  const emptyChooser = within(screen.getByRole('dialog', { name: 'Add to goal lists' }));
+  fireEvent.click(emptyChooser.getByRole('button', { name: 'Create goal list' }));
+  const expected = ['2', '002', '10', '9007199254740992', '9007199254740993', 'LCR 2', 'LCR 10'];
+  assert.deepEqual(Array.from(document.querySelectorAll<HTMLElement>('.goal-edit-items li'), row => row.dataset.id), expected);
+  assert.ok(screen.getByText('Title LCR 2', { exact: false }));
+  fireEvent.click(button('Cancel'));
+  assert.equal(create.mock.callCount(), 0);
+  assert.ok(screen.getByText('7 selected'));
+  fireEvent.click(button('Create goal list'));
+  fireEvent.change(screen.getByRole('textbox', { name: 'List name' }), { target: { value: 'Cross-page set' } });
+  await act(async () => { fireEvent.click(button('Save list')); });
+  assert.deepEqual(create.mock.calls[0].arguments[0].frontendIds, expected);
+  assert.equal(create.mock.calls[0].arguments[0].name, 'Cross-page set');
+  assert.equal(onCreated.mock.callCount(), 1);
+  assert.equal(screen.queryByRole('dialog'), null);
+  assert.equal(screen.queryByRole('group', { name: 'Bulk actions' }), null);
+  assert.ok(screen.getByText(/Created “Cross-page set”/));
+  await act(async () => { fireEvent.change(screen.getByRole('searchbox'), { target: { value: '' } }); });
+  fireEvent.click(box('100'));
+  fireEvent.click(button('Clear selection'));
+  assert.equal(box('100').checked, false);
+  assert.equal(screen.queryByRole('button', { name: 'Create goal list' }), null);
+});
+
+it('favorites the selection across catalog filters, keeping it on cancel and allowing a failed save to retry', async () => {
+  overview();
+  const existing = { id: crypto.randomUUID(), name: 'Original', count: 1 };
+  const review = { id: crypto.randomUUID(), name: 'Review', count: 0 };
+  mock.method(api, 'getFavoriteLibrary', async () => ({ total: 1, folders: [existing, review] }));
+  mock.method(api, 'getCatalog', async ({ search }: { search?: string }) => {
+    const page = results(search || '002');
+    return { ...page, items: page.items.map(problem => ({ ...problem, favoriteFolderIds: search ? undefined : [existing.id] })) };
+  });
+  let reject = true;
+  const add = mock.method(api, 'addFavorites', async (input: Parameters<typeof api.addFavorites>[0]) => {
+    if (reject) throw new ApiError(503, 'TEMPORARY', 'Try saving again');
+    return { count: input.frontendIds.length };
+  });
+  const onChange = mock.fn();
+  await act(async () => { render(<CatalogView lang="en" onNavigateSettings={() => {}} onFavoritesChanged={onChange} />); });
+  const button = (name: string) => screen.getByRole('button', { name });
+  const checkbox = (name: string) => screen.getByRole('checkbox', { name }) as HTMLInputElement;
+  fireEvent.click(checkbox('Select #002 002'));
+  await act(async () => { fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'LCR 01' } }); });
+  fireEvent.click(checkbox('Select #LCR 01 LCR 01'));
+  await act(async () => { fireEvent.click(button('Favorite')); });
+  assert.ok(screen.getByRole('dialog', { name: 'Favorite 2 selected problems' }));
+  assert.equal(checkbox('Original').checked, false);
+  assert.equal(screen.queryByRole('button', { name: 'Remove from favorites' }), null);
+  fireEvent.click(button('Cancel'));
+  assert.ok(screen.getByText('2 selected'));
+  assert.equal(add.mock.callCount(), 0);
+  await act(async () => { fireEvent.click(button('Favorite')); });
+  fireEvent.click(checkbox('Review'));
+  fireEvent.click(button('New folder'));
+  fireEvent.change(screen.getByRole('textbox', { name: 'New folder name' }), { target: { value: 'Interview' } });
+  await act(async () => { fireEvent.click(button('Save favorites')); });
+  assert.ok(screen.getByRole('alert'));
+  assert.ok(checkbox('Review').checked);
+  reject = false;
+  await act(async () => { fireEvent.click(button('Save favorites')); });
+  const payload = add.mock.calls[1].arguments[0];
+  assert.deepEqual(add.mock.calls[0].arguments[0], payload);
+  assert.deepEqual(payload.frontendIds, ['002', 'LCR 01']);
+  assert.deepEqual(payload.folderIds, [review.id, payload.newFolder!.id]);
+  assert.equal(payload.newFolder!.name, 'Interview');
+  assert.equal(onChange.mock.callCount(), 1);
+  assert.equal(screen.queryByRole('group', { name: 'Bulk actions' }), null);
+  assert.ok(screen.getByText('Saved 2 problems to favorites.'));
+});
+
+it('creates a sorted goal from favorites and reviews cross-folder removal again after a concurrent change', async () => {
+  const a = { id: crypto.randomUUID(), name: 'Arrays', count: 2 };
+  const b = { id: crypto.randomUUID(), name: 'Trees', count: 2 };
+  const folders = [a, b];
+  const memberships = new Map<string, string[]>([['100', [a.id]], ['2', [a.id, b.id]], ['10', [b.id]]]);
+  mock.method(api, 'getFavoriteLibrary', async () => ({ total: memberships.size, folders }));
+  mock.method(api, 'getFavoriteMemberships', async () => Array.from(memberships, ([frontendId, folderIds]) => ({ frontendId, folderIds })));
+  mock.method(api, 'getCatalog', async ({ favoriteScope, search }: { favoriteScope: string; search?: string }) => {
+    const items = Array.from(memberships).filter(([id, folderIds]) => (!search || id === search) &&
+      (favoriteScope === 'all' || folderIds.includes(favoriteScope))).map(([id, favoriteFolderIds]) => ({
+        ...results('Title ' + id).items[0], questionFrontendId: id, favoriteFolderIds,
+      }));
+    return { items, total: items.length, page: 1, limit: 50 };
+  });
+  const create = mock.method(api, 'createGoalList', async (input: Parameters<typeof api.createGoalList>[0]) => ({
+    id: input.id!, version: 1, name: input.name, items: input.frontendIds.map(frontendId => ({ frontendId, title: '', url: '', completed: false })),
+  }));
+  const remove = mock.method(api, 'removeFavorites', async ({ expected }: Parameters<typeof api.removeFavorites>[0]) => {
+    if (!memberships.get('100')!.includes(b.id)) {
+      memberships.set('100', [a.id, b.id]);
+      throw new ApiError(409, 'STALE_FAVORITES', 'Changed');
+    }
+    for (const { frontendId } of expected) memberships.delete(frontendId);
+    return { removed: expected.length };
+  });
+  const onGoal = mock.fn();
+  await act(async () => { render(<CatalogView lang="en" favoritesOnly onNavigateSettings={() => {}} onGoalListCreated={onGoal} />); });
+  const button = (name: string) => screen.getByRole('button', { name });
+  const click = async (name: string) => { await act(async () => { fireEvent.click(button(name)); }); };
+  const checkbox = (name: string) => screen.getByRole('checkbox', { name }) as HTMLInputElement;
+  await click('Arrays 2');
+  fireEvent.click(checkbox('Select all problems on this page'));
+  await click('Trees 2');
+  assert.ok(checkbox('Select #2 Title 2').checked);
+  assert.ok(checkbox('Select all problems on this page').indeterminate);
+  fireEvent.click(checkbox('Select all problems on this page'));
+  assert.ok(screen.getByText('3 selected'));
+  await click('Create goal list');
+  assert.deepEqual(Array.from(document.querySelectorAll<HTMLElement>('.goal-edit-items li'), row => row.dataset.id), ['2', '10', '100']);
+  fireEvent.change(screen.getByRole('textbox', { name: 'List name' }), { target: { value: 'From favorites' } });
+  await click('Save list');
+  assert.deepEqual(create.mock.calls[0].arguments[0].frontendIds, ['2', '10', '100']);
+  assert.equal(onGoal.mock.callCount(), 1);
+  assert.equal(memberships.size, 3);
+  await click('Arrays 2');
+  fireEvent.click(checkbox('Select all problems on this page'));
+  await act(async () => { fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'no match' } }); });
+  await click('Unfavorite');
+  assert.ok(screen.getByRole('dialog', { name: 'Remove favorites' }));
+  assert.ok(screen.getByText('Arrays, Trees'));
+  await click('Cancel');
+  assert.equal(remove.mock.callCount(), 0);
+  assert.ok(screen.getByText('2 selected'));
+  await click('Unfavorite');
+  await click('Confirm removal');
+  assert.equal(remove.mock.callCount(), 1);
+  assert.ok(screen.getByText(/Folder membership changed/));
+  assert.equal(screen.getAllByText('Arrays, Trees').length, 2);
+  await click('Confirm removal');
+  assert.deepEqual(remove.mock.calls[1].arguments[0].expected.map(item => item.frontendId), ['100', '2']);
+  assert.deepEqual([...memberships.keys()], ['10']);
+  assert.ok(screen.getByText('Removed 2 problems from favorites.'));
+  assert.equal(screen.queryByRole('group', { name: 'Bulk actions' }), null);
+});
+
+it('keeps a large folder library in one labeled picker with every destination available', async () => {
+  const { FavoriteFolderPicker } = await import('../apps/web/src/components/FavoriteFolders.tsx');
+  const folders = Array.from({ length: 50 }, (_, i) => ({ id: String(i), name: 'Long folder name '.repeat(5) + i, count: 3000 }));
+  const onSelect = mock.fn();
+  render(<FavoriteFolderPicker library={{ folders, total: 3000 }} selected="49" lang="en" onSelect={onSelect} />);
+  const select = screen.getByRole('combobox', { name: 'Choose a folder' }) as HTMLSelectElement;
+  assert.equal(select.options.length, 51);
+  assert.equal(select.value, '49');
+  assert.match(select.selectedOptions[0].text, /3,000/);
+  fireEvent.change(select, { target: { value: 'all' } });
+  assert.deepEqual(onSelect.mock.calls[0].arguments, ['all']);
+});
+
+it('windows thousands of selected problems while keeping the full save and removal payloads', async (t) => {
+  const { GoalListEditor } = await import('../apps/web/src/components/GoalListEditor.tsx');
+  const { RemoveFavoritesDialog } = await import('../apps/web/src/components/FavoriteFolders.tsx');
+  // jsdom has no layout. Model a 240px list viewport and measured 40px rows.
+  mock.getter(dom.window.Element.prototype, 'clientHeight', () => 240);
+  mock.getter(dom.window.Element.prototype, 'clientWidth', () => 600);
+  mock.getter(dom.window.HTMLElement.prototype, 'offsetHeight', () => 40);
+  const ids = Array.from({ length: 3000 }, (_, i) => String(i + 1));
+  const items = ids.map(frontendId => ({ frontendId, title: 'Problem ' + frontendId, url: '', completed: false }));
+  const create = mock.method(api, 'createGoalList', async (input: Parameters<typeof api.createGoalList>[0]) =>
+    ({ id: input.id!, name: input.name, version: 1, items }));
+  const first = render(<GoalListEditor goal={null} initialItems={items} lang="en" onClose={() => {}} onSaved={() => {}} />);
+  const list = screen.getByRole('list');
+  assert.ok(list.children.length > 0 && list.children.length < 40);
+  assert.equal(list.firstElementChild!.getAttribute('aria-setsize'), '3000');
+  list.scrollTop = 80000;
+  fireEvent.scroll(list);
+  assert.ok(Number(list.firstElementChild!.getAttribute('data-index')) > 1000);
+  // A deferred focus restoration after a move must not take the user's cursor out of the name field.
+  const previousFrame = Object.getOwnPropertyDescriptor(globalThis, 'requestAnimationFrame');
+  let frame!: FrameRequestCallback;
+  Object.defineProperty(globalThis, 'requestAnimationFrame', { configurable: true, value: (fn: FrameRequestCallback) => { frame = fn; return 1; } });
+  t.after(() => previousFrame ? Object.defineProperty(globalThis, 'requestAnimationFrame', previousFrame) : Reflect.deleteProperty(globalThis, 'requestAnimationFrame'));
+  const row = list.children[3] as HTMLElement;
+  const index = Number(row.dataset.index);
+  const up = row.querySelector<HTMLButtonElement>('[data-move]')!;
+  const nameInput = screen.getByLabelText('List name');
+  act(() => { up.focus(); fireEvent.click(up); nameInput.focus(); });
+  act(() => frame(0));
+  assert.ok(document.activeElement === nameInput);
+  fireEvent.change(nameInput, { target: { value: 'Full selection' } });
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Save list' })));
+  const order = [...ids];
+  [order[index - 1], order[index]] = [order[index], order[index - 1]];
+  assert.deepEqual(create.mock.calls[0].arguments[0].frontendIds, order);
+  first.unmount();
+
+  const memberships = ids.map(frontendId => ({ frontendId, folderIds: [] }));
+  mock.method(api, 'getFavoriteMemberships', async () => memberships);
+  const remove = mock.method(api, 'removeFavorites', async ({ expected }: Parameters<typeof api.removeFavorites>[0]) => ({ removed: expected.length }));
+  const problems = ids.map(id => results(id).items[0]);
+  await act(async () => { render(<RemoveFavoritesDialog problems={problems} lang="en" onClose={() => {}} onRefresh={() => {}} onRemoved={() => {}} />); });
+  const review = screen.getByRole('list', { name: 'Problems to remove from favorites' });
+  assert.ok(review.children.length > 0 && review.children.length < 40);
+  const confirm = screen.getByRole('button', { name: 'Confirm removal' });
+  assert.ok(confirm.closest('.overlay-footer'));
+  await act(async () => fireEvent.click(confirm));
+  assert.deepEqual(remove.mock.calls[0].arguments[0].expected, memberships);
 });
 
 it('rejects oversized files > 10 MiB before reading and shows alert', async () => {

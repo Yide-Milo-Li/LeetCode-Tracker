@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.5.0] - 2026-11-20
+
+- Added ordered goal lists and a Favorites library. Select problems across catalog pages, organize stars in folders, and append selections to multiple goal lists.
+- Reworked Today around daily plan progress, the active goal list, and seven days of activity. Checking a shared task records practice once. Later corrections update linked checkmarks according to the remaining evidence.
+- Added MCP tools for favorites and goal-list membership. Improved the loading of goal lists, Today activity, and background sync so local edits can continue during an upload.
+- Added an explicit review cap and moved review spacing to the learner-wide Practice & notes settings.
+
+See the [1.5.0 release notes](docs/releases/1.5.0.md).
+
 ## [1.4.1] - 2026-11-18
 
 - Keep the selected macOS Dock icon after the first quit and restore the shipped icon when returning to the default light palette.

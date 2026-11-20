@@ -15,6 +15,7 @@ import { computeContentHash, writeSyncSettings, readSyncSetting } from '../packa
 import { classifySyncState, findHeads, type SyncGraphNode } from '../packages/domain/src/device-sync.ts';
 import { buildApp } from '../apps/server/src/app.ts';
 import { snapshotBlobNames, isSyncBlobName } from '../apps/server/src/sync/blob-store.ts';
+import { FolderBlobStore } from '../apps/server/src/sync/folder-store.ts';
 import { DriveRequests, type DriveConnection } from '../apps/server/src/sync/drive-request.ts';
 import { MAX_DELTA_BYTES } from '../apps/server/src/sync/drive-snapshot-delta.ts';
 import { isHistoryIndex } from '../apps/server/src/sync/drive-history-index.ts';
@@ -91,12 +92,55 @@ test('content hash ignores row order and device-local settings and survives a ro
   } finally { source.close(); target.close(); }
 });
 
+test('local practice commits during a stalled publish and remains dirty for the next snapshot', async t => {
+  const a = await profile('concurrent-save'), A = await device(a);
+  const shared = mkdtempSync(join(tmpdir(), 'sync-write-window-'));
+  let reached!: () => void, release!: () => void;
+  const uploading = new Promise<void>(resolve => { reached = resolve; });
+  const resume = new Promise<void>(resolve => { release = resolve; });
+  const write = FolderBlobStore.prototype.write;
+  t.mock.method(FolderBlobStore.prototype, 'write', async function(this: FolderBlobStore, name: string, data: Buffer) {
+    if (name.endsWith('.ltsync.gz')) { reached(); await resume; }
+    return write.call(this, name, data);
+  });
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await a.store.importJsonl(JSON.stringify({ id: '1', title: 'Synthetic', difficulty: 'Easy' }));
+    await A.call('PUT', '/api/v1/sync/config', { transport: 'folder', folderPath: shared });
+    const operationId = randomUUID();
+    const pending = A.call('POST', '/api/v1/sync/publish', { operationId });
+    await Promise.race([uploading, pending.then(() => assert.fail('publish did not reach file I/O'))]);
+    const saving = A.call('POST', '/api/v1/practice-records', {
+      questionFrontendId: '1', completed: true, practicedAt: '2020-03-08T12:00:00Z',
+    });
+    const saved = await Promise.race([saving, new Promise<never>((_, reject) => {
+      deadline = setTimeout(() => reject(new Error('practice write waited for the transfer')), 3000);
+    })]);
+    assert.equal(saved.status, 201);
+    release();
+    const first = await pending;
+    assert.equal(first.body.published, true);
+    assert.equal((await A.call('GET', '/api/v1/sync/status')).body.localDirty, true);
+    assert.deepEqual((await A.call('POST', '/api/v1/sync/publish', { operationId })).body, first.body);
+    const next = await A.call('POST', '/api/v1/sync/publish', {});
+    assert.equal(next.body.snapshot.parentId, first.body.snapshot.snapshotId);
+    assert.equal((await A.call('GET', '/api/v1/sync/status')).body.localDirty, false);
+  } finally {
+    clearTimeout(deadline); release();
+    await A.app.close(); a.close(); rmSync(shared, { recursive: true, force: true });
+  }
+});
+
 test('sync folder hands a profile to a second device and back, with acknowledgements', async () => {
   const shared = mkdtempSync(join(tmpdir(), 'shared drive '));
   const a = await profile('a'), b = await profile('b');
   const A = await device(a), B = await device(b);
   try {
     await seedMigrationProfile(a.store);
+    const folder = { id: randomUUID(), name: 'Revisit' };
+    assert.equal((await A.call('PUT', '/api/v1/favorites/problems', {
+      frontendId: '1', expectedFolderIds: null, folderIds: [folder.id], newFolder: folder,
+    })).status, 200);
     for (const [d, name] of [[A, 'Laptop'], [B, 'Mac']] as const) {
       assert.equal((await d.call('PUT', '/api/v1/sync/config', { transport: 'folder', folderPath: shared, deviceName: name })).status, 200);
     }
@@ -116,6 +160,8 @@ test('sync folder hands a profile to a second device and back, with acknowledgem
     const received = await B.call('POST', '/api/v1/sync/receive', { previewId: preview.body.previewId });
     assert.equal(received.status, 200, JSON.stringify(received.body));
     assert.equal(received.body.resolutionSnapshotId, null);
+    assert.deepEqual((await B.call('GET', '/api/v1/favorites')).body, { total: 1, folders: [{ ...folder, count: 1 }] });
+    assert.deepEqual((await B.call('GET', '/api/v1/catalog?favoriteScope=' + folder.id)).body.items[0].favoriteFolderIds, [folder.id]);
     assert.equal(b.store.getProblemNote('1')?.content, '# Synthetic note\n跨设备');
     assert.equal((await B.call('GET', '/api/v1/sync/status')).body.classification, 'up-to-date');
     assert.equal((await B.call('POST', '/api/v1/sync/receive', { previewId: preview.body.previewId })).body.error, 'SYNC_PREVIEW_EXPIRED');

@@ -7,7 +7,6 @@ import assert from 'node:assert/strict';
 import {
   hasMeaningfulNoteContent,
   NOTE_TEMPLATES,
-  formatObsidianCallout,
   formatNotionCard,
 } from '../packages/contracts/src/notes.ts';
 
@@ -168,7 +167,7 @@ describe('Note Content Validity: hasMeaningfulNoteContent', () => {
   });
 });
 
-describe('Card / Callout Formatting with Note Fallback', () => {
+describe('Notion Card Formatting with Note Fallback', () => {
   const dummyProblem = {
     frontendId: '1',
     title: 'Two Sum',
@@ -179,7 +178,7 @@ describe('Card / Callout Formatting with Note Fallback', () => {
   };
 
   it('falls back to practice log notes when customNote is an unfilled template', () => {
-    const callout = formatObsidianCallout(
+    const callout = formatNotionCard(
       dummyProblem,
       { durationMinutes: 10, practicedAt: '2026-09-17T00:00:00Z', completed: true, notes: 'Quick hash map solve' },
       HISTORICAL_EN_TEMPLATE,
@@ -200,7 +199,7 @@ describe('Card / Callout Formatting with Note Fallback', () => {
 
   it('prefers customNote when it contains meaningful reflections', () => {
     const meaningfulNote = '## 💡 Key Idea & Approach\n- Two-pass hash table';
-    const callout = formatObsidianCallout(
+    const callout = formatNotionCard(
       dummyProblem,
       { durationMinutes: 10, practicedAt: '2026-09-17T00:00:00Z', completed: true, notes: 'Practice note' },
       meaningfulNote,
@@ -211,12 +210,12 @@ describe('Card / Callout Formatting with Note Fallback', () => {
   });
 
   it('renders no note section when neither meaningful customNote nor practice notes exist', () => {
-    const callout = formatObsidianCallout(
+    const callout = formatNotionCard(
       dummyProblem,
       { durationMinutes: 10, practicedAt: '2026-09-17T00:00:00Z', completed: true, notes: null },
       NOTE_TEMPLATES.en,
       'en'
     );
-    assert.ok(!callout.includes('Notes & Reflections'));
+    assert.ok(!callout.includes('Notes & Key Takeaways'));
   });
 });

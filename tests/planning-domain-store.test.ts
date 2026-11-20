@@ -316,6 +316,34 @@ describe('PlanningStore Database Operations', () => {
     return { db, catalog, planning: catalog.planning };
   }
 
+  it('reconciles several historical plans from one read per evidence source, preserving each assignment boundary', async t => {
+    const { db, catalog, planning } = await createTestStore();
+    try {
+      const at = Date.parse('2020-03-08T12:00:00Z');
+      const record = await catalog.createPracticeRecord({ questionFrontendId: '1', completed: true, practicedAt: new Date(at).toISOString() });
+      const insert = db.prepare('INSERT INTO daily_plans VALUES(?,?,1,?)');
+      for (const [index, date] of ['2020-03-07', '2020-03-08', '2020-03-09'].entries()) {
+        const addedAt = Date.parse(date + 'T00:00:00Z');
+        const plan: DailyPlan = {
+          id: 'plan-' + index, date, timezone: 'UTC', version: 1, strategyId: null, strategyVersion: null,
+          rules: { dailyCount: 1, difficulty: { Easy: 100, Medium: 0, Hard: 0 }, tags: [], premium: false,
+            reviewEnabled: false, reviewPercent: null, preference: '' },
+          items: [{ id: 'item', problem: createMockProblem('1'), kind: 'new', addedAt,
+            reason: { en: '', zh: '' }, evidenceIds: [], completed: false }],
+          source: 'local', model: null, encouragement: { en: '', zh: '' }, notices: [], algorithmVersion: ALGORITHM_VERSION,
+          catalogRevision: 1, practiceRevision: 1, planningRevision: 0, createdAt: addedAt, updatedAt: addedAt, action: 'ensure',
+        };
+        insert.run(plan.id, date, JSON.stringify(plan));
+      }
+      const prepare = t.mock.method(db, 'prepare');
+      const history = planning.plans(at + 86400000);
+      assert.deepEqual(history.map(plan => plan.items[0].evidenceIds), [[], ['manual:' + record.id], ['manual:' + record.id]]);
+      const queries = prepare.mock.calls.map(call => call.arguments[0]);
+      assert.equal(queries.filter(sql => sql.includes('FROM practice_records')).length, 1);
+      assert.equal(queries.filter(sql => sql.includes('FROM snapshot_successes')).length, 1);
+    } finally { db.close(); }
+  });
+
   it('creates, reads, and updates strategies with versioning', async () => {
     const { planning } = await createTestStore();
 

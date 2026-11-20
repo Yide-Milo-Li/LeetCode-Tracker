@@ -264,6 +264,8 @@ export const catalogQuerySchema = z.object({
   tag: z.string().max(100).optional(),
   premium: z.enum(['true', 'false', 'all']).default('all'),
   search: z.string().max(200).optional(),
+  /** Include saved state in the full catalog, show all favorites, or select one folder. */
+  favoriteScope: z.union([z.literal('catalog'), z.literal('all'), z.uuid()]).optional(),
 });
 
 export type CatalogQuery = z.infer<typeof catalogQuerySchema>;

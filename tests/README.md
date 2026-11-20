@@ -1,5 +1,9 @@
 # Testing boundaries
 
+## 1.5.0 verification
+
+`server-planning-api` verifies ordered goal edits and linked completion after practice corrections and revocations. `server-api` covers favorites, and `mcp-write` exercises guarded membership edits and paged reads through stdio. `server-dashboard-api` covers Today activity against full statistics. `device-sync` covers a delayed upload with a concurrent local write using a simulated Drive server. See [release verification](../docs/status.md) for the latest results.
+
 ## 1.4.1 verification
 
 Branch CI runs the application suite, Windows desktop checks and installer build, Apple Silicon packaging and migration checks, and a separate WKWebView migration job. Tag builds also verify the updater package signatures before staging a draft. The README gallery was refreshed with synthetic data for 1.4.0. Installed-app results for earlier builds are recorded in [implementation status](../docs/status.md). [CI runs](https://github.com/Yide-Milo-Li/LeetCode-Tracker/actions/workflows/ci.yml)

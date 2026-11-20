@@ -9,11 +9,13 @@
 export class ApiError extends Error {
   public status: number;
   public code: string;
+  readonly details?: Record<string, unknown>;
   /** Preserve server conflict metadata so retries can retain their operation identity. */
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, details?: Record<string, unknown>) {
     super(message);
     this.status = status;
     this.code = code;
+    this.details = details;
   }
 }
 
@@ -77,16 +79,13 @@ export async function invokeTauriApi<T>(path: string, options: RequestInit = {})
     }), options.signal);
 
     if (response.status < 200 || response.status >= 300) {
-      let errorMsg = `HTTP ${response.status}`;
-      let errorCode = 'HTTP_ERROR';
+      let details;
       try {
-        const errJson = JSON.parse(response.body);
-        if (errJson.message) errorMsg = errJson.message;
-        if (errJson.error) errorCode = errJson.error;
+        details = JSON.parse(response.body);
       } catch {
         // Use default fallback error message
       }
-      throw new ApiError(response.status, errorCode, errorMsg);
+      throw new ApiError(response.status, details?.error || 'HTTP_ERROR', details?.message || `HTTP ${response.status}`, details);
     }
 
     try {

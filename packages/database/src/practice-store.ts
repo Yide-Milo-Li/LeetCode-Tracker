@@ -4,6 +4,7 @@
  */
 import type { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
+import { reconcileGoalEvidence } from './goal-lists.ts';
 import { isEventTime } from '../../contracts/src/time.ts';
 import {
   createPracticeRecordSchema,
@@ -246,7 +247,7 @@ export interface PreparedPracticeInsert {
  * Insert one practice inside the caller's open transaction, or return the
  * record an earlier request with the same operation ID created.
  */
-function insertPracticeRow(
+export function insertPracticeRow(
   db: DatabaseSync,
   { problem, validated, precision, fingerprint }: PreparedPracticeInsert,
   defaultTimezone: string | null
@@ -299,6 +300,11 @@ function insertPracticeRow(
     ).run(validated.operationId, fingerprint, id);
   }
 
+  const eventId = 'manual:' + id;
+  reconcileGoalEvidence(db, problem.questionId, now, validated.completed ? { successId: eventId } : { unfinished: {
+    id: eventId, questionId: problem.questionId, at: validated.practicedAt, precision,
+    zone: validated.sourceTimezone ?? defaultTimezone, recordedAt: now,
+  } });
   incrementPracticeRevision(db);
   return { id, replayed: false };
 }
@@ -406,6 +412,11 @@ export function updatePracticeRecordTransaction(
       );
     }
 
+    if (finalCompleted !== existing.completed || practicedAt !== existing.practicedAt ||
+        timePrecision !== existing.timePrecision ||
+        (validated.sourceTimezone !== undefined && validated.sourceTimezone !== existing.sourceTimezone)) {
+      reconcileGoalEvidence(db, existing.questionId, now, { successId: 'manual:' + id });
+    }
     incrementPracticeRevision(db);
     db.exec('COMMIT;');
   } catch (err) {
@@ -417,7 +428,7 @@ export function updatePracticeRecordTransaction(
 /**
  * Revoke an active practice record within a transaction.
  */
-export function revokePracticeRecordTransaction(db: DatabaseSync, id: string): void {
+export function revokePracticeRecordTransaction(db: DatabaseSync, id: string, questionId: string): void {
   const now = Date.now();
   db.exec('BEGIN IMMEDIATE;');
   try {
@@ -431,6 +442,7 @@ export function revokePracticeRecordTransaction(db: DatabaseSync, id: string): v
     `
     ).run(now, now, id);
 
+    reconcileGoalEvidence(db, questionId, now);
     incrementPracticeRevision(db);
     db.exec('COMMIT;');
   } catch (err) {

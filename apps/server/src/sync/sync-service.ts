@@ -6,7 +6,8 @@
  * - `snap-<createdAt>-<id>.json` envelope only, written last; its presence lists the snapshot
  * - `device-<id>.json` acknowledgement, written only by its own device
  *
- * Every write that touches the local profile runs under the server write lock. Receiving always
+ * Snapshot capture and base updates share the profile write lock. Transfer I/O and its device-local
+ * journal are serialized independently so normal practice writes can proceed. Receiving always
  * creates a safety backup first (via `importSnapshotBundle`) and never auto-resolves forks.
  */
 import { createHash, randomUUID } from 'node:crypto';
@@ -46,7 +47,7 @@ import { describeSnapshotDelta, reconstructSnapshot } from './drive-snapshot-del
 import { validateMigrationBundle } from '../../../../packages/database/src/migration-bundle.ts';
 import type { CatalogStore } from '../../../../packages/database/src/store.ts';
 import { classifySyncState, findHeads } from '../../../../packages/domain/src/device-sync.ts';
-import type { AsyncLock } from '../async-lock.ts';
+import { AsyncLock } from '../async-lock.ts';
 import {
   SyncTransportError,
   deviceBlobName,
@@ -218,6 +219,8 @@ function parseDeviceState(text: string, deviceId: string): SyncDeviceState | und
 
 /** Coordinates configuration, OAuth, remote listing, publish and receive for this device. */
 export class DeviceSyncService {
+  // Transfer/configuration order is independent of ordinary local edits.
+  private readonly syncLock = new AsyncLock();
   private readonly ctx: DeviceSyncContext;
   private readonly options: DeviceSyncOptions;
   private readonly fetchImpl: typeof fetch;
@@ -234,6 +237,7 @@ export class DeviceSyncService {
   private lastListingAttemptAt: number | null = null;
   private lastLocalWriteAt: number | null = null;
   private observedDataStamp: string;
+  private localWriteRevision = 0;
   private automaticTimer?: NodeJS.Timeout;
   private automaticFlight?: Promise<void>;
   private closed = false;
@@ -265,6 +269,10 @@ export class DeviceSyncService {
     this.now = options.now ?? Date.now;
     this.authFlow = new GoogleAuthorizationFlow(this.endpoints, this.fetchImpl, this.now);
     this.observedDataStamp = ctx.store.dataStamp();
+  }
+
+  private changeSyncState<T>(change: () => T | Promise<T>): Promise<T> {
+    return this.syncLock.run(() => this.ctx.writeLock.run(change));
   }
 
   // ---------------------------------------------------------------------------
@@ -338,7 +346,7 @@ export class DeviceSyncService {
     if (input.deviceName !== undefined) values[K.deviceName] = input.deviceName;
     if (input.automaticSync !== undefined) values[K.automaticSync] = String(input.automaticSync);
 
-    return this.ctx.writeLock.run(() => {
+    return this.changeSyncState(() => {
       if (input.transport === 'folder' && !(values[K.folderPath] ?? this.setting(K.folderPath))) {
         throw new DeviceSyncError(400, 'SYNC_FOLDER_REQUIRED', 'Choose a sync folder first');
       }
@@ -383,10 +391,11 @@ export class DeviceSyncService {
 
   /** Called after successful local mutations, including desktop MCP writes. */
   observeLocalWrite(): void {
-    if (!this.automaticTransport() || !this.setting(K.baseSnapshotId)) return;
+    if (!this.automaticTransport()) return;
     const stamp = this.ctx.store.dataStamp();
     if (stamp === this.observedDataStamp) return;
     this.observedDataStamp = stamp;
+    this.localWriteRevision++;
     this.lastLocalWriteAt = this.now();
     this.queueAutomaticPublish();
   }
@@ -462,7 +471,7 @@ export class DeviceSyncService {
     this.prepareCheckedUpdate(blobs, listing);
     if (!mayPublish || listing.unreadable || listing.ambiguousSnapshotFiles) return;
 
-    await this.ctx.writeLock.run(async () => {
+    await this.syncLock.run(async () => {
       if (!this.automaticTransport() || listing !== this.listing || this.listingFlight ||
           (this.lastLocalWriteAt !== null && this.now() - this.lastLocalWriteAt < AUTO_PUBLISH_DELAY_MS)) return;
       const result = await this.publishLocked({}, blobs, listing);
@@ -525,7 +534,7 @@ export class DeviceSyncService {
    */
   async publish(input: { operationId?: string; allowFork?: boolean }): Promise<SyncPublishResult> {
     const deadline = Date.now() + DRIVE_BUDGET_MS;
-    return this.ctx.writeLock.run(() => this.publishLocked(input, this.requireStore(deadline)));
+    return this.syncLock.run(() => this.publishLocked(input, this.requireStore(deadline)));
   }
 
   private publishLocked(input: { operationId?: string; allowFork?: boolean }, blobs: SyncBlobStore): Promise<SyncPublishResult>;
@@ -560,9 +569,16 @@ export class DeviceSyncService {
       const snapshot = await this.sendStaged(drive, scope, staged);
       return finish(await this.finishSnapshot(blobs, snapshot, staged.baseId));
     }
-    const bundle = this.exportBundle();
-    const contentHash = computeContentHash(bundle.tables);
-    const local = this.localState(contentHash);
+    // Capture one immutable local version. Remote listing, upload, and acknowledgement may await I/O.
+    const capture = await this.ctx.writeLock.run(() => {
+      if (checkedListing && (checkedListing !== this.listing || this.listingFlight ||
+          (this.lastLocalWriteAt !== null && this.now() - this.lastLocalWriteAt < AUTO_PUBLISH_DELAY_MS))) return;
+      const bundle = this.exportBundle();
+      const contentHash = computeContentHash(bundle.tables);
+      return { bundle, contentHash, local: this.localState(contentHash), writeRevision: this.localWriteRevision };
+    });
+    if (!capture) return;
+    const { bundle, contentHash, local, writeRevision } = capture;
     const graph = classifySyncState(listing.snapshots, local.baseId, local.dirty);
     if (checkedListing && (graph.classification !== 'local-ahead' || !graph.heads[0].compatible)) return;
     if (graph.classification !== 'up-to-date') {
@@ -592,18 +608,20 @@ export class DeviceSyncService {
       : [];
     const snapshot = await this.upload(blobs, bundle, contentHash, { parentId, supersedes, kind: 'publish' },
       { operation, purpose: 'publish', fingerprint });
-    return finish(await this.finishSnapshot(blobs, snapshot, this.setting(K.baseSnapshotId)));
+    return finish(await this.finishSnapshot(blobs, snapshot, local.baseId, writeRevision));
   }
 
-  private async finishSnapshot(blobs: SyncBlobStore, snapshot: RemoteSnapshot, baseBefore: string | null): Promise<SyncPublishResult> {
-    // A user may have received another snapshot while a failed publish was waiting for a retry.
-    const base = this.setting(K.baseSnapshotId);
-    if (base === baseBefore || base === snapshot.snapshotId) {
+  private async finishSnapshot(blobs: SyncBlobStore, snapshot: RemoteSnapshot, baseBefore: string | null, writeRevision?: number): Promise<SyncPublishResult> {
+    await this.ctx.writeLock.run(() => {
+      // A resumed upload can predate a receive. Only advance the base from which it was staged.
+      const base = this.setting(K.baseSnapshotId);
+      if (base !== baseBefore && base !== snapshot.snapshotId) return;
       writeSyncSettings(this.ctx.store.db, {
         [K.baseSnapshotId]: snapshot.snapshotId, [K.baseContentHash]: snapshot.envelope!.contentHash,
         [K.lastPublished]: snapshot.snapshotId,
       });
-    }
+      if (writeRevision !== this.localWriteRevision) this.queueAutomaticPublish();
+    });
     const warning = await this.writeOwnDevice(blobs);
     const heads = findHeads(this.listing!.snapshots);
     return { published: true, snapshot: this.summarize(snapshot, heads), ...(warning ? { warning } : {}) };
@@ -758,7 +776,7 @@ export class DeviceSyncService {
    */
   async receive(input: { previewId: string; localChanges?: 'fork' | 'discard' }): Promise<SyncReceiveResult> {
     const deadline = Date.now() + DRIVE_BUDGET_MS;
-    return this.ctx.writeLock.run(async () => {
+    return this.changeSyncState(async () => {
       const preview = this.preview;
       if (!preview || preview.previewId !== input.previewId || this.now() - preview.createdAt > (this.options.previewTtlMs ?? PREVIEW_TTL_MS)) {
         throw new DeviceSyncError(409, 'SYNC_PREVIEW_EXPIRED', 'Preview expired; preview the snapshot again');
@@ -874,7 +892,7 @@ export class DeviceSyncService {
       // A stale or forged callback must not mark an existing connection as broken.
       throw new DeviceSyncError(400, 'SYNC_AUTHORIZATION_FAILED', error instanceof Error ? error.message : 'Authorization failed');
     }
-    await this.ctx.writeLock.run(() => {
+    await this.changeSyncState(() => {
       const client = this.googleClient();
       if (!client || generation !== this.googleAuthGeneration) {
         throw new DeviceSyncError(400, 'SYNC_AUTHORIZATION_FAILED', 'The Google authorization has been superseded');
@@ -898,7 +916,7 @@ export class DeviceSyncService {
 
   /** Revoke (best effort) and forget the stored Google token. */
   async disconnectGoogle(): Promise<SyncStatus> {
-    const token = await this.ctx.writeLock.run(() => {
+    const token = await this.changeSyncState(() => {
       const refreshToken = this.googleRefreshToken();
       writeSyncSettings(this.ctx.store.db, {
         [K.googleGrantScope]: null,
@@ -1047,7 +1065,8 @@ export class DeviceSyncService {
     if (!baseId || !baseHash) {
       const db = this.ctx.store.db;
       const row = db.prepare(
-        'SELECT (SELECT COUNT(*) FROM problems) + (SELECT COUNT(*) FROM practice_records) + (SELECT COUNT(*) FROM problem_notes) AS n'
+        `SELECT (SELECT COUNT(*) FROM problems) + (SELECT COUNT(*) FROM practice_records) + (SELECT COUNT(*) FROM problem_notes)
+          + (SELECT COUNT(*) FROM catalog_meta WHERE key GLOB 'goal-list:v1:*' OR key GLOB 'favorite:v1:*') AS n`
       ).get() as { n: number };
       return { baseId: null, dirty: row.n > 0 };
     }

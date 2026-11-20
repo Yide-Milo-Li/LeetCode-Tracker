@@ -134,13 +134,15 @@ export function registerDesktopAgentRoutes(
           return toolError(new ProfileError('PROFILE_IN_USE', 'AI client writes are disabled in desktop Settings.'));
         }
         const before = agentDataRevision(store);
+        const favoriteStamp = name.includes('favorite') ? store.dataStamp() : undefined;
         let result: AgentResult | undefined;
         try { result = await tool.invoke(application, args); }
         finally {
           const info = result?.isError ? undefined : result?.structuredContent;
           const noteChanged = (name === 'tracker_patch_note' || name === 'tracker_save_notes') && info?.status === 'applied';
           // Compare committed revisions even when a multi-step plan edit reports a partial failure.
-          if (noteChanged || agentDataRevision(store) !== before) {
+          const favoritesChanged = favoriteStamp !== undefined && result && !result.isError && store.dataStamp() !== favoriteStamp;
+          if (noteChanged || favoritesChanged || agentDataRevision(store) !== before) {
             const count = name === 'tracker_create_practices' ? Number(info?.created ?? 0)
               : name === 'tracker_save_notes' ? Number(info?.applied ?? 0)
               : name === 'tracker_import_catalog' || name === 'tracker_import_problems'

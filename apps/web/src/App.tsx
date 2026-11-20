@@ -1,7 +1,8 @@
-/** Desktop application shell: three destinations, retained workspaces and one daily-plan controller. */
+/** Desktop navigation, retained workspaces and the shared daily-plan controller. */
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   BookOpen,
+  Star,
   BookMarked,
   CalendarDays,
   ChartNoAxesCombined,
@@ -18,6 +19,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { CatalogView } from './components/CatalogView.tsx';
+import { GoalListsScope } from './components/ProblemGoalLists.tsx';
 import { ActivityRecords } from './components/ActivityRecords.tsx';
 import { TodayPlanView } from './components/TodayPlanView.tsx';
 import { PracticeWorkspace } from './components/PracticeWorkspace.tsx';
@@ -80,6 +82,7 @@ import { api, type PracticeRecord } from './api.ts';
 import { localizeApiError } from './error-i18n.ts';
 import {
   WorkspaceContext,
+  RetainedView,
   type PracticeOutcome,
   type PracticeRequest,
   type RecordsFilter,
@@ -92,6 +95,7 @@ const views: View[] = [
   'schedule',
   'notes',
   'problems',
+  'favorites',
   'catalog-import',
   'records',
   'statistics',
@@ -121,6 +125,8 @@ export function App() {
     persistPreference,
   } = usePreferences();
   const [revision, setRevision] = useState(0);
+  const [favoriteRevision, setFavoriteRevision] = useState(0);
+  const refreshFavorites = useCallback(() => setFavoriteRevision(value => value + 1), []);
   const [focusRequest,setFocusRequest]=useState(0);
   const [selectedNoteProblem, setSelectedNoteProblem] = useState<string | null>(null);
   const [recordsFilter, setRecordsFilter] = useState<RecordsFilterRequest | null>(null);
@@ -163,7 +169,10 @@ export function App() {
   const practice = practiceQueue[0];
   const [outcomes, setOutcomes] = useState<PracticeOutcome[]>([]);
   /** Concurrent row saves retain the active draft and present subsequent details in order. */
-  const openPractice = useCallback((request: PracticeRequest) => setPracticeQueue((queue) => [...queue, request]), []);
+  const openPractice = useCallback((request: PracticeRequest) => setPracticeQueue(queue => {
+    if (request.mode === 'enrich' && queue.some(open => open.mode === 'enrich' && open.record.id === request.record.id)) return queue;
+    return [...queue, request];
+  }), []);
   const reportPracticeOutcome = useCallback((outcome: PracticeOutcome) => setOutcomes((items) => [...items, outcome]), []);
   const plan = useDailyPlan(lang);
   const [desktopAgentRevision, setDesktopAgentRevision] = useState(0);
@@ -242,6 +251,7 @@ export function App() {
     onNavigateProblems: () => navigate('problems'),
     onNavigateRecords: () => navigate('statistics'),
     onNavigateNotes: () => navigate('notes'),
+    onNavigateFavorites: () => navigate('favorites'),
     onOpenManualPractice: () => openPractice({ mode: 'manual' }),
     onFocusSearch: focusSearch,
     onToggleHelp: () => setShowShortcutHelp((open) => !open),
@@ -289,8 +299,8 @@ export function App() {
     [navigate],
   );
   const workspace = useMemo(
-    () => ({ revision, desktopAgentRevision, timezone, selectedNoteProblem, navigate, openRecords, notifyMutation, openPractice, reportPracticeOutcome }),
-    [revision, desktopAgentRevision, timezone, selectedNoteProblem, navigate, openRecords, notifyMutation, openPractice, reportPracticeOutcome],
+    () => ({ revision, favoriteRevision, desktopAgentRevision, timezone, selectedNoteProblem, navigate, openRecords, notifyMutation, openPractice, reportPracticeOutcome }),
+    [revision, favoriteRevision, desktopAgentRevision, timezone, selectedNoteProblem, navigate, openRecords, notifyMutation, openPractice, reportPracticeOutcome],
   );
   const zh = lang === 'zh';
   const error = errorCause ? localizeApiError(errorCause, lang) : '';
@@ -299,6 +309,8 @@ export function App() {
     view === 'schedule' ? 'today' : view === 'catalog-import' ? 'problems' : progress ? 'statistics' : view;
   return (
     <WorkspaceContext.Provider value={workspace}>
+      <GoalListsScope lang={lang} showSelected={view === 'today'} active={view === 'today' || view === 'problems' || view === 'favorites'}
+        onCreated={() => setRevision(value => value + 1)}>
       <div className="app-shell">
         <a
           className="skip-link"
@@ -349,6 +361,7 @@ export function App() {
                 { id: 'problems', icon: BookOpen, label: zh ? '题库' : 'Problems', shortcut: '2' },
                 { id: 'statistics', icon: ChartNoAxesCombined, label: zh ? '进展' : 'Progress', shortcut: '3' },
                 { id: 'notes', icon: BookMarked, label: zh ? '复盘' : 'Notes', shortcut: '4' },
+                { id: 'favorites', icon: Star, label: zh ? '收藏夹' : 'Favorites', shortcut: '5' },
               ] as const
             ).map((item) => {
               const navBtn = (
@@ -553,7 +566,7 @@ export function App() {
           )}
           <React.Suspense fallback={<WorkspaceFallback label={zh ? '加载中…' : 'Loading…'} />}>
             {visited.has('today') && (
-              <div hidden={view !== 'today'} id="view-today">
+              <RetainedView hidden={view !== 'today'} id="view-today">
                 <SetupGate
                   lang={lang}
                   theme={theme}
@@ -570,6 +583,8 @@ export function App() {
                 >
                   <TodayPlanView
                     lang={lang}
+                    active={view === 'today'}
+                    onFavoritesChanged={refreshFavorites}
                     planController={plan}
                     promptSwapFeedback={promptSwapFeedback}
                     onNavigateToSettings={() => {
@@ -578,10 +593,10 @@ export function App() {
                     }}
                   />
                 </SetupGate>
-              </div>
+              </RetainedView>
             )}
             {visited.has('schedule') && (
-              <div hidden={view !== 'schedule'} id="view-schedule">
+              <RetainedView hidden={view !== 'schedule'} id="view-schedule">
                 <PageHeader
                   title={zh ? '学习安排' : 'Study schedule'}
                   description={
@@ -592,10 +607,10 @@ export function App() {
                   back={{ label: zh ? '返回今日' : 'Back to Today', run: () => navigate('today') }}
                 />
                 <StrategiesView lang={lang} focusRequest={focusRequest} />
-              </div>
+              </RetainedView>
             )}
             {visited.has('notes') && (
-              <div hidden={view !== 'notes'} id="view-notes">
+              <RetainedView hidden={view !== 'notes'} id="view-notes">
                 <NotesWorkspace
                   lang={lang}
                   notesFormatOnSave={notesFormatOnSave ?? undefined}
@@ -603,25 +618,34 @@ export function App() {
                   onClearInitialFrontendId={() => setSelectedNoteProblem(null)}
                   onNeedsSaveChange={setNoteNeedsSave}
                 />
-              </div>
+              </RetainedView>
             )}
             {visited.has('problems') && (
-              <div hidden={view !== 'problems'} id="view-problems">
-                <CatalogView lang={lang} onNavigateSettings={() => navigate('catalog-import')} />
-              </div>
+              <RetainedView hidden={view !== 'problems'} id="view-problems">
+                <CatalogView lang={lang} onNavigateSettings={() => navigate('catalog-import')}
+                  onGoalListCreated={() => setRevision(value => value + 1)}
+                  onFavoritesChanged={refreshFavorites} />
+              </RetainedView>
+            )}
+            {visited.has('favorites') && (
+              <RetainedView hidden={view !== 'favorites'} id="view-favorites">
+                <CatalogView lang={lang} onNavigateSettings={() => navigate('catalog-import')} favoritesOnly
+                  onGoalListCreated={() => setRevision(value => value + 1)}
+                  onFavoritesChanged={refreshFavorites} />
+              </RetainedView>
             )}
             {visited.has('catalog-import') && (
-              <div hidden={view !== 'catalog-import'} id="view-catalog-import">
+              <RetainedView hidden={view !== 'catalog-import'} id="view-catalog-import">
                 <CatalogImportWorkspace lang={lang} />
-              </div>
+              </RetainedView>
             )}
             {visited.has('records') && (
-              <div hidden={view !== 'records'} role="tabpanel" aria-labelledby="tab-records" id="view-records">
+              <RetainedView hidden={view !== 'records'} role="tabpanel" aria-labelledby="tab-records" id="view-records">
                 <ActivityRecords lang={lang} filterRequest={recordsFilter} />
-              </div>
+              </RetainedView>
             )}
             {visited.has('statistics') && (
-              <div
+              <RetainedView
                 hidden={view !== 'statistics'}
                 role="tabpanel"
                 aria-labelledby="tab-statistics"
@@ -632,15 +656,15 @@ export function App() {
                   active={view === 'statistics'}
                   onNavigateToStrategies={() => {setFocusRequest(v=>v+1);navigate('schedule');}}
                 />
-              </div>
+              </RetainedView>
             )}
             {visited.has('progress-import') && (
-              <div hidden={view !== 'progress-import'} id="view-progress-import">
+              <RetainedView hidden={view !== 'progress-import'} id="view-progress-import">
                 <ProgressWorkbench lang={lang} />
-              </div>
+              </RetainedView>
             )}
             {visited.has('settings') && (
-              <div hidden={view !== 'settings'} id="view-settings">
+              <RetainedView hidden={view !== 'settings'} id="view-settings">
                 <SettingsView
                   lang={lang}
                   desktopAgent={desktopAgent}
@@ -659,7 +683,7 @@ export function App() {
                   section={settingsSection}
                   onSectionChange={setSettingsSection}
                 />
-              </div>
+              </RetainedView>
             )}
           </React.Suspense>
         </main>
@@ -681,6 +705,7 @@ export function App() {
           <ShortcutHelpModal lang={lang} onClose={() => setShowShortcutHelp(false)} />
         )}
       </div>
+      </GoalListsScope>
     </WorkspaceContext.Provider>
   );
 }

@@ -155,6 +155,12 @@ export interface DashboardResponse {
   revision: RevisionStamp;
 }
 
+export interface DashboardDayNote {
+  id: string;
+  title: string;
+  notes: string;
+}
+
 /** Paginated response returned by GET /api/v1/dashboard/activity. */
 export interface DashboardActivityListResponse {
   items: RecentActivityItem[];

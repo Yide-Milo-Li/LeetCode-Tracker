@@ -6,11 +6,11 @@ import {
   dashboardQuerySchema,
   type DashboardDailySummary,
 } from '../../../contracts/src/dashboard.ts';
-import { isTimeZone, localDate } from '../../../contracts/src/time.ts';
+import { isCalendarDate, isTimeZone, localDate } from '../../../contracts/src/time.ts';
 import {
   calculateDashboardStats,
 } from '../../../domain/src/index.ts';
-import { dashboardActivityPage, recentDashboardDays } from '../../../database/src/dashboard-query.ts';
+import { dashboardActivityPage, dashboardDayNotes, recentDashboardDays } from '../../../database/src/dashboard-query.ts';
 import type { CatalogStore } from '../../../database/src/store.ts';
 import type { PlanningService } from '../planning.ts';
 import type { ApplicationContext } from '../context.ts';
@@ -141,5 +141,9 @@ export function createDashboardOperations(context: ApplicationContext) {
     return dashboardActivityPage(store.db, parseRes.data, store.planning.stamp(), Date.now());
   };
   const recent = async () => recentDashboardDays(store.db, store.getSettings().timezone, Date.now());
-  return { summary, activity, recent };
+  const dayNotes = async (date: unknown) => {
+    if (typeof date !== 'string' || !isCalendarDate(date)) return fail(400, { error: 'INVALID_QUERY', message: 'Expected a calendar date.' });
+    return { items: dashboardDayNotes(store.db, date, store.getSettings().timezone, Date.now()) };
+  };
+  return { summary, activity, recent, dayNotes };
 }

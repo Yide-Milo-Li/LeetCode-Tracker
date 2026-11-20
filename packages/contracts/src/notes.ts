@@ -83,6 +83,7 @@ export type ProblemNoteSummary = z.infer<typeof problemNoteSummarySchema>;
 
 /** Query options for listing problem notes. */
 export const problemNoteListQuerySchema = z.object({
+  frontendId: z.string().min(1).max(100).optional(),
   search: z.string().max(100).optional(),
   difficulty: z.enum(['Easy', 'Medium', 'Hard', 'all']).default('all'),
   hasNote: z.enum(['true', 'false', 'all']).default('all'),
@@ -344,52 +345,6 @@ export function formatProblemFilename(frontendId: string, slug: string): string 
   const prefix = Number.isSafeInteger(num) ? String(num).padStart(4, '0') : frontendId;
   const cleanSlug = slug.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
   return `${prefix}-${cleanSlug}.md`;
-}
-
-/**
- * Format single problem as an Obsidian Callout card for clipboard copying.
- * Adapts labels and statuses according to the requested language ('en' | 'zh').
- * If customNote has no meaningful content, falls back to practice log notes.
- */
-export function formatObsidianCallout(
-  problem: { frontendId: string; title: string; url: string; difficulty: string; tags: string[]; slug: string },
-  record?: { durationMinutes: number | null; practicedAt?: string; completed?: boolean; notes: string | null },
-  customNote?: string | null,
-  lang: 'en' | 'zh' = 'en'
-): string {
-  const isZh = lang === 'zh';
-  const effectiveCustomNote = hasMeaningfulNoteContent(customNote) ? customNote!.trim() : null;
-  const recordNotes = record?.notes && record.notes.trim().length > 0 ? record.notes.trim() : null;
-  const noteContent = effectiveCustomNote || recordNotes;
-  const tagList = problem.tags.map((t) => `#leetcode/${t.toLowerCase().replace(/\s+/g, '-')}`).join(' ');
-  const link = formatProblemFilename(problem.frontendId, problem.slug).replace(/\.md$/, '');
-
-  const durationStr = record?.durationMinutes
-    ? (isZh ? `${record.durationMinutes} 分钟` : `${record.durationMinutes} min`)
-    : (isZh ? '未记录' : 'Unrecorded');
-  const statusStr = record?.completed
-    ? (isZh ? '✅ 已解决' : '✅ Solved')
-    : (isZh ? '⚠️ 尝试中' : '⚠️ Attempted');
-  const dateStr = record?.practicedAt ? record.practicedAt.slice(0, 10) : new Date().toISOString().slice(0, 10);
-
-  const diffLabel = isZh ? '难度' : 'Difficulty';
-  const statusLabel = isZh ? '状态' : 'Status';
-  const dateLabel = isZh ? '日期' : 'Date';
-  const durLabel = isZh ? '耗时' : 'Duration';
-  const tagsLabel = isZh ? '标签' : 'Tags';
-  const linkLabel = isZh ? '双链索引' : 'Vault Link';
-  const notesHeading = isZh ? '复盘笔记' : 'Notes & Reflections';
-
-  return `> [!example] [${problem.frontendId}. ${problem.title}](${problem.url})
-> - **${diffLabel}**: \`${problem.difficulty}\` | **${statusLabel}**: ${statusStr}
-> - **${dateLabel}**: ${dateStr} | **${durLabel}**: ${durationStr}
-> - **${tagsLabel}**: ${tagList || '#leetcode'}
-> - **${linkLabel}**: [[${link}]]
-${
-  noteContent && noteContent.length > 0
-    ? `> \n> **${notesHeading}**:\n> ${noteContent.replace(/\r?\n/g, '\n> ')}`
-    : ''
-}`;
 }
 
 /**

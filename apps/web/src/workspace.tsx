@@ -1,5 +1,5 @@
 /** Lightweight application coordination using React context and the existing local navigation. */
-import { createContext, useContext } from 'react';
+import { createContext, useContext, useLayoutEffect, useRef, type ComponentPropsWithoutRef } from 'react';
 import type { CatalogProblem, PracticeRecord, PlanItem } from './api.ts';
 
 export type View =
@@ -7,6 +7,7 @@ export type View =
   | 'schedule'
   | 'notes'
   | 'problems'
+  | 'favorites'
   | 'catalog-import'
   | 'records'
   | 'statistics'
@@ -48,6 +49,7 @@ export interface RecordsFilterRequest extends RecordsFilter {
 export interface WorkspaceState {
   revision: number;
   desktopAgentRevision?: number;
+  favoriteRevision?: number;
   timezone: string | null;
   selectedNoteProblem?: string | null;
   navigate: (view: View, targetId?: string) => void;
@@ -67,4 +69,20 @@ export const WorkspaceContext = createContext<WorkspaceState>({
 /** Subscribe to invalidations without tying requests to changing page or theme identity. */
 export function useWorkspace(): WorkspaceState {
   return useContext(WorkspaceContext);
+}
+
+export const ViewVisible = createContext(true);
+
+/** Keep drafts mounted, delivering accumulated workspace changes when the user returns. */
+export function RetainedView({ hidden = false, children, ...props }: ComponentPropsWithoutRef<'div'>) {
+  const current = useWorkspace();
+  const lastVisible = useRef(current);
+  useLayoutEffect(() => {
+    if (!hidden) lastVisible.current = current;
+  }, [hidden, current]);
+  return <ViewVisible.Provider value={!hidden}>
+    <WorkspaceContext.Provider value={hidden ? lastVisible.current : current}>
+      <div hidden={hidden} {...props}>{children}</div>
+    </WorkspaceContext.Provider>
+  </ViewVisible.Provider>;
 }

@@ -99,7 +99,7 @@ The local SQLite catalog schema is defined in [schema.ts](../packages/database/s
 - **`problem_review_state`**: Existing interval-based review state tracking per problem; the algorithm is unchanged by the desktop refactor.
 - **`import_results`**: Complete committed response, including line errors, keyed by import ID for durable retry replay.
 - **`import_history`**: Audit log recording ingestion timestamps, lines processed, inserted/updated/unchanged/duplicate counts, and error counts.
-- **`catalog_meta`**: Key-value metadata storing monotonic `catalog_revision`, `practice_revision`, `planning_revision`, `review_baseline`, and `last_imported_at`.
+- **`catalog_meta`**: Key-value metadata storing revisions, review baseline, and last import time. Goal-list documents store ordered entries, completion, and an optional link to the assignment time used to evaluate practice evidence. Favorite folder names and per-problem memberships have separate keys. Bundle v5 validates these entries against the exported catalog and folder IDs on restore.
 - **`settings`**: User preferences table storing `language` ('en' | 'zh'), `theme` ('light' | 'dark' | 'system'), and `timezone` (string | null).
 - **`schema_version`**: Tracks applied database schema version (currently v12).
 - **`practice_records`**: Stores individual practice attempts, including optional `outcome` ('independent' | 'assisted' | 'unsolved' | null) with index `idx_practice_records_outcome`.

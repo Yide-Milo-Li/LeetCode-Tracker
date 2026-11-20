@@ -1,8 +1,8 @@
 /** Shared practice creation intent storage; uncertain retries preserve both ID and actual event time. */
-import { api, ApiError, type CreatePracticeRecordInput, type PracticeRecord } from './api.ts';
+import { api, ApiError, type PracticeIntentInput, type PracticeRecord } from './api.ts';
 import type { Language } from './i18n.ts';
 
-const pending = new Map<string, CreatePracticeRecordInput>();
+const pending = new Map<string, PracticeIntentInput>();
 const inFlight = new Map<string, Promise<PracticeRecord>>();
 const prefix = 'leetcode-practice-intent:';
 
@@ -19,12 +19,12 @@ export function clearPracticeIntents(): void {
 }
 
 /** Recover an unresolved intent across page reload; storage denial still preserves in-memory safety. */
-export function getPracticeIntent(key: string): CreatePracticeRecordInput | undefined {
+export function getPracticeIntent(key: string): PracticeIntentInput | undefined {
   if (pending.has(key)) return pending.get(key);
   try {
     const raw = window.sessionStorage.getItem(prefix + key);
     if (raw) {
-      const value = JSON.parse(raw) as CreatePracticeRecordInput;
+      const value = JSON.parse(raw) as PracticeIntentInput;
       if (value.operationId && value.practicedAt && value.questionFrontendId) {
         pending.set(key, value);
         return value;
@@ -37,7 +37,7 @@ export function getPracticeIntent(key: string): CreatePracticeRecordInput | unde
 }
 
 /** Submit exactly one immutable creation intent; preserve it until the server confirms the record. */
-export function createPractice(key: string, payload: CreatePracticeRecordInput): Promise<PracticeRecord> {
+export function createPractice(key: string, payload: PracticeIntentInput): Promise<PracticeRecord> {
   const running = inFlight.get(key);
   if (running) return running;
   const input = getPracticeIntent(key) ?? { ...payload, operationId: crypto.randomUUID() };
@@ -60,7 +60,7 @@ export function createPractice(key: string, payload: CreatePracticeRecordInput):
     })
     .catch((error) => {
       // Explicit validation/not-found responses prove no row was written. Network/5xx failures do not.
-      if (error instanceof ApiError && [400, 404, 422].includes(error.status)) {
+      if (error instanceof ApiError && ([400, 404, 422].includes(error.status) || error.code === 'STALE_PLAN')) {
         pending.delete(key);
         try {
           window.sessionStorage.removeItem(prefix + key);

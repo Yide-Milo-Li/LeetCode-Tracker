@@ -2,9 +2,9 @@
 
 The same desktop UI runs in the Windows and Apple Silicon macOS desktop apps as well as source-mode browsers. Native mode shows recoverable startup status, uses native dialogs for exports, and opens allowed external links in the system browser. See [installation and runtime behavior](desktop.md).
 
-## Four places to work
+## Workspaces
 
-Today is the homepage. Problems is the local catalog. Notes provides problem Markdown editing, practice timelines, and export. Progress contains Statistics and Records, with Statistics selected by default. Settings remains at the sidebar bottom. The sidebar starts as a 64px icon rail; use Expand sidebar for 216px labelled navigation. This browser remembers the choice. Hover or focus icons for their names; Escape dismisses a tooltip. Row actions, reset, refresh and pagination use labelled icons, while saves and destructive actions retain text.
+Today is the homepage. Problems is the local catalog. Notes provides problem Markdown editing, practice timelines, and export. Progress contains Statistics and Records, with Statistics selected by default. Favorites contains All favorites and your folders. Settings stays at the sidebar bottom. Expand the sidebar for full navigation labels. The app remembers the choice. Hover or focus navigation icons for their names. Escape dismisses a tooltip.
 
 On a new installation, Today opens a three-step setup guide instead of an empty plan: timezone (saved as soon as it is picked, with a one-click device suggestion), catalog import, and study rhythm. The rhythm step offers a weekday preset (Monday–Friday, one Easy and two Medium problems, one of them a review) or a link to the full schedule editor. Only the current step is shown; finished steps are checked and every step can be revisited or skipped. Finishing or skipping the guide is remembered in this browser, and installations that already have a timezone, catalog and schedule never see it. Afterwards, Today flags an empty catalog with a link to Problems → Import problems.
 
@@ -21,6 +21,10 @@ Today shows one locally selected encouragement below its heading. The library co
 | Time a problem with the built-in stopwatch | Today → problem row → Start timer, or Problems → timer |
 | Open the original problem | Today → problem title link |
 | Replace unfinished problems or inspect versions | Today → More |
+| Make or edit an ordered goal list | Today → Goal lists → New list or Edit |
+| Assign one problem to goal lists | Flag beside a problem in Today, Problems or Favorites |
+| Add a selection to existing goals | Problems or Favorites → select rows → Add to goal lists |
+| Organize starred problems | Favorites, or the star beside a problem |
 | Import JSONL problem metadata | Problems → Import problems |
 | Bring in completed progress | Progress → Import progress |
 | Record extra or historical practice | Progress → Manual record |
@@ -34,6 +38,14 @@ Today shows one locally selected encouragement below its heading. The library co
 | Let local AI clients (MCP) read and write, copy client configuration | Settings → AI clients (desktop app) |
 | Sync between devices through a folder or Google Drive | Settings → Sync |
 | Migrate to another device, export to Obsidian or Notion | Settings → Data |
+
+## Goal lists and favorites
+
+Today shows daily plan progress, the selected goal's progress in saved order, and seven days of activity. Select an activity day to see its records. Each problem counts once per day in the chart, using the profile timezone.
+
+Create a goal list by searching the catalog or pasting problem IDs in order. In Problems or Favorites, select rows across pages to create a list or append to existing lists. Appending skips existing entries and adds new ones in natural problem ID order. Use **Edit** to move, replace, remove, or reopen entries. A goal-only check stays in its list. When the problem is also in today's active plan, a completion uses the same practice evidence for both places. Correcting or revoking the evidence reopens the linked check when no qualifying record remains. Older unlinked checks remain manual.
+
+Use the star to save a problem to All favorites and optionally to one or more folders. Use the Problems batch action to add stars while keeping existing folder memberships. Deleting a folder keeps its problems starred. Unfavoriting from a selection removes those stars from every folder.
 
 ## Completing a planned problem
 
@@ -77,7 +89,7 @@ The current snapshot browser and both import histories are collapsed by default 
 
 ## Reading statistics and preferences
 
-Today's seven-day strip includes today in the saved timezone and uses distinct completed problems from both manual and valid imported evidence. Its neighboring streak counts days with known activity, including unfinished practice. No known records and unknown dates are labelled honestly.
+Today compares completed problems with the size of the daily plan in a progress ring. The selected goal has a mark for each problem in saved order, or a continuous bar for lists over 32 problems. **Next** takes you to the first pending problem. The seven-day chart counts distinct completed problems on each local date from manual and imported records. Select a day to open its records, or **Statistics** for the full report.
 
 Statistics shows outcome metrics (unique solved, this week, streak, reviews due today / overdue), the yearly heatmap, difficulty coverage, the topics worth attention and a sortable topic table whose rows expand into 30-day evidence. The thirty-day trend appears only when that window has activity; otherwise a one-line note names the last active date. Source counts and data coverage sit in a collapsed section. Selecting a heatmap date, or the pending-date notice, switches to Records with that filter applied; keyboard arrows move the heatmap focus. Tags overlap and the displayed totals are not a historical task-completion percentage.
 
@@ -110,7 +122,7 @@ The Notes Workspace provides a filterable master list, formatting toolbar, and E
 
 - **Focus and save**: `Ctrl+\` / `⌘\` toggles Notes focus mode; `Ctrl+S` / `⌘S` saves the active draft (the UI automatically displays `⌘S` and `⌘\` on macOS). Focus mode starts off. The practice timeline can be expanded separately.
 - **Unsaved changes**: Selecting another problem offers Save and switch, Discard and switch, or Cancel. Saving must succeed before switching; Cancel preserves the current draft.
-- **Quick copy**: The Copy menu exposes Obsidian and Notion card formats.
+- **Quick copy**: Use **Copy for Notion** to copy a card with the current note. Use **.md** to download the Markdown file.
 
 - **Scope independence**: A problem's inclusion in "Practiced Only" (`scope=practiced`) strictly requires active practice logs or valid progress snapshots; writing or having notes never alters practice categorization.
 - **Default blank editing & on-demand templates**: New problem notes open completely blank with instructional placeholders. Clicking **Insert Template** inserts a language-specific skeleton outline without default complexity answers or placeholder code. The action is enabled only when the editor is empty, and switching language never replaces or overwrites in-progress drafts.
@@ -118,7 +130,7 @@ The Notes Workspace provides a filterable master list, formatting toolbar, and E
 - **Save protection & proactive clearing**: Saving is disabled for untouched notes and blank or unedited new templates. Existing notes can be proactively cleared to an empty string and saved, updating the status to "Without Custom Note" while safely retaining all problem catalog data and practice records.
 - **Request ownership**: Loading and retry responses are cancelled when switching problems. Save responses from an earlier selection visit cannot change the current editor's saved baseline or feedback, even after switching back to the same problem. Edits made during a save remain in the editor; repeated save shortcuts cannot duplicate an in-flight write. Editing and template insertion wait until note loading succeeds.
 - **Complexity answers**: Standalone complexity notes and answers entered into today's blank templates count as meaningful, including `$O(N)$` time and `$O(1)$` space. Historical default answers are ignored only when the complete old template matches after whitespace normalization. Ambiguous partial notes with answers are retained as meaningful; original stored text is not rewritten on load or import.
-- **Card and export fallbacks**: Obsidian and Notion quick-copy cards and knowledge exports check for meaningful note content; unfilled templates automatically fall back to recent practice log notes.
+- **Card and export fallbacks**: Notion cards and knowledge exports check for meaningful note content; unfilled templates automatically fall back to recent practice log notes.
 
 ## Desktop launcher
 

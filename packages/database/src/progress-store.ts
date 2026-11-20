@@ -2,6 +2,7 @@
  * Progress snapshots persistence, conflict detection, version history, and batch commit.
  * Enforces historical audit trail on revisions, conflicts, and revocations.
  */
+import { reconcileGoalEvidence } from './goal-lists.ts';
 import type { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import { isEventTime } from '../../contracts/src/time.ts';
@@ -305,6 +306,7 @@ export function revokeProgressSnapshotTransaction(
     ).run(newVersion, now, existing.questionId);
 
     db.prepare('DELETE FROM snapshot_successes WHERE question_id=?').run(existing.questionId);
+    reconcileGoalEvidence(db, existing.questionId, now);
 
     incrementPracticeRevisionFn();
     db.exec('COMMIT;');

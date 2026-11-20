@@ -6,6 +6,11 @@
 
 export type Language = 'en' | 'zh';
 
+const countFormat = { en: new Intl.NumberFormat('en-US'), zh: new Intl.NumberFormat('zh-CN') };
+export function formatCount(value: number, lang: Language) {
+  return countFormat[lang].format(value);
+}
+
 export const translations = {
   en: {
     appTitle: 'LeetCode Tracker',
@@ -421,7 +426,6 @@ export const translations = {
     exportNotionHistory: 'Export Notion CSV (History)',
     exportNotionSummaryTitle: 'Download Notion Problems Summary CSV',
     exportNotionHistoryTitle: 'Download Notion Practice History CSV',
-    copyObsidianCard: 'Copy for Obsidian',
     copyNotionCard: 'Copy for Notion',
     cardCopied: 'Copied to clipboard!',
     quickNoteDrawerTitle: 'Past Reflections & Notes',
@@ -917,7 +921,6 @@ export const translations = {
     exportNotionHistory: '导出 Notion CSV (做题历史表)',
     exportNotionSummaryTitle: '下载 Notion 题库表 CSV',
     exportNotionHistoryTitle: '下载 Notion 做题历史表 CSV',
-    copyObsidianCard: '复制为 Obsidian 卡片',
     copyNotionCard: '复制为 Notion 卡片',
     cardCopied: '已复制到剪贴板！',
     quickNoteDrawerTitle: '以往复盘笔记',
