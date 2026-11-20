@@ -1,3 +1,4 @@
+import { GoalProblemPicker } from './GoalProblemPicker.tsx';
 import { useId, useLayoutEffect, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, Trash2 } from 'lucide-react';
 import type { StudyPlanView } from '../../../../packages/contracts/src/study-plan.ts';
@@ -68,6 +69,7 @@ export function StudyProblemListEditor({ goal, texts, onChange, lang }: {
           {goal.stages.map((name, i) => <option key={i} value={i}>{name}</option>)}
         </select>
       </label>}
+      <GoalProblemPicker lang={lang} selected={groups.flat()} onAdd={id => onChange(texts.map((text, i) => i === stage ? [...ids, id].join('\n') : text))} />
       <div><button type="button" className="btn btn-secondary" ref={toggle}
         onClick={() => setBulk(!showText)} disabled={duplicate}>
         {showText ? (zh ? '返回题目列表' : 'Show list') : (zh ? '添加或批量编辑题号' : 'Add or edit problem IDs')}

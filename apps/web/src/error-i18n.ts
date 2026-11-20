@@ -43,6 +43,7 @@ const API_ERROR_MESSAGES: Record<string, BilingualMessage> = {
     en: 'A goal is already active. Refresh the schedule and reopen the goal editor to replace it.',
     zh: '已有进行中的目标。请刷新学习安排，再打开目标表单进行替换。',
   },
+  GOAL_HAS_PRACTICE: { en: 'This goal has practice history. You can archive it.', zh: '此目标已有练习记录，可以归档。' },
   STUDY_PLAN_NOT_FOUND: {
     en: 'This goal could not be found. Reopen Study Schedule.',
     zh: '找不到这份题单，请重新打开学习安排。',
@@ -287,6 +288,9 @@ function splitMixedBilingual(message: string, lang: Language): string | null {
 function matchKnownErrorMessage(message: string, lang: Language): string | null {
   if (message === 'Include at least one new-problem day; review-only days must be study days.')
     return lang === 'zh' ? '请至少保留一个可安排新题的学习日。' : message;
+  if (message === 'Choose a future deadline or switch to daily pacing.') return lang === 'zh' ? '请延后截止日，或清空截止日后按日常题量恢复。' : message;
+  if (message === 'Only an upcoming goal can change its start date.') return lang === 'zh' ? '只有尚未开始的目标可以改开始日期。' : message;
+  if (message === 'Choose today or a future date.') return lang === 'zh' ? '请选择今天或之后的日期。' : message;
   if (message === 'The deadline has passed.') return lang === 'zh' ? '请选择今天或之后的截止日。' : message;
   const dependency = /^#(.+) requires #(.+)\. List prerequisites earlier in the route\.$/.exec(message);
   if (dependency) return lang === 'zh' ? `#${dependency[1]} 依赖 #${dependency[2]}。请将 #${dependency[2]} 放在它前面，或一并移除依赖它的题目。` : message;

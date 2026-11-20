@@ -697,3 +697,175 @@ test('v12 upgrade retains the saved goal, daily plan ID, immutable versions and 
   assert.equal(after.find(p => p.studyPlan?.id === goal.id)?.id, day.id);
   assert.equal(after.find(p => p.id === day.id)?.items[0].completed, true);
 });
+
+test('shortening a twelve-problem goal preserves its two-problem ceiling and reports six outstanding', async t => {
+  const f = await fixture(t, goalIds);
+  const request = flatGoal(goalIds.slice(0, 12), { dailyCount: 2, reviewCap: 0, maxDailyCount: 2, deadline: '2026-11-21' });
+  request.plan.weekdays = [0, 1, 2, 3, 4, 5, 6];
+  const { plan } = await f.app.planning.saveStudyPlan(request);
+  const edit = { id: plan.id, expectedVersion: 1, operationId: randomUUID(), changes: { deadline: '2026-11-18' } };
+  const preview = (await f.app.planning.updateStudyPlan({ ...edit, dryRun: true })).plan;
+  const saved = (await f.app.planning.updateStudyPlan(edit)).plan;
+  assert.equal(saved.settings.maxDailyCount, 2);
+  assert.deepEqual(preview.calendar.map(day => day.items.length), [2, 2, 2]);
+  assert.equal(saved.deadlineShortfall, 6);
+});
+
+test('dated strategy transfers resolve by source and period, and reject a stale concurrent change', async t => {
+  const f = await fixture(t);
+  const rules = { dailyCount: 1, difficulty: { Easy: 100, Medium: 0, Hard: 0 }, tags: [], premium: false,
+    reviewEnabled: false, reviewMode: 'none', reviewPercent: null, preference: '' };
+  const a = await f.app.planning.createStrategy({ name: 'A', weekdays: [1, 2], rules });
+  const b = await f.app.planning.createStrategy({ name: 'B', weekdays: [], rules });
+  const revision = () => f.store.planning.stamp().planning;
+  const recurring = { id: randomUUID(), scope: 'weekly', startDate: monday, strategyId: b.id };
+  await f.app.planning.adjustWeeklyCalendar({ expectedRevision: revision(), change: { action: 'set', rule: recurring } });
+  assert.deepEqual(f.store.planning.strategy(a.id)?.weekdays, [2]);
+  assert.deepEqual(f.store.planning.strategy(b.id)?.weekdays, [1]);
+  const period = { id: randomUUID(), scope: 'range', startDate: monday, endDate: '2026-11-17', strategyId: null };
+  const prior = revision();
+  await f.app.planning.adjustWeeklyCalendar({ expectedRevision: prior, change: { action: 'set', rule: period } });
+  await assert.rejects(f.app.planning.adjustWeeklyCalendar({ expectedRevision: prior, change: { action: 'remove', id: period.id } }), /schedule changed/);
+  assert.equal((await f.app.planning.ensure()).status, 'rest');
+  const single = { id: randomUUID(), scope: 'day', startDate: monday, strategyId: a.id };
+  await f.app.planning.adjustWeeklyCalendar({ expectedRevision: revision(), change: { action: 'set', rule: single } });
+  assert.equal((await f.app.planning.ensure()).plan?.strategyId, a.id);
+  assert.equal(f.store.planning.strategyForDate('2026-11-17'), null);
+  assert.equal(f.store.planning.strategyForDate('2026-11-23')?.id, b.id);
+  validateMigrationBundle(f.store.exportMigrationBundle(5));
+});
+
+test('a goal can skip a date and reduce a study week, then return to its usual pace', async t => {
+  const f = await fixture(t, goalIds);
+  const { plan } = await f.app.planning.saveStudyPlan(flatGoal(goalIds, { dailyCount: 3, reviewCap: 0 }));
+  const changes = { dateAdjustments: [
+    { id: randomUUID(), scope: 'range', startDate: monday, endDate: '2026-11-20', count: 1 },
+    { id: randomUUID(), scope: 'day', startDate: '2026-11-17', count: 0 },
+  ] };
+  const edit = { id: plan.id, expectedVersion: 1, operationId: randomUUID(), changes };
+  const preview = (await f.app.planning.updateStudyPlan({ ...edit, dryRun: true })).plan;
+  assert.equal(preview.calendar[0].items.length, 1);
+  assert.ok(!preview.calendar.some(day => day.date === '2026-11-17'));
+  assert.equal(preview.calendar.find(day => day.date === '2026-11-23')?.items.length, 3);
+  assert.equal((await f.app.planning.readDay(monday)).plan?.items.length, 3);
+  await f.app.planning.updateStudyPlan(edit);
+  const today = (await f.app.planning.ensure()).plan!;
+  assert.equal(today.items.length, 1);
+  assert.equal(today.studyPlan?.temporaryAdjustment, true);
+});
+
+test('seven-day overview counts known overlaps once and reports ungenerated strategy slots separately', async t => {
+  const f = await fixture(t);
+  await f.app.planning.saveStudyPlan(flatGoal(['99', '98'], { dailyCount: 1, reviewCap: 0 }));
+  await f.app.planning.saveStudyPlan(flatGoal(['99', '643'], { dailyCount: 1, reviewCap: 0 }));
+  await f.app.planning.createStrategy({ name: 'Monday', weekdays: [1], rules: {
+    dailyCount: 1, difficulty: { Easy: 0, Medium: 0, Hard: 100 }, tags: [], premium: false,
+    reviewEnabled: false, reviewMode: 'none', reviewPercent: null, preference: '',
+  } });
+  const week = await f.app.planning.calendar(monday);
+  assert.equal(week.days.length, 7);
+  assert.equal(week.days[0].distinctProblems, 1);
+  assert.equal(week.days[0].pendingSlots, 1);
+  assert.equal(week.days[1].sources.length, 2);
+  assert.equal(week.days[1].pendingSlots, 0);
+  assert.equal((await f.app.planning.plans()).items.length, 0);
+  await f.app.planning.ensure();
+  const generated = (await f.app.planning.calendar(monday)).days[0];
+  assert.equal(generated.distinctProblems, 1);
+  assert.equal(generated.pendingSlots, 0);
+  assert.ok(generated.sources.every(source => source.state === 'saved'));
+});
+
+test('pause, resume preview, archive and restore preserve the same goal and practice history', async t => {
+  const f = await fixture(t);
+  const { plan } = await f.app.planning.saveStudyPlan(course());
+  await f.app.planning.ensure();
+  await f.log('643');
+  const transition = (action: string, version: number, extra = {}) => f.app.planning.lifecycle({
+    id: plan.id, action, expectedVersion: version, operationId: randomUUID(), ...extra,
+  });
+  assert.equal((await transition('pause', 1)).plan?.status, 'paused');
+  f.clock('2026-11-17T18:00:00Z');
+  assert.equal((await f.app.planning.ensure()).status, 'rest');
+  assert.equal((await transition('resume', 2, { dryRun: true })).plan?.completedCore, 1);
+  assert.equal((await f.app.planning.studyPlan()).plan?.status, 'paused');
+  assert.equal((await transition('resume', 2)).plan?.status, 'active');
+  await transition('archive', 3);
+  const library = await f.app.planning.studyPlan();
+  assert.equal(library.goals.length, 0);
+  assert.equal(library.archived[0].id, plan.id);
+  assert.equal((await f.app.planning.readDay(monday)).plans.length, 1);
+  validateMigrationBundle(f.store.exportMigrationBundle(5));
+  await assert.rejects(transition('delete', 4), /practice history/);
+  const renamed = await f.app.planning.updateStudyPlan({ id: plan.id, expectedVersion: 4, operationId: randomUUID(), changes: { name: 'Renamed' } });
+  assert.equal(renamed.plan.status, 'archived');
+  assert.equal((await transition('restore', 5)).plan?.name, 'Renamed');
+  assert.equal(f.store.queryPracticeRecords().total, 1);
+});
+
+test('deleting an unused goal is retry-safe and frees its empty-history daily assignment', async t => {
+  const f = await fixture(t);
+  const request = course();
+  const { plan } = await f.app.planning.saveStudyPlan(request);
+  await f.app.planning.ensure();
+  const deletion = { id: plan.id, action: 'delete', expectedVersion: 1, operationId: randomUUID() };
+  assert.equal((await f.app.planning.lifecycle(deletion)).plan, null);
+  assert.equal((await f.app.planning.lifecycle(deletion)).plan, null);
+  assert.equal((await f.app.planning.studyPlan(plan.id)).plan, null);
+  assert.equal((await f.app.planning.ensure()).status, 'rest');
+  assert.equal((await f.app.planning.studyPlan()).archived.length, 0);
+  await assert.rejects(f.app.planning.saveStudyPlan(request), /deleted/);
+  validateMigrationBundle(f.store.exportMigrationBundle(5));
+});
+
+test('restoring a deleted strategy offers its former weekdays without replacing their new owner', async t => {
+  const f = await fixture(t);
+  const rules = { dailyCount: 1, difficulty: { Easy: 100, Medium: 0, Hard: 0 }, tags: [], premium: false,
+    reviewEnabled: false, reviewMode: 'none', reviewPercent: null, preference: '' };
+  const old = await f.app.planning.createStrategy({ name: 'Before', weekdays: [1, 2], rules });
+  await f.app.planning.deleteStrategy({ body: { expectedVersion: 1 } }, { id: old.id });
+  await f.app.planning.createStrategy({ name: 'New owner', weekdays: [1], rules });
+  assert.deepEqual((await f.app.planning.deletedStrategies()).items[0].weekdays, [1, 2]);
+  await assert.rejects(f.app.planning.restoreStrategy({ expectedVersion: 2, weekdays: [1, 2] }, old.id), /already assigned/);
+  const restored = await f.app.planning.restoreStrategy({ expectedVersion: 2, weekdays: [2] }, old.id);
+  assert.equal(restored.deleted, false);
+  assert.deepEqual(restored.weekdays, [2]);
+  assert.equal(f.store.planning.strategyForDate(monday)?.name, 'New owner');
+});
+
+test('copied strategy rules and edited stage metadata belong to the goal and survive restore', async t => {
+  const f = await fixture(t);
+  const strategy = await f.app.planning.createStrategy({ name: 'Window', weekdays: [1],
+    rules: { dailyCount: 3, difficulty: { Easy: 100, Medium: 0, Hard: 0 }, tags: ['window'], premium: false,
+      reviewEnabled: false, reviewMode: 'none', reviewPercent: null, preference: 'Order by topic', timeBudgetMinutes: 80 } });
+  const request = course();
+  const { plan } = await f.app.planning.saveStudyPlan({ ...request, plan: { ...request.plan,
+    strategyId: strategy.id, strategyVersion: 1, dailyCount: undefined, reviewCap: 0 } });
+  await f.app.planning.updateStrategy({ expectedVersion: 1, rules: { dailyCount: 4 } }, { id: strategy.id });
+  assert.equal(plan.settings.dailyCount, 3);
+  await assert.rejects(f.app.planning.saveStudyPlan({ operationId: randomUUID(), plan: { ...request.plan, strategyId: strategy.id, strategyVersion: 1 } }), /source strategy changed/i);
+  const route = [{ name: 'Warm up', items: [stage('3')] }, { name: 'Challenge', items: [
+    { ...stage('643', ['3']), purpose: 'Apply the window' }, { ...stage('1456', ['643']), optional: true }] }];
+  const edit = { id: plan.id, expectedVersion: 1, operationId: randomUUID(), changes: { stages: route } };
+  const result = (await f.app.planning.updateStudyPlan(edit)).plan;
+  assert.equal(result.settings.dailyCount, 3);
+  assert.deepEqual(result.stages, ['Warm up', 'Challenge']);
+  assert.equal(result.nodes[1].purpose, 'Apply the window');
+  assert.deepEqual(result.nodes[2].requires, [result.nodes[1].questionId]);
+  assert.equal(result.nodes[2].optional, true);
+  assert.deepEqual(result.initialCalendar, plan.initialCalendar);
+  await f.store.importSnapshotBundle(f.store.exportMigrationBundle(5));
+  assert.deepEqual((await f.app.planning.studyPlan(plan.id)).plan!.nodes, result.nodes);
+});
+
+test('only an upcoming goal may move its start date while its initial calendar remains readable', async t => {
+  const f = await fixture(t);
+  const request = course();
+  const { plan } = await f.app.planning.saveStudyPlan({ ...request, plan: { ...request.plan, startDate: '2026-11-18' } });
+  const edit = { id: plan.id, expectedVersion: 1, operationId: randomUUID(), changes: { startDate: '2026-11-19' } };
+  const moved = (await f.app.planning.updateStudyPlan(edit)).plan;
+  assert.equal(moved.calendar[0].date, '2026-11-19');
+  assert.deepEqual(moved.initialCalendar, plan.initialCalendar);
+  f.clock('2026-11-19T18:00:00Z');
+  await assert.rejects(f.app.planning.updateStudyPlan({ ...edit, expectedVersion: 2, operationId: randomUUID(), changes: { startDate: '2026-11-20' } }), /upcoming/);
+});

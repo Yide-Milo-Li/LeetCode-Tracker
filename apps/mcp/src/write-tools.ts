@@ -16,6 +16,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { TrackerApplication } from '../../../packages/application/src/application.ts';
 import { isTimeZone, localDate } from '../../../packages/contracts/src/time.ts';
+import { calendarDate } from '../../../packages/contracts/src/calendar.ts';
 import type { RulePatch } from '../../../packages/contracts/src/recommendations.ts';
 import { percentagesForCounts, reviewPercentForCount } from '../../web/src/strategy-counts.ts';
 import { ProfileError } from './profile.ts';
@@ -49,12 +50,12 @@ async function resolveDate(application: TrackerApplication, date: string | undef
  * The conversion reuses the desktop strategy editor's rules.
  */
 const strategyCountsSchema = z.object({
-  dailyCount: z.number().int().min(1).max(50).describe('Problems per day'),
+  dailyCount: z.number().int().min(1).max(50),
   difficultyCounts: z.object({ Easy: z.number().int().min(0), Medium: z.number().int().min(0), Hard: z.number().int().min(0) })
-    .describe('New-problem mix for a day without reviews; must add up to dailyCount. Reviews ignore it, and remaining new slots follow its ratio'),
+    .describe('Total must equal dailyCount. Remaining new slots follow this mix.'),
   review: z.object({
-    mode: z.enum(['none', 'partial', 'all']).describe('none: only new problems; partial: due reviews first up to count, unused review slots become new problems; all: only due reviews, a shorter plan when few are due'),
-    count: z.number().int().min(0).optional().describe('Review cap for partial, 1 to dailyCount; for none, omit or use 0'),
+    mode: z.enum(['none', 'partial', 'all']).describe('none=new only, partial=due first then new, all=due only.'),
+    count: z.number().int().min(0).optional().describe('For partial use 1..dailyCount.'),
   }).refine(review => review.count !== 0 || review.mode === 'none', {
     path: ['count'], message: 'A zero review count requires mode "none".',
   }),
@@ -77,7 +78,7 @@ function rulesFromCounts(counts: z.infer<typeof strategyCountsSchema>): Pick<Rul
 }
 
 const weekdaysSchema = z.array(z.number().int().min(0).max(6)).max(7)
-  .describe('Weekdays this strategy plans, 0 = Sunday ... 6 = Saturday. If another strategy already owns any requested weekday, the whole save returns WEEKDAY_CONFLICT. Free the weekday on its current strategy before assigning it here.');
+  .describe('0=Sun..6=Sat. On WEEKDAY_CONFLICT, free the weekday first.');
 
 export function registerWriteTools({ register }: Registrar): void {
   // ---------------------------------------------------------------- practice
@@ -127,16 +128,18 @@ export function registerWriteTools({ register }: Registrar): void {
   register(
     'tracker_get_strategies',
     {
-      description: 'List study strategies (rules, daily count, difficulty mix, tags, review share and weekdays) with today\'s weekday.',
-      inputSchema: z.object({}),
+      description: 'List strategies. Request a seven-day calendar or deleted strategies.',
+      inputSchema: z.object({ weekStart: dateSchema.optional(), includeDeleted: z.boolean().optional() }),
     },
-    async (application) => {
+    async (application, { weekStart, includeDeleted }) => {
       const { items } = await application.planning.strategies();
       const { timezone } = await application.settings.get();
       const zone = timezone && isTimeZone(timezone) ? timezone : null;
       const activeDate = zone ? localDate(Date.now(), zone) : null;
       return json({
         strategies: items,
+        ...(weekStart && { calendar: await application.planning.calendar(weekStart) }),
+        ...(includeDeleted && { deleted: (await application.planning.deletedStrategies()).items }),
         timezone: zone,
         activeDate,
         todayWeekday: activeDate ? new Date(`${activeDate}T12:00:00Z`).getUTCDay() : null,
@@ -148,17 +151,36 @@ export function registerWriteTools({ register }: Registrar): void {
   register(
     'tracker_save_strategy',
     {
-      description: 'Create or update a study strategy and its weekdays (0=Sun..6=Sat). Omit strategyId to create (requires name, weekdays, dailyCount, difficultyCounts, review). Pass strategyId and expectedVersion to update (give dailyCount, difficultyCounts and review together when changing counts). If a creation reply is lost, check tracker_get_strategies before retrying.',
+      description: 'Create with name, weekdays and all counts. Update with ID/version. For dated assignments use calendar revision and target strategyId (omit for rest). Check before retrying a lost create.',
       inputSchema: strategyCountsSchema.partial().extend({
-        strategyId: z.string().min(1).optional().describe('Strategy ID to update; omit to create'),
-        expectedVersion: z.number().int().positive().optional().describe('Required when updating'),
+        strategyId: z.string().min(1).optional(),
+        restore: z.boolean().optional(),
+        assignment: z.object({
+          id: z.uuid(), revision: z.number().int().nonnegative(), scope: z.enum(['day','range','weekly','remove']),
+          startDate: calendarDate.optional(), endDate: calendarDate.optional(),
+        }).strict().optional(),
+        expectedVersion: z.number().int().positive().optional(),
         name: z.string().trim().min(1).max(100).optional(),
         weekdays: weekdaysSchema.optional(),
-        tags: z.array(z.string().min(1)).max(100).optional().describe('Topic tag slugs'),
+        tags: z.array(z.string().min(1)).max(100).optional(),
         premium: z.boolean().optional(),
       }),
     },
-    async (application, { strategyId, expectedVersion, name, weekdays, tags, premium, dailyCount, difficultyCounts, review }) => {
+    async (application, { strategyId, expectedVersion, assignment, restore, name, weekdays, tags, premium, dailyCount, difficultyCounts, review }) => {
+      if (assignment) {
+        if ([expectedVersion, restore, name, weekdays, tags, premium, dailyCount, difficultyCounts, review].some(value => value !== undefined))
+          return refuse('INVALID_INPUT', 'Pass assignment with only the target strategyId. Omit strategyId for a rest day.');
+        const { id, revision, scope, startDate, endDate } = assignment;
+        if (scope === 'remove' && (strategyId || startDate || endDate)) return refuse('INVALID_INPUT', 'Remove by assignment ID and revision.');
+        await application.planning.adjustWeeklyCalendar({ expectedRevision: revision, change: scope === 'remove'
+          ? { action: 'remove', id } : { action: 'set', rule: { id, scope, startDate, endDate, strategyId: strategyId ?? null } } });
+        return json({ status: 'applied', assignmentId: id });
+      }
+      if (restore) {
+        if (!strategyId || !expectedVersion || !weekdays || [name, tags, premium, dailyCount, difficultyCounts, review].some(value => value !== undefined))
+          return refuse('INVALID_INPUT', 'Restore with strategyId, expectedVersion and weekdays.');
+        return json({ status: 'applied', strategy: await application.planning.restoreStrategy({ expectedVersion, weekdays }, strategyId) });
+      }
       if (strategyId === undefined && expectedVersion === undefined) {
         if (!name || !weekdays || dailyCount === undefined || !difficultyCounts || !review) {
           return refuse('INVALID_INPUT', 'Creating a strategy requires name, weekdays, dailyCount, difficultyCounts and review.');
@@ -195,7 +217,7 @@ export function registerWriteTools({ register }: Registrar): void {
   register(
     'tracker_delete_strategy',
     {
-      description: 'Delete a study strategy. Its weekdays become rest days until another strategy takes them; plans already generated keep their items and history. Requires its version from tracker_get_strategies.',
+      description: 'Soft-delete by ID/version. Frees weekdays and keeps saved plans.',
       inputSchema: z.object({
         strategyId: z.string().min(1),
         expectedVersion: z.number().int().positive(),
@@ -242,9 +264,9 @@ export function registerWriteTools({ register }: Registrar): void {
   register(
     'tracker_create_today',
     {
-      description: 'Ensure daily lists for goals and the scheduled strategy. Rest means no assignments. Setup means a timezone is needed.',
+      description: 'Ensure the scheduled goals and strategy. Setup requires a timezone.',
       inputSchema: z.object({
-        date: dateSchema.optional().describe('YYYY-MM-DD; defaults to today in the configured timezone'),
+        date: dateSchema.optional().describe('Defaults to local today.'),
         operationId: operationIdSchema,
       }),
     },
@@ -272,14 +294,14 @@ export function registerWriteTools({ register }: Registrar): void {
   register(
     'tracker_apply_today_rules',
     {
-      description: 'Rebuild a day\'s plan with one-day rule changes (keeping completed items). Pass expectedVersion from tracker_get_today, or null if no plan exists yet. Set dryRun to preview candidate counts and issues.',
+      description: 'Adjust one day; keep completed items. Read the plan version first (null for a new plan). dryRun previews shortages.',
       inputSchema: z.object({
         date: dateSchema.optional(),
         planId: z.uuid().optional().describe("Required for a multi-source day."),
         rules: todayRulesSchema,
         expectedVersion: z.number().int().positive().nullable(),
         operationId: requiredOperationIdSchema,
-        dryRun: z.boolean().optional().default(false).describe('Check the rule change without applying it (default false)'),
+        dryRun: z.boolean().optional().default(false).describe('Preview only.'),
       }),
     },
     async (application, { date, planId, rules, expectedVersion, operationId, dryRun = false }) => {

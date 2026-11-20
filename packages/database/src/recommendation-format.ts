@@ -9,7 +9,7 @@ export function hasRecommendationFields(value: unknown): boolean {
 
 /** Never export an old envelope that hides newer scheduling or user-feedback semantics. */
 export function assertLegacyRecommendationExport(db: DatabaseSync): void {
-  if (db.prepare("SELECT 1 FROM catalog_meta WHERE key='study-plan:active'").get())
+  if (db.prepare("SELECT 1 FROM catalog_meta WHERE key IN ('study-plan:active','weekly-calendar:v1')").get())
     throw new Error('BUNDLE_VERSION_REQUIRED: Study plans require portable Bundle v5.');
   const rows = [
     ...db.prepare('SELECT rules_json AS json FROM strategies').all(),

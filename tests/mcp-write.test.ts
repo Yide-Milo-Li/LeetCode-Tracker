@@ -666,3 +666,28 @@ test('MCP creates and reopens a course, previews Today without writing, and save
     assert.equal(committedList.version, updated.version + 1);
   } finally { await client.close(); p.cleanup(); }
 });
+
+test('MCP manages goal lifecycle, dated assignments and recovery through the shared planner', async () => {
+  const p = profileWithCatalog();
+  const { client } = await StdioClient.start(entry, p.dbPath);
+  try {
+    const date = today();
+    const goal = (await client.call('tracker_create_study_plan', {
+      operationId: randomUUID(), plan: { name: 'Short list', startDate: date, weekdays: [0, 1, 2, 3, 4, 5, 6],
+        reviewCap: 0, stages: [{ name: 'Practice', items: [{ frontendId: '1', purpose: 'Warm up' }] }] },
+    })).structuredContent.plan;
+    const transition = { id: goal.id, expectedVersion: 1, operationId: randomUUID(), action: 'pause' };
+    assert.equal((await client.call('tracker_update_study_plan', { ...transition, dryRun: true })).structuredContent.plan.status, 'paused');
+    assert.equal((await client.call('tracker_update_study_plan', transition)).structuredContent.plan.status, 'paused');
+    const created = (await client.call('tracker_save_strategy', { name: 'Backup', weekdays: [],
+      dailyCount: 1, difficultyCounts: { Easy: 1, Medium: 0, Hard: 0 }, review: { mode: 'none' } })).structuredContent.strategy;
+    const calendar = (await client.call('tracker_get_strategies', { weekStart: date })).structuredContent.calendar;
+    const assignment = { id: randomUUID(), revision: calendar.revision, scope: 'day', startDate: date };
+    assert.equal((await client.call('tracker_save_strategy', { strategyId: created.id, assignment })).structuredContent.status, 'applied');
+    assert.equal((await client.call('tracker_get_strategies', { weekStart: date })).structuredContent.calendar.days[0].pendingSlots, 1);
+    await client.call('tracker_delete_strategy', { strategyId: created.id, expectedVersion: 1 });
+    const deleted = (await client.call('tracker_get_strategies', { includeDeleted: true })).structuredContent.deleted;
+    assert.equal((await client.call('tracker_save_strategy', { restore: true, strategyId: created.id, expectedVersion: deleted[0].version,
+      weekdays: [] })).structuredContent.strategy.deleted, false);
+  } finally { await client.close(); p.cleanup(); }
+});

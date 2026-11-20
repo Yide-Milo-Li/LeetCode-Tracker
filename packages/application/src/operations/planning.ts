@@ -1,5 +1,7 @@
-import { activeStudySummaries } from '../../../database/src/study-plans.ts';
-import type { z } from 'zod';
+import { weeklyChangeSchema } from '../../../contracts/src/calendar.ts';
+import { readCalendarWeek } from '../calendar.ts';
+import { activeStudySummaries, dormantStudySummaries } from '../../../database/src/study-plans.ts';
+import { z } from 'zod';
 /**
  * Business operations for study strategies, weekly scheduling, daily recommendation plans, and prompt overrides.
  */
@@ -16,8 +18,8 @@ import {
   updateStrategySchema,
 } from '../../../contracts/src/recommendations.ts';
 import { isCalendarDate } from '../../../contracts/src/time.ts';
-import { studyPlanEditSchema, studyPlanRequestSchema } from '../../../contracts/src/study-plan.ts';
-import { createStudyPlan, currentStudyView, editStudyPlan } from '../study-plans.ts';
+import { goalLifecycleSchema, studyPlanEditSchema, studyPlanRequestSchema } from '../../../contracts/src/study-plan.ts';
+import { changeGoalLifecycle, createStudyPlan, currentStudyView, editStudyPlan } from '../study-plans.ts';
 import { operationFingerprint } from '../../../database/src/operation-fingerprint.ts';
 import type { ApplicationContext } from '../context.ts';
 import { fail, artifact } from '../errors.ts';
@@ -83,6 +85,26 @@ export function createPlanningOperations(context: ApplicationContext) {
   const schedule = async (input: unknown = {}) => {
     const schedule = planningService.getWeeklySchedule();
     return { schedule };
+  };
+
+  const calendar = async (start?: string) => {
+    if (start !== undefined && (!isCalendarDate(start) || start > '9999-12-25')) return fail(400, { error: 'INVALID_DATE' });
+    try { return readCalendarWeek(store, start); }
+    catch (err) {
+      if (err instanceof PlanningError) return fail(err.status, { error: err.code, message: err.message });
+      throw err;
+    }
+  };
+  const adjustWeeklyCalendar = async (input: unknown) => {
+    const parsed = weeklyChangeSchema.safeParse(input);
+    if (!parsed.success) return fail(400, { error: 'INVALID_INPUT', issues: parsed.error.issues });
+    try {
+      await writeLock.run(() => store.planning.changeWeeklyCalendar(parsed.data));
+      return { ok: true };
+    } catch (error) {
+      if (error instanceof PlanningError) return fail(error.status, { error: error.code, message: error.message });
+      throw error;
+    }
   };
 
   /** plans: validates input and preserves existing business rules. */
@@ -209,15 +231,18 @@ export function createPlanningOperations(context: ApplicationContext) {
   const studyPlan = async (id?: string) => {
     if (id !== undefined && (typeof id !== 'string' || id.length > 100)) return fail(400, {error: 'INVALID_INPUT'});
     try {
-      return { plan: currentStudyView(store, Date.now(), id), goals: activeStudySummaries(store.db) };
+      const active = activeStudySummaries(store.db);
+      const dormant = dormantStudySummaries(store.db);
+      const goals = [...active, ...dormant.filter(goal => goal.state === 'paused')];
+      return { plan: currentStudyView(store, Date.now(), id ?? goals[0]?.id), goals, archived: dormant.filter(goal => goal.state === 'archived') };
     }
     catch (err) {
       if (err instanceof PlanningError) return fail(err.status, { error: err.code, message: err.message });
       throw err;
     }
   };
-  async function runStudyWrite<R extends { dryRun: boolean }>(
-    parsed: z.ZodSafeParseResult<R>, action: (store: typeof context.store, request: R) => ReturnType<typeof createStudyPlan>
+  async function runStudyWrite<R extends { dryRun: boolean }, T>(
+    parsed: z.ZodSafeParseResult<R>, action: (store: typeof context.store, request: R) => Promise<T>
   ) {
     if (!parsed.success) return fail(400, { error: 'INVALID_INPUT', issues: parsed.error.issues });
     try {
@@ -230,10 +255,24 @@ export function createPlanningOperations(context: ApplicationContext) {
   }
   const saveStudyPlan = (input: unknown) => runStudyWrite(studyPlanRequestSchema.safeParse(input), createStudyPlan);
   const updateStudyPlan = (input: unknown) => runStudyWrite(studyPlanEditSchema.safeParse(input), editStudyPlan);
+  const lifecycle = (input: unknown) => runStudyWrite(goalLifecycleSchema.safeParse(input), changeGoalLifecycle);
+  const deletedStrategies = async () => ({ items: store.planning.deletedStrategies() });
+  const restoreStrategy = async (input: unknown, id: string) => {
+    const parsed = z.object({ expectedVersion: z.number().int().positive(), weekdays: strategyInputSchema.shape.weekdays }).strict().safeParse(input);
+    if (!parsed.success) return fail(400, { error: 'INVALID_INPUT', issues: parsed.error.issues });
+    const old = store.planning.strategy(id, true);
+    if (!old?.deleted) return fail(409, { error: 'STALE_STRATEGY' });
+    try {
+      return await writeLock.run(() => store.planning.saveStrategy({ name: old.name, rules: old.rules, weekdays: parsed.data.weekdays }, id, parsed.data.expectedVersion, true));
+    } catch (err) {
+      if (err instanceof PlanningError) return fail(err.status, { error: err.code, message: err.message });
+      throw err;
+    }
+  };
   const readDay = async (date: string) => {
     if (!isCalendarDate(date)) return fail(400, {error:'INVALID_DATE'});
     return planningService.readDay(date);
   };
   const fingerprintForOperation = async (id: string) => operationFingerprint(store.db, 'planning_operations', id);
-  return { studyPlan, saveStudyPlan, updateStudyPlan, readDay, strategies, createStrategy, updateStrategy, deleteStrategy, schedule, plans, ensure, replace, append, remove, versions, previewOverride, commitOverride, applyRules, fingerprintForOperation };
+  return { deletedStrategies, restoreStrategy, lifecycle, calendar, adjustWeeklyCalendar, studyPlan, saveStudyPlan, updateStudyPlan, readDay, strategies, createStrategy, updateStrategy, deleteStrategy, schedule, plans, ensure, replace, append, remove, versions, previewOverride, commitOverride, applyRules, fingerprintForOperation };
 }

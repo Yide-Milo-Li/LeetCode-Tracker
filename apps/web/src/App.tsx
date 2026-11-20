@@ -182,7 +182,8 @@ export function App() {
   const priorTimezone = useRef<string | null>(null);
   /** Save outgoing scroll before moving; visited child views retain their unsaved input state. */
   const navigate = useCallback((next: View, targetId?: string) => {
-    if (targetId !== undefined) {
+    if (next === 'settings' && targetId === 'practice') setSettingsSection('practice');
+    if (next === 'notes' && targetId !== undefined) {
       setSelectedNoteProblem(targetId);
     }
     if (next === current.current) return;

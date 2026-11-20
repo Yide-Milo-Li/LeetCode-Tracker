@@ -19,11 +19,11 @@ export const WeeklyScheduleGrid: React.FC<WeeklyScheduleGridProps> = ({ schedule
   const t = translations[lang];
 
   return (
-    <div className="section-card u-margin-bottom-2rem">
-      <h3 className="section-title u-display-flex u-align-items-center u-gap-0-5rem u-margin-bottom-1rem">
+    <details className="section-card u-margin-bottom-2rem">
+      <summary className="section-title u-display-flex u-align-items-center u-gap-0-5rem u-margin-bottom-1rem">
         <Calendar size={18} className="primary-icon" />
         {t.weekdayScheduleTitle}
-      </h3>
+      </summary>
 
       <div className="weekly-schedule-grid">
         {schedule.map(({ weekday, strategy }) => (
@@ -55,12 +55,12 @@ export const WeeklyScheduleGrid: React.FC<WeeklyScheduleGridProps> = ({ schedule
                   </div>
                 </>
               ) : (
-                <div className="day-rest-label">{t.noStrategyAssigned}</div>
+                <div className="day-rest-label">{lang === 'zh' ? '无周策略' : 'No weekly strategy'}</div>
               )}
             </div>
           </div>
         ))}
       </div>
-    </div>
+    </details>
   );
 };

@@ -600,6 +600,7 @@ it('edits an existing goal from its panel with prefilled settings and previews b
   assert.equal((screen.getByLabelText('Deadline') as HTMLInputElement).value, view.deadline);
   assert.equal((screen.getByLabelText(translations.en.weekdays[0], { exact: true }) as HTMLInputElement).checked, true);
   fireEvent.click(screen.getByText('Workload, difficulty and reviews'));
+  assert.equal((screen.getByLabelText('Daily maximum (optional)') as HTMLInputElement).value, '8');
   assert.equal((screen.getByLabelText('Hard (%)') as HTMLInputElement).value, '10');
   assert.equal((screen.getByLabelText('Allow Premium problems') as HTMLInputElement).checked, true);
   fireEvent.change(screen.getByLabelText('Pacing'), { target: { value: 'flexible' } });
@@ -612,10 +613,7 @@ it('edits an existing goal from its panel with prefilled settings and previews b
   assert.equal(args.dryRun, true);
   assert.equal(args.changes.deadline, null);
   assert.equal(args.changes.dailyCount, 5);
-  assert.deepEqual(args.changes.weekdays, [0, 6]);
-  assert.equal(args.changes.reviewCap, 2);
-  assert.equal(args.changes.maxDailyCount, 8);
-  assert.equal(args.changes.tags, undefined);
+  assert.deepEqual(args.changes, { deadline: null, dailyCount: 5 });
   assert.equal(notify.mock.callCount(), 0);
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save and reschedule' })); });
   assert.equal(update.mock.calls[1].arguments[0].dryRun, false);
@@ -1901,4 +1899,121 @@ it('shows independent goal and strategy lists, unique daily progress and a singl
   await act(async () => { fireEvent.click(within(strategy).getByRole('button', { name: 'Add one' })); });
   assert.equal(append.mock.calls[0].arguments[0], weekly.id);
   assert.ok(screen.getByRole('button', { name: 'All 6 goals' }));
+});
+
+it('builds a goal from a strategy, catalog search and authored stages, then previews and saves a date exception', async t => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const { CatalogStore } = await import('../packages/database/src/store.ts');
+  const { createTrackerApplication } = await import('../packages/application/src/application.ts');
+  const { localModelService } = await import('../apps/mcp/src/profile.ts');
+  const { localDate, addDays } = await import('../packages/contracts/src/time.ts');
+  const { StudyGoalEditor } = await import('../apps/web/src/components/StudyGoalEditor.tsx');
+  const { CalendarAdjustmentEditor } = await import('../apps/web/src/components/CalendarAdjustmentEditor.tsx');
+  const db = new DatabaseSync(':memory:');
+  const store = new CatalogStore(db, { skipBackup: true });
+  const app = createTrackerApplication({ store, modelService: localModelService });
+  t.after(async () => { await app.close(); db.close(); });
+  await store.updateSettings({ timezone: 'UTC' });
+  await store.importJsonl(['One', 'Two', 'Three'].map((title, i) => JSON.stringify({
+    id: String(i + 1), title, tags: ['Array'], difficulty: 'Easy',
+  })).join('\n'));
+  const strategy = await app.planning.createStrategy({ name: 'Daily array', weekdays: [0, 1, 2, 3, 4, 5, 6],
+    rules: { dailyCount: 3, difficulty: { Easy: 100, Medium: 0, Hard: 0 }, tags: ['array'], premium: true,
+      reviewEnabled: false, reviewMode: 'none', reviewPercent: null, preference: '' } });
+  mock.method(api, 'getCatalog', (query: Parameters<typeof store.queryCatalog>[0]) => Promise.resolve(store.queryCatalog(query)));
+  mock.method(api, 'getStudyPlan', (id?: string) => app.planning.studyPlan(id));
+  mock.method(api, 'createStudyPlan', (request: StudyPlanRequest) => app.planning.saveStudyPlan(request));
+  mock.method(api, 'updateStudyPlan', (request: StudyPlanEdit) => app.planning.updateStudyPlan(request));
+  const saved = mock.fn();
+  render(<StudyGoalEditor lang="en" timezone="UTC" strategies={[strategy]} onClose={() => {}} onSaved={saved} />);
+  const change = (label: string | RegExp, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
+  change('Goal Name', 'Interview list');
+  change('Problem IDs', '1');
+  change('Copy weekly strategy settings', strategy.id);
+  assert.equal((screen.getByLabelText('Problems per study day (including reviews)') as HTMLInputElement).value, '3');
+  change('Add from catalog', 'Two');
+  fireEvent.click(await screen.findByRole('button', { name: /#2 Two/ }));
+  assert.equal((screen.getByLabelText('Problem IDs') as HTMLTextAreaElement).value, '1\n2');
+  fireEvent.click(screen.getByRole('button', { name: 'Edit stages and prerequisites' }));
+  change('Stage name', 'Foundations');
+  fireEvent.click(screen.getByRole('button', { name: 'Add stage' }));
+  change('Stage name', 'Stretch');
+  change('Paste IDs into this stage', '3');
+  fireEvent.click(screen.getByRole('button', { name: 'Add IDs' }));
+  fireEvent.click(screen.getByLabelText('Optional problem'));
+  fireEvent.click(screen.getByLabelText('#1', { exact: true }));
+  const start = addDays(localDate(Date.now(), 'UTC'), 1);
+  change('Start Date', start);
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save Goal' })); });
+  assert.equal(saved.mock.callCount(), 1);
+  const view = (await app.planning.studyPlan()).plan!;
+  assert.deepEqual(view.stages, ['Foundations', 'Stretch']);
+  assert.equal(view.nodes[2].optional, true);
+  assert.deepEqual(view.nodes[2].requires, [view.nodes[0].questionId]);
+  assert.deepEqual(view.settings.tags, ['array']);
+  assert.equal(view.settings.premium, true);
+  cleanup();
+  const week = await app.planning.calendar(start);
+  const notified = mock.fn();
+  render(<CalendarAdjustmentEditor lang="en" day={week.days[0]} week={week} strategies={[strategy]} onClose={() => {}} onSaved={notified} />);
+  await act(async () => { change('Schedule to adjust', view.id); });
+  change('Applies to', 'range');
+  change('Through date (inclusive)', addDays(start, 1));
+  change('Daily count (0 to skip)', '1');
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Preview reschedule' })); });
+  assert.match(screen.getByRole('status').textContent!, /Estimated finish/);
+  assert.equal((await app.planning.studyPlan()).plan!.version, 1);
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save adjustment' })); });
+  assert.equal(notified.mock.callCount(), 1);
+  assert.equal((await app.planning.studyPlan()).plan!.calendar[0].items.length, 1);
+});
+
+it('duplicates strategy rules without weekdays and can select a catalog tag beyond the first forty', async () => {
+  const strategy: Strategy = { id: 'weekly', name: 'Core', deleted: false, weekdays: [1], version: 1,
+    rules: { dailyCount: 2, difficulty: { Easy: 50, Medium: 50, Hard: 0 }, tags: [], premium: true,
+      reviewEnabled: true, reviewPercent: 50, reviewMode: 'partial', reviewCount: 1, preference: 'Graphs' } };
+  mock.method(api, 'getStrategies', async () => [strategy]);
+  mock.method(api, 'getWeeklySchedule', async () => [{ weekday: 1, strategy }]);
+  mock.method(api, 'getAllTags', async () => ({ tags: Array.from({ length: 55 }, (_, i) => ({ name: 'Topic ' + i, slug: 'topic-' + i, problemCount: 1 })) }));
+  mock.method(api, 'getMasteryReport', async () => ({ tags: [] } as never));
+  const create = mock.method(api, 'createStrategy', async (data: unknown) => data);
+  await act(async () => { render(<StrategiesView lang="en" />); });
+  fireEvent.click(screen.getByRole('button', { name: 'Duplicate strategy' }));
+  fireEvent.change(screen.getByLabelText('Search all tags'), { target: { value: 'topic-54' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Topic 54' }));
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save Strategy' })); });
+  const copy = create.mock.calls[0].arguments[0] as Strategy;
+  assert.equal(copy.name, 'Copy of Core');
+  assert.deepEqual(copy.weekdays, []);
+  assert.equal(copy.rules.preference, 'Graphs');
+  assert.equal(copy.rules.premium, true);
+  assert.deepEqual(copy.rules.difficulty, strategy.rules.difficulty);
+  assert.deepEqual(copy.rules.tags, ['topic-54']);
+});
+
+it('submits only the changed deadline, clears a cap only on explicit input, and keeps global spacing read-only', async () => {
+  const { StudyGoalEditor } = await import('../apps/web/src/components/StudyGoalEditor.tsx');
+  const { localDate, addDays } = await import('../packages/contracts/src/time.ts');
+  const start = addDays(localDate(Date.now(), 'UTC'), 1);
+  const deadline = addDays(start, 2);
+  const view: StudyPlanView = { id: crypto.randomUUID(), version: 1, name: 'Twelve', startDate: start,
+    deadline: addDays(start, 5), settings: { deadline: addDays(start, 5), weekdays: [6, 5, 4, 3, 2, 1, 0], reviewsOnlyWeekdays: [],
+      dailyCount: 2, adaptivePace: true, maxDailyCount: 2, reviewCap: 0, difficulty: null, premium: false, tags: [], filterReviewTags: false },
+    goal: '', stages: ['Core'], status: 'upcoming', completedCore: 0, totalCore: 12, forecastCore: 12,
+    baseDailyCount: 2, estimatedFinish: addDays(start, 5), nodes: [], calendar: [], initialCalendar: [], notices: [] };
+  const update = mock.method(api, 'updateStudyPlan', async (input: StudyPlanEdit) => ({ dryRun: input.dryRun, plan: view }));
+  mock.method(api, 'getSettings', async () => ({ reviewPolicy: 'fixed', reviewIntervals: [1, 3, 7] } as never));
+  const globalWrite = mock.method(api, 'updateSettings');
+  render(<StudyGoalEditor lang="en" timezone="UTC" editing={view} onSaved={() => {}} onClose={() => {}} />);
+  fireEvent.click(screen.getByText('Review spacing for all plans'));
+  assert.ok(await screen.findByText(/Fixed spacing · 1 \/ 3 \/ 7/));
+  assert.equal(screen.queryByRole('combobox', { name: 'Review spacing' }), null);
+  fireEvent.change(screen.getByLabelText('Deadline'), { target: { value: deadline } });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Preview schedule' })); });
+  assert.deepEqual(update.mock.calls[0].arguments[0].changes, { deadline });
+  fireEvent.click(screen.getByText('Workload, difficulty and reviews'));
+  fireEvent.change(screen.getByLabelText('Daily maximum (optional)'), { target: { value: '' } });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save and reschedule' })); });
+  assert.deepEqual(update.mock.calls[1].arguments[0].changes, { deadline, maxDailyCount: null });
+  assert.equal(globalWrite.mock.callCount(), 0);
 });

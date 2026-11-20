@@ -195,7 +195,7 @@ export class PlanningService {
     }
     const current = projectedIds.length ? this.planning.reconcileDay(plans, now) : plans;
     const strategy = zone && date >= localDate(now, zone) && !plans.some(plan => !plan.studyPlan)
-      ? this.planning.strategyForWeekday(new Date(date + 'T12:00:00Z').getUTCDay()) : null;
+      ? this.planning.strategyForDate(date) : null;
     return { plan: current[0] ?? null, plans: current, projected: projectedIds.includes(current[0]?.id), projectedIds,
       pendingStrategy: strategy ? { id: strategy.id, name: strategy.name } : undefined };
   }
@@ -407,8 +407,7 @@ export class PlanningService {
     const now = Date.now();
     const deadline = now + this.timeoutMs;
     const epoch = this.transientEpoch;
-    const weekday = new Date(targetDate + 'T12:00:00Z').getUTCDay();
-    const strategy = this.planning.strategyForWeekday(weekday);
+    const strategy = this.planning.strategyForDate(targetDate);
     const plans = this.planning.plansByDate(targetDate, now);
     const savedGoals = new Set(plans.map(plan => plan.studyPlan?.id));
     let addedGoal = false;
@@ -984,9 +983,7 @@ export class PlanningService {
     if (!options.planId && dayPlans.length > 1) throw new PlanningError('PLAN_SOURCE_REQUIRED', 'Choose a source plan for this adjustment.', 400);
     const basePlan = options.planId ? dayPlans.find(plan => plan.id === options.planId) : dayPlans[0];
     if (options.planId && !basePlan) throw new PlanningError('PLAN_NOT_FOUND', 'This source plan could not be found.', 404);
-    const targetInstant = Date.parse(`${targetDate}T12:00:00Z`);
-    const weekday = new Date(targetInstant).getUTCDay();
-    const strategy = this.planning.strategyForWeekday(weekday);
+    const strategy = this.planning.strategyForDate(targetDate);
 
     const baseRules: Rules | null = basePlan?.rules ?? strategy?.rules ?? null;
 

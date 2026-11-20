@@ -1,3 +1,4 @@
+import { dateRuleFor } from '../../contracts/src/calendar.ts';
 import { createHash } from 'node:crypto';
 import {
   type DailyPlan,
@@ -8,10 +9,10 @@ import {
   resolveReviewSettings,
   rulesSchema,
 } from '../../contracts/src/recommendations.ts';
-import { type StudyPlan, type StudyPlanEdit, type StudyPlanInput, type StudyPlanRequest, type StudyPlanView } from '../../contracts/src/study-plan.ts';
+import { type StudyPlan, type StudyPlanEdit, type GoalLifecycle, type StudyPlanInput, type StudyPlanRequest, type StudyPlanView } from '../../contracts/src/study-plan.ts';
 import { addDays, localDate } from '../../contracts/src/time.ts';
 import type { CatalogStore } from '../../database/src/store.ts';
-import { activeStudyIds, frozenStudyDays, readStudyPlan, studyDayHistory } from '../../database/src/study-plans.ts';
+import { activeStudyIds, frozenStudyDays, goalHasPractice, deletedGoalReceipt, readStudyPlan, studyDayHistory } from '../../database/src/study-plans.ts';
 import { isStudyDay, isStudyReviewDay, projectStudyPlan, studyPlanSettings, unlockedStudyNodes, type StudyFacts } from '../../domain/src/study-plan.ts';
 import { studyPace } from '../../domain/src/study-pace.ts';
 import { calculateKnowledgeProfile } from '../../domain/src/knowledge-profile.ts';
@@ -29,7 +30,7 @@ function scheduleRules(input: ScheduleInput, store: CatalogStore, source?: Rules
   const dailyCount = input.deadline ? Math.max(1, cap) : input.dailyCount ?? source?.dailyCount ?? 2;
   if (dailyCount > 30 || cap > dailyCount)
     invalid('Choose a daily count up to 30 and a review cap within that count.');
-  if (!input.deadline && input.maxDailyCount !== undefined && input.maxDailyCount < dailyCount)
+  if (!input.deadline && input.adaptivePace !== false && input.maxDailyCount !== undefined && input.maxDailyCount < dailyCount)
     invalid('The automatic daily maximum must be at least the starting daily count.');
   if (input.deadline && input.deadline < input.startDate) invalid('Deadline precedes start date.');
   if (
@@ -45,7 +46,7 @@ function scheduleRules(input: ScheduleInput, store: CatalogStore, source?: Rules
     tags: [],
     premium: false,
     ...source,
-    ...(input.difficulty && { difficulty: input.difficulty }),
+    ...(input.difficulty === null ? { difficulty: { Easy: 34, Medium: 33, Hard: 33 } } : input.difficulty && { difficulty: input.difficulty }),
     ...(input.tags && { tags: input.tags }),
     ...(input.premium !== undefined && { premium: input.premium }),
     reviewScope:
@@ -126,6 +127,8 @@ function makePlan(request: StudyPlanRequest, store: CatalogStore, now: number): 
   const input = request.plan;
   const source = input.strategyId ? store.planning.strategy(input.strategyId) : null;
   if (input.strategyId && !source) invalid('The source strategy does not exist.');
+  if (input.strategyVersion !== undefined && input.strategyVersion !== source?.version)
+    throw new PlanningError('STALE_STRATEGY', 'The source strategy changed. Select its current version.');
   const rules = scheduleRules(input, store, source?.rules);
   const nodes = resolveNodes(input.stages, store);
   return {
@@ -143,7 +146,7 @@ function makePlan(request: StudyPlanRequest, store: CatalogStore, now: number): 
     flexibleDailyCount: input.deadline ? input.dailyCount : undefined,
     ...(input.deadline && { deadlinePacing: 'balanced' as const }),
     ...(input.adaptivePace !== undefined && !input.deadline && { adaptivePace: input.adaptivePace }),
-    useDifficultyMix: Boolean(input.difficulty || source),
+    useDifficultyMix: input.difficulty !== null && Boolean(input.difficulty || source),
     stages: input.stages.map((s) => s.name),
     nodes,
     initialCalendar: [],
@@ -233,11 +236,14 @@ function studyFacts(
 }
 
 function paceHistory(store: CatalogStore, plan: StudyPlan, today: string) {
-  return plan.deadline || plan.adaptivePace === false
-    ? [] : studyDayHistory(store.db, plan.id, plan.paceSince ?? plan.startDate, today);
+  return plan.deadline || plan.adaptivePace === false ? []
+    : studyDayHistory(store.db, plan.id, plan.paceSince ?? plan.startDate, today).filter(({ final }) => {
+      const rule = dateRuleFor(plan.dateAdjustments, final.date);
+      return !final.studyPlan?.temporaryAdjustment && (!rule || rule.scope === 'weekly');
+    });
 }
 
-function liveProjection(store: CatalogStore, plan: StudyPlan, zone: string, now: number) {
+function liveProjection(store: CatalogStore, plan: StudyPlan, zone: string, now: number, through?: string) {
   const today = localDate(now, zone);
   const history = paceHistory(store, plan, today);
   const facts = studyFacts(store, plan, zone, now, today, history);
@@ -255,16 +261,75 @@ function liveProjection(store: CatalogStore, plan: StudyPlan, zone: string, now:
     const day = projectStudyPlan(plan, atOpen, { through: today }).calendar[0];
     if (day) facts.savedDays.set(today, day);
   }
-  return { facts, view: projectStudyPlan(plan, facts) };
+  return { facts, view: projectStudyPlan(plan, facts, { through }) };
+}
+
+export function forecastStudyDays(store: CatalogStore, id: string, now: number, through: string) {
+  const record = readStudyPlan(store.db, id);
+  if (!record || record.plan.startDate > through) return [];
+  return liveProjection(store, record.plan, zoneOf(store), now, through).view.calendar;
 }
 
 export function currentStudyView(store: CatalogStore, now = Date.now(), id?: string): StudyPlanView | null {
   const record = readStudyPlan(store.db, id);
-  if (!record) return null;
+  if (!record || record.state === 'deleted') return null;
   const { view } = liveProjection(store, record.plan, zoneOf(store), now);
-  return id && !activeStudyIds(store.db).includes(id)
-    ? { ...view, status: 'archived', calendar: [], estimatedFinish: null }
-    : view;
+  const result = id && !activeStudyIds(store.db).includes(id) ? dormantView(view, record.state === 'paused' ? 'paused' : 'archived') : view;
+  return { ...result, hasPractice: goalHasPractice(store.db, record) };
+}
+
+function dormantView(view: StudyPlanView, status: 'paused' | 'archived'): StudyPlanView {
+  return { ...view, status, calendar: [], forecastCore: view.completedCore, estimatedFinish: null, deadlineShortfall: undefined,
+    notices: [], nodes: view.nodes.map(node => ({ ...node, scheduledDate: null })) };
+}
+
+export async function changeGoalLifecycle(store: CatalogStore, request: GoalLifecycle, now = Date.now()) {
+  const { id, expectedVersion, operationId, dryRun, action } = request;
+  const stamp = store.planning.stamp();
+  const record = readStudyPlan(store.db, id);
+  const fingerprint = createHash('sha256').update(JSON.stringify({ action, expectedVersion, deadline: request.deadline })).digest('hex');
+  const deleted = !record && deletedGoalReceipt(store.db, id);
+  if (deleted && deleted.operationId === operationId && deleted.fingerprint === fingerprint) return { dryRun, plan: null };
+  const receipt = record?.edits?.[operationId];
+  if (receipt) {
+    if (receipt !== fingerprint) throw new PlanningError('OPERATION_CONFLICT', 'This operation ID belongs to another change.');
+    return { dryRun, plan: currentStudyView(store, now, id) };
+  }
+  if (!record || record.state === 'deleted') throw new PlanningError('STUDY_PLAN_NOT_FOUND', 'Goal not found.', 404);
+  if (record.plan.version !== expectedVersion) throw new PlanningError('STALE_STUDY_PLAN', 'Reload this goal before changing it.');
+  const running = activeStudyIds(store.db).includes(id);
+  const status = running ? 'running' : record.state ?? 'archived';
+  if ((action === 'pause' && !running) || (action === 'resume' && status !== 'paused') ||
+      (action === 'restore' && status !== 'archived') || (action === 'archive' && status === 'archived'))
+    invalid('Choose an action available for this goal.');
+  if (action === 'delete' && goalHasPractice(store.db, record))
+    throw new PlanningError('GOAL_HAS_PRACTICE', 'This goal has practice history. Archive it instead.', 409);
+  const activate = action === 'resume' || action === 'restore';
+  const zone = zoneOf(store), today = localDate(now, zone);
+  const old = record.plan;
+  const plan = { ...old, version: old.version + 1, updatedAt: now };
+  if (request.deadline !== undefined && !activate) invalid('Only resuming a goal can change its deadline.');
+  if (activate) {
+    const settings = studyPlanSettings(old);
+    const deadline = request.deadline === undefined ? old.deadline : request.deadline ?? undefined;
+    if (deadline && deadline < today) invalid('Choose a future deadline or switch to daily pacing.');
+    plan.deadline = deadline;
+    plan.rules = scheduleRules({ ...settings, startDate: plan.startDate, deadline, maxDailyCount: settings.maxDailyCount ?? undefined,
+      difficulty: settings.difficulty ?? undefined }, store, old.rules);
+    plan.flexibleDailyCount = deadline ? settings.dailyCount : undefined;
+    plan.deadlinePacing = deadline ? 'balanced' : undefined;
+    plan.revisedCalendar = [];
+    const facts = studyFacts(store, plan, zone, now, today, paceHistory(store, plan, today));
+    validateRemainingNodes(plan, facts);
+    plan.revisedCalendar = projectStudyPlan(plan, facts).calendar;
+  }
+  const view = action === 'delete' ? null : liveProjection(store, plan, zone, now).view;
+  if (activate && !plan.deadline && view && view.forecastCore < view.totalCore)
+    invalid('The goal cannot finish at this pace. Review the schedule.');
+  const state = activate ? undefined : action === 'pause' ? 'paused' : action === 'delete' ? 'deleted' : 'archived';
+  if (!dryRun) await store.planning.saveStudyPlan({ ...record, state, plan, edits: { ...record.edits, [operationId]: fingerprint } },
+    stamp, today, expectedVersion, undefined, activate ? 'activate' : action === 'delete' ? 'delete' : 'deactivate', operationId);
+  return { dryRun, plan: view && (activate ? view : dormantView(view, state === 'paused' ? 'paused' : 'archived')) };
 }
 
 function validateRemainingNodes(plan: StudyPlan, facts: StudyFacts) {
@@ -289,7 +354,9 @@ export async function createStudyPlan(store: CatalogStore, request: StudyPlanReq
     .update(JSON.stringify([request.plan, replacePlanId ?? null]))
     .digest('hex');
   const prior = readStudyPlan(store.db, operationId);
+  if (!prior && deletedGoalReceipt(store.db, operationId)) throw new PlanningError('STUDY_PLAN_NOT_FOUND', 'This goal was deleted.', 404);
   if (prior) {
+    if (prior.state === 'deleted') throw new PlanningError('STUDY_PLAN_NOT_FOUND', 'This goal was deleted.', 404);
     if (prior.fingerprint !== fingerprint)
       throw new PlanningError('OPERATION_CONFLICT', 'This operation ID was used for a different route.');
     return { dryRun, plan: currentStudyView(store, now, operationId)! };
@@ -316,7 +383,7 @@ export async function editStudyPlan(store: CatalogStore, request: StudyPlanEdit,
   const { id, expectedVersion, changes, operationId, dryRun } = request;
   const stamp = store.planning.stamp();
   const record = readStudyPlan(store.db, id);
-  if (!record) throw new PlanningError('STUDY_PLAN_NOT_FOUND', 'This goal could not be found.', 404);
+  if (!record || record.state === 'deleted') throw new PlanningError('STUDY_PLAN_NOT_FOUND', 'This goal could not be found.', 404);
   const fingerprint = createHash('sha256').update(JSON.stringify([id, expectedVersion, changes])).digest('hex');
   const prior = record.edits?.[operationId];
   if (prior) {
@@ -324,15 +391,29 @@ export async function editStudyPlan(store: CatalogStore, request: StudyPlanEdit,
     return { dryRun, plan: currentStudyView(store, now, id)! };
   }
   const old = record.plan;
-  if (!activeStudyIds(store.db).includes(id) || old.version !== expectedVersion)
+  const metadataOnly = Object.keys(changes).every(key => key === 'name' || key === 'goal');
+  if ((!metadataOnly && !activeStudyIds(store.db).includes(id)) || old.version !== expectedVersion)
     throw new PlanningError('STALE_STUDY_PLAN', 'The goal changed. Reload it before editing.');
   const zone = zoneOf(store);
   const today = localDate(now, zone);
   const previous = studyPlanSettings(old);
-  const { stageProblemIds, ...settingsPatch } = changes;
-  const nodes = stageProblemIds ? editNodes(old, stageProblemIds, store) : old.nodes;
-  const routeChanged = nodes.length !== old.nodes.length || nodes.some((node, index) =>
-    node.questionId !== old.nodes[index].questionId || node.stage !== old.nodes[index].stage);
+  const { name = old.name, goal = old.goal, startDate = old.startDate, stages, stageProblemIds, dateAdjustments, ...settingsPatch } = changes;
+  if (metadataOnly) {
+    const version = name === old.name && goal === old.goal ? old.version : old.version + 1;
+    if (!dryRun) await store.planning.saveStudyPlan({ ...record, plan: { ...old, name, goal, version },
+      edits: { ...record.edits, [operationId]: fingerprint } }, stamp, today, expectedVersion, undefined, 'preserve');
+    return { dryRun, plan: { ...currentStudyView(store, now, id)!, name, goal, version } };
+  }
+  if (startDate !== old.startDate && (old.startDate <= today || startDate < today))
+    invalid('Only an upcoming goal can change its start date.');
+  const metadataChanged = name !== old.name || goal !== old.goal || startDate !== old.startDate;
+  if (dateAdjustments?.some(rule => rule.startDate < today &&
+      !old.dateAdjustments?.some(previous => JSON.stringify(rule) === JSON.stringify(previous)))) invalid('Choose today or a future date.');
+  const datesChanged = dateAdjustments !== undefined && JSON.stringify(dateAdjustments) !== JSON.stringify(old.dateAdjustments ?? []);
+  if (stages && stageProblemIds) invalid('Choose a full route or stage problem IDs for this edit.');
+  const nodes = stages ? resolveNodes(stages, store) : stageProblemIds ? editNodes(old, stageProblemIds, store) : old.nodes;
+  const stageNames = stages?.map(stage => stage.name) ?? old.stages;
+  const routeChanged = JSON.stringify(nodes) !== JSON.stringify(old.nodes) || JSON.stringify(stageNames) !== JSON.stringify(old.stages);
   const settings = { ...previous, ...settingsPatch };
   if (changes.weekdays && !changes.reviewsOnlyWeekdays)
     settings.reviewsOnlyWeekdays = previous.reviewsOnlyWeekdays.filter(day => settings.weekdays.includes(day));
@@ -340,17 +421,17 @@ export async function editStudyPlan(store: CatalogStore, request: StudyPlanEdit,
   const deadline = settings.deadline ?? undefined;
   const maxDailyCount = settings.maxDailyCount ?? undefined;
   const rules = scheduleRules({
-    ...settings, startDate: old.startDate, deadline, maxDailyCount,
+    ...settings, startDate, deadline, maxDailyCount,
     difficulty: settings.difficulty ?? { Easy: 34, Medium: 33, Hard: 33 },
   }, store, old.rules);
   const edits = { ...record.edits, [operationId]: fingerprint };
-  if (!routeChanged && JSON.stringify(settings) === JSON.stringify(previous)) {
+  if (!metadataChanged && !routeChanged && !datesChanged && JSON.stringify(settings) === JSON.stringify(previous)) {
     if (!dryRun) await store.planning.saveStudyPlan({ ...record, edits }, stamp, today, expectedVersion);
     return { dryRun, plan: currentStudyView(store, now, id)! };
   }
 
   const plan: StudyPlan = {
-    ...old, nodes, version: old.version + 1, updatedAt: now, deadline, maxDailyCount, rules,
+    ...old, name, goal, startDate, stages: stageNames, nodes, ...(datesChanged && { dateAdjustments }), version: old.version + 1, updatedAt: now, deadline, maxDailyCount, rules,
     weekdays: settings.weekdays, reviewsOnlyWeekdays: settings.reviewsOnlyWeekdays,
     flexibleDailyCount: deadline ? settings.dailyCount : undefined,
     adaptivePace: settings.adaptivePace, useDifficultyMix: settings.difficulty !== null,
@@ -368,7 +449,10 @@ export async function editStudyPlan(store: CatalogStore, request: StudyPlanEdit,
   if (!deadline && view.forecastCore < view.totalCore)
     invalid('The route cannot finish in the forecast window with this difficulty mix and review load.');
   if (!dryRun) {
-    await store.planning.saveStudyPlan({ ...record, plan, edits }, stamp, today, expectedVersion);
+    const present = new Set(nodes.map(node => node.questionId));
+    const removed = old.nodes.filter(node => !present.has(node.questionId)).map(node => node.questionId);
+    const pastQuestionIds = [...new Set([...(record.pastQuestionIds ?? []), ...removed])];
+    await store.planning.saveStudyPlan({ ...record, plan, edits, ...(pastQuestionIds.length && { pastQuestionIds }) }, stamp, today, expectedVersion);
   }
   return { dryRun, plan: view };
 }
@@ -426,6 +510,7 @@ export function studyDailyPlan(store: CatalogStore, date: string, zone: string, 
     ...(plan.rules.reviewMode === 'partial' && { reviewCount: Math.min(plan.rules.reviewCount!, dailyCount) }),
     ...(onlyReviews && { reviewMode: 'all' as const }),
   });
+  const adjustment = dateRuleFor(plan.dateAdjustments, date);
   const notices = [...view.notices];
   if (day.items.length < rules.dailyCount)
     notices.push(
@@ -446,7 +531,7 @@ export function studyDailyPlan(store: CatalogStore, date: string, zone: string, 
     rules,
     strategyId: null,
     strategyVersion: null,
-    studyPlan: { id: plan.id, name: plan.name, ...(stage !== undefined && { stage: plan.stages[stage] }), ...(plan.deadline && { deadline: plan.deadline }) },
+    studyPlan: { id: plan.id, name: plan.name, ...(adjustment && adjustment.scope !== 'weekly' && { temporaryAdjustment: true }), ...(stage !== undefined && { stage: plan.stages[stage] }), ...(plan.deadline && { deadline: plan.deadline }) },
     source: 'local',
     model: null,
     encouragement: { en: plan.goal, zh: plan.goal },

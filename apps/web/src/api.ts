@@ -1,4 +1,5 @@
-import type { StudyPlanEdit, StudyPlanRequest, StudyPlanView } from '../../../packages/contracts/src/study-plan.ts';
+import type { CalendarWeek, WeeklyChange } from '../../../packages/contracts/src/calendar.ts';
+import type { GoalLifecycle, StudyPlanEdit, StudyPlanRequest, StudyPlanView } from '../../../packages/contracts/src/study-plan.ts';
 /**
  * Typed client API client for communicating with local /api/v1 Fastify server.
  * Provides typed methods for catalog browsing, JSONL problem import, manual practice records,
@@ -372,6 +373,21 @@ const planningApi = {
     });
   },
 
+  getDeletedStrategies() {
+    return request<{ items: Strategy[] }>('/strategies/deleted');
+  },
+  restoreStrategy(id: string, expectedVersion: number, weekdays: number[]) {
+    return request<Strategy>(`/strategies/${id}/restore`, { method: 'POST', body: JSON.stringify({ expectedVersion, weekdays }) });
+  },
+  goalLifecycle(input: GoalLifecycle) {
+    return request<{ dryRun: boolean; plan: StudyPlanView | null }>('/study-plan/lifecycle', { method: 'POST', body: JSON.stringify(input) });
+  },
+  getCalendarWeek(start?: string) {
+    return request<CalendarWeek>('/study-calendar' + (start ? '?start=' + encodeURIComponent(start) : ''));
+  },
+  adjustWeeklyCalendar(input: WeeklyChange) {
+    return request<{ ok: boolean }>('/study-calendar', { method: 'PATCH', body: JSON.stringify(input) });
+  },
   async getWeeklySchedule(): Promise<{ weekday: number; strategy: Strategy | null }[]> {
     const res = await request<{ schedule: { weekday: number; strategy: Strategy | null }[] }>('/weekly-schedule');
     return res.schedule;
@@ -389,7 +405,7 @@ const planningApi = {
   },
 
   getStudyPlan(id?: string) {
-    return request<{ plan: StudyPlanView | null; goals?: { id: string; name: string }[] }>('/study-plan' + (id ? '?id=' + encodeURIComponent(id) : ''));
+    return request<{ plan: StudyPlanView | null; goals?: { id: string; name: string }[]; archived?: { id: string; name: string }[] }>('/study-plan' + (id ? '?id=' + encodeURIComponent(id) : ''));
   },
 
   updateStudyPlan(input: StudyPlanEdit) {

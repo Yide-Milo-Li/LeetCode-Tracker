@@ -12,6 +12,7 @@ interface StrategyCardProps {
   strategy: Strategy;
   lang: Language;
   onEdit: (strategy: Strategy) => void;
+  onDuplicate?: (strategy: Strategy) => void;
   onDelete: (strategy: Strategy) => void;
 }
 
@@ -21,7 +22,7 @@ interface StrategyCardProps {
 export const StrategyCard: React.FC<StrategyCardProps> = ({
   strategy: s,
   lang,
-  onEdit,
+  onEdit, onDuplicate,
   onDelete,
 }) => {
   const t = translations[lang];
@@ -44,6 +45,7 @@ export const StrategyCard: React.FC<StrategyCardProps> = ({
           </span>
         </div>
         <div className="strategy-actions">
+          {onDuplicate && <button type="button" className="btn btn-secondary btn-sm" onClick={() => onDuplicate(s)}>{lang === 'zh' ? '复制为新策略' : 'Duplicate strategy'}</button>}
           <IconButton icon={Edit2} label={t.editStrategy} onClick={() => onEdit(s)} />
           <button className="btn btn-secondary btn-sm danger-icon" onClick={() => onDelete(s)}>
             <Trash2 size={18} aria-hidden="true" />{lang === 'zh' ? '删除' : 'Delete'}

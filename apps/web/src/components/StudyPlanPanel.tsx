@@ -1,3 +1,4 @@
+import { GoalManagement } from './GoalManagement.tsx';
 import { useEffect, useState } from 'react';
 import type { StudyDay, StudyPlanView } from '../../../../packages/contracts/src/study-plan.ts';
 import { useWorkspace } from '../workspace.tsx';
@@ -6,17 +7,20 @@ import { api } from '../api.ts';
 import type { Language } from '../i18n.ts';
 import { localizeApiError } from '../error-i18n.ts';
 
-export function useStudyPlan(refreshKey: string, lang: Language, id?: string) {
+export function useStudyPlan(refreshKey: string, lang: Language, id?: string, fallbackToLibrary = false) {
   const [view, setView] = useState<StudyPlanView | null>(null);
   const [error, setError] = useState('');
   const [goals, setGoals] = useState<{ id: string; name: string }[]>([]);
+  const [archived, setArchived] = useState<{ id: string; name: string }[]>([]);
   useEffect(() => {
     let active = true;
     api
       .getStudyPlan(id)
-      .then(({ plan, goals }) => {
+      .then(async ({ plan, goals, archived }) => {
+        if (active && fallbackToLibrary && !plan && id && goals?.[0]) plan = (await api.getStudyPlan(goals[0].id)).plan;
         if (active) {
           setView(plan ?? null);
+          setArchived(archived ?? []);
           setGoals(goals ?? (plan ? [{ id: plan.id, name: plan.name }] : []));
           setError('');
         }
@@ -30,8 +34,8 @@ export function useStudyPlan(refreshKey: string, lang: Language, id?: string) {
     return () => {
       active = false;
     };
-  }, [refreshKey, lang, id]);
-  return { view, goals, error };
+  }, [refreshKey, lang, id, fallbackToLibrary]);
+  return { view, goals, archived, error };
 }
 
 function Calendar({ days, zh }: { days: StudyDay[]; zh: boolean }) {
@@ -64,6 +68,7 @@ export function StudyPlanPanel({ view, lang }: { view: StudyPlanView; lang: Lang
     active: zh ? '进行中' : 'In progress',
     expired: zh ? '已到截止日' : 'Deadline passed',
     completed: zh ? '已完成' : 'Completed',
+    paused: zh ? '已暂停' : 'Paused',
     archived: zh ? '已归档' : 'Archived',
   }[view.status];
   const byId = new Map(view.nodes.map((n) => [n.questionId, n.frontendId]));
@@ -71,11 +76,12 @@ export function StudyPlanPanel({ view, lang }: { view: StudyPlanView; lang: Lang
     <section className="study-route" aria-label={zh ? '目标计划' : 'Study plan'}>
       <div className="u-display-flex u-justify-content-space-between u-gap-0-5rem">
         <h3>{view.name}</h3>
-        {view.status !== 'archived' &&
+        {view.status !== 'archived' && view.status !== 'paused' &&
           <button type="button" className="btn btn-secondary" onClick={() => setEditing(view)}>
             {zh ? '调整安排' : 'Edit schedule'}
           </button>}
       </div>
+      <GoalManagement key={view.id} goal={view} lang={lang} />
       {editing && <StudyGoalEditor lang={lang} timezone={workspace.timezone} editing={editing}
         onClose={() => setEditing(null)} onSaved={() => { setEditing(null); workspace.notifyMutation(); }} />}
       {view.goal && <p>{view.goal}</p>}

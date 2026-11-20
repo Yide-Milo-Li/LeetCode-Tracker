@@ -19,6 +19,8 @@ import {
   updateDifficultyDraft, isCount, percentagesForCounts, reviewPercentForCount,
   unchangedReview, newCountsAtCap, type ReviewMode, type CountInput,
 } from '../strategy-counts.ts';
+import { DeletedStrategies } from './DeletedStrategies.tsx';
+import { StudyCalendar } from './StudyCalendar.tsx';
 import { WeeklyScheduleGrid } from './WeeklyScheduleGrid.tsx';
 import { StrategyCard } from './StrategyCard.tsx';
 import { TimeBudgetField } from './RecommendationOptions.tsx';
@@ -53,7 +55,7 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
   const t = translations[lang];
   const workspace = useWorkspace();
   const [selectedGoal, setSelectedGoal] = useState<string>();
-  const course = useStudyPlan(String(workspace.revision), lang, selectedGoal);
+  const course = useStudyPlan(String(workspace.revision), lang, selectedGoal, true);
   const arrangementId = React.useId();
   const arrangementButton = useRef<HTMLButtonElement>(null);
   const [choosingArrangement, setChoosingArrangement] = useState(false);
@@ -68,6 +70,9 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
   // Strategy Modal State
   const [modalOpen, setModalOpen] = useState(false);
   const [editingStrategy, setEditingStrategy] = useState<Strategy | null>(null);
+  const [copySource, setCopySource] = useState<Strategy | null>(null);
+  const baselineRules = editingStrategy?.rules ?? copySource?.rules;
+  const [tagSearch, setTagSearch] = useState('');
   const [name, setName] = useState('');
   const [dailyCount, setDailyCount] = useState<number | ''>('');
   const [difficultyDraft, setDifficultyDraft] = useState(emptyDifficultyDraft);
@@ -144,6 +149,7 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
   /** Leave count, mix and review choice unset until the user selects them. */
   function openCreateModal() {
     setEditingStrategy(null);
+    setCopySource(null); setTagSearch('');
     setName('');
     setDailyCount('');
     setDifficultyDraft(emptyDifficultyDraft());
@@ -163,6 +169,7 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
   /** Capture the selected revision for conflict-safe correction. */
   function openEditModal(s: Strategy) {
     setEditingStrategy(s);
+    setCopySource(null); setTagSearch('');
     setName(s.name);
     setDailyCount(s.rules.dailyCount);
     setDifficultyDraft({ values: difficultyCounts(s.rules), automatic: null });
@@ -186,7 +193,7 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
   const isSumValid = hasDifficulties && currentSum === dailyCount;
   // Review-only strategies never pick new problems, so the mix is neither shown nor required.
   const mixRequired = reviewMode !== 'all';
-  const reviewUnchanged = unchangedReview(dailyCount, reviewMode, reviewCount, editingStrategy?.rules);
+  const reviewUnchanged = unchangedReview(dailyCount, reviewMode, reviewCount, baselineRules);
   const isReviewValid = reviewMode !== null && (reviewMode !== 'partial' || reviewUnchanged ||
     (isCount(reviewCount) && reviewCount >= 1 && typeof dailyCount === 'number' && reviewCount <= dailyCount));
   const exceedsTotal = typeof dailyCount === 'number' && (
@@ -226,7 +233,7 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
     setSaving(true);
     setError(null);
     try {
-      const legacy = editingStrategy?.rules;
+      const legacy = baselineRules;
       const payload: StrategyInput = {
         name: name.trim(),
         rules: {
@@ -259,7 +266,7 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
           ...(legacy?.personalDurationCalibration !== undefined ? { personalDurationCalibration: legacy.personalDurationCalibration } : {}),
           ...(focusWeakTags
             ? { focusWeakTags: true }
-            : editingStrategy?.rules.focusWeakTags !== undefined
+            : baselineRules?.focusWeakTags !== undefined
               ? { focusWeakTags: false }
               : {}),
         },
@@ -275,7 +282,9 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
       if (editingStrategy) {
         await api.updateStrategy(editingStrategy.id, {
           expectedVersion: editingStrategy.version,
-          ...validated.data,
+          name: validated.data.name,
+          rules: validated.data.rules,
+          ...(JSON.stringify(weekdays) !== JSON.stringify(editingStrategy.weekdays) && { weekdays }),
         });
       } else {
         await api.createStrategy(validated.data);
@@ -379,9 +388,12 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
         </div>
       )}
 
-      {course.goals.length > 1 && (
+      {(strategies.length > 0 || course.goals.length > 0) && <StudyCalendar strategies={strategies} lang={lang} />}
+      {(course.goals.length > 1 || course.archived.length > 0) && (
         <label className="schedule-goal-select">{lang === 'zh' ? '学习目标' : 'Study goal'}
           <select className="form-input" value={course.view?.id ?? ''} onChange={e => setSelectedGoal(e.target.value)}>
+            {!course.view && <option value="">{lang === 'zh' ? '选择学习目标' : 'Choose a goal'}</option>}
+            {course.archived.length > 0 && <optgroup label={lang === 'zh' ? '已归档' : 'Archived'}>{course.archived.map(goal => <option key={goal.id} value={goal.id}>{goal.name}</option>)}</optgroup>}
             {course.goals.map(goal => <option key={goal.id} value={goal.id}>{goal.name}</option>)}
           </select>
         </label>
@@ -399,6 +411,13 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
                 lang={lang}
                 onEdit={openEditModal}
                 onDelete={handleDelete}
+                onDuplicate={source => {
+                  openEditModal(source);
+                  setCopySource(source);
+                  setEditingStrategy(null);
+                  setWeekdays([]);
+                  setName(lang === 'zh' ? source.name.slice(0, 97) + ' 副本' : 'Copy of ' + source.name.slice(0, 92));
+                }}
               />
             ))}
           </div>
@@ -409,8 +428,13 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
         </div>
       ) : null}
 
+      <DeletedStrategies active={strategies} lang={lang} />
+      <button type="button" className="text-link" onClick={() => workspace.navigate('settings', 'practice')}>
+        {lang === 'zh' ? '编辑全局复习设置' : 'Edit global review settings'}
+      </button>
+
       {goalEditor && (
-        <StudyGoalEditor lang={lang} timezone={workspace.timezone}
+        <StudyGoalEditor lang={lang} timezone={workspace.timezone} strategies={strategies}
           onClose={() => setGoalEditor(false)} onSaved={() => {
             setGoalEditor(false);
             setSelectedGoal(undefined);
@@ -525,13 +549,15 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
                     </button>
                   )}
                 </div>
+                <input type="search" className="form-input" aria-label={lang === 'zh' ? '搜索全部标签' : 'Search all tags'}
+                  placeholder={lang === 'zh' ? '搜索标签名称或标识' : 'Search tag name or slug'} value={tagSearch} onChange={e => setTagSearch(e.target.value)} />
                 <div className="tag-chips-scroll">
-                  {allTags.slice(0, 40).map((tag) => {
+                  {allTags.filter(tag => (tag.name + ' ' + tag.slug).toLowerCase().includes(tagSearch.trim().toLowerCase())).map((tag) => {
                     const isSelected = selectedTags.includes(tag.slug);
                     return (
                       <button
                         key={tag.slug}
-                        type="button"
+                        type="button" aria-pressed={isSelected}
                         className={`tag-chip selectable ${isSelected ? 'selected' : ''}`}
                         onClick={() => toggleTag(tag.slug)}
                       >

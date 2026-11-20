@@ -7,7 +7,7 @@
  */
 import { readFile, stat } from 'node:fs/promises';
 import * as path from 'node:path';
-import { studyPlanEditSchema, studyPlanRequestSchema } from '../../../packages/contracts/src/study-plan.ts';
+import { goalLifecycleSchema, studyPlanEditSchema, studyPlanRequestSchema } from '../../../packages/contracts/src/study-plan.ts';
 import { z } from 'zod';
 import { isTimeZone, localDate } from '../../../packages/contracts/src/time.ts';
 import type { CatalogProblem } from '../../../packages/contracts/src/sync.ts';
@@ -15,7 +15,7 @@ import { ApplicationError } from '../../../packages/application/src/errors.ts';
 import { ProfileError, type TrackerProfile } from './profile.ts';
 import { importCatalog, TIMEZONE_HINT } from './operations.ts';
 import { MCP_SERVER_VERSION } from './version.ts';
-import { createRegistrar, json } from './registrar.ts';
+import { createRegistrar, json, refuse } from './registrar.ts';
 import { practiceView, profileLang, profileZone, summarizePlan, weakTopicsView } from './views.ts';
 import { registerWriteTools } from './write-tools.ts';
 import { registerNoteTools } from './note-tools.ts';
@@ -37,10 +37,17 @@ export function createTrackerToolRegistry(profile: Pick<TrackerProfile, 'exists'
   }, async (application, args) => json(await application.planning.saveStudyPlan(args)),
   args => args.dryRun ? 'preview' : 'write', { destructive: true, idempotent: true });
   server.registerTool('tracker_update_study_plan', {
-    description: 'Edit a goal’s list or schedule and replan. Read its id/version first. Null clears deadline, maximum or mix.',
-    inputSchema: studyPlanEditSchema,
-  }, async (app, args) => json(await app.planning.updateStudyPlan(args)),
-  args => args.dryRun ? 'preview' : 'write', { destructive: false, idempotent: true });
+    description: 'Use changes to edit a goal, or action to manage it. Preview with dryRun. Read its ID/version first.',
+    inputSchema: studyPlanEditSchema.extend({
+      changes: studyPlanEditSchema.shape.changes.optional(),
+      action: goalLifecycleSchema.shape.action.optional(),
+      deadline: goalLifecycleSchema.shape.deadline,
+    }),
+  }, async (app, { changes, action, deadline, ...base }) => {
+    if (action && !changes) return json(await app.planning.lifecycle({ ...base, action, deadline }));
+    if (changes && !action && deadline === undefined) return json(await app.planning.updateStudyPlan({ ...base, changes }));
+    return refuse('INVALID_INPUT', 'Supply either changes or a lifecycle action. Use changes.deadline when editing.');
+  }, args => args.dryRun ? 'preview' : 'write', { destructive: true, idempotent: true });
   server.registerTool('tracker_get_study_plan', {
     description: 'List goals and read one goal’s stages, progress and calendars by ID.',
     inputSchema: z.object({ id: z.string().uuid().optional() }),
@@ -50,7 +57,7 @@ export function createTrackerToolRegistry(profile: Pick<TrackerProfile, 'exists'
   server.registerTool(
     'tracker_status',
     {
-      description: 'Get server version, profile location, catalog problem counts, streak metrics, configured timezone and today\'s plan summary. Call only when asked for an overview or to diagnose setup issues.',
+      description: 'Profile, timezone, catalog and daily summary. For overview or setup diagnostics.',
       inputSchema: z.object({}),
     },
     async (application) => {
@@ -163,9 +170,9 @@ export function createTrackerToolRegistry(profile: Pick<TrackerProfile, 'exists'
   server.registerTool(
     'tracker_get_today',
     {
-      description: 'Read a saved day or read-only course forecast. For edits, save a projected day with tracker_create_today first.',
+      description: 'Read saved or forecast lists. Save forecasts with tracker_create_today before editing.',
       inputSchema: z.object({
-        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Explicit date in YYYY-MM-DD format (defaults to current date in configured timezone)'),
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Defaults to local today.'),
       }),
     },
     async (application, { date }) => {

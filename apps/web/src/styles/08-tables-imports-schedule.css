@@ -600,6 +600,8 @@
 }
 .strategy-header {
   display: flex;
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -607,6 +609,11 @@
 }
 .strategy-actions {
   display: flex;
+  flex-wrap: wrap;
+  gap: .25rem;
+}
+@media (max-width: 820px) {
+  .strategies-grid { grid-template-columns: minmax(0, 1fr); }
 }
 .strategy-name {
   font-size: 17px;
@@ -771,3 +778,14 @@
   align-items: center;
   gap: 12px;
 }
+
+.study-week { margin-block-end: 1rem; }
+.study-week-header { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+.study-week-header h3 { margin: 0; }
+.study-week-days { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr)); gap: .5rem; }
+.study-week-day { display: flex; flex-direction: column; align-items: flex-start; gap: .4rem; padding: .75rem; min-height: 6rem; text-align: start; font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--border); border-radius: .65rem; cursor: pointer; overflow-wrap: anywhere; }
+.study-week-day:hover, .study-week-day:focus-visible { border-color: var(--focus); }
+.study-week-day span { font-size: .84rem; }
+.goal-picker-results { list-style: none; margin: .25rem 0; padding: 0; max-height: 12rem; overflow: auto; }
+.goal-picker-results button { padding: .3rem 0; text-align: start; }
+.goal-route-editor { margin-block: .5rem; }

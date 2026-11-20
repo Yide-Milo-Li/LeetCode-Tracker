@@ -102,6 +102,8 @@ function stripSchemaNoise(node: unknown): unknown {
   const isUuid = record.format === 'uuid';
   for (const [key, value] of Object.entries(record)) {
     if (key === '$schema') continue;
+    // An enum of strings already constrains the type in JSON Schema.
+    if (key === 'type' && value === 'string' && Array.isArray(record.enum) && record.enum.every(option => typeof option === 'string')) continue;
     if (key === 'maximum' && value === Number.MAX_SAFE_INTEGER) continue;
     if (isUuid && (key === 'pattern' || key === 'format')) continue;
     out[key] = stripSchemaNoise(value);

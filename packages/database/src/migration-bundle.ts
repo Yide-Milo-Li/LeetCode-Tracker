@@ -14,6 +14,8 @@ import {
   type SnapshotBundleV5,
   type AnyMigrationBundle,
 } from '../../contracts/src/migration.ts';
+import { WEEKLY_RULES_KEY } from './calendar-store.ts';
+import { dateRuleList, weeklyDateRuleSchema } from '../../contracts/src/calendar.ts';
 import { validateStudyDocuments } from './study-plans.ts';
 import { assertLegacyRecommendationExport, hasRecommendationFields } from './recommendation-format.ts';
 import { z } from 'zod';
@@ -58,6 +60,13 @@ export function validateMigrationBundle(raw: unknown): AnyMigrationBundle {
   const bundle = rawVersion === 5 ? snapshotBundleV5Schema.parse(raw) : rawVersion === 3
     ? snapshotBundleV3Schema.parse(raw)
     : snapshotBundleV2Schema.parse(raw);
+  const weekly = bundle.tables.catalog_meta.find(row => row.key === WEEKLY_RULES_KEY);
+  if (weekly) {
+    if (bundle.version !== 5) throw new Error('Calendar adjustments require Bundle v5');
+    const ids = new Set(bundle.tables.strategies.map(row => row.id));
+    const rules = dateRuleList(weeklyDateRuleSchema).parse(JSON.parse(weekly.value));
+    if (rules.some(rule => rule.strategyId && !ids.has(rule.strategyId))) throw new Error('Unknown calendar strategy');
+  }
   validateStudyDocuments(bundle.tables.catalog_meta, bundle.tables.problems, bundle.version);
   for (const table of ['strategies', 'strategy_versions', 'daily_plans', 'daily_plan_versions'] as const) {
     for (const row of bundle.tables[table]) {

@@ -1,3 +1,4 @@
+import { dateRuleFor } from '../../contracts/src/calendar.ts';
 import type { CatalogProblem } from '../../contracts/src/sync.ts';
 import type { CalendarItem, StudyDay, StudyPlan, StudyPlanSettings, StudyPlanView } from '../../contracts/src/study-plan.ts';
 import { resolveReviewSettings, type ReviewState } from '../../contracts/src/recommendations.ts';
@@ -19,10 +20,11 @@ export interface StudyFacts {
 }
 
 export function isStudyDay(plan: StudyPlan, date: string) {
+  const rule = dateRuleFor(plan.dateAdjustments, date);
   return (
     date >= plan.startDate &&
     (!plan.deadline || date <= plan.deadline) &&
-    plan.weekdays.includes(studyWeekday(date))
+    rule?.count !== 0 && (plan.weekdays.includes(studyWeekday(date)) || (!!rule && rule.scope !== 'range'))
   );
 }
 
@@ -197,8 +199,11 @@ function simulateCalendar(
     const saved = facts.savedDays.get(date);
     if (!saved && !isStudyDay(plan, date)) continue;
     const onlyReviews = isStudyReviewDay(plan, date);
-    const maximum = plan.maxDailyCount ?? 30;
-    const limit = plan.deadline ? Math.min(cap, maximum) : onlyReviews ? pace.dailyCount : cap;
+    const adjustment = dateRuleFor(plan.dateAdjustments, date);
+    const goalMaximum = !plan.deadline && plan.adaptivePace === false ? 30 : plan.maxDailyCount ?? 30;
+    const maximum = Math.min(goalMaximum, adjustment?.count ?? 30);
+    const flexibleCount = Math.min(adjustment?.count ?? pace.dailyCount, maximum);
+    const limit = plan.deadline ? Math.min(cap, maximum) : onlyReviews ? flexibleCount : Math.min(cap, flexibleCount);
     const due = [...reviews]
       .filter(([id, state]) => {
         const problem = problems.get(id);
@@ -220,7 +225,7 @@ function simulateCalendar(
     }));
     const dailyCount = plan.deadline
       ? Math.min(maximum, slots.length + (newSlots?.get(date) ?? 0))
-      : pace.dailyCount;
+      : flexibleCount;
     if (!saved && !onlyReviews && slots.length < dailyCount) {
       const eligible = unlockedStudyNodes(plan, done, required, includeOptional).filter((node) => {
         const problem = problems.get(node.questionId);
@@ -365,6 +370,7 @@ function simulateCalendar(
     id: plan.id,
     version: plan.version,
     settings: studyPlanSettings(plan),
+    ...(plan.dateAdjustments?.length && { dateAdjustments: plan.dateAdjustments }),
     name: plan.name,
     goal: plan.goal,
     stages: plan.stages,

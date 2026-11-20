@@ -1,7 +1,9 @@
+import { calendarWeekday, type WeeklyChange } from '../../contracts/src/calendar.ts';
+import { recentWeekday, storeWeeklyRules, strategyIdForDate, weekdayOwners, weeklyRules } from './calendar-store.ts';
 import { defaultReviewIntervals } from '../../contracts/src/sync.ts';
 /** Scheduling persistence shares catalog write ownership; provider calls never hold this queue. */
 import type { DatabaseSync } from 'node:sqlite';
-import { activeStudyIds, insertStudyPlan, readStudyPlan, updateStudyDocument, type StoredStudyPlan } from './study-plans.ts';
+import { activeStudyIds, insertStudyPlan, readStudyPlan, updateStudyDocument, writeActiveStudyIds, deleteUnusedGoal, type StoredStudyPlan } from './study-plans.ts';
 import { localDate } from '../../contracts/src/time.ts';
 import { createEvidenceDateResolver } from '../../domain/src/recommendations.ts';
 import { randomUUID } from 'node:crypto';
@@ -36,14 +38,24 @@ export class PlanningStore {
     });
   }
 
-  saveStudyPlan(record: StoredStudyPlan, stamp: RevisionStamp, day: string, expectedVersion?: number, replaceId?: string): Promise<void> {
+  saveStudyPlan(record: StoredStudyPlan, stamp: RevisionStamp, day: string, expectedVersion?: number, replaceId?: string, membership?: 'activate' | 'deactivate' | 'delete' | 'preserve', deletionOperation?: string): Promise<void> {
     return this.write(() => {
       this.assertStamp(stamp);
       if (!stamp.timezone || localDate(Date.now(), stamp.timezone) !== day) throw new PlanningError('STALE_DATA', 'Calendar date changed; retry.');
       if (expectedVersion === undefined) insertStudyPlan(this.db, record, replaceId);
       else {
-        if (!activeStudyIds(this.db).includes(record.plan.id) || readStudyPlan(this.db, record.plan.id)?.plan.version !== expectedVersion)
+        const active = activeStudyIds(this.db);
+        if ((!membership && !active.includes(record.plan.id)) || readStudyPlan(this.db, record.plan.id)?.plan.version !== expectedVersion)
           throw new PlanningError('STALE_STUDY_PLAN', 'The goal changed. Reload it before editing.');
+        if (membership && membership !== 'preserve') {
+          const others = active.filter(id => id !== record.plan.id);
+          writeActiveStudyIds(this.db, membership === 'activate' ? [record.plan.id, ...others] : others);
+          if (membership === 'delete') {
+            if (!deletionOperation || !record.edits?.[deletionOperation]) throw new Error('Missing deletion receipt');
+            deleteUnusedGoal(this.db, record.plan.id, deletionOperation, record.edits[deletionOperation]);
+            return;
+          }
+        }
         updateStudyDocument(this.db, record);
       }
     });
@@ -69,8 +81,8 @@ export class PlanningStore {
   /** Read active strategies, including their conflict-safe weekday assignments. */
   strategies(includeDeleted = false): Strategy[] {
     const rows = this.db.prepare(`SELECT * FROM strategies ${includeDeleted ? '' : 'WHERE deleted=0'} ORDER BY name,id`).all() as { id: string; name: string; version: number; rules_json: string; deleted: number }[];
-    const assignments = this.db.prepare('SELECT * FROM weekday_assignments ORDER BY weekday').all() as { weekday: number; strategy_id: string }[];
-    return rows.map(r => ({ id: r.id, name: r.name, version: r.version, rules: JSON.parse(r.rules_json), deleted: !!r.deleted, weekdays: assignments.filter(a => a.strategy_id === r.id).map(a => a.weekday) }));
+    const assignments = weekdayOwners(this.db, localDate(Date.now(), this.catalog.getSettings().timezone ?? 'UTC'));
+    return rows.map(r => ({ id: r.id, name: r.name, version: r.version, rules: JSON.parse(r.rules_json), deleted: !!r.deleted, weekdays: Array.from(assignments).filter(([, owner]) => owner === r.id).map(([day]) => day).sort() }));
   }
 
   /** Find an active strategy by id. */
@@ -83,6 +95,46 @@ export class PlanningStore {
     return this.strategies().find(s => s.weekdays.includes(weekday)) ?? null;
   }
 
+  strategyForDate(date: string): Strategy | null {
+    const owner = strategyIdForDate(date, weekdayOwners(this.db), weeklyRules(this.db));
+    return owner ? this.strategy(owner) : null;
+  }
+
+  changeWeeklyCalendar(input: WeeklyChange) {
+    return this.write(() => {
+      const rules = weeklyRules(this.db);
+      const { change, expectedRevision } = input;
+      const id = change.action === 'set' ? change.rule.id : change.id;
+      const previous = rules.find(rule => rule.id === id);
+      if (change.action === 'set' && previous && JSON.stringify(previous) === JSON.stringify(change.rule)) return;
+      if (change.action === 'remove' && !previous) return;
+      if (this.stamp().planning !== expectedRevision) throw new PlanningError('STALE_DATA', 'The schedule changed. Reopen the date and try again.');
+      const next = rules.filter(rule => rule.id !== id);
+      if (change.action === 'set') {
+        const rule = change.rule;
+        const today = localDate(Date.now(), this.catalog.getSettings().timezone ?? 'UTC');
+        if (rule.startDate < today) throw new PlanningError('INVALID_INPUT', 'Choose today or a future date.', 400);
+        if (rule.strategyId && !this.strategy(rule.strategyId)) throw new PlanningError('STRATEGY_NOT_FOUND', 'Choose an active strategy.', 404);
+        next.push(rule);
+      }
+      const strategies = this.strategies();
+      storeWeeklyRules(this.db, next);
+      // Invalidate open template editors before they can put a transferred weekday back.
+      for (const strategy of this.strategies()) {
+        const before = strategies.find(item => item.id === strategy.id);
+        if (JSON.stringify(strategy.weekdays) === JSON.stringify(before?.weekdays)) continue;
+        this.recordAssignmentVersion(strategy);
+      }
+      this.db.exec("UPDATE catalog_meta SET value=CAST(value AS INTEGER)+1 WHERE key='planning_revision'");
+    });
+  }
+
+  private recordAssignmentVersion(strategy: Strategy) {
+    const saved = { ...strategy, version: strategy.version + 1 };
+    this.db.prepare('UPDATE strategies SET version=? WHERE id=?').run(saved.version, saved.id);
+    this.db.prepare('INSERT INTO strategy_versions VALUES(?,?,?)').run(saved.id, saved.version, JSON.stringify(saved));
+  }
+
   /** Return weekly assignments mapped across weekdays 0 through 6. */
   weeklySchedule(): { weekday: number; strategy: Strategy | null }[] {
     const active = this.strategies();
@@ -93,21 +145,40 @@ export class PlanningStore {
   }
 
   /** Reject the entire strategy-and-assignment save on any occupied weekday or stale version. */
-  saveStrategy(input: StrategyInput, id: string = randomUUID(), expectedVersion?: number): Promise<Strategy> {
+  saveStrategy(input: StrategyInput, id: string = randomUUID(), expectedVersion?: number, restore = false): Promise<Strategy> {
     const parsed = strategyInputSchema.parse(input);
     return this.write(() => {
       this.validateTags(parsed.rules);
       const old = this.strategies(true).find(s => s.id === id);
-      if ((old && (old.deleted || old.version !== expectedVersion)) || (!old && expectedVersion !== undefined)) throw new PlanningError('STALE_STRATEGY', 'Strategy changed; reload it');
+      if ((old && (old.deleted !== restore || old.version !== expectedVersion)) || (!old && expectedVersion !== undefined)) throw new PlanningError('STALE_STRATEGY', 'Strategy changed; reload it');
       const conflicts = this.strategies().flatMap(s => s.id !== id ? s.weekdays.filter(d => parsed.weekdays.includes(d)).map(d => `${d}: ${s.name}`) : []);
       if (conflicts.length) throw new PlanningError('WEEKDAY_CONFLICT', `Weekday already assigned (${conflicts.join(', ')})`);
       const saved: Strategy = { ...parsed, id, version: (old?.version ?? 0) + 1, deleted: false };
-      this.db.prepare('INSERT INTO strategies VALUES(?,?,?,?,0) ON CONFLICT(id) DO UPDATE SET version=excluded.version,name=excluded.name,rules_json=excluded.rules_json').run(id, saved.version, saved.name, JSON.stringify(saved.rules));
+      this.db.prepare('INSERT INTO strategies VALUES(?,?,?,?,0) ON CONFLICT(id) DO UPDATE SET version=excluded.version,name=excluded.name,rules_json=excluded.rules_json,deleted=0').run(id, saved.version, saved.name, JSON.stringify(saved.rules));
       this.db.prepare('INSERT INTO strategy_versions VALUES(?,?,?)').run(id, saved.version, JSON.stringify(saved));
-      this.db.prepare('DELETE FROM weekday_assignments WHERE strategy_id=?').run(id);
-      for (const day of saved.weekdays) this.db.prepare('INSERT INTO weekday_assignments VALUES(?,?)').run(day, id);
+      const rules = weeklyRules(this.db);
+      const today = localDate(Date.now(), this.catalog.getSettings().timezone ?? 'UTC');
+      for (let day = 0; day < 7; day++) {
+        const assigned = saved.weekdays.includes(day);
+        if (assigned === (old?.weekdays.includes(day) ?? false)) continue;
+        if (assigned) this.db.prepare('INSERT OR REPLACE INTO weekday_assignments VALUES(?,?)').run(day, id);
+        else this.db.prepare('DELETE FROM weekday_assignments WHERE weekday=?').run(day);
+        if (rules.some(rule => rule.scope === 'weekly' && calendarWeekday(rule.startDate) === day && rule.startDate <= today)) {
+          rules.push({ id: randomUUID(), scope: 'weekly', startDate: recentWeekday(today, day), strategyId: assigned ? id : null });
+        }
+      }
+      if (rules.length) storeWeeklyRules(this.db, rules);
       this.db.prepare("UPDATE catalog_meta SET value=CAST(value AS INTEGER)+1 WHERE key='planning_revision'").run();
       return saved;
+    });
+  }
+
+  deletedStrategies() {
+    const previous = this.db.prepare('SELECT payload_json FROM strategy_versions WHERE strategy_id=? AND version=?');
+    return this.strategies(true).filter(strategy => strategy.deleted).map(strategy => {
+      const row = previous.get(strategy.id, strategy.version - 1);
+      const former: Strategy | undefined = row && JSON.parse(String(row.payload_json));
+      return { ...strategy, weekdays: former?.weekdays ?? [] };
     });
   }
 
@@ -120,6 +191,8 @@ export class PlanningStore {
       this.db.prepare('UPDATE strategies SET deleted=1,version=? WHERE id=?').run(saved.version, id);
       this.db.prepare('INSERT INTO strategy_versions VALUES(?,?,?)').run(id, saved.version, JSON.stringify(saved));
       this.db.prepare('DELETE FROM weekday_assignments WHERE strategy_id=?').run(id);
+      const rules = weeklyRules(this.db);
+      if (rules.some(rule => rule.strategyId === id)) storeWeeklyRules(this.db, rules.map(rule => rule.strategyId === id ? { ...rule, strategyId: null } : rule));
       this.db.prepare("UPDATE catalog_meta SET value=CAST(value AS INTEGER)+1 WHERE key='planning_revision'").run();
     });
   }

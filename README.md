@@ -65,7 +65,11 @@ With a deadline, the app spreads outstanding list problems over the remaining st
 
 Choose **Edit schedule** on an existing goal to preview and save a new deadline, switch pacing modes or adjust its preferences. Expand **Edit problem list** to add catalog IDs, remove problems or change their order. Bulk editing accepts one ID per line or comma-separated IDs in each stage. Keep prerequisites before dependent problems. The remaining work is rescheduled in place. Practice history, saved daily assignments and the original calendar remain available.
 
-Goals follow list order by default. You can give each difficulty a percentage to balance new problems across days. Review spacing is shared by all plans. Change the interval lengths and spacing policy in the goal editor or in **Settings → Practice**. Daily scheduling runs locally after the AI disconnects.
+Goals follow list order by default. You can give each difficulty a percentage to balance new problems across days. Review spacing is shared by all plans. The goal editor shows the shared rhythm. Edit interval lengths and spacing policy in **Settings → Practice**. Daily scheduling runs locally after the AI disconnects.
+
+The seven-day schedule combines goals and weekly strategies. It counts known problems once and lists ungenerated strategy slots separately. Select a date to change its strategy or a goal's workload for one day, a date range, or that weekday going forward. Zero skips a goal session. Saved daily assignments keep their history. Temporary date adjustments are excluded from adaptive pacing.
+
+Use **Manage goal** to pause, preview resumption, archive, or restore a goal. An unused goal can be deleted. You can rename goals and move an upcoming start date. **Deleted strategies** lets you restore a strategy to available weekdays. Duplicate a strategy to reuse its rules, or copy its settings once when creating a goal. Search the local catalog or paste IDs to build the route. **Edit stages and prerequisites** supports stage names and order, problem purposes, optional problems, and prerequisite links.
 
 ### Today's practice
 

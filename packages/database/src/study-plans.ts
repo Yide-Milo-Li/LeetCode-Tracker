@@ -8,15 +8,18 @@ import type { StudyDay } from '../../contracts/src/study-plan.ts';
 // Keep the original creation fingerprint and edit receipts with the portable document.
 export const STUDY_ACTIVE_KEY = 'study-plan:active';
 export const STUDY_DOCUMENT_PREFIX = 'study-plan:v1:';
+const deletionPrefix = 'study-plan:deleted:';
 export interface StoredStudyPlan {
   plan: StudyPlan;
   fingerprint: string;
+  state?: 'paused' | 'archived' | 'deleted';
+  pastQuestionIds?: string[];
   edits?: Record<string, string>;
 }
 
 function parseActiveIds(value: string): string[] {
   // Existing profiles stored a single UUID and may also contain archived documents.
-  return value.startsWith('[') ? z.array(z.uuid()).nonempty().parse(JSON.parse(value)) : [value];
+  return value.startsWith('[') ? z.array(z.uuid()).parse(JSON.parse(value)) : [value];
 }
 
 export function activeStudyIds(db: DatabaseSync): string[] {
@@ -27,6 +30,45 @@ export function activeStudySummaries(db: DatabaseSync): { id: string; name: stri
   return db.prepare(`SELECT goal.value AS id, json_extract(doc.value, '$.plan.name') AS name
     FROM json_each(?) AS goal JOIN catalog_meta AS doc ON doc.key = ? || goal.value ORDER BY goal.key`)
     .all(JSON.stringify(activeStudyIds(db)), STUDY_DOCUMENT_PREFIX) as { id: string; name: string }[];
+}
+export function dormantStudySummaries(db: DatabaseSync) {
+  return db.prepare(`SELECT substr(key, ?) AS id, json_extract(value,'$.plan.name') AS name,
+    coalesce(json_extract(value,'$.state'),'archived') AS state FROM catalog_meta
+    WHERE key GLOB 'study-plan:v1:*' AND coalesce(json_extract(value,'$.state'),'') <> 'deleted'
+    AND substr(key, ?) NOT IN (SELECT value FROM json_each(?)) ORDER BY name,id`)
+    .all(STUDY_DOCUMENT_PREFIX.length + 1, STUDY_DOCUMENT_PREFIX.length + 1, JSON.stringify(activeStudyIds(db))) as
+      { id: string; name: string; state: 'paused' | 'archived' }[];
+}
+
+export function writeActiveStudyIds(db: DatabaseSync, ids: string[]) {
+  db.prepare('INSERT OR REPLACE INTO catalog_meta(key,value) VALUES(?,?)').run(STUDY_ACTIVE_KEY, ids.length === 1 ? ids[0] : JSON.stringify(ids));
+}
+
+export function goalHasPractice(db: DatabaseSync, record: StoredStudyPlan) {
+  const ids = [...record.plan.nodes.map(node => node.questionId), ...(record.pastQuestionIds ?? [])];
+  return Boolean(db.prepare(`WITH questions AS (
+    SELECT value AS id FROM json_each(?)
+    UNION SELECT json_extract(item.value,'$.problem.questionId') FROM daily_plan_versions v
+      JOIN daily_plans p ON p.id=v.plan_id, json_each(v.payload_json,'$.items') item WHERE p.goal_id=?
+  ) SELECT 1 FROM practice_records WHERE question_id IN (SELECT id FROM questions) AND created_at >= ?
+    UNION ALL SELECT 1 FROM progress_snapshots WHERE question_id IN (SELECT id FROM questions) AND updated_at >= ? LIMIT 1`)
+    .get(JSON.stringify(ids), record.plan.id, record.plan.createdAt, record.plan.createdAt));
+}
+
+export function deletedGoalReceipt(db: DatabaseSync, goalId: string): { operationId: string; fingerprint: string } | undefined {
+  const row = db.prepare('SELECT value FROM catalog_meta WHERE key=?').get(deletionPrefix + goalId);
+  return row && JSON.parse(String(row.value));
+}
+
+/** Retain only a retry receipt. The goal name, route and unused assignments are removed together. */
+export function deleteUnusedGoal(db: DatabaseSync, goalId: string, operationId: string, fingerprint: string) {
+  const ids = 'SELECT id FROM daily_plans WHERE goal_id=?';
+  db.prepare(`DELETE FROM planning_operations WHERE coalesce(json_extract(result_json,'$.id'),json_extract(result_json,'$.plan.id')) IN (${ids})`).run(goalId);
+  db.prepare(`DELETE FROM daily_plan_versions WHERE plan_id IN (${ids})`).run(goalId);
+  db.prepare('DELETE FROM daily_plans WHERE goal_id=?').run(goalId);
+  db.prepare('DELETE FROM catalog_meta WHERE key=?').run(STUDY_DOCUMENT_PREFIX + goalId);
+  db.prepare('INSERT INTO catalog_meta(key,value) VALUES(?,?)').run(deletionPrefix + goalId, JSON.stringify({ operationId, fingerprint }));
+  db.exec("UPDATE catalog_meta SET value=CAST(value AS INTEGER)+1 WHERE key='planning_revision'");
 }
 export function readStudyPlan(db: DatabaseSync, id = activeStudyIds(db)[0]): StoredStudyPlan | null {
   if (!id) return null;
@@ -44,8 +86,7 @@ export function insertStudyPlan(db: DatabaseSync, record: StoredStudyPlan, repla
     STUDY_DOCUMENT_PREFIX + record.plan.id,
     JSON.stringify(record)
   );
-  const ids = [record.plan.id, ...activeStudyIds(db).filter(id => id !== replaceId)];
-  db.prepare('INSERT OR REPLACE INTO catalog_meta(key,value) VALUES(?,?)').run(STUDY_ACTIVE_KEY, ids.length === 1 ? ids[0] : JSON.stringify(ids));
+  writeActiveStudyIds(db, [record.plan.id, ...activeStudyIds(db).filter(id => id !== replaceId)]);
   db.exec("UPDATE catalog_meta SET value=CAST(value AS INTEGER)+1 WHERE key='planning_revision'");
 }
 
@@ -102,8 +143,16 @@ export function validateStudyDocuments(
   const active = courseRows.find((row) => row.key === STUDY_ACTIVE_KEY)?.value;
   for (const row of courseRows) {
     if (row.key === STUDY_ACTIVE_KEY) continue;
+    if (row.key.startsWith(deletionPrefix)) {
+      const id = z.uuid().parse(row.key.slice(deletionPrefix.length));
+      z.object({ operationId: z.uuid(), fingerprint: z.string().regex(/^[0-9a-f]{64}$/) }).strict().parse(JSON.parse(row.value));
+      if (courseRows.some(row => row.key === STUDY_DOCUMENT_PREFIX + id)) throw new Error('Goal is both stored and deleted.');
+      continue;
+    }
     const record = JSON.parse(row.value);
     const plan = storedStudyPlanSchema.parse(record.plan);
+    if (record.state !== undefined) z.enum(['paused', 'archived', 'deleted']).parse(record.state);
+    if (record.pastQuestionIds !== undefined) z.array(z.string()).parse(record.pastQuestionIds);
     if (record.edits !== undefined) z.record(z.uuid(), z.string().regex(/^[0-9a-f]{64}$/)).parse(record.edits);
     if (row.key !== STUDY_DOCUMENT_PREFIX + plan.id || !/^[0-9a-f]{64}$/.test(record.fingerprint))
       throw new Error('Invalid study plan identity.');
@@ -112,8 +161,8 @@ export function validateStudyDocuments(
       [...plan.initialCalendar, ...(plan.revisedCalendar ?? [])].some((day) => day.items.some((i) => !catalog.has(i.questionId)))
     )
       throw new Error('Unknown catalog problem in study plan.');
-    ids.add(plan.id);
+    if (!record.state) ids.add(plan.id);
   }
   const activeIds = active ? parseActiveIds(active) : [];
-  if (!activeIds.length || new Set(activeIds).size !== activeIds.length || activeIds.some(id => !ids.has(id))) throw new Error('Missing active study plan.');
+  if (active === undefined || new Set(activeIds).size !== activeIds.length || activeIds.some(id => !ids.has(id))) throw new Error('Missing active study plan.');
 }

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { dateRuleList, goalDateRuleSchema, type GoalDateRule } from './calendar.ts';
 import { isCalendarDate } from './time.ts';
 import { ruleFieldsSchema, rulesSchema, type Bilingual } from './recommendations.ts';
 
@@ -15,23 +16,24 @@ export const studyPlanInputSchema = z
     name: label,
     goal: z.string().trim().max(1000).default(''),
     startDate: day,
-    deadline: day.optional().describe('Hard deadline, inclusive. Omit for a flexible finish.'),
+    deadline: day.optional().describe('Inclusive deadline; omit for daily pacing.'),
     weekdays: weekdays,
     reviewsOnlyWeekdays: weekdays.default([]),
     strategyId: z
       .string()
       .optional()
-      .describe('Copy daily rules from this strategy, then apply supplied overrides.'),
+      .describe('Copy its rules once, then apply overrides.'),
+    strategyVersion: z.number().int().positive().optional(),
     dailyCount: z.number().int().min(1).max(30).optional()
-      .describe('Starting total per study day for flexible goals. With a deadline the calendar determines the pace.'),
-    adaptivePace: z.boolean().optional().describe('For flexible goals, learn from repeated manual edits and completions. Defaults to true.'),
+      .describe('Daily total without a deadline.'),
+    adaptivePace: z.boolean().optional().describe('Adapt flexible pace from edits and completions (default true).'),
     maxDailyCount: z.number().int().min(1).max(30).optional()
-      .describe('Optional hard daily limit including reviews. Deadline goals balance the remaining work across eligible study days, up to 30 problems per day.'),
+      .describe('Daily ceiling including reviews.'),
     reviewCap: z.number().int().min(0).max(30).optional(),
     tags: ruleFieldsSchema.shape.tags.optional(),
     premium: z.boolean().optional(),
     filterReviewTags: z.boolean().optional(),
-    difficulty: ruleFieldsSchema.shape.difficulty.optional(),
+    difficulty: ruleFieldsSchema.shape.difficulty.nullable().optional(),
     stages: z
       .array(
         z
@@ -90,11 +92,23 @@ export const studyPlanEditSchema = z.object({
   operationId: z.string().uuid(),
   dryRun: z.boolean().default(false),
   changes: settingsSchema.partial().extend({
+    name: label.optional(),
+    goal: scheduleFields.goal.optional(),
+    startDate: day.optional(),
+    dateAdjustments: dateRuleList(goalDateRuleSchema).optional(),
+    stages: scheduleFields.stages.optional(),
     stageProblemIds: z.array(z.array(frontendId).max(150)).min(1).max(30).optional()
-      .describe('Full ordered frontend IDs per existing stage. Omitted IDs are removed.'),
+      .describe('Ordered IDs per stage; omissions remove items.'),
   }).refine(changes => Object.keys(changes).length > 0, 'Supply schedule or list changes'),
 }).strict();
 export type StudyPlanEdit = z.infer<typeof studyPlanEditSchema>;
+
+export const goalLifecycleSchema = z.object({
+  id: z.uuid(), expectedVersion: z.number().int().positive(), operationId: z.uuid(),
+  action: z.enum(['pause', 'resume', 'archive', 'restore', 'delete']),
+  dryRun: z.boolean().default(false), deadline: day.nullable().optional(),
+}).strict();
+export type GoalLifecycle = z.infer<typeof goalLifecycleSchema>;
 
 const nodeSchema = z
   .object({
@@ -136,6 +150,7 @@ export const storedStudyPlanSchema = z
     version: z.number().int().positive(),
     updatedAt: z.number().int().nonnegative().optional(),
     paceSince: day.optional(),
+    dateAdjustments: dateRuleList(goalDateRuleSchema).optional(),
     flexibleDailyCount: scheduleFields.dailyCount,
     revisedCalendar: z.array(calendarDaySchema).max(1095).optional(),
     createdAt: z.number().int().nonnegative(),
@@ -163,7 +178,7 @@ export const storedStudyPlanSchema = z
       !plan.weekdays.some((d) => !plan.reviewsOnlyWeekdays.includes(d)) ||
       plan.reviewsOnlyWeekdays.some((d) => !plan.weekdays.includes(d)) ||
       (plan.deadline && plan.deadline < plan.startDate) ||
-      (!plan.deadline && plan.maxDailyCount !== undefined && plan.maxDailyCount < plan.rules.dailyCount)
+      (!plan.deadline && plan.adaptivePace !== false && plan.maxDailyCount !== undefined && plan.maxDailyCount < plan.rules.dailyCount)
     )
       ctx.addIssue({ code: 'custom', message: 'Invalid course schedule' });
     let previousStage = 0;
@@ -192,6 +207,8 @@ export interface RouteProgress extends RouteNode {
 }
 export interface StudyPlanView {
   settings: StudyPlanSettings;
+  dateAdjustments?: GoalDateRule[];
+  hasPractice?: boolean;
   id: string;
   version: number;
   name: string;
@@ -199,7 +216,7 @@ export interface StudyPlanView {
   stages: string[];
   startDate: string;
   deadline?: string;
-  status: 'upcoming' | 'active' | 'completed' | 'expired' | 'archived';
+  status: 'upcoming' | 'active' | 'completed' | 'expired' | 'paused' | 'archived';
   completedCore: number;
   totalCore: number;
   forecastCore: number;

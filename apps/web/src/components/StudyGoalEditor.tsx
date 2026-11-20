@@ -1,22 +1,26 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
-import { studyPlanInputSchema, type StudyPlanView } from '../../../../packages/contracts/src/study-plan.ts';
+import { studyPlanInputSchema, type StudyPlanEdit, type StudyPlanView } from '../../../../packages/contracts/src/study-plan.ts';
 import { difficulties } from '../../../../packages/contracts/src/recommendations.ts';
 import { localDate } from '../../../../packages/contracts/src/time.ts';
 import { ApiError } from '../platform/index.ts';
 import { useWorkspace } from '../workspace.tsx';
-import { api } from '../api.ts';
+import { GoalRouteEditor, detailedStages, type RouteStages } from './GoalRouteEditor.tsx';
+import { GoalProblemPicker } from './GoalProblemPicker.tsx';
+import { reviewCountForRules } from '../strategy-counts.ts';
+import { api, type Strategy } from '../api.ts';
 import { localizeApiError } from '../error-i18n.ts';
 import { translations, type Language } from '../i18n.ts';
-import { ReviewSpacingRow } from './settings/PracticeSection.tsx';
+import { reviewPolicyLabel } from './RecommendationOptions.tsx';
 import { parseGoalIds, StudyProblemListEditor } from './StudyProblemListEditor.tsx';
 import { Dialog } from './ui.tsx';
 
 const studyWeekdays = [1, 2, 3, 4, 5, 6, 0];
 
-export function StudyGoalEditor({ lang, timezone, editing, onSaved, onClose }: {
+export function StudyGoalEditor({ lang, timezone, editing, strategies = [], onSaved, onClose }: {
   lang: Language;
   timezone: string | null;
   editing?: StudyPlanView;
+  strategies?: Strategy[];
   onSaved: () => void;
   onClose: () => void;
 }) {
@@ -27,6 +31,11 @@ export function StudyGoalEditor({ lang, timezone, editing, onSaved, onClose }: {
   const [originalTexts] = useState(() => editing?.stages.map((_, stage) =>
     editing.nodes.filter(node => node.stage === stage).map(node => node.frontendId).join('\n')) ?? []);
   const [listDraft, setListDraft] = useState<string[] | null>(null);
+  const [problemText, setProblemText] = useState('');
+  const [advanced, setAdvanced] = useState<RouteStages | null>(null);
+  const [template, setTemplate] = useState<Strategy | null>(null);
+  const templateKey = template ? template.id + ':' + template.version : 'custom';
+  const templateCount = template ? Math.min(30, template.rules.dailyCount) : 2;
   const workspace = useWorkspace();
   const paceField = useRef<HTMLSelectElement>(null);
   const firstField = useRef<HTMLInputElement>(null);
@@ -39,10 +48,18 @@ export function StudyGoalEditor({ lang, timezone, editing, onSaved, onClose }: {
   const [difficultyMix, setDifficultyMix] = useState(Boolean(settings?.difficulty));
   const [adaptive, setAdaptive] = useState(settings?.adaptivePace ?? true);
   const [globalOpen, setGlobalOpen] = useState(false);
-  const [globalBusy, setGlobalBusy] = useState(false);
+  const [globalSummary, setGlobalSummary] = useState('');
+  useEffect(() => {
+    if (!globalOpen) return;
+    let active = true;
+    api.getSettings().then(value => {
+      if (active) setGlobalSummary([reviewPolicyLabel(value.reviewPolicy ?? 'fixed', lang), value.reviewIntervals?.join(' / ')].filter(Boolean).join(' · '));
+    }).catch(() => { if (active) setGlobalSummary(zh ? '未能读取复习设置' : 'Could not load review settings'); });
+    return () => { active = false; };
+  }, [globalOpen, workspace.revision, lang, zh]);
   const [preview, setPreview] = useState<StudyPlanView | null>(null);
   const previewSummary = useRef<HTMLElement>(null);
-  const saving = pending !== null || globalBusy;
+  const saving = pending !== null;
 
   useEffect(() => {
     if (preview) previewSummary.current?.focus();
@@ -58,9 +75,21 @@ export function StudyGoalEditor({ lang, timezone, editing, onSaved, onClose }: {
     const dryRun = ((event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null)?.value === 'preview';
     const data = new FormData(event.currentTarget);
     const value = (key: string) => String(data.get(key) ?? '').trim();
-    const stageProblemIds = listDraft?.map(parseGoalIds);
+    const stageProblemIds = !advanced && listDraft ? listDraft.map(parseGoalIds) : undefined;
     const ids = parseGoalIds(value('problemIds'));
-    const allIds = stageProblemIds?.flat() ?? ids;
+    const allIds = advanced?.flatMap(stage => stage.items.map(item => item.frontendId)) ?? stageProblemIds?.flat() ?? ids;
+    if (advanced) {
+      const prior = new Set<string>();
+      for (const stage of advanced) {
+        if (!stage.name.trim() || !stage.items.length) { setError(zh ? '每个阶段需要名称和至少一道题。' : 'Give every stage a name and at least one problem.'); return; }
+        for (const item of stage.items) {
+          if (!item.purpose.trim() || item.requires.some(id => !prior.has(id))) {
+            setError(zh ? `请检查 #${item.frontendId} 的练习目的及前置题顺序。` : `Check the purpose and prerequisite order for #${item.frontendId}.`); return;
+          }
+          prior.add(item.frontendId);
+        }
+      }
+    }
     if (stageProblemIds && (!allIds.length || allIds.length > 150 || allIds.some(id => id.length > 100))) {
       setError(zh ? '题单须有 1 至 150 道题，每个题号最多 100 个字符。' : 'Use 1–150 problems with IDs of at most 100 characters each.');
       return;
@@ -104,7 +133,9 @@ export function StudyGoalEditor({ lang, timezone, editing, onSaved, onClose }: {
       return;
     }
 
+    const tags = value('tags').split(/[,，\n]+/u).map(tag => tag.trim()).filter(Boolean);
     const common = { weekdays, dailyCount, reviewCap, maxDailyCount, deadline, difficulty, premium: data.has('premium'),
+      tags, filterReviewTags: data.has('filterReviewTags'),
       ...(!deadlineMode && { adaptivePace: adaptive }) };
     const operationId = (draft: unknown) => {
       const key = JSON.stringify(draft);
@@ -117,16 +148,28 @@ export function StudyGoalEditor({ lang, timezone, editing, onSaved, onClose }: {
     try {
       let result;
       if (editing) {
-        const changes = {
-          ...common, ...(stageProblemIds && { stageProblemIds }), deadline: deadline ?? null, difficulty: difficulty ?? null,
-          maxDailyCount: deadlineMode || adaptive ? maxDailyCount ?? null : settings?.maxDailyCount,
-        };
+        const proposed = { ...common, deadline: deadline ?? null, difficulty: difficulty ?? null,
+          maxDailyCount: deadlineMode || adaptive ? maxDailyCount ?? null : editing.settings.maxDailyCount };
+        const original = { ...editing.settings, weekdays: [...editing.settings.weekdays].sort() };
+        const changes: StudyPlanEdit['changes'] = Object.fromEntries(Object.entries(proposed).filter(([key, next]) =>
+          next !== undefined && JSON.stringify(next) !== JSON.stringify(original[key as keyof typeof original])));
+        if (value('name') !== editing.name) changes.name = value('name');
+        if (value('goal') !== editing.goal) changes.goal = value('goal');
+        if (startDate !== editing.startDate) changes.startDate = startDate;
+        if (advanced && JSON.stringify(advanced) !== JSON.stringify(detailedStages(originalTexts.map(parseGoalIds), lang, editing))) changes.stages = advanced;
+        if (stageProblemIds && JSON.stringify(stageProblemIds) !== JSON.stringify(originalTexts.map(parseGoalIds))) changes.stageProblemIds = stageProblemIds;
+        if (!Object.keys(changes).length) {
+          if (dryRun) setPreview(editing);
+          else onClose();
+          return;
+        }
         const draft = { id: editing.id, expectedVersion: editing.version, changes };
         result = await api.updateStudyPlan({ ...draft, dryRun, operationId: operationId(draft) });
       } else {
         const parsed = studyPlanInputSchema.safeParse({
-          ...common, name: value('name'), startDate,
-          stages: [{
+          ...common, name: value('name'), goal: value('goal'), startDate,
+          ...(template && { strategyId: template.id, strategyVersion: template.version, difficulty: difficulty ?? null }),
+          stages: advanced ?? [{
             name: zh ? '目标题单' : 'Goal problem list',
             items: ids.map((frontendId, index) => ({
               frontendId,
@@ -146,7 +189,7 @@ export function StudyGoalEditor({ lang, timezone, editing, onSaved, onClose }: {
       if (dryRun) setPreview(result.plan);
       else onSaved();
     } catch (err) {
-      if (err instanceof ApiError && err.code === 'STALE_STUDY_PLAN') workspace.notifyMutation();
+      if (err instanceof ApiError && ['STALE_STUDY_PLAN', 'STALE_STRATEGY'].includes(err.code)) workspace.notifyMutation();
       setError(localizeApiError(err, lang, zh ? '保存目标失败，请重试。' : 'Could not save the goal. Try again.'));
     } finally {
       setPending(null);
@@ -177,30 +220,48 @@ export function StudyGoalEditor({ lang, timezone, editing, onSaved, onClose }: {
         {error && <p ref={errorSummary} tabIndex={-1} role="alert" className="alert alert-danger">{error}</p>}
         <fieldset className="study-goal-fields" disabled={saving}>
           <legend className="visually-hidden">{zh ? '目标计划详情' : 'Goal details'}</legend>
+          <label className="form-group">
+            <span className="form-label">{zh ? '目标名称' : 'Goal Name'}</span>
+            <input ref={firstField} defaultValue={editing?.name} name="name" type="text" className="form-input" required maxLength={250} />
+          </label>
+          <label className="form-group"><span className="form-label">{zh ? '目标说明（可选）' : 'Goal description (optional)'}</span>
+            <input name="goal" className="form-input" maxLength={1000} defaultValue={editing?.goal ?? ''} /></label>
+          {!editing && strategies.length > 0 && <label className="form-group">{zh ? '复制周策略配置' : 'Copy weekly strategy settings'}
+            <select className="form-input" value={template?.id ?? ''} onChange={e => {
+              const source = strategies.find(item => item.id === e.target.value) ?? null;
+              setTemplate(source); setDifficultyMix(!!source);
+            }}>
+              <option value="">{zh ? '自行设置' : 'Custom settings'}</option>
+              {strategies.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select>
+            {template && <small>{zh ? '复制一次，可继续修改。目标每天最多 30 题。' : 'Copied once and editable. Goals allow up to 30 problems per day.'}</small>}
+          </label>}
+          {advanced ? <GoalRouteEditor stages={advanced} lang={lang} onChange={next => { setAdvanced(next); setPreview(null); setError(''); }} /> : <>
           {editing ? <><p className="text-muted">{zh
             ? `已完成 ${editing.completedCore}/${editing.totalCore} 道必做题。保存后会重排剩余题目，已生成的每日题单会保留。`
             : `${editing.completedCore}/${editing.totalCore} core problems complete. Saving reschedules remaining work and keeps saved daily assignments.`}</p>
           <StudyProblemListEditor goal={editing} texts={listDraft ?? originalTexts} lang={lang}
             onChange={next => { setListDraft(next); setPreview(null); setError(''); }} />
           </> : <>
-          <label className="form-group">
-            <span className="form-label">{zh ? '目标名称' : 'Goal Name'}</span>
-            <input ref={firstField} name="name" type="text" className="form-input" required maxLength={250} />
-          </label>
           <div className="form-group">
             <label className="form-label" htmlFor={`${formId}-ids`}>{zh ? '题号列表' : 'Problem IDs'}</label>
-            <textarea id={`${formId}-ids`} name="problemIds" className="form-textarea" rows={4} autoCapitalize="none" spellCheck={false}
+            <textarea value={problemText} onChange={e => setProblemText(e.target.value)} id={`${formId}-ids`} name="problemIds" className="form-textarea" rows={4} autoCapitalize="none" spellCheck={false}
               required aria-describedby={`${formId}-ids-help`} />
             <small id={`${formId}-ids-help`} className="text-muted">
               {zh ? '按练习顺序填写本地题库中的题号，用逗号或换行分隔，最多 150 道。'
                 : 'Enter up to 150 IDs from your catalog in practice order, separated by commas or newlines.'}
             </small>
           </div>
+          <GoalProblemPicker lang={lang} selected={parseGoalIds(problemText)} onAdd={id => { setProblemText(text => [...parseGoalIds(text), id].join('\n')); setPreview(null); }} />
           </>}
+          <button type="button" className="btn btn-secondary" onClick={() => {
+            const groups = editing ? (listDraft ?? originalTexts).map(parseGoalIds) : [parseGoalIds(problemText)];
+            setAdvanced(detailedStages(groups, lang, editing)); setPreview(null);
+          }}>{zh ? '编辑阶段与前置题' : 'Edit stages and prerequisites'}</button></>}
           <div className="study-goal-row">
             <label className="form-group">
               <span className="form-label">{zh ? '开始日期' : 'Start Date'}</span>
-              <input name="startDate" type="date" className="form-input" defaultValue={editing?.startDate ?? today} readOnly={!!editing} required />
+              <input name="startDate" type="date" className="form-input" defaultValue={editing?.startDate ?? today} readOnly={!!editing && editing.startDate <= today} min={editing && editing.startDate > today ? today : undefined} required />
             </label>
             <label className="form-group">
               <span className="form-label">{zh ? '排题方式' : 'Pacing'}</span>
@@ -217,7 +278,7 @@ export function StudyGoalEditor({ lang, timezone, editing, onSaved, onClose }: {
           </label>
           <label className="form-group" hidden={deadlineMode}>
             <span className="form-label">{zh ? '每个学习日的题量（含复习）' : 'Problems per study day (including reviews)'}</span>
-            <input name="dailyCount" type="number" className="form-input" min={1} max={30} defaultValue={settings?.dailyCount ?? 2} required={!deadlineMode} disabled={deadlineMode} />
+            <input key={templateKey} name="dailyCount" type="number" className="form-input" min={1} max={30} defaultValue={settings?.dailyCount ?? templateCount} required={!deadlineMode} disabled={deadlineMode} />
           </label>
           {deadlineMode && <p className="text-muted">{zh
             ? '系统把剩余题目分配到截止日之前（含当天）的学习日，并计入到期复习。'
@@ -226,8 +287,8 @@ export function StudyGoalEditor({ lang, timezone, editing, onSaved, onClose }: {
             <legend className="form-label">{zh ? '学习日' : 'Study Days'}</legend>
             <div className="weekday-selector-row">
               {studyWeekdays.map((day) => (
-                <label key={day} className="form-checkbox-label">
-                  <input name="weekdays" value={day} type="checkbox" defaultChecked={settings ? settings.weekdays.includes(day) : day >= 1 && day <= 5} />
+                <label key={templateKey + day} className="form-checkbox-label">
+                  <input name="weekdays" value={day} type="checkbox" defaultChecked={settings ? settings.weekdays.includes(day) : template?.weekdays.length ? template.weekdays.includes(day) : day >= 1 && day <= 5} />
                   <span>{t.weekdays[day]}</span>
                 </label>
               ))}
@@ -243,11 +304,11 @@ export function StudyGoalEditor({ lang, timezone, editing, onSaved, onClose }: {
               <div className="study-goal-row">
                 <label className="form-group" hidden={!deadlineMode && !adaptive}>
                   <span className="form-label">{zh ? '每日总量上限（可选）' : 'Daily maximum (optional)'}</span>
-                  <input name="maxDailyCount" disabled={!deadlineMode && !adaptive} type="number" className="form-input" min={1} max={30} placeholder={zh ? '最多 30' : 'Up to 30'} />
+                  <input name="maxDailyCount" defaultValue={settings?.maxDailyCount ?? ''} disabled={!deadlineMode && !adaptive} type="number" className="form-input" min={1} max={30} placeholder={zh ? '最多 30' : 'Up to 30'} />
                 </label>
                 <label className="form-group">
                   <span className="form-label">{zh ? '每日复习上限' : 'Daily review cap'}</span>
-                  <input name="reviewCap" type="number" className="form-input" min={0} max={30} defaultValue={settings?.reviewCap ?? 1} required />
+                  <input key={templateKey} name="reviewCap" type="number" className="form-input" min={0} max={30} defaultValue={settings?.reviewCap ?? (template ? Math.min(templateCount, reviewCountForRules(template.rules)) : 1)} required />
                 </label>
               </div>
               <p className="text-muted">{zh ? '优先安排最早到期的复习。上限填 0 即关闭复习。' : 'The oldest due reviews go first. Enter 0 to turn reviews off.'}</p>
@@ -261,16 +322,20 @@ export function StudyGoalEditor({ lang, timezone, editing, onSaved, onClose }: {
               <fieldset className="study-goal-fields" hidden={!difficultyMix} disabled={!difficultyMix}>
                 <legend className="form-label">{zh ? '新题难度占比' : 'New problem mix'}</legend>
                 <div className="study-goal-row">
-                  {difficulties.map((d, i) => <label key={d} className="form-group">
+                  {difficulties.map((d, i) => <label key={templateKey + d} className="form-group">
                     <span className="form-label">{zh ? ['简单', '中等', '困难'][i] : d} (%)</span>
-                    <input name={d} className="form-input" type="number" min={0} max={100} step="any" defaultValue={settings?.difficulty?.[d] ?? [30, 50, 20][i]} required />
+                    <input name={d} className="form-input" type="number" min={0} max={100} step="any" defaultValue={settings?.difficulty?.[d] ?? template?.rules.difficulty[d] ?? [30, 50, 20][i]} required />
                   </label>)}
                 </div>
                 <small className="text-muted">{zh ? '总计 100%。在已解锁的题目中跨天平衡难度，填 0 会排除该难度。'
                   : 'Use 100% in total. Difficulty is balanced across days within unlocked problems. A zero excludes that difficulty.'}</small>
               </fieldset>
+              <label>{zh ? '题目标签（标识用逗号分隔）' : 'Topic tag slugs (comma separated)'}
+                <input className="form-input" key={templateKey} name="tags" defaultValue={(settings?.tags ?? template?.rules.tags ?? []).join(', ')} /></label>
+              <label><input key={templateKey} type="checkbox" name="filterReviewTags" defaultChecked={settings?.filterReviewTags ?? (template?.rules.reviewScope === 'matching')} />
+                {zh ? '仅复习与标签匹配的题目' : 'Limit reviews to matching tags'}</label>
               <label className="form-checkbox-label">
-                <input type="checkbox" name="premium" defaultChecked={settings?.premium ?? false} />
+                <input key={templateKey} type="checkbox" name="premium" defaultChecked={settings?.premium ?? template?.rules.premium ?? false} />
                 <span>{zh ? '允许安排会员题' : 'Allow Premium problems'}</span>
               </label>
             </div>
@@ -279,15 +344,12 @@ export function StudyGoalEditor({ lang, timezone, editing, onSaved, onClose }: {
       </form>
       <details className="study-goal-options" onToggle={event => { if (event.currentTarget.open) setGlobalOpen(true); }}>
         <summary>{zh ? '全局复习间隔' : 'Review spacing for all plans'}</summary>
-        {globalOpen && <fieldset className="study-goal-fields" disabled={pending !== null}>
-          <legend className="visually-hidden">{zh ? '全局复习设置' : 'Global review settings'}</legend>
-          <ReviewSpacingRow lang={lang} compact onBusyChange={busy => { setGlobalBusy(busy); setPreview(null); }} />
-        </fieldset>}
+        {globalOpen && <p>{globalSummary} {zh ? '可在「设置 → 练习与笔记」中修改。' : 'Edit in Settings → Practice & notes.'}</p>}
       </details>
       {preview && <section ref={previewSummary} tabIndex={-1} className="study-goal-preview"
         aria-label={zh ? '排题预览' : 'Schedule preview'}>
         <h3>{zh ? '排题预览' : 'Schedule preview'}</h3>
-        {listDraft && <p>{zh ? `修改后已完成 ${preview.completedCore}/${preview.totalCore} 道必做题。`
+        {(advanced || listDraft) && <p>{zh ? `修改后已完成 ${preview.completedCore}/${preview.totalCore} 道必做题。`
           : `${preview.completedCore}/${preview.totalCore} core problems complete after your edits.`}</p>}
         <p>{preview.completedCore === preview.totalCore
           ? (zh ? '题单中的必做题都已完成。' : 'You have completed every core problem in this list.')
@@ -302,7 +364,7 @@ export function StudyGoalEditor({ lang, timezone, editing, onSaved, onClose }: {
             const reviews = day.items.length - fresh;
             return <li key={day.date}><time dateTime={day.date}>{day.date}{day.saved && (zh ? '（已生成）' : ' (saved)')}</time><span>
               {zh ? `${fresh} 道新题 · ${reviews} 道复习` : `${fresh} new · ${reviews} review`}</span>
-              {listDraft && fresh > 0 && <small className="text-muted"> {day.items.filter(item => item.kind === 'new').map(item => '#' + item.frontendId).join(', ')}</small>}</li>;
+              {(advanced || listDraft) && fresh > 0 && <small className="text-muted"> {day.items.filter(item => item.kind === 'new').map(item => '#' + item.frontendId).join(', ')}</small>}</li>;
           })}
         </ol>
       </section>}

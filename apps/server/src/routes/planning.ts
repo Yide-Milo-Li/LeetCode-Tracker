@@ -7,10 +7,15 @@ export function registerPlanningRoutes(app: FastifyInstance, { application }: Ro
   app.get('/api/v1/study-plan', applicationRoute(r => planning.studyPlan((r.query as {id?:string}).id)));
   app.post('/api/v1/study-plan', applicationRoute(r => planning.saveStudyPlan(r.body)));
   app.patch('/api/v1/study-plan', applicationRoute(r => planning.updateStudyPlan(r.body)));
+  app.post('/api/v1/study-plan/lifecycle', applicationRoute(r => planning.lifecycle(r.body)));
+  app.get('/api/v1/strategies/deleted', applicationRoute(() => planning.deletedStrategies()));
+  app.post('/api/v1/strategies/:id/restore', applicationRoute(r => planning.restoreStrategy(r.body, (r.params as { id: string }).id)));
   app.get('/api/v1/strategies', applicationRoute(() => planning.strategies()));
   app.post('/api/v1/strategies', applicationRoute(r => planning.createStrategy(r.body), 201));
   app.patch('/api/v1/strategies/:id', applicationRoute(r => planning.updateStrategy(r.body, r.params as { id: string })));
   app.delete('/api/v1/strategies/:id', applicationRoute(r => planning.deleteStrategy({ body: r.body, query: r.query }, r.params as { id: string })));
+  app.get('/api/v1/study-calendar', applicationRoute(r => planning.calendar((r.query as { start?: string }).start)));
+  app.patch('/api/v1/study-calendar', applicationRoute(r => planning.adjustWeeklyCalendar(r.body)));
   app.get('/api/v1/weekly-schedule', applicationRoute(() => planning.schedule()));
   app.get('/api/v1/daily-plans', applicationRoute(r => planning.plans(r.query)));
   app.post('/api/v1/daily-plans/ensure', applicationRoute(r => planning.ensure(r.body)));

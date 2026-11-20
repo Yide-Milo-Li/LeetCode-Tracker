@@ -66,9 +66,7 @@ function computeTodaySummary(
     };
   }
 
-  const targetInstant = Date.parse(`${todayDate}T12:00:00Z`);
-  const weekday = new Date(targetInstant).getUTCDay();
-  const strategy = store.planning.strategyForWeekday(weekday);
+  const strategy = store.planning.strategyForDate(todayDate);
 
   if (!strategy) {
     return {
