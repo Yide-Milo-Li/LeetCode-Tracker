@@ -2,7 +2,7 @@
 
 A [Model Context Protocol](https://modelcontextprotocol.io) server for LeetCode Tracker. It lets Claude Code, Claude Desktop, Codex, Antigravity and other MCP clients read and update your local problem catalog, study plans, practice history, notes and progress. It runs over stdio and works independently or through the desktop app's loopback service.
 
-Desktop 1.4.1 bundles MCP server version `1.4.1`. Install the desktop release or build the standalone server from this checkout. [Desktop downloads](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/latest)
+Desktop 1.4.1 bundles MCP server version `1.4.1`. The tool reference below describes this checkout, including goal lists and favorites in the 1.5.0 candidate. [Desktop downloads](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/latest) · [1.5.0 candidate notes](../../docs/releases/1.5.0.md)
 
 ## Requirements
 

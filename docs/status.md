@@ -1,5 +1,11 @@
 # Implementation status
 
+## 1.5.0 candidate
+
+The candidate adds ordered goal lists, favorite folders, shared practice completion, and a Today activity overview. [Candidate notes](releases/1.5.0.md)
+
+Candidate source `be77c6f` passed 695 JavaScript, renderer and bundled-sidecar tests locally, plus TypeScript and the production frontend build. A separate 1.5.0 profile and bundle identifier were used for the local Apple Silicon package. The eight README captures use an isolated synthetic catalog. Hosted tag builds and the installation of a published 1.5.0 update remain pending.
+
 ## Release 1.4.1
 
 The macOS Dock keeps the selected palette after the first quit. This release also adds automatic sync for devices with a configured target and repairs relative dates in LeetCode progress imports. [Release notes](releases/1.4.1.md)

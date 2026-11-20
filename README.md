@@ -18,6 +18,8 @@ LeetCode Tracker packages the React interface, Fastify API, SQLite engine (schem
 
 Version 1.4.0 adds device sync, MCP client integration and signed in-app updates. Version 1.4.1 keeps the selected macOS Dock icon after quitting. Upgrading from 1.3.1 requires one manual install. [1.4.1 release notes](docs/releases/1.4.1.md)
 
+The 1.5.0 candidate adds ordered goal lists, a Favorites library, and a new Today overview. The workflows below describe the candidate. [1.5.0 candidate notes](docs/releases/1.5.0.md)
+
 ## Download and start
 
 Download the installer for your OS from the [latest release](https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/latest) and use the accompanying `SHA256SUMS.txt` to verify the download.
@@ -82,7 +84,7 @@ Browse a filterable problem list alongside a Markdown editor and CommonMark/GFM 
 
 ### Appearance and keyboard access
 
-Ten palettes, English/Chinese text, and light/dark/system appearance support desktop work, and selecting a palette dynamically tints the window/Dock icon to match. All eight screenshots come from the 1.4.1 browser build in English with the default light palette and synthetic catalog and practice data.
+Ten palettes, English/Chinese text, and light/dark/system appearance support desktop work, and selecting a palette dynamically tints the window/Dock icon to match. The eight screenshots show the 1.5.0 candidate in English with the default light palette and synthetic catalog and practice data.
 
 | Shortcut | Action |
 | --- | --- |
@@ -154,7 +156,7 @@ CI checks TypeScript, automated tests, the production frontend, documentation, n
 
 ## Documentation
 
-- [Documentation index](docs/README.md) · [Desktop installation](docs/desktop.md) · [1.4.1 release notes](docs/releases/1.4.1.md) · [MCP setup](apps/mcp/README.md)
+- [Documentation index](docs/README.md) · [Desktop installation](docs/desktop.md) · [1.5.0 candidate notes](docs/releases/1.5.0.md) · [MCP setup](apps/mcp/README.md)
 - [Data format](docs/data-format.md) · [Device sync](docs/sync.md) · [AI providers](docs/llm-providers.md) · [Topic insights](docs/topic-practice-insights.md)
 - [Architecture](docs/architecture.md) · [Applications](apps/README.md) · [Shared packages](packages/README.md)
 - [Tests](tests/README.md) · [Scripts](scripts/README.md) · [Roadmap](docs/roadmap.md)

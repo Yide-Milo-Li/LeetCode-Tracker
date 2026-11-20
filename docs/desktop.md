@@ -84,6 +84,8 @@ On Windows the NSIS installer closes and relaunches the app. If Windows reports 
 
 Version 1.3.1 and earlier require one manual upgrade to the first release with app updates. In ordinary branch builds, the update panel shows the current version and a link to manual installers. Tag builds configure the verification key and stable update feed.
 
+The 1.5.0 candidate uses this same update channel and profile location. Official 1.4.0 and 1.4.1 clients will see 1.5.0 once the signed release is published and selected as Latest. [1.5.0 candidate notes](releases/1.5.0.md)
+
 ---
 
 ## 2. Architecture & Process Lifecycle

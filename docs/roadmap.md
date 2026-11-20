@@ -2,6 +2,8 @@
 
 Release 1.4.0 adds device sync, AI client access through MCP and signed in-app updates for Windows x64 and Apple Silicon macOS. [Current release notes](releases/1.4.1.md) · [Verification](status.md)
 
+The 1.5.0 candidate adds ordered practice goals, favorite folders, and a Today overview with activity drill-down. The same goal and favorite operations are available to local MCP clients. [Candidate notes](releases/1.5.0.md)
+
 ## Desktop distribution: implemented and remaining
 
 - Implemented: Tauri host, private Node 26.13.0, authenticated IPC bridge, native export authorization, sidecar lifecycle/retry, palette-tinted native icons, unsigned Windows x64 NSIS installer, and ad-hoc signed Apple Silicon macOS `.app`/`.dmg` package.
