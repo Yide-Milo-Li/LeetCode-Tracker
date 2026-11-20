@@ -2,7 +2,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   BookOpen,
-  Star,
   BookMarked,
   CalendarDays,
   ChartNoAxesCombined,
@@ -20,6 +19,7 @@ import {
 } from 'lucide-react';
 import { CatalogView } from './components/CatalogView.tsx';
 import { GoalListsScope } from './components/ProblemGoalLists.tsx';
+import { GoalListLibrary } from './components/GoalListLibrary.tsx';
 import { ActivityRecords } from './components/ActivityRecords.tsx';
 import { TodayPlanView } from './components/TodayPlanView.tsx';
 import { PracticeWorkspace } from './components/PracticeWorkspace.tsx';
@@ -90,12 +90,12 @@ import {
   type View,
 } from './workspace.tsx';
 
+const libraryViews = ['problems', 'favorites', 'goal-lists'] as const;
 const views: View[] = [
   'today',
   'schedule',
   'notes',
-  'problems',
-  'favorites',
+  ...libraryViews,
   'catalog-import',
   'records',
   'statistics',
@@ -305,11 +305,12 @@ export function App() {
   const zh = lang === 'zh';
   const error = errorCause ? localizeApiError(errorCause, lang) : '';
   const progress = ['records', 'statistics', 'progress-import'].includes(view);
+  const library = libraryViews.some(id => id === view);
   const primary =
-    view === 'schedule' ? 'today' : view === 'catalog-import' ? 'problems' : progress ? 'statistics' : view;
+    view === 'schedule' ? 'today' : library || view === 'catalog-import' ? 'problems' : progress ? 'statistics' : view;
   return (
     <WorkspaceContext.Provider value={workspace}>
-      <GoalListsScope lang={lang} showSelected={view === 'today'} active={view === 'today' || view === 'problems' || view === 'favorites'}
+      <GoalListsScope lang={lang} showSelected={view === 'today'} active={view === 'today' || library}
         onCreated={() => setRevision(value => value + 1)}>
       <div className="app-shell">
         <a
@@ -361,7 +362,6 @@ export function App() {
                 { id: 'problems', icon: BookOpen, label: zh ? '题库' : 'Problems', shortcut: '2' },
                 { id: 'statistics', icon: ChartNoAxesCombined, label: zh ? '进展' : 'Progress', shortcut: '3' },
                 { id: 'notes', icon: BookMarked, label: zh ? '复盘' : 'Notes', shortcut: '4' },
-                { id: 'favorites', icon: Star, label: zh ? '收藏夹' : 'Favorites', shortcut: '5' },
               ] as const
             ).map((item) => {
               const navBtn = (
@@ -517,6 +517,16 @@ export function App() {
             </Feedback>
           )}
           <PracticeTimerPill lang={lang} />
+          {library && (
+            <nav className="page-tabs library-nav" aria-label={zh ? '题库视图' : 'Problem library'}>
+              {libraryViews.map((id) => (
+                <a key={id} href={'#' + id} aria-current={view === id ? 'page' : undefined}>
+                  {id === 'problems' ? (zh ? '全部题目' : 'All problems')
+                    : id === 'favorites' ? (zh ? '收藏夹' : 'Favorites') : (zh ? '目标题单' : 'Goal lists')}
+                </a>
+              ))}
+            </nav>
+          )}
           {(view === 'records' || view === 'statistics') && (
             <>
               <PageHeader
@@ -632,6 +642,11 @@ export function App() {
                 <CatalogView lang={lang} onNavigateSettings={() => navigate('catalog-import')} favoritesOnly
                   onGoalListCreated={() => setRevision(value => value + 1)}
                   onFavoritesChanged={refreshFavorites} />
+              </RetainedView>
+            )}
+            {visited.has('goal-lists') && (
+              <RetainedView hidden={view !== 'goal-lists'} id="view-goal-lists">
+                <GoalListLibrary lang={lang} active={view === 'goal-lists'} />
               </RetainedView>
             )}
             {visited.has('catalog-import') && (

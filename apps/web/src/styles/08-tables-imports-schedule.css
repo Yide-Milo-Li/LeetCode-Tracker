@@ -323,8 +323,8 @@
 .catalog-bulk-result .feedback > div { max-block-size: min(6em, 24dvh); overflow: auto; }
 .catalog-view:has(.catalog-bulk-actions) .problem-table :is(input, button, a) { scroll-margin-block-end: 9rem; }
 @media (max-width: 36rem) {
-  .main-content:has(:is(#view-problems, #view-favorites):not([hidden])),
-  .sidebar.expanded ~ .main-content:has(:is(#view-problems, #view-favorites):not([hidden])) {
+  .main-content:has(.library-nav),
+  .sidebar.expanded ~ .main-content:has(.library-nav) {
     margin-left: 64px;
     padding-inline: .75rem;
   }
@@ -805,8 +805,6 @@
   text-align: start;
   white-space: normal;
 }
-.favorite-folder-switcher { display: block; max-inline-size: 32rem; margin-block-end: 16px; }
-.favorite-folder-switcher select { inline-size: 100%; min-inline-size: 0; text-overflow: ellipsis; }
 .favorite-folder span,
 .favorite-choice span,
 .favorite-problem-title {
@@ -898,7 +896,6 @@
 .overlay-panel:has(.overlay-footer .favorite-form-actions) .overlay-header { padding: 10px 16px; align-items: center; }
 .overlay-panel:has(.overlay-footer .favorite-form-actions) .overlay-body { padding: 12px 16px; }
 .overlay-footer:has(.favorite-form-actions) { padding: 8px 16px; flex-shrink: 0; }
-.favorite-form .favorite-choices { max-block-size: min(36dvh, 22rem); overflow: auto; padding-inline: 4px; }
 .favorite-form .favorite-choice { min-inline-size: 0; }
 .favorite-form .favorite-choice span { min-inline-size: 0; }
 @media (max-width: 640px) {
@@ -910,4 +907,125 @@
   .catalog-view .problem-table {
     min-inline-size: 38rem;
   }
+}
+
+/* Search and pagination stay above the collection rows in pickers and the goal directory. */
+.collection-picker-trigger {
+  max-inline-size: min(100%, 32rem);
+  min-inline-size: 0;
+}
+.collection-picker-trigger > span {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.collection-picker-trigger > :is(svg, small) { flex: none; }
+.collection-picker-trigger small, .collection-picker-option small { font-variant-numeric: tabular-nums; }
+.goal-list-tools .collection-picker-trigger { flex: 1; justify-content: space-between; }
+.goal-list-tools .collection-picker-trigger > span { margin-inline-end: auto; }
+.collection-picker-tools, .collection-choice-tools, .goal-library-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: .65rem 1rem;
+}
+:is(.collection-picker-tools, .collection-choice-tools, .goal-library-toolbar) > .collection-search {
+  flex: 1 1 12rem;
+  min-inline-size: 0;
+}
+.collection-choice-tools > small { padding-block-end: .45rem; }
+.collection-sort-field { display: flex; align-items: center; gap: 4px; }
+.collection-sort-field .btn-icon { inline-size: 36px; block-size: 36px; }
+.collection-picker-rows {
+  list-style: none;
+  max-block-size: min(36dvh, 24rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+  margin: .65rem 0 0;
+  padding-inline: 4px;
+}
+.collection-picker-option {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: .5rem;
+  inline-size: 100%;
+  min-block-size: 48px;
+  padding: .45rem .65rem;
+  background: transparent;
+  border-radius: var(--radius);
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+.collection-picker-option:hover { background: var(--muted-surface); }
+.collection-picker-option[aria-current='true'] { color: var(--primary); background: var(--selected); }
+.collection-picker-option:focus-visible { outline-offset: -2px; }
+.collection-choices { display: block; }
+.collection-choices .favorite-choice { padding-block: .45rem; }
+:is(.collection-picker, .collection-choices) .pagination { margin-block: .45rem 0; }
+.goal-library-toolbar { margin-block-end: 1.25rem; }
+.goal-library-toolbar > .collection-search { max-inline-size: 25rem; }
+.goal-library-toolbar > .pagination { flex: 1 1 auto; justify-content: flex-end; margin: 0; }
+@container catalog-workspace (max-width: 30rem) {
+  .goal-library-toolbar > .pagination { flex-basis: 100%; justify-content: space-between; }
+}
+.goal-library-lists {
+  display: grid;
+  gap: .5rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.goal-library-lists > li {
+  min-inline-size: 0;
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+}
+.goal-library-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: .5rem .85rem;
+  width: 100%;
+  min-height: 3.5rem;
+  padding: .75rem 1rem;
+  border-radius: inherit;
+  background: transparent;
+  text-align: start;
+}
+.goal-library-summary:hover { background: var(--muted-surface); }
+.goal-library-summary > svg { color: var(--text-muted); }
+.goal-library-summary[aria-expanded='true'] .goal-library-chevron { transform: rotate(180deg); }
+.goal-library-name { display: flex; align-items: center; flex-wrap: wrap; gap: .25rem .8rem; overflow-wrap: anywhere; }
+.goal-library-name small, .goal-library-status { display: inline-flex; align-items: center; gap: .3rem; }
+.goal-library-name small, .goal-library-status[data-complete='true'] { color: var(--primary); }
+.goal-library-progress, .goal-library-status, .goal-library-position, .goal-library-id {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  font-size: .875rem;
+}
+.goal-library-detail { border-top: 1px solid var(--border-color); padding: .75rem 1rem; }
+.goal-library-actions { justify-content: flex-start; }
+.goal-library-filter { margin-inline-start: auto; }
+.goal-library-filters { margin-block: 1rem; }
+.goal-library-filters .form-field:last-child { flex: 0 1 auto; }
+.goal-library-progress { display: inline-flex; align-items: center; gap: .65rem; }
+.goal-library-progress progress { inline-size: 4.5rem; block-size: .4rem; margin: 0; }
+.goal-library-items li {
+  display: grid;
+  grid-template-columns: var(--goal-order-width) minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: .65rem;
+  padding-block: .6rem;
+  overflow-wrap: anywhere;
+}
+.goal-library-position { text-align: end; }
+@container catalog-workspace (max-width: 30rem) {
+  .goal-library-summary { grid-template-columns: auto minmax(0, 1fr) auto; gap: .2rem .6rem; }
+  .goal-library-progress { grid-column: 2; }
+  .goal-library-chevron { grid-column: 3; grid-row: 1 / 3; }
+  .goal-library-name { gap: .2rem .5rem; }
+  .goal-library-filter { margin-inline-start: 0; }
 }

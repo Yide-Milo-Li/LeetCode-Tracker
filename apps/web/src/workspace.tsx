@@ -8,6 +8,7 @@ export type View =
   | 'notes'
   | 'problems'
   | 'favorites'
+  | 'goal-lists'
   | 'catalog-import'
   | 'records'
   | 'statistics'

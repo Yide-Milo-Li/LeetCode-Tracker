@@ -213,22 +213,24 @@
   border-bottom: 1px solid var(--border-color);
   margin: -3px 0 28px;
 }
-.page-tabs button {
+.page-tabs button, .library-nav a {
   padding: 10px 4px 13px;
   background: none;
   color: var(--text-muted);
   border-bottom: 2px solid transparent;
   transition: color var(--fast) ease, border-color var(--fast) ease, transform var(--fast) var(--spring-tactile);
 }
-.page-tabs button:hover:not(:disabled) {
+.page-tabs button:hover:not(:disabled), .library-nav a:hover {
   color: var(--text-main);
   transform: translateY(-1px);
 }
 .page-tabs button:active:not(:disabled) {
   transform: scale(0.96);
 }
-.page-tabs button[aria-selected='true'] {
+.page-tabs button[aria-selected='true'], .library-nav a[aria-current='page'] {
   border-color: var(--primary);
   color: var(--primary);
   font-weight: 620;
 }
+.library-nav { gap: clamp(.6rem, 3vw, 1.5rem); flex-wrap: wrap; }
+.library-nav a { text-decoration: none; }

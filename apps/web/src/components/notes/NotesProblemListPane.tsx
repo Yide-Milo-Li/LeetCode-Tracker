@@ -1,11 +1,11 @@
 /** Master column of the notes workspace: scope tabs, search, filters, problem list and pagination. */
 import { useId, useState } from 'react';
-import { ArrowDownWideNarrow, ArrowUpNarrowWide, ChevronRight, Search, FileText } from 'lucide-react';
+import { ChevronRight, Search, FileText } from 'lucide-react';
 import { translations, type Language } from '../../i18n.ts';
 import type { NoteListGroup, ProblemNoteListQuery, ProblemNoteSummary } from '../../api.ts';
 import { formatCalendarDate, formatInstant } from '../../date-format.ts';
 import { useWorkspace } from '../../workspace.tsx';
-import { Pagination, Tooltip } from '../ui.tsx';
+import { Pagination, SortDirectionButton } from '../ui.tsx';
 import type { NotesDifficultyFilter, NotesHasNoteFilter, NotesListState, NotesSortField } from './useNotesList.ts';
 
 interface NotesProblemListPaneProps {
@@ -66,11 +66,6 @@ export function NotesProblemListPane({ lang, zenMode, list, selectedId, onSelect
   } = list;
 
   const controlsId = useId();
-  const newestFirst = sortDirection === 'desc';
-  const DirectionIcon = newestFirst ? ArrowDownWideNarrow : ArrowUpNarrowWide;
-  const directionHint = newestFirst
-    ? (zh ? '当前从新到旧，点击切换为从旧到新' : 'Newest first. Switch to oldest first.')
-    : (zh ? '当前从旧到新，点击切换为从新到旧' : 'Oldest first. Switch to newest first.');
   const { timezone } = useWorkspace();
   const [collapsedId, setCollapsedId] = useState<string | null>(null);
   const openId = grouping?.groups.some(group => group.id === groupId) ? groupId : grouping?.activeId;
@@ -187,16 +182,12 @@ export function NotesProblemListPane({ lang, zenMode, list, selectedId, onSelect
               <option value="notes-first">{zh ? '有笔记优先' : 'Written notes first'}</option>
             </select>
             {sortField !== 'notes-first' && (
-              <Tooltip text={directionHint} position="top">
-                <button type="button" className="btn-icon nw-sort-direction"
-                  aria-label={zh ? '从新到旧' : 'Newest first'} aria-pressed={newestFirst}
-                  onClick={() => {
-                    setSortDirection(previous => previous === 'desc' ? 'asc' : 'desc');
-                    setPage(1);
-                  }}>
-                  <DirectionIcon size={16} aria-hidden="true" />
-                </button>
-              </Tooltip>
+              <SortDirectionButton className="nw-sort-direction" direction={sortDirection} lang={lang}
+                ascending={zh ? '从旧到新' : 'Oldest first'} descending={zh ? '从新到旧' : 'Newest first'}
+                onChange={direction => {
+                  setSortDirection(direction);
+                  setPage(1);
+                }} />
             )}
           </div>
         </div>

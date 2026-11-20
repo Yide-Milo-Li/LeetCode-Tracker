@@ -5,6 +5,7 @@ import { api, ApiError } from '../api.ts';
 import { localizeApiError } from '../error-i18n.ts';
 import { formatCount, type Language } from '../i18n.ts';
 import { Dialog, Feedback, Field, Tooltip } from './ui.tsx';
+import { COLLECTION_PICKER_PAGE_SIZE, CollectionChoices, CollectionPicker } from './CollectionPicker.tsx';
 
 import { useProblemListWindow } from '../hooks/useProblemListWindow.ts';
 import { useAsyncResource } from '../hooks/useAsyncResource.ts';
@@ -25,21 +26,21 @@ export function FavoriteFolderPicker({ library, selected, lang, onSelect }: {
   library: FavoriteLibrary; selected: string; lang: Language; onSelect(id: string): void;
 }) {
   const zh = lang === 'zh';
-  const folders = [{ id: 'all', name: zh ? '全部收藏' : 'All favorites', count: library.total }, ...library.folders];
-  if (library.folders.length > 8) {
-    return <label className="favorite-folder-switcher">
-      <span className="visually-hidden">{zh ? '选择收藏夹' : 'Choose a folder'}</span>
-      <select value={selected} title={folders.find(folder => folder.id === selected)?.name} onChange={event => onSelect(event.currentTarget.value)}>
-        {folders.map(folder => <option key={folder.id} value={folder.id}>{folder.name} ({formatCount(folder.count, lang)})</option>)}
-      </select>
-    </label>;
-  }
+  const all = { id: 'all', name: zh ? '全部收藏' : 'All favorites', count: library.total };
+  const large = library.folders.length > COLLECTION_PICKER_PAGE_SIZE;
+  const folders = large ? [all] : [all, ...library.folders];
+  const options = useMemo(() => large ? library.folders.map(folder => ({
+    ...folder, detail: formatCount(folder.count, lang),
+  })) : [], [large, library.folders, lang]);
   return <div className="favorite-folders" role="group" aria-label={zh ? '选择收藏夹' : 'Choose a folder'}>
     {folders.map(({ id, name, count }) => <button key={id} type="button" aria-pressed={id === selected}
       className="btn btn-secondary favorite-folder" onClick={() => onSelect(id)}>
       {id === 'all' ? <Star size={16} aria-hidden="true" /> : <Folder size={16} aria-hidden="true" />}
       <span>{name}</span> <small>{formatCount(count, lang)}</small>
     </button>)}
+    {large && <CollectionPicker options={options} selected={selected}
+      label={zh ? '切换收藏夹' : 'Browse folders'} searchLabel={zh ? '搜索收藏夹' : 'Search folders'}
+      lang={lang} onSelect={onSelect} />}
   </div>;
 }
 
@@ -239,23 +240,15 @@ export function FavoriteProblemEditor({ target: { problem, frontendIds, existing
     {loadError ? <Feedback retry={{ label: zh ? '重试' : 'Retry', run: onRefresh }}>
       {localizeApiError(loadError, lang)}
     </Feedback> : !library ? <p role="status">{zh ? '正在读取收藏夹…' : 'Loading folders…'}</p> :
-      <form id={formId} className="favorite-form" aria-label={title} onChange={clearError} onSubmit={event => {
+      <form id={formId} className="favorite-form" aria-label={title} onSubmit={event => {
         event.preventDefault();
         if (canSave) save(folderIds);
       }}>
-        {(!frontendIds || library.folders.length > 0) && <fieldset className="favorite-choices" disabled={busy}>
-          <legend>{zh ? '收藏夹（可多选）' : existingFoldersOnly ? 'Folders (select one or more)' : 'Folders (optional)'}</legend>
-          {library.folders.map(folder => <label key={folder.id} className="favorite-choice">
-            <input type="checkbox" name="folder" value={folder.id} checked={selectedFolders.has(folder.id)}
-              onChange={event => {
-                const checked = event.currentTarget.checked;
-                setSelected(ids => checked ? [...ids, folder.id] : ids.filter(id => id !== folder.id));
-              }} />
-            <span>{folder.name}</span>
-          </label>)}
-          {!frontendIds && !library.folders.length && <p className="muted">{zh ? '可以直接保存到「全部收藏」，也可以新建收藏夹。'
+        {library.folders.length > 0 ? <CollectionChoices options={library.folders} selected={selected} lang={lang} disabled={busy}
+          name="folder" label={zh ? '收藏夹（可多选）' : existingFoldersOnly ? 'Folders (select one or more)' : 'Folders (optional)'}
+          searchLabel={zh ? '搜索收藏夹' : 'Search folders'} onChange={ids => { setSelected(ids); clearError(); }} />
+          : !frontendIds && <p className="muted">{zh ? '可以直接保存到「全部收藏」，也可以新建收藏夹。'
             : 'Save in All favorites, or create a folder below.'}</p>}
-        </fieldset>}
         {existingFoldersOnly ? (!library.folders.length && <p>{zh ? '还没有收藏夹。可返回后选择「存入新收藏夹」。'
           : 'There are no folders yet. Go back and choose “Save to new folder”.'}</p>) : <>
           <button type="button" className="text-link" disabled={busy} aria-expanded={creating} aria-controls={newFieldId}
@@ -265,7 +258,7 @@ export function FavoriteProblemEditor({ target: { problem, frontendIds, existing
           <div id={newFieldId} hidden={!creating}>
             {creating && <Field label={zh ? '新收藏夹名称' : 'New folder name'}>
               <input name="newFolder" autoFocus required maxLength={100} pattern={'.*\\S.*'} autoComplete="off"
-                value={newName} onChange={event => setNewName(event.target.value)} disabled={busy} />
+                value={newName} onChange={event => { setNewName(event.target.value); clearError(); }} disabled={busy} />
             </Field>}
           </div>
         </>}
