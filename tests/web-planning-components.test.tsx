@@ -1660,6 +1660,7 @@ it('Today renders the entire ordered checklist and restores checked items to the
     assert.deepEqual(visibleIds(), ids);
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Complete #2 Problem 2' })));
     assert.deepEqual(visibleIds(), ids.filter(id => id !== '2'));
+    assert.equal(document.querySelector('.goal-pending-items li:last-child .goal-item-position')?.textContent, '32.');
     fireEvent.click(screen.getByRole('button', { name: 'Edit Interview' }));
     fireEvent.click(screen.getByRole('button', { name: 'Reopen #2' }));
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Save list' })));
@@ -1685,7 +1686,10 @@ it('selects one full goal list at a time, remembers the choice and falls back wh
   const selector = await screen.findByRole('combobox', { name: 'Select list (2)' });
   fireEvent.change(selector, { target: { value: second.id } });
   assert.equal(screen.queryByText('#4 Arrays4'), null);
-  assert.deepEqual(Array.from(document.querySelectorAll('.goal-pending-items li'), el => el.textContent), ['#9 Trees9', '#3 Trees3']);
+  const rows = Array.from(document.querySelectorAll('.goal-pending-items li'), row => [
+    row.querySelector('.goal-item-position')?.textContent, row.querySelector('.goal-item-title')?.textContent,
+  ]);
+  assert.deepEqual(rows, [['1.', '#9 Trees9'], ['2.', '#3 Trees3']]);
   root.unmount();
   await act(async () => { root = render(view(0)); });
   assert.equal((screen.getByRole('combobox') as HTMLSelectElement).value, second.id);

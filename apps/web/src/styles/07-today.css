@@ -1,3 +1,26 @@
+/* Keep quiet dividers separate from the colors that identify controls and data. */
+.today-view,
+:where(body:has(#view-today:not([hidden]))) .overlay-panel {
+  --text-muted: color-mix(in oklab, var(--text-secondary) 70%, var(--text-main));
+  --today-control-outline: color-mix(in oklab, var(--outline) 40%, var(--text-muted));
+  --today-accent-text: color-mix(in oklab, var(--primary) 80%, var(--text-main));
+  --today-danger-text: color-mix(in oklab, var(--danger) 38%, var(--text-main));
+  --today-warning-text: color-mix(in oklab, var(--medium) 33%, var(--text-main));
+  --today-success-text: color-mix(in oklab, var(--easy) 43%, var(--text-main));
+}
+.today-view {
+  container: today / inline-size;
+  --goal-fill: color-mix(in oklab, var(--primary) 50%, var(--review));
+}
+.today-view .text-link,
+.today-view .goal-completion-badge,
+:where(body:has(#view-today:not([hidden]))) .overlay-panel .text-link { color: var(--today-accent-text); }
+
+html[data-palette='catppuccin-latte'] .today-view,
+html[data-palette='catppuccin-latte']:has(#view-today:not([hidden])) .overlay-panel {
+  --primary-hover: var(--today-accent-text);
+}
+
 /* Today dashboard. Each measure keeps its own denominator and time frame. */
 .today-overview {
   display: grid;
@@ -32,12 +55,14 @@
   aspect-ratio: 1;
   flex: none;
   border-radius: 50%;
-  background: conic-gradient(var(--primary) var(--today-plan-fill), var(--border-color) 0);
+  border: 1px solid var(--today-control-outline);
+  background: conic-gradient(var(--primary) var(--today-plan-fill), transparent 0);
 }
 .daily-progress-ring::before {
   content: '';
   position: absolute;
-  inset: .43rem;
+  inset: .37rem;
+  border: 1px solid var(--today-control-outline);
   border-radius: 50%;
   background: var(--muted-surface);
   z-index: -1;
@@ -59,9 +84,18 @@
   overflow: hidden;
 }
 .goal-order-marks { display: flex; height: .75rem; gap: 2px; }
-.goal-order-marks > span { flex: 1; min-width: 0; border-radius: 2px; background: var(--border-color); }
-.goal-order-marks > [data-complete="true"] { background: var(--goal-fill); }
-.goal-long-progress { display: block; width: 100%; height: .75rem; accent-color: var(--goal-fill); }
+.goal-order-marks > span { flex: 1; min-width: 0; border-radius: 2px; border: 1px solid var(--today-control-outline); }
+.goal-order-marks > [data-complete="true"] { border-color: var(--goal-fill); background: var(--goal-fill); }
+.today-overview .goal-long-progress {
+  width: 100%;
+  height: .75rem;
+  margin: 0;
+  border: 1px solid var(--today-control-outline);
+  background: transparent;
+}
+.goal-long-progress::-webkit-progress-bar { background: transparent; }
+.goal-long-progress::-webkit-progress-value { background: var(--goal-fill); border-radius: 0; }
+.goal-long-progress::-moz-progress-bar { background: var(--goal-fill); }
 .goal-metric-footer { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: .25rem .5rem; margin-top: .5rem; }
 .next-goal-task { display: inline-flex; align-items: center; gap: .15rem; font-size: .78rem; overflow-wrap: anywhere; }
 .week-title { display: inline-flex; align-items: center; gap: .35rem; }
@@ -95,11 +129,11 @@ button.week-day:hover, button.week-day:focus-visible { background: var(--surface
   width: min(54%, 1.35rem);
   min-height: 2px;
   border-radius: .22rem .22rem 0 0;
-  background: var(--heatmap-2);
+  background: color-mix(in oklab, var(--primary) 70%, var(--text-muted));
 }
 .week-count { position: absolute; left: 50%; width: max-content; transform: translateX(-50%); bottom: calc(100% + .12rem); font-size: .72rem; line-height: 1.1; }
 .is-today .week-bar { background: var(--primary); }
-.week-bar[data-zero="true"] { background: var(--outline); }
+.week-bar[data-zero="true"] { background: var(--today-control-outline); }
 .is-today .week-day { color: var(--text-main); font-weight: 650; }
 .week-metric .week-summary { margin-top: .35rem; font-size: .75rem; }
 @media (prefers-reduced-motion: no-preference) {
@@ -107,10 +141,23 @@ button.week-day:hover, button.week-day:focus-visible { background: var(--surface
   .goal-order-marks > span { transition: background-color 180ms ease-out; }
 }
 @media (forced-colors: active) {
-  .daily-progress-ring { forced-color-adjust: none; background: conic-gradient(Highlight var(--today-plan-fill), GrayText 0); color: CanvasText; }
-  .daily-progress-ring::before { background: Canvas; }
-  .goal-order-marks > span { border: 1px solid GrayText; }
-  .goal-order-marks > [data-complete="true"], .week-bar { forced-color-adjust: none; background: Highlight; }
+  .daily-progress-ring {
+    forced-color-adjust: none;
+    border-color: CanvasText;
+    background: conic-gradient(Highlight var(--today-plan-fill), Canvas 0);
+    color: CanvasText;
+  }
+  .daily-progress-ring::before { background: Canvas; border-color: CanvasText; }
+  .daily-progress-ring small { color: CanvasText; }
+  .goal-order-marks > span { border-color: CanvasText; }
+  .goal-order-marks > [data-complete="true"], .week-chart .week-bar {
+    forced-color-adjust: none;
+    border-color: Highlight;
+    background: Highlight;
+  }
+  .week-chart .week-bar[data-zero="true"] { background: CanvasText; }
+  .today-overview .goal-long-progress { appearance: auto; }
+  .goal-list-switcher select { appearance: auto; background-image: none; }
   .week-count { color: CanvasText; }
 }
 @container today (max-width: 45rem) {
@@ -122,7 +169,7 @@ button.week-day:hover, button.week-day:focus-visible { background: var(--surface
 @container today (max-width: 32rem) {
   .daily-metric-body { flex-wrap: wrap; gap: .45rem; }
   .daily-progress-ring { inline-size: 3.3rem; }
-  .daily-progress-ring::before { inset: .3rem; }
+  .daily-progress-ring::before { inset: .24rem; }
   .daily-progress-ring > span { font-size: .9rem; }
   .today-count { font-size: 1.25rem; }
   .today-count span { font-size: .82rem; }
@@ -230,7 +277,7 @@ progress::-moz-progress-bar {
   list-style: none;
   width: 32px;
   height: 32px;
-  border: 1px solid var(--outline);
+  border: 1px solid var(--today-control-outline, var(--outline));
   border-radius: 6px;
   cursor: pointer;
   transition:
@@ -408,7 +455,7 @@ progress::-moz-progress-bar {
   padding: 0;
   margin: 0;
   background: none;
-  color: var(--outline);
+  color: var(--today-control-outline, var(--outline));
   border-radius: 50%;
   cursor: pointer;
   transition:
@@ -525,7 +572,30 @@ progress::-moz-progress-bar {
   margin: 12px 0;
 }
 
-.today-view { container: today / inline-size; --goal-fill: color-mix(in oklab, var(--primary) 50%, var(--review)); }
+.today-view :is(.difficulty.easy, .feedback.success),
+:where(body:has(#view-today:not([hidden]))) .overlay-panel :is(.badge-easy, .difficulty-easy, .alert-success) {
+  color: var(--today-success-text);
+}
+.today-view :is(.difficulty.medium, .feedback.warning),
+:where(body:has(#view-today:not([hidden]))) .overlay-panel :is(.badge-medium, .difficulty-medium, .alert-warning, .override-notice) {
+  color: var(--today-warning-text);
+}
+.today-view :is(.difficulty.hard, .feedback.error),
+:where(body:has(#view-today:not([hidden]))) .overlay-panel :is(.badge-hard, .difficulty-hard, .feedback.error, .alert-danger, .btn-danger) {
+  color: var(--today-danger-text);
+}
+:where(body:has(#view-today:not([hidden]))) .overlay-panel .btn-danger { border-color: currentColor; }
+.goal-editor :is(.form-input, .form-textarea):not(:focus, :hover, [aria-invalid='true']) {
+  border-color: var(--today-control-outline);
+}
+.goal-editor .form-textarea[aria-invalid='true'] { border-color: var(--today-danger-text); }
+.today-view .btn-icon-danger:hover:not(:disabled),
+:where(body:has(#view-today:not([hidden]))) .overlay-panel .btn-icon-danger:hover:not(:disabled) {
+  color: var(--today-danger-text);
+}
+.today-view .feedback.info { color: var(--today-accent-text); }
+.today-view .feedback .text-link { color: inherit; text-decoration: underline; }
+
 .today-task-columns {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
@@ -580,8 +650,14 @@ progress::-moz-progress-bar {
 .today-strategy-tasks .problem-actions { grid-template-columns: repeat(3, 32px); gap: .2rem; }
 .today-strategy-tasks .completion-circle { width: 36px; height: 36px; }
 .goal-list-switcher { min-width: 0; flex: 1; }
-.goal-list-switcher select { width: 100%; min-width: 0; max-width: 100%; text-overflow: ellipsis; }
-.goal-list-heading, .goal-item-line, .goal-edit-line, .goal-edit-actions, .goal-editor-footer {
+.goal-list-switcher select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  text-overflow: ellipsis;
+  border-color: var(--today-control-outline);
+}
+.goal-list-heading, .goal-edit-actions, .goal-editor-footer {
   display: flex;
   align-items: center;
   gap: .6rem;
@@ -592,14 +668,35 @@ progress::-moz-progress-bar {
 .goal-list-heading h3 { font-size: 1rem; }
 .goal-list-heading > :last-child, .goal-editor-footer > .action-row { margin-inline-start: auto; }
 .goal-pending-items { border-top: 1px solid var(--border-color); }
-.goal-items li::marker { color: var(--text-muted); font-variant-numeric: tabular-nums; font-size: .85rem; }
-.goal-items { padding-inline-start: 2.5rem; margin: .5rem 0 0; overflow-y: auto; max-block-size: min(32rem, 56dvh); }
+.goal-items {
+  list-style: none;
+  padding: 0;
+  margin: .5rem 0 0;
+  overflow-y: auto;
+  max-block-size: min(32rem, 56dvh);
+  font-variant-numeric: tabular-nums;
+}
 .goal-items li + li { border-top: 1px solid var(--border-color); }
-.goal-item-line { min-height: 2.5rem; overflow-wrap: anywhere; }
-.goal-item-line .completion-circle { flex: none; }
+.goal-items li:focus-visible { outline-offset: -2px; }
+.goal-item-line, .goal-edit-line {
+  display: grid;
+  align-items: start;
+  gap: .25rem .4rem;
+  padding-block: .35rem;
+  overflow-wrap: anywhere;
+}
+.goal-item-position, .goal-item-title {
+  align-self: baseline;
+  line-height: 1.5;
+  padding-block-start: max(0px, calc((var(--goal-row-action-size) - 1.5em) / 2));
+}
+.goal-item-position { color: var(--text-muted); text-align: end; }
 .goal-editor { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 1rem; }
 .goal-editor-footer { flex-wrap: wrap; }
-.goal-edit-line { justify-content: space-between; padding-block: .25rem; overflow-wrap: anywhere; }
+.goal-edit-line {
+  --goal-row-action-size: 38px;
+  grid-template-columns: var(--goal-order-width) minmax(0, 1fr) auto;
+}
 .goal-edit-actions { flex-wrap: wrap; justify-content: end; gap: .15rem; }
 .goal-edit-actions button { min-width: 28px; min-height: 28px; }
 .goal-edit-items { max-block-size: min(20rem, 44dvh); }
@@ -607,7 +704,8 @@ progress::-moz-progress-bar {
 .goal-picker-results { list-style: none; padding: 0; margin: .25rem 0; max-height: 12rem; overflow: auto; }
 .goal-picker-results button { padding: .3rem 0; text-align: start; }
 @media (max-width: 480px) {
-  .goal-edit-line { align-items: flex-start; flex-direction: column; }
+  .goal-edit-line { grid-template-columns: var(--goal-order-width) minmax(0, 1fr); }
+  .goal-edit-actions { grid-column: 2; justify-content: start; }
   .today-goal-lists { padding-inline: .8rem; }
 }
 
@@ -644,15 +742,20 @@ progress::-moz-progress-bar {
 
 .today-goal-lists { container: goal-tasks / inline-size; }
 .goal-item-line {
-  display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto;
-  gap: .35rem;
-  padding-block: .35rem;
+  --goal-row-action-size: 36px;
+  grid-template-columns: var(--goal-order-width) var(--goal-row-action-size) minmax(0, 1fr) auto;
 }
-.goal-item-line .completion-circle { width: 36px; height: 36px; }
+.goal-item-line .completion-circle {
+  width: var(--goal-row-action-size);
+  height: var(--goal-row-action-size);
+}
+.goal-item-line > .goal-item-title {
+  justify-self: start;
+  margin-inline-end: 5px;
+}
 .goal-problem-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .15rem; }
-.goal-action-error { grid-column: 2 / -1; }
+.goal-action-error { grid-column: 3 / -1; }
 @container goal-tasks (max-width: 30rem) {
-  .goal-item-line { grid-template-columns: 36px minmax(0, 1fr); }
-  .goal-problem-actions { grid-column: 2; }
+  .goal-item-line { grid-template-columns: var(--goal-order-width) var(--goal-row-action-size) minmax(0, 1fr); }
+  .goal-problem-actions { grid-column: 3; }
 }

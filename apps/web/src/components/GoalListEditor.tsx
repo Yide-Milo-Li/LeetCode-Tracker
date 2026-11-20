@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from 'react';
+import { useId, useRef, useState, type CSSProperties } from 'react';
 import { ArrowDown, ArrowUp, Pencil, Trash2, Undo2 } from 'lucide-react';
 import type { GoalList } from '../../../../packages/contracts/src/goal-lists.ts';
 import { api, ApiError } from '../api.ts';
@@ -120,7 +120,8 @@ export function GoalListEditor({ goal, lang, onClose, onSaved, onRefresh }: {
               }}
               aria-invalid={duplicate} aria-describedby={duplicate ? formId + '-duplicates' : undefined} />
             {duplicate && <small id={formId + '-duplicates'} role="alert">{zh ? '同一题号只能出现一次。' : 'Keep one entry per problem ID.'}</small>}
-          </label> : <ol className="goal-items goal-edit-items" ref={rows}>
+          </label> : <ol className="goal-items goal-edit-items" role="list" ref={rows}
+            style={{ '--goal-order-width': `${String(ids.length).length + 1}ch` } as CSSProperties}>
             {ids.map((id, i) => {
               const item = details.get(id);
               const actions = [
@@ -133,11 +134,12 @@ export function GoalListEditor({ goal, lang, onClose, onSaved, onRefresh }: {
                 label: zh ? `恢复待做 #${id}` : `Reopen #${id}`, icon: Undo2,
                 run: () => { setDetails(prev => new Map(prev).set(id, { ...item, completed: false })); focusRow(id); },
               });
-              return <li key={id} data-id={id}><div className="goal-edit-line">
-                <span>#{id} {item?.title} {item?.completed && <small>{zh ? '已完成' : 'Completed'}</small>}</span>
+              return <li key={id} data-id={id} className="goal-edit-line">
+                <span className="goal-item-position">{i + 1}.</span>
+                <span className="goal-item-title">#{id} {item?.title} {item?.completed && <small>{zh ? '已完成' : 'Completed'}</small>}</span>
                 <div className="goal-edit-actions">{actions.map(({ label, icon: Icon, disabled, run }) =>
                   <button type="button" key={label} className="btn-icon" disabled={disabled} aria-label={label} title={label} onClick={run}><Icon size={15} /></button>)}</div>
-              </div></li>;
+              </li>;
             })}
           </ol>}
         </>}

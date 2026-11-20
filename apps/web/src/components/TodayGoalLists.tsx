@@ -1,4 +1,4 @@
-import { useRef, useState, type Ref } from 'react';
+import { useRef, useState, type CSSProperties, type Ref } from 'react';
 import { Circle, ListOrdered, Pencil, Plus } from 'lucide-react';
 import type { GoalList } from '../../../../packages/contracts/src/goal-lists.ts';
 import { api } from '../api.ts';
@@ -82,19 +82,19 @@ export function TodayGoalLists({ lang, goals, nextTaskRef }: {
           <button type="button" className="btn btn-secondary btn-sm goal-edit-button" aria-label={(zh ? '编辑 ' : 'Edit ') + list.name}
             disabled={!!pending} onClick={() => setEditing(list)}><Pencil size={14} aria-hidden="true" />{zh ? '编辑' : 'Edit'}</button>
         </div>
-        {nextItem ? <ol className="goal-items goal-pending-items" aria-label={list.name}>
-          {list.items.map((item, i) => item.completed ? null : <li key={item.frontendId} value={i + 1}
+        {nextItem ? <ol className="goal-items goal-pending-items" role="list" aria-label={list.name}
+          style={{ '--goal-order-width': `${String(list.items.length).length + 1}ch` } as CSSProperties}>
+          {list.items.map((item, i) => item.completed ? null : <li key={item.frontendId} value={i + 1} className="goal-item-line"
             ref={item === nextItem ? nextTaskRef : undefined} tabIndex={item === nextItem ? -1 : undefined}>
-            <div className="goal-item-line">
-              <button type="button" className="completion-circle" data-problem={item.frontendId}
-                aria-label={zh ? `完成 #${item.frontendId} ${item.title}` : `Complete #${item.frontendId} ${item.title}`}
-                disabled={!!pending} onClick={() => void changeItem(list, item.frontendId, 'complete')}><Circle size={20} aria-hidden="true" /></button>
-              {/^https?:\/\//i.test(item.url)
-                ? <a className="problem-title-link" href={item.url} target="_blank" rel="noopener noreferrer" title={zh ? '打开题目 ↗' : 'Open problem ↗'}>#{item.frontendId} {item.title}<span aria-hidden="true" className="problem-link-mark"> ↗</span></a>
-                : <span>#{item.frontendId} {item.title}</span>}
-              <GoalProblemActions lang={lang} frontendId={item.frontendId} title={item.title} disabled={!!pending}
-                onRemove={() => void changeItem(list, item.frontendId, 'remove')} />
-            </div>
+            <span className="goal-item-position">{i + 1}.</span>
+            <button type="button" className="completion-circle" data-problem={item.frontendId}
+              aria-label={zh ? `完成 #${item.frontendId} ${item.title}` : `Complete #${item.frontendId} ${item.title}`}
+              disabled={!!pending} onClick={() => void changeItem(list, item.frontendId, 'complete')}><Circle size={20} aria-hidden="true" /></button>
+            {/^https?:\/\//i.test(item.url)
+              ? <a className="goal-item-title problem-title-link" href={item.url} target="_blank" rel="noopener noreferrer" title={zh ? '打开题目 ↗' : 'Open problem ↗'}>#{item.frontendId} {item.title}<span aria-hidden="true" className="problem-link-mark"> ↗</span></a>
+              : <span className="goal-item-title">#{item.frontendId} {item.title}</span>}
+            <GoalProblemActions lang={lang} frontendId={item.frontendId} title={item.title} disabled={!!pending}
+              onRemove={() => void changeItem(list, item.frontendId, 'remove')} />
           </li>)}
         </ol> : <p className="text-muted">{list.items.length ? (zh ? '本单已全部完成。' : 'All problems completed.') : (zh ? '题单为空。' : 'This list is empty.')}</p>}
       </div> : loaded && !error ? <p className="text-muted">{zh ? '尚无目标题单。' : 'No goal lists yet.'}</p> : null}

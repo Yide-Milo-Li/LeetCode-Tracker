@@ -849,7 +849,8 @@ it('keeps ordered goal membership, checkmarks and practice history independent a
   } finally { await app.close(); db.close(); }
 });
 
-it('shares one recorded solve across strategy and goal clicks, including concurrent requests and retries', async () => {
+it('shares one recorded solve across strategy and goal clicks, including concurrent requests and retries', async ({ mock }) => {
+  mock.timers.enable({ apis: ['Date'], now: Date.UTC(2026, 10, 19, 12) });
   const { app, db, store } = await createTestApp();
   try {
     const response = await app.inject({ method: 'POST', url: '/api/v1/strategies', payload: {
@@ -859,6 +860,8 @@ it('shares one recorded solve across strategy and goal clicks, including concurr
     } });
     assert.equal(response.statusCode, 201, response.body);
     const plan = (await app.inject({ method: 'POST', url: '/api/v1/daily-plans/ensure' })).json().plan;
+    // A completion must be strictly later than its assignment timestamp.
+    mock.timers.tick(1);
     const ids: string[] = plan.items.map((item: { problem: { questionFrontendId: string } }) => item.problem.questionFrontendId);
     assert.equal(ids.length, 3);
     const list = (await app.inject({ method: 'POST', url: '/api/v1/goal-lists', payload: { name: 'Same three', frontendIds: ids } })).json();
