@@ -14,6 +14,13 @@ export type StoredGoalList = z.infer<typeof storedGoalListSchema>;
 export interface GoalList extends Omit<StoredGoalList, 'items'> {
   items: Array<StoredGoalList['items'][number] & { title: string; url: string }>;
 }
+export function goalListSummary(list: StoredGoalList) {
+  return { id: list.id, name: list.name, version: list.version, total: list.items.length,
+    completedCount: list.items.reduce((count, item) => count + Number(item.completed), 0) };
+}
+export type GoalListSummary = ReturnType<typeof goalListSummary>;
+export const goalMembershipLookupSchema = z.object({ frontendIds: z.array(frontendId).min(1).max(100) }).strict();
+
 export const createGoalListSchema = z.object({
   id: goalListIdSchema.optional(), name, frontendIds: z.array(frontendId),
 }).strict();

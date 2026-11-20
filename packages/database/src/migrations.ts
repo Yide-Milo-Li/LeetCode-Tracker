@@ -300,6 +300,16 @@ export function migrateV5ToV6(db: DatabaseSync): void {
   db.prepare('UPDATE schema_version SET version = ?').run(6);
 }
 
+/** Derived indexes are optional for readers of older v12 profiles and do not change the portable format. */
+export function ensureActivityIndexes(db: DatabaseSync): void {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_practice_status_time ON practice_records(status, practiced_at);
+    CREATE INDEX IF NOT EXISTS idx_practice_completed_question ON practice_records(status, completed, question_id);
+    CREATE INDEX IF NOT EXISTS idx_progress_status_time ON progress_snapshots(status, last_submitted_at);
+    CREATE INDEX IF NOT EXISTS idx_success_time ON snapshot_successes(event_time, question_id);
+  `);
+}
+
 /** Verify schema compatibility, initialize if empty, or perform sequential migrations. */
 export function initOrMigrateSchema(db: DatabaseSync, validateVersion?: (version: number | null) => void): void {
   const version = inspectCatalogSchema(db, true);
@@ -330,6 +340,7 @@ export function initOrMigrateSchema(db: DatabaseSync, validateVersion?: (version
     createPracticeMetadataSchema(db);
     createNotesSchema(db);
     createOutcomeSchema(db);
+    ensureActivityIndexes(db);
     // v12 fences strategy/provenance JSON semantics; v11 is reserved by LC-2.0.
     db.prepare('UPDATE schema_version SET version = ?').run(CURRENT_SCHEMA_VERSION);
     inspectCatalogSchema(db);

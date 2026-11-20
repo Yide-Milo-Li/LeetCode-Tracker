@@ -102,7 +102,7 @@ export function SetupGate({ children, ...props }: SetupGateProps) {
   useEffect(() => {
     if (phase === 'done') return;
     let active = true;
-    Promise.all([api.getSettings(), api.getCatalogStats(), api.getStrategies(), api.getGoalLists()])
+    Promise.all([api.getSettings(), api.getCatalogStats(), api.getStrategies(), api.getGoalListSummaries(1, { limit: 1 })])
       .then(([settings, stats, strategies, goals]) => {
         if (!active) return;
         const next: SetupStatus = {
@@ -110,7 +110,7 @@ export function SetupGate({ children, ...props }: SetupGateProps) {
           problemCount: stats.totalProblems,
           hasSchedule: strategies.some((s) => !s.deleted && s.weekdays.length > 0),
         };
-        if (goals.length || (phase === 'checking' && firstOpenStep(next) === 3)) {
+        if (goals.items.length || (phase === 'checking' && firstOpenStep(next) === 3)) {
           // Existing installs (or a restored migration) skip the guide entirely.
           writeDone();
           setPhase('done');

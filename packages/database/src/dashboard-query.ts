@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { addDays, isTimeZone, localDate } from '../../contracts/src/time.ts';
-import type { DashboardActivityListResponse, DashboardActivityQuery, RecentActivityItem, RecentDashboardResponse } from '../../contracts/src/dashboard.ts';
+import type { DashboardActivityListResponse, DashboardActivityQuery, RecentActivityItem, RecentDashboardResponse, DashboardDayNote } from '../../contracts/src/dashboard.ts';
 import type { RevisionStamp } from '../../contracts/src/recommendations.ts';
 import { resolveEventDate } from '../../domain/src/dashboard.ts';
 
@@ -8,7 +8,7 @@ type Source = DashboardActivityQuery['source'];
 
 /** Apply source and ISO date-prefix bounds before combining the three event streams. */
 function eventRows(source: Source, bounded = false) {
-  const range = (column: string) => bounded ? ` AND ${column} >= :start AND ${column} < :end` : '';
+  const range = (column: string) => bounded ? ` AND ${column} >= :fromDate AND ${column} < :untilDate` : '';
   const queries = [];
   if (source !== 'snapshot') queries.push(`
     SELECT id, question_id AS questionId, practiced_at AS timestamp, time_precision AS timePrecision,
@@ -24,7 +24,9 @@ function eventRows(source: Source, bounded = false) {
           ELSE COALESCE(NULLIF(last_result,''),'Submission') END AS action,
         CASE last_result WHEN 'Accepted' THEN 'accepted' ELSE 'other' END AS status
       FROM progress_snapshots WHERE status = 'active'${range('last_submitted_at')}`);
-    // Choose the first stored success at each timestamp, matching the domain's deduplication order.
+    // For a date filter, start with successes in the time range before checking their parent snapshots.
+    // MIN(rowid) retains the domain's first success at each timestamp.
+    const join = bounded ? 'CROSS JOIN' : 'JOIN';
     queries.push(`
       SELECT id, questionId, timestamp, timePrecision, sourceTimezone, 1 AS solved, 'snapshot' AS source,
              'Accepted Submission' AS action, 'accepted' AS status
@@ -32,7 +34,7 @@ function eventRows(source: Source, bounded = false) {
         SELECT s.question_id || '-success-' || s.version AS id, s.question_id AS questionId,
           s.event_time AS timestamp, s.precision AS timePrecision, s.source_timezone AS sourceTimezone,
           MIN(s.rowid) AS firstRow
-        FROM snapshot_successes s JOIN progress_snapshots p ON p.question_id = s.question_id
+        FROM snapshot_successes s ${join} progress_snapshots p ON p.question_id = s.question_id
         WHERE p.status = 'active' AND p.has_accepted = 1
           AND NOT (p.last_result IS 'Accepted' AND p.last_submitted_at IS s.event_time)${range('s.event_time')}
         GROUP BY s.question_id, s.event_time
@@ -43,6 +45,11 @@ function eventRows(source: Source, bounded = false) {
 
 type EventTime = Pick<RecentActivityItem, 'timestamp' | 'timePrecision' | 'sourceTimezone'>;
 
+/** Written ISO dates can differ from the user's date by up to two days across UTC offsets. */
+function dateBounds(first: string, last = first) {
+  return { fromDate: addDays(first, -2), untilDate: addDays(last, 3) };
+}
+
 /** UTC offsets can shift an ISO timestamp's written date relative to the profile's date. */
 export function recentDashboardDays(db: DatabaseSync, timezone: string | null, now: number): RecentDashboardResponse {
   if (!timezone || !isTimeZone(timezone)) return { timezone, days: [] };
@@ -52,7 +59,7 @@ export function recentDashboardDays(db: DatabaseSync, timezone: string | null, n
     addDays(first, i), { active: new Set<string>(), solved: new Set<string>() },
   ] as const));
   const rows = db.prepare(`SELECT questionId, timestamp, timePrecision, sourceTimezone, solved
-    FROM (${eventRows('all', true)})`).iterate({start: addDays(first, -2), end: addDays(today, 3)});
+    FROM (${eventRows('all', true)})`).iterate(dateBounds(first, today));
   for (const value of rows) {
     const row = value as unknown as EventTime & {questionId: string; solved: number};
     const { date } = resolveEventDate(row.timestamp, row.timePrecision, row.sourceTimezone, timezone, now);
@@ -86,10 +93,13 @@ export function dashboardActivityPage(db: DatabaseSync, query: DashboardActivity
     params.zone = revision.timezone;
     params.now = now;
     const day = 'tracker_activity_date(timestamp,timePrecision,sourceTimezone,:zone,:now)';
-    if (date) { where.push(day + ' = :date'); params.date = date; }
+    if (date) {
+      where.push(day + ' = :date');
+      Object.assign(params, { date }, dateBounds(date));
+    }
     if (pendingDate !== 'all') where.push(day + (pendingDate === 'true' ? ' IS NULL' : ' IS NOT NULL'));
   }
-  const filtered = `SELECT * FROM (${eventRows(query.source)}) ${where.length ? 'WHERE ' + where.join(' AND ') : ''}`;
+  const filtered = `SELECT * FROM (${eventRows(query.source, !!date)}) ${where.length ? 'WHERE ' + where.join(' AND ') : ''}`;
   const rows = db.prepare(`
     WITH ranked AS (
       SELECT *, rank() OVER byTime AS firstRank,
@@ -110,4 +120,18 @@ export function dashboardActivityPage(db: DatabaseSync, query: DashboardActivity
     ...item, isDatePending: resolveEventDate(item.timestamp, item.timePrecision, item.sourceTimezone, revision.timezone, now).isPending,
   }));
   return { items, total, page, limit, totalPages: Math.max(1, Math.ceil(total / limit)), revision };
+}
+
+/** Fetch all reflections for the selected profile day, independently of activity pagination. */
+export function dashboardDayNotes(db: DatabaseSync, date: string, timezone: string | null, now: number): DashboardDayNote[] {
+  if (!timezone || !isTimeZone(timezone)) return [];
+  registerActivityFunctions(db);
+  return db.prepare(`SELECT pr.id, '#' || p.frontend_question_id || ' ' || p.title AS title, pr.notes
+    FROM practice_records pr JOIN problems p ON p.question_id = pr.question_id
+    WHERE pr.status = 'active' AND pr.notes IS NOT NULL
+      AND pr.practiced_at >= :fromDate AND pr.practiced_at < :untilDate
+      AND tracker_activity_date(pr.practiced_at, pr.time_precision, pr.source_timezone, :zone, :now) = :date
+    ORDER BY pr.practiced_at DESC, pr.created_at DESC, pr.id`).all({
+    ...dateBounds(date), zone: timezone, now, date,
+  }).filter(row => String(row.notes).trim().length > 0) as unknown as DashboardDayNote[];
 }

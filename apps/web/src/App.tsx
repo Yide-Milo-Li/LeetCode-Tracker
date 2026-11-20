@@ -82,6 +82,7 @@ import { api, type PracticeRecord } from './api.ts';
 import { localizeApiError } from './error-i18n.ts';
 import {
   WorkspaceContext,
+  RetainedView,
   type PracticeOutcome,
   type PracticeRequest,
   type RecordsFilter,
@@ -298,8 +299,8 @@ export function App() {
     [navigate],
   );
   const workspace = useMemo(
-    () => ({ revision, desktopAgentRevision, timezone, selectedNoteProblem, navigate, openRecords, notifyMutation, openPractice, reportPracticeOutcome }),
-    [revision, desktopAgentRevision, timezone, selectedNoteProblem, navigate, openRecords, notifyMutation, openPractice, reportPracticeOutcome],
+    () => ({ revision, favoriteRevision, desktopAgentRevision, timezone, selectedNoteProblem, navigate, openRecords, notifyMutation, openPractice, reportPracticeOutcome }),
+    [revision, favoriteRevision, desktopAgentRevision, timezone, selectedNoteProblem, navigate, openRecords, notifyMutation, openPractice, reportPracticeOutcome],
   );
   const zh = lang === 'zh';
   const error = errorCause ? localizeApiError(errorCause, lang) : '';
@@ -308,7 +309,7 @@ export function App() {
     view === 'schedule' ? 'today' : view === 'catalog-import' ? 'problems' : progress ? 'statistics' : view;
   return (
     <WorkspaceContext.Provider value={workspace}>
-      <GoalListsScope lang={lang} active={view === 'today' || view === 'problems' || view === 'favorites'}
+      <GoalListsScope lang={lang} showSelected={view === 'today'} active={view === 'today' || view === 'problems' || view === 'favorites'}
         onCreated={() => setRevision(value => value + 1)}>
       <div className="app-shell">
         <a
@@ -565,7 +566,7 @@ export function App() {
           )}
           <React.Suspense fallback={<WorkspaceFallback label={zh ? '加载中…' : 'Loading…'} />}>
             {visited.has('today') && (
-              <div hidden={view !== 'today'} id="view-today">
+              <RetainedView hidden={view !== 'today'} id="view-today">
                 <SetupGate
                   lang={lang}
                   theme={theme}
@@ -583,7 +584,6 @@ export function App() {
                   <TodayPlanView
                     lang={lang}
                     active={view === 'today'}
-                    favoriteRevision={favoriteRevision}
                     onFavoritesChanged={refreshFavorites}
                     planController={plan}
                     promptSwapFeedback={promptSwapFeedback}
@@ -593,10 +593,10 @@ export function App() {
                     }}
                   />
                 </SetupGate>
-              </div>
+              </RetainedView>
             )}
             {visited.has('schedule') && (
-              <div hidden={view !== 'schedule'} id="view-schedule">
+              <RetainedView hidden={view !== 'schedule'} id="view-schedule">
                 <PageHeader
                   title={zh ? '学习安排' : 'Study schedule'}
                   description={
@@ -607,10 +607,10 @@ export function App() {
                   back={{ label: zh ? '返回今日' : 'Back to Today', run: () => navigate('today') }}
                 />
                 <StrategiesView lang={lang} focusRequest={focusRequest} />
-              </div>
+              </RetainedView>
             )}
             {visited.has('notes') && (
-              <div hidden={view !== 'notes'} id="view-notes">
+              <RetainedView hidden={view !== 'notes'} id="view-notes">
                 <NotesWorkspace
                   lang={lang}
                   notesFormatOnSave={notesFormatOnSave ?? undefined}
@@ -618,34 +618,34 @@ export function App() {
                   onClearInitialFrontendId={() => setSelectedNoteProblem(null)}
                   onNeedsSaveChange={setNoteNeedsSave}
                 />
-              </div>
+              </RetainedView>
             )}
             {visited.has('problems') && (
-              <div hidden={view !== 'problems'} id="view-problems">
+              <RetainedView hidden={view !== 'problems'} id="view-problems">
                 <CatalogView lang={lang} onNavigateSettings={() => navigate('catalog-import')}
                   onGoalListCreated={() => setRevision(value => value + 1)}
-                  favoriteRevision={favoriteRevision} onFavoritesChanged={refreshFavorites} />
-              </div>
+                  onFavoritesChanged={refreshFavorites} />
+              </RetainedView>
             )}
             {visited.has('favorites') && (
-              <div hidden={view !== 'favorites'} id="view-favorites">
+              <RetainedView hidden={view !== 'favorites'} id="view-favorites">
                 <CatalogView lang={lang} onNavigateSettings={() => navigate('catalog-import')} favoritesOnly
                   onGoalListCreated={() => setRevision(value => value + 1)}
-                  favoriteRevision={favoriteRevision} onFavoritesChanged={refreshFavorites} />
-              </div>
+                  onFavoritesChanged={refreshFavorites} />
+              </RetainedView>
             )}
             {visited.has('catalog-import') && (
-              <div hidden={view !== 'catalog-import'} id="view-catalog-import">
+              <RetainedView hidden={view !== 'catalog-import'} id="view-catalog-import">
                 <CatalogImportWorkspace lang={lang} />
-              </div>
+              </RetainedView>
             )}
             {visited.has('records') && (
-              <div hidden={view !== 'records'} role="tabpanel" aria-labelledby="tab-records" id="view-records">
+              <RetainedView hidden={view !== 'records'} role="tabpanel" aria-labelledby="tab-records" id="view-records">
                 <ActivityRecords lang={lang} filterRequest={recordsFilter} />
-              </div>
+              </RetainedView>
             )}
             {visited.has('statistics') && (
-              <div
+              <RetainedView
                 hidden={view !== 'statistics'}
                 role="tabpanel"
                 aria-labelledby="tab-statistics"
@@ -656,15 +656,15 @@ export function App() {
                   active={view === 'statistics'}
                   onNavigateToStrategies={() => {setFocusRequest(v=>v+1);navigate('schedule');}}
                 />
-              </div>
+              </RetainedView>
             )}
             {visited.has('progress-import') && (
-              <div hidden={view !== 'progress-import'} id="view-progress-import">
+              <RetainedView hidden={view !== 'progress-import'} id="view-progress-import">
                 <ProgressWorkbench lang={lang} />
-              </div>
+              </RetainedView>
             )}
             {visited.has('settings') && (
-              <div hidden={view !== 'settings'} id="view-settings">
+              <RetainedView hidden={view !== 'settings'} id="view-settings">
                 <SettingsView
                   lang={lang}
                   desktopAgent={desktopAgent}
@@ -683,7 +683,7 @@ export function App() {
                   section={settingsSection}
                   onSectionChange={setSettingsSection}
                 />
-              </div>
+              </RetainedView>
             )}
           </React.Suspense>
         </main>

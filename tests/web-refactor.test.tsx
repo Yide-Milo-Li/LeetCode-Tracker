@@ -1,4 +1,5 @@
 /** Synthetic desktop regressions for durable completion, exact edits, navigation and import ownership. */
+import { mockGoalReads } from './fixtures/web-goals.ts';
 import { afterEach, beforeEach, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
@@ -38,7 +39,9 @@ const { render, renderHook, fireEvent, screen, act, cleanup, waitFor, within } =
 const { api, ApiError } = await import('../apps/web/src/api.ts');
 const queryCatalogOverHttp = api.getCatalog;
 const readFavoritesOverHttp = api.getFavoriteMemberships;
-const readGoalsOverHttp = api.getGoalLists;
+const goalReadsOverHttp = {
+  getGoalListSummaries: api.getGoalListSummaries, getGoalList: api.getGoalList, getGoalMemberships: api.getGoalMemberships,
+};
 const { brandIconUrl } = await import('../apps/web/src/brand-icons.ts');
 const { usePreferences } = await import('../apps/web/src/hooks/usePreferences.ts');
 const { App } = await import('../apps/web/src/App.tsx');
@@ -151,7 +154,7 @@ beforeEach(() => {
   };
   mock.method(globalThis, 'setInterval', () => 1 as any);
   mock.method(globalThis, 'clearInterval', () => {});
-  mock.method(api, 'getGoalLists', async () => []);
+  mockGoalReads(api);
   mock.method(api, 'getFavoriteMemberships', async () => []);
   mock.method(api, 'getSettings', async () => preferences);
   mock.method(api, 'updateSettings', async (patch: Partial<typeof preferences>) => {
@@ -343,6 +346,35 @@ it('clearing an in-flight manual search removes its spinner and ignores the old 
   assert.equal(screen.queryByRole('button', { name: /Synthetic Search Window/ }), null);
 });
 
+it('defers hidden catalog and favorite reads until returning and keeps catalog filters', async t => {
+  const reads: string[] = [];
+  t.mock.method(api, 'getCatalog', async (query: Parameters<typeof api.getCatalog>[0]) => {
+    reads.push(query?.favoriteScope ?? 'catalog');
+    return { items: [problem], total: 1, page: 1, limit: 50 };
+  });
+  const folders = t.mock.method(api, 'getFavoriteLibrary', async () => ({ total: 1, folders: [] }));
+  const click = async (name: string) => { await act(async () => { fireEvent.click(screen.getByRole('button', { name })); }); };
+  location.hash = 'problems';
+  await act(async () => { render(<App />); });
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'Synthetic' } });
+  await click('Favorites');
+  await click('Today');
+  reads.length = 0;
+  const before = folders.mock.callCount();
+  await click('Mark complete: ' + problem.title);
+  assert.deepEqual(reads, []);
+  assert.equal(folders.mock.callCount(), before);
+  fireEvent.keyDown(document, { key: 'Escape' });
+  await click('Problems');
+  assert.deepEqual(reads, ['catalog']);
+  assert.equal((screen.getByRole('searchbox') as HTMLInputElement).value, 'Synthetic');
+  await click('Favorites');
+  assert.deepEqual(reads, ['catalog', 'all']);
+  assert.equal(folders.mock.callCount(), before + 1);
+  await click('Problems');
+  assert.equal(reads.length, 2);
+});
+
 it('a detail failure after closing offers the original draft without losing completion', async () => {
   const pending = deferred<PracticeRecord>();
   const patch = mock.method(api, 'updatePracticeRecord', () => pending.promise);
@@ -429,7 +461,9 @@ async function withProblemCatalog(run: () => Promise<void>) {
     await store.importJsonl(JSON.stringify({ id: '901', title: problem.title, difficulty: 'Easy' }));
     mock.method(api, 'getCatalog', queryCatalogOverHttp);
     mock.method(api, 'getFavoriteMemberships', readFavoritesOverHttp);
-    mock.method(api, 'getGoalLists', readGoalsOverHttp);
+    mock.method(api, 'getGoalListSummaries', goalReadsOverHttp.getGoalListSummaries);
+    mock.method(api, 'getGoalList', goalReadsOverHttp.getGoalList);
+    mock.method(api, 'getGoalMemberships', goalReadsOverHttp.getGoalMemberships);
     mock.method(globalThis, 'fetch', async (url: string, options: RequestInit = {}) => {
       const { pathname, search } = new URL(url);
       const reply = await server.inject({ method: (options.method ?? 'GET') as 'GET' | 'PUT' | 'POST' | 'PATCH' | 'DELETE',
@@ -640,7 +674,7 @@ it('manages independent flags and stars on each catalog, favorite, strategy and 
 
 it('guards duplicate saves from the Today folder chooser and reloads membership after a concurrent edit', async () => {
   const frontendId = problem.questionFrontendId;
-  mock.method(api, 'getGoalLists', async () => [{ id: 'goal', name: 'Review', version: 1,
+  mockGoalReads(api, () => [{ id: 'goal', name: 'Review', version: 1,
     items: [{ frontendId, title: problem.title, url: problem.url, completed: false }] }]);
   const trees = { id: crypto.randomUUID(), name: 'Trees', count: 1 };
   const review = { id: crypto.randomUUID(), name: 'Review', count: 0 };

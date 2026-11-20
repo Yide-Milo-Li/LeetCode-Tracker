@@ -1,6 +1,7 @@
 /** Scheduling persistence shares catalog write ownership; provider calls never hold this queue. */
 import type { DatabaseSync } from 'node:sqlite';
 import { createEvidenceDateResolver } from '../../domain/src/recommendations.ts';
+import { readPlanEvidence } from './planning-evidence.ts';
 import { randomUUID } from 'node:crypto';
 import type { CatalogStore } from './store.ts';
 import { strategyInputSchema, PlanningError, type Strategy, type StrategyInput, type DailyPlan, type Evidence, type ReviewPolicy, type RevisionStamp, type ReviewState, type Rules } from '../../contracts/src/recommendations.ts';
@@ -119,9 +120,7 @@ export class PlanningStore {
 
   /** Active manual rows and explicit snapshot successes form the only event evidence. */
   evidence(): Evidence[] {
-    const manual = this.db.prepare("SELECT 'manual:'||id AS id, question_id AS questionId, practiced_at AS at, time_precision AS precision, source_timezone AS zone, created_at AS recordedAt, duration_minutes AS durationMinutes FROM practice_records WHERE status='active' AND completed=1").all();
-    const snapshots = this.db.prepare("SELECT 'snapshot:'||s.question_id||':'||s.version AS id, s.question_id AS questionId, event_time AS at, precision, s.source_timezone AS zone, recorded_at AS recordedAt FROM snapshot_successes s JOIN progress_snapshots p ON p.question_id=s.question_id WHERE p.status='active' AND p.has_accepted=1").all();
-    return [...manual, ...snapshots] as unknown as Evidence[];
+    return readPlanEvidence(this.db);
   }
 
   /**
@@ -183,19 +182,33 @@ export class PlanningStore {
     return calculateKnowledgeProfile({ ...raw, now, userZone: zone, reviewStates: states, revision: this.stamp() }, resolveDate);
   }
 
-  /** Reconcile completion without mutating a historical version's event timestamps. */
+  /** Read the evidence for this entire request once, then match only events for each assigned problem. */
+  private reconcilePlans(plans: DailyPlan[], now: number): DailyPlan[] {
+    const ids = new Set(plans.flatMap(plan => plan.items.map(item => item.problem.questionId)));
+    const events = new Map<string, Evidence[]>();
+    for (const event of readPlanEvidence(this.db, [...ids])) {
+      const group = events.get(event.questionId);
+      if (group) group.push(event);
+      else events.set(event.questionId, [event]);
+    }
+    return plans.map(plan => ({
+      ...plan,
+      items: plan.items.map(item => {
+        const matches = events.get(item.problem.questionId) ?? [];
+        const evidenceIds = matches.filter(event => evidenceAfter(event, item.addedAt, now)).map(event => event.id);
+        return { ...item, completed: evidenceIds.length > 0, evidenceIds };
+      }),
+    }));
+  }
+
   reconcile(plan: DailyPlan, now: number): DailyPlan {
-    const events = this.evidence();
-    return { ...plan, items: plan.items.map(item => {
-      const evidenceIds = events.filter(e => e.questionId === item.problem.questionId && evidenceAfter(e, item.addedAt, now)).map(e => e.id);
-      return { ...item, completed: evidenceIds.length > 0, evidenceIds };
-    }) };
+    return this.reconcilePlans([plan], now)[0];
   }
 
   /** Read current plans; live completion is derived, while saved versions remain auditable. */
   plans(now = Date.now()): DailyPlan[] {
-    const rows = this.db.prepare('SELECT payload_json FROM daily_plans ORDER BY plan_date DESC').all() as { payload_json: string }[];
-    return rows.map(r => this.reconcile(JSON.parse(r.payload_json), now));
+    const rows = this.db.prepare('SELECT payload_json FROM daily_plans ORDER BY plan_date DESC').all();
+    return this.reconcilePlans(rows.map(row => JSON.parse(String(row.payload_json))), now);
   }
 
   /** Find a daily plan by calendar date string (YYYY-MM-DD). */

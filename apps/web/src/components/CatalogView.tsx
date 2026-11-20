@@ -62,15 +62,16 @@ interface CatalogViewProps {
 }
 
 export function CatalogView(props: CatalogViewProps) {
-  return <GoalListsScope lang={props.lang} onCreated={props.onGoalListCreated}><CatalogWorkspace {...props} /></GoalListsScope>;
+  return <GoalListsScope lang={props.lang} showSelected={false} onCreated={props.onGoalListCreated}><CatalogWorkspace {...props} /></GoalListsScope>;
 }
 
 /** Retain filter state and reject out-of-order responses while catalog/import mutations refresh current data. */
-function CatalogWorkspace({ lang, onNavigateSettings, favoritesOnly = false, favoriteRevision = 0,
+function CatalogWorkspace({ lang, onNavigateSettings, favoritesOnly = false, favoriteRevision: ownFavoriteRevision,
   onFavoritesChanged, onGoalListCreated }: CatalogViewProps) {
   const t = translations[lang];
   const zh = lang === 'zh';
   const workspace = useWorkspace();
+  const favoriteRevision = ownFavoriteRevision ?? workspace.favoriteRevision ?? 0;
   const goals = useSharedGoalLists();
   const [stats, setStats] = useState<CatalogStats | null>(null);
   const [tags, setTags] = useState<TopicTag[]>([]);

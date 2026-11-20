@@ -1,4 +1,5 @@
 /** Rendered DOM regressions for delayed import responses and failed catalog requests. */
+import { mockGoalReads } from './fixtures/web-goals.ts';
 import { afterEach, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
@@ -280,7 +281,7 @@ it('handles pagination navigation and disables boundary controls correctly', asy
 
 it('builds a goal list in natural ID order from selections across catalog pages and filters', async () => {
   overview();
-  mock.method(api, 'getGoalLists', async () => []);
+  mockGoalReads(api);
   const first = ['100', 'LCR 10', '9007199254740993'];
   const second = ['002', '10', 'LCR 2', '9007199254740992', '2'];
   const nextPage = deferred<ReturnType<typeof results>>();

@@ -36,7 +36,7 @@ const baseSettings = { language: 'en' as const, theme: 'light' as const, timezon
 function stubStatus({ timezone = null as string | null, problems = 0, scheduled = false, goals = false } = {}) {
   mock.method(api, 'getSettings', async () => ({ ...baseSettings, timezone }));
   mock.method(api, 'getCatalogStats', async () => ({ totalProblems: problems }) as never);
-  mock.method(api, 'getGoalLists', async () => goals ? [{ id: 'list' }] as never : []);
+  mock.method(api, 'getGoalListSummaries', async () => ({ items: goals ? [{ id: 'list' }] : [], nextPage: null }));
   mock.method(api, 'getStrategies', async () =>
     scheduled ? ([{ id: 's1', version: 1, deleted: false, weekdays: [1], name: 'x', rules: {} }] as never) : [],
   );

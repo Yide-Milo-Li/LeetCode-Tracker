@@ -4,7 +4,7 @@
  * progress snapshot management, Gemini-assisted text formatting, and user preferences.
  */
 import type { RecommendationFeedbackReason } from '../../../packages/contracts/src/recommendations.ts';
-import type { AddProblemsToGoalLists, CreateGoalList, UpdateGoalList, EditGoalItem, GoalList, ProblemGoalMembership } from '../../../packages/contracts/src/goal-lists.ts';
+import type { AddProblemsToGoalLists, CreateGoalList, UpdateGoalList, EditGoalItem, GoalList, GoalListSummary, ProblemGoalMembership } from '../../../packages/contracts/src/goal-lists.ts';
 import type { AddFavorites, CatalogListProblem, FavoriteFolder, FavoriteLibrary, FavoriteMembership, RemoveFavorites, SaveFavorite } from '../../../packages/contracts/src/favorites.ts';
 import type { DesktopAgentStatus } from '../../../packages/contracts/src/desktop-agent.ts';
 import type {
@@ -14,6 +14,7 @@ import type {
   CreatePracticeRecordInput,
   DailyPlan,
   DashboardActivityListResponse,
+  DashboardDayNote,
   DashboardResponse,
   RecentDashboardResponse,
   EnsureResult,
@@ -375,11 +376,26 @@ const planningApi = {
   async getGoalLists(): Promise<GoalList[]> {
     return (await request<{ items: GoalList[] }>('/goal-lists')).items;
   },
-  async setProblemGoalMembership(input: ProblemGoalMembership): Promise<GoalList[]> {
-    return (await request<{ items: GoalList[] }>('/goal-lists/memberships', { method: 'PUT', body: JSON.stringify(input) })).items;
+  getGoalListSummaries(page = 1, { signal, limit = 100 }: ReadOptions & { limit?: number } = {}) {
+    return request<{ items: GoalListSummary[]; nextPage: number | null }>(`/goal-lists/summaries?page=${page}&limit=${limit}`, { signal });
   },
-  addProblemsToGoalLists(input: AddProblemsToGoalLists): Promise<{ items: GoalList[]; added: number }> {
-    return request('/goal-lists/memberships/batch', { method: 'PUT', body: JSON.stringify(input) });
+  getGoalList(id: string, { signal }: ReadOptions = {}) {
+    return request<GoalList>(`/goal-lists/${encodeURIComponent(id)}`, { signal });
+  },
+  async getGoalMemberships(frontendIds: string[], { signal }: ReadOptions = {}) {
+    const batches: Promise<{ items: { frontendId: string; listIds: string[] }[] }>[] = [];
+    for (let i = 0; i < frontendIds.length; i += 100) {
+      batches.push(request('/goal-lists/memberships/lookup', {
+        method: 'POST', body: JSON.stringify({ frontendIds: frontendIds.slice(i, i + 100) }), signal,
+      }));
+    }
+    return (await Promise.all(batches)).flatMap(batch => batch.items);
+  },
+  setProblemGoalMembership(input: ProblemGoalMembership) {
+    return request<{ changed: GoalListSummary[]; problem: { frontendId: string; title: string; url: string } }>('/goal-lists/memberships?compact=true', { method: 'PUT', body: JSON.stringify(input) });
+  },
+  addProblemsToGoalLists(input: AddProblemsToGoalLists): Promise<{ added: number }> {
+    return request('/goal-lists/memberships/batch?compact=true', { method: 'PUT', body: JSON.stringify(input) });
   },
   createGoalList(input: CreateGoalList): Promise<GoalList> {
     return request('/goal-lists', { method: 'POST', body: JSON.stringify(input) });
@@ -481,13 +497,17 @@ const dashboardApi = {
     return request<RecentDashboardResponse>('/dashboard/recent', { signal });
   },
 
+  async getDashboardDayNotes(date: string, { signal }: ReadOptions = {}): Promise<DashboardDayNote[]> {
+    return (await request<{ items: DashboardDayNote[] }>(`/dashboard/day-notes?date=${encodeURIComponent(date)}`, { signal })).items;
+  },
+
   getDashboardActivities(query: {
     page?: number;
     limit?: number;
     date?: string;
     source?: 'manual' | 'snapshot' | 'all';
     pendingDate?: 'true' | 'false' | 'all';
-  } = {}): Promise<DashboardActivityListResponse> {
+  } = {}, { signal }: ReadOptions = {}): Promise<DashboardActivityListResponse> {
     const params = new URLSearchParams();
     if (query.page) params.set('page', String(query.page));
     if (query.limit) params.set('limit', String(query.limit));
@@ -495,7 +515,7 @@ const dashboardApi = {
     if (query.source && query.source !== 'all') params.set('source', query.source);
     if (query.pendingDate && query.pendingDate !== 'all') params.set('pendingDate', query.pendingDate);
     const qs = params.toString();
-    return request<DashboardActivityListResponse>(`/dashboard/activity${qs ? `?${qs}` : ''}`);
+    return request<DashboardActivityListResponse>(`/dashboard/activity${qs ? `?${qs}` : ''}`, { signal });
   },
 
   getMasteryReport(): Promise<TagMasteryReport> {

@@ -189,7 +189,7 @@ function ReviewBacklogRow({ plan, lang, disabled, onAddReview }: {
 function TodayPlanViewInner({
   lang,
   active = true,
-  favoriteRevision = 0,
+  favoriteRevision,
   onFavoritesChanged,
   onNavigateToSettings,
   planController: controller,
@@ -422,12 +422,12 @@ function TodayPlanViewInner({
         }
       />
       <TodayOverview lang={lang} plan={plan} planStatus={controller.error && !plan ? 'error' : controller.ensureResult?.status}
-        goal={goals.list} goalsLoaded={goals.loaded} goalsError={Boolean(goals.error)} onJumpToGoal={() => {
+        goal={goals.list} goalsLoaded={goals.loaded && (!goals.lists.length || !!goals.list)} goalsError={Boolean(goals.error)} onJumpToGoal={() => {
           const row = nextGoalRow.current;
           (row?.querySelector<HTMLAnchorElement>('a.problem-title-link') ?? row)?.focus();
         }} />
       <TodayFavorites lang={lang} active={active && Boolean(plan?.items.length || goals.list?.items.length)}
-        favoriteRevision={favoriteRevision} onChanged={onFavoritesChanged}>
+        favoriteRevision={favoriteRevision ?? workspace.favoriteRevision ?? 0} onChanged={onFavoritesChanged}>
       <div className="today-task-columns">
         <section className="today-strategy-tasks" aria-labelledby="strategy-tasks-title">
           <div className="today-task-heading">

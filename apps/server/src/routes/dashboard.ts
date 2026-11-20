@@ -6,5 +6,6 @@ export function registerDashboardRoutes(app: FastifyInstance, { application }: R
   const { dashboard } = application;
   app.get('/api/v1/dashboard', applicationRoute(r => dashboard.summary(r.query)));
   app.get('/api/v1/dashboard/recent', applicationRoute(() => dashboard.recent()));
+  app.get('/api/v1/dashboard/day-notes', applicationRoute(r => dashboard.dayNotes((r.query as { date?: string }).date)));
   app.get('/api/v1/dashboard/activity', applicationRoute(r => dashboard.activity(r.query)));
 }

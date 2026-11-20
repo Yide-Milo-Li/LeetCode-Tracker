@@ -2,9 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
   GOAL_LIST_PREFIX, createGoalListSchema, updateGoalListSchema, editGoalItemSchema, deleteGoalListSchema,
-  goalListIdSchema, problemGoalMembershipSchema, addProblemsToGoalListsSchema, type EditGoalItem, type GoalList, type StoredGoalList,
+  goalListSummary, goalListIdSchema, problemGoalMembershipSchema, addProblemsToGoalListsSchema,
+  type EditGoalItem, type GoalList, type StoredGoalList,
 } from '../../../contracts/src/goal-lists.ts';
-import { goalCatalog, readGoalLists, saveGoalList } from '../../../database/src/goal-lists.ts';
+import { goalCatalog, readGoalLists, readGoalListsById, readGoalListPage, readGoalMemberships, saveGoalList } from '../../../database/src/goal-lists.ts';
 import { completePlanItem, currentPlan } from '../planned-completion.ts';
 import type { ApplicationContext } from '../context.ts';
 import { fail } from '../errors.ts';
@@ -76,13 +77,17 @@ export function createGoalListOperations({ store, writeLock }: ApplicationContex
 
   return {
     list: async (id?: string) => ({ items: views(id === undefined ? readGoalLists(db) : [get(id)]) }),
-    addProblems(input: unknown) {
+    memberships: async (frontendIds: string[]) => readGoalMemberships(db, frontendIds),
+    async summaries(page: number, limit: number) {
+      const { total, lists } = readGoalListPage(db, page, limit);
+      return { items: lists.map(goalListSummary), total, page, nextPage: page * limit < total ? page + 1 : null };
+    },
+    addProblems(input: unknown, includeLists = true) {
       const { frontendIds, listIds } = parse(addProblemsToGoalListsSchema, input);
       const ids = [...new Set(frontendIds)];
       const destinations = new Set(listIds);
       return transaction(() => {
-        const lists = readGoalLists(db);
-        const selected = lists.filter(list => destinations.has(list.id));
+        const selected = readGoalListsById(db, destinations);
         if (selected.length !== destinations.size) fail(404, { error: 'GOAL_LIST_NOT_FOUND' });
         const catalog = goalCatalog(db, ids);
         const missing = ids.filter(id => !catalog.has(id));
@@ -98,20 +103,22 @@ export function createGoalListOperations({ store, writeLock }: ApplicationContex
           saveGoalList(db, list);
           added += additions.length;
         }
-        return { items: views(lists), added };
+        return { items: includeLists ? views(readGoalLists(db)) : [], added };
       });
     },
-    setProblemMembership(input: unknown) {
+    setProblemMembership(input: unknown, includeLists = true) {
       const { frontendId, expectedListIds, listIds, newList } = parse(problemGoalMembershipSchema, input);
       return transaction(() => {
-        if (!goalCatalog(db, [frontendId]).has(frontendId)) {
+        const problem = goalCatalog(db, [frontendId]).get(frontendId);
+        if (!problem) {
           fail(404, { error: 'GOAL_UNKNOWN_PROBLEM', message: frontendId, frontendIds: [frontendId] });
         }
-        const lists = readGoalLists(db);
+        const current = new Set(readGoalMemberships(db, [frontendId]).get(frontendId) ?? []);
+        const lists = readGoalListsById(db, new Set([...current, ...listIds]));
+        const changed: ReturnType<typeof goalListSummary>[] = [];
         const known = new Map(lists.map(list => [list.id, list]));
         const selected = new Set(listIds);
         if (listIds.some(id => !known.has(id) && id !== newList?.id)) fail(409, { error: 'STALE_GOAL_MEMBERSHIP' });
-        const current = new Set(lists.filter(list => list.items.some(item => item.frontendId === frontendId)).map(list => list.id));
         if (newList) {
           const existing = known.get(newList.id);
           if (existing && (existing.name !== newList.name || !current.has(existing.id))) fail(409, { error: 'GOAL_LIST_EXISTS' });
@@ -123,12 +130,15 @@ export function createGoalListOperations({ store, writeLock }: ApplicationContex
           if (selected.has(list.id) === current.has(list.id)) continue;
           if (selected.has(list.id)) list.items.push({ frontendId, completed: false });
           else list.items = list.items.filter(item => item.frontendId !== frontendId);
-          saveGoalList(db, { ...list, version: list.version + 1 });
+          list.version++;
+          saveGoalList(db, list);
+          if (!includeLists) changed.push(goalListSummary(list));
         }
         if (newList && !known.has(newList.id)) {
-          saveGoalList(db, { ...newList, version: 1, items: [{ frontendId, completed: false }] });
+          const created = save({ ...newList, version: 1, items: [{ frontendId, completed: false }] });
+          if (!includeLists) changed.push(goalListSummary(created));
         }
-        return { items: views(readGoalLists(db)) };
+        return includeLists ? { items: views(readGoalLists(db)) } : { items: [], changed, problem };
       });
     },
     create(input: unknown) {

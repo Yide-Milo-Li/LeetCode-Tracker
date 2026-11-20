@@ -1042,3 +1042,27 @@ it('shares one recorded solve across strategy and goal clicks, including concurr
     await assertProgress(3);
   } finally { await app.close(); db.close(); }
 });
+
+it('returns paged goal summaries, visible memberships and a compact acknowledgement without unrelated entries', async () => {
+  const { app, db } = await createTestApp();
+  const base = '/api/v1/goal-lists';
+  try {
+    const make = async (name: string, frontendIds: string[]) => (await app.inject({
+      method: 'POST', url: base, payload: { name, frontendIds },
+    })).json<GoalList>();
+    const first = await make('First', ['1']), second = await make('Second', ['2']);
+    const summaries = (await app.inject(base + '/summaries?page=1&limit=1')).json();
+    assert.equal(summaries.nextPage, 2);
+    assert.deepEqual(summaries.items, [{ id: first.id, name: 'First', version: 1, total: 1, completedCount: 0 }]);
+    assert.equal((await app.inject(base + '/summaries?page=2&limit=1')).json().items[0].id, second.id);
+    const lookup = await app.inject({ method: 'POST', url: base + '/memberships/lookup', payload: { frontendIds: ['1'] } });
+    assert.deepEqual(lookup.json().items, [{ frontendId: '1', listIds: [first.id] }]);
+    const set = await app.inject({ method: 'PUT', url: base + '/memberships?compact=true',
+      payload: { frontendId: '1', expectedListIds: [first.id], listIds: [second.id] } });
+    assert.equal(set.statusCode, 200);
+    assert.deepEqual(set.json().items, []);
+    assert.deepEqual(set.json().changed.map((list: { total: number }) => list.total).sort(), [0, 2]);
+    assert.equal(set.json().problem.frontendId, '1');
+    assert.equal((await app.inject(base + '/' + second.id)).json().items.length, 2);
+  } finally { await app.close(); db.close(); }
+});

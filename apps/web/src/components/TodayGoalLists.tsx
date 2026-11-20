@@ -19,7 +19,7 @@ export function TodayGoalLists({ lang, goals, nextTaskRef }: {
 }) {
   const zh = lang === 'zh';
   const { notifyMutation, openPractice } = useWorkspace();
-  const { lists, list, loaded, error, setError, selectGoal, saved, refresh } = goals;
+  const { lists, selected, list, loaded, error, setError, selectGoal, saved, refresh } = goals;
   const pendingRows = useMemo(() => list?.items.flatMap((item, i) => item.completed ? [] : [{ item, position: i + 1 }]) ?? [], [list]);
   const nextItem = pendingRows[0]?.item;
   const scrollList = useRef<HTMLOListElement>(null);
@@ -79,18 +79,18 @@ export function TodayGoalLists({ lang, goals, nextTaskRef }: {
       </button>
     </div>
     {error && <Feedback retry={{ label: zh ? '刷新题单' : 'Reload lists', run: refresh }}>{error}</Feedback>}
-    {list ? <div className="goal-list" key={list.id} data-goal={list.id}>
+    {selected ? <div className="goal-list" key={selected.id} data-goal={selected.id}>
         <div className="goal-list-tools">
           {lists.length > 1 ? <label className="goal-list-switcher">
             <span className="visually-hidden">{zh ? `切换题单（${lists.length}）` : `Select list (${lists.length})`}</span>
-            <select className="form-input" value={list.id} title={list.name} disabled={!!pending} onChange={e => selectGoal(e.target.value)}>
+            <select className="form-input" value={selected.id} title={selected.name} disabled={!!pending} onChange={e => selectGoal(e.target.value)}>
               {lists.map(goal => <option key={goal.id} value={goal.id}>{goal.name}</option>)}
             </select>
-          </label> : <h3>{list.name}</h3>}
-          <button type="button" className="btn btn-secondary btn-sm goal-edit-button" aria-label={(zh ? '编辑 ' : 'Edit ') + list.name}
-            ref={editButton} disabled={!!pending} onClick={() => setEditing(list)}><Pencil size={14} aria-hidden="true" />{zh ? '编辑' : 'Edit'}</button>
+          </label> : <h3>{selected.name}</h3>}
+          <button type="button" className="btn btn-secondary btn-sm goal-edit-button" aria-label={(zh ? '编辑 ' : 'Edit ') + selected.name}
+            ref={editButton} disabled={!!pending || !list} onClick={() => setEditing(list)}><Pencil size={14} aria-hidden="true" />{zh ? '编辑' : 'Edit'}</button>
         </div>
-        {nextItem ? <ol className="goal-items goal-pending-items" role="list" aria-label={list.name} ref={scrollList} {...windowed.listProps}
+        {!list ? (!error && <p role="status">{zh ? '正在读取题单…' : 'Loading checklist…'}</p>) : nextItem ? <ol className="goal-items goal-pending-items" role="list" aria-label={list.name} ref={scrollList} {...windowed.listProps}
           style={{ ...windowed.listProps.style, '--goal-order-width': `${String(list.items.length).length + 1}ch` } as CSSProperties}>
           {windowed.renderRows(({ item, position }, i, rowProps) => <li key={item.frontendId} value={position} className="goal-item-line" {...rowProps}
             ref={i === 0 && nextTaskRef ? node => {
@@ -109,7 +109,7 @@ export function TodayGoalLists({ lang, goals, nextTaskRef }: {
               onRemove={() => void changeItem(list, item.frontendId, 'remove')} />
           </li>)}
         </ol> : <p className="text-muted">{list.items.length ? (zh ? '本单已全部完成。' : 'All problems completed.') : (zh ? '题单为空。' : 'This list is empty.')}</p>}
-      </div> : loaded && !error ? <p className="text-muted">{zh ? '尚无目标题单。' : 'No goal lists yet.'}</p> : null}
+      </div> : loaded && !lists.length && !error ? <p className="text-muted">{zh ? '尚无目标题单。' : 'No goal lists yet.'}</p> : null}
     <span className="visually-hidden" role="status">{announcement}</span>
     {editing !== undefined && <GoalListEditor goal={editing} lang={lang} onClose={() => setEditing(undefined)}
       onRefresh={refresh} onSaved={(id, list) => {

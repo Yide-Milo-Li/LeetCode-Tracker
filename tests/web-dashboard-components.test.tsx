@@ -400,6 +400,7 @@ it('ActivityRecords applies a filter request, then supports filtering, paginatio
       },
     ],
   });
+  const notes = mock.method(api, 'getDashboardDayNotes', async () => [{ id: 'historical', title: '#1 Two Sum', notes: 'An older reflection.' }]);
   mock.method(api, 'getDashboardActivities', async (query: any) => {
     queryParams = query;
     return page(query.page === 2 ? 2 : 1);
@@ -409,6 +410,8 @@ it('ActivityRecords applies a filter request, then supports filtering, paginatio
     render(<ActivityRecords lang="en" filterRequest={{ id: 1, date: '2026-03-30' }} />);
   });
 
+  assert.ok(screen.getByText('An older reflection.'));
+  assert.equal(notes.mock.calls[0].arguments[0], '2026-03-30');
   assert.equal(queryParams?.date, '2026-03-30');
   assert.equal(queryParams?.page, 1);
 
@@ -428,6 +431,7 @@ it('ActivityRecords applies a filter request, then supports filtering, paginatio
 
 it('ActivityRecords replaces every filter when a new request arrives', async () => {
   let queryParams: any = null;
+  mock.method(api, 'getDashboardDayNotes', async () => []);
   mock.method(api, 'getDashboardActivities', async (query: any) => {
     queryParams = query;
     return emptyActivities;

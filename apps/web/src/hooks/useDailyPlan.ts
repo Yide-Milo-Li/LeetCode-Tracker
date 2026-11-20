@@ -33,7 +33,6 @@ export interface UseDailyPlanReturn {
   clearError: () => void;
   /** Trigger a background check/refresh of today's plan. */
   refresh: () => Promise<void>;
-  /** Append one question to today's plan. */
   /** Append one problem; `review` pulls the next due review even when today's review cap is full. */
   appendOne: (kind?: 'new' | 'review') => Promise<void>;
   /** Remove a single question from today's plan. */
@@ -47,6 +46,8 @@ export interface UseDailyPlanReturn {
   /** Reload plan status after a practice session is logged or updated. */
   onPracticeLogged: (record?: PracticeRecord) => Promise<void>;
 }
+
+type PlanMutation = { kind: 'replace' | 'remove'; itemId: string } | { kind: 'batch' | 'append' };
 
 interface PlanErrorEntry {
   err: unknown;
@@ -63,10 +64,7 @@ export function useDailyPlan(lang: Language = 'en'): UseDailyPlanReturn {
   const [ensureResult, setEnsureResult] = useState<EnsureResult | null>(null);
   const [refreshError, setRefreshError] = useState<PlanErrorEntry | null>(null);
   const [mutationError, setMutationError] = useState<PlanErrorEntry | null>(null);
-  const [replacingItemId, setReplacingItemId] = useState<string | null>(null);
-  const [replacingBatch, setReplacingBatch] = useState(false);
-  const [appending, setAppending] = useState(false);
-  const [removingItemId, setRemovingItemId] = useState<string | null>(null);
+  const [mutation, setMutation] = useState<PlanMutation | null>(null);
 
   const changeRevision = useRef(0);
   const refreshInFlight = useRef(false);
@@ -133,72 +131,27 @@ export function useDailyPlan(lang: Language = 'en'): UseDailyPlanReturn {
     };
   }, [refresh]);
 
-  const replaceOne = useCallback(
-    async (item: PlanItem, feedbackReason?: RecommendationFeedbackReason) => {
-      if (!ensureResult?.plan || planMutationPending.current) return;
-      planMutationPending.current = true;
-      setReplacingItemId(item.id);
-      setMutationError(null);
-      const currentRevision = ++changeRevision.current;
-      try {
-        const updated = await api.replacePlanItems(ensureResult.plan.id, {
-          mode: 'one',
-          itemId: item.id,
-          ...(feedbackReason ? { feedbackReason } : {}),
-          expectedVersion: ensureResult.plan.version,
-        });
-        if (currentRevision === changeRevision.current) {
-          setEnsureResult({ status: 'ready', plan: updated });
-        } else {
-          queuedRefresh.current = true;
-        }
-      } catch (err: unknown) {
-        if (currentRevision === changeRevision.current) {
-          setMutationError({
-            err,
-            fallback: { en: 'Failed to replace problem.', zh: '更换题目失败。' },
-          });
-        }
-      } finally {
-        changeRevision.current++;
-        planMutationPending.current = false;
-        setReplacingItemId(null);
-        if (queuedRefresh.current) {
-          queuedRefresh.current = false;
-          void refresh();
-        }
-      }
-    },
-    [ensureResult, refresh],
-  );
-
-  const replaceAllUnfinished = useCallback(async () => {
-    if (!ensureResult?.plan || planMutationPending.current) return;
+  const mutatePlan = useCallback(async (
+    action: PlanMutation,
+    fallback: PlanErrorEntry['fallback'],
+    save: (plan: DailyPlan) => Promise<DailyPlan>,
+  ) => {
+    const plan = ensureResult?.plan;
+    if (!plan || planMutationPending.current) return;
     planMutationPending.current = true;
-    setReplacingBatch(true);
+    const revision = ++changeRevision.current;
+    setMutation(action);
     setMutationError(null);
-    const currentRevision = ++changeRevision.current;
     try {
-      const updated = await api.replacePlanItems(ensureResult.plan.id, {
-        mode: 'all_unfinished',
-        expectedVersion: ensureResult.plan.version,
-      });
-      if (currentRevision === changeRevision.current) {
-        setEnsureResult({ status: 'ready', plan: updated });
-      } else {
-        queuedRefresh.current = true;
-      }
-    } catch (err: unknown) {
-      if (currentRevision === changeRevision.current) {
-        setMutationError({
-          err,
-          fallback: { en: 'Failed to replace unfinished problems.', zh: '更换未完成题目失败。' },
-        });
-      }
+      const updated = await save(plan);
+      if (revision === changeRevision.current) setEnsureResult({ status: 'ready', plan: updated });
+      else queuedRefresh.current = true;
+    } catch (err) {
+      if (revision === changeRevision.current) setMutationError({ err, fallback });
     } finally {
       changeRevision.current++;
       planMutationPending.current = false;
-      setReplacingBatch(false);
+      setMutation(null);
       if (queuedRefresh.current) {
         queuedRefresh.current = false;
         void refresh();
@@ -206,77 +159,39 @@ export function useDailyPlan(lang: Language = 'en'): UseDailyPlanReturn {
     }
   }, [ensureResult, refresh]);
 
-  const appendOne = useCallback(async (kind?: 'new' | 'review') => {
-    if (!ensureResult?.plan || planMutationPending.current) return;
-    planMutationPending.current = true;
-    setAppending(true);
-    setMutationError(null);
-    const currentRevision = ++changeRevision.current;
-    try {
-      const updated = await api.appendPlanItem(ensureResult.plan.id, {
-        expectedVersion: ensureResult.plan.version,
-        ...(kind ? { kind } : {}),
-      });
-      if (currentRevision === changeRevision.current) {
-        setEnsureResult({ status: 'ready', plan: updated });
-      } else {
-        queuedRefresh.current = true;
-      }
-    } catch (err: unknown) {
-      if (currentRevision === changeRevision.current) {
-        setMutationError({
-          err,
-          fallback: { en: 'Failed to append problem.', zh: '加题失败。' },
-        });
-      }
-    } finally {
-      changeRevision.current++;
-      planMutationPending.current = false;
-      setAppending(false);
-      if (queuedRefresh.current) {
-        queuedRefresh.current = false;
-        void refresh();
-      }
-    }
-  }, [ensureResult, refresh]);
+  const replaceOne = useCallback((item: PlanItem, feedbackReason?: RecommendationFeedbackReason) =>
+    mutatePlan(
+      { kind: 'replace', itemId: item.id },
+      { en: 'Failed to replace problem.', zh: '更换题目失败。' },
+      plan => api.replacePlanItems(plan.id, {
+        mode: 'one', itemId: item.id, expectedVersion: plan.version,
+        ...(feedbackReason ? { feedbackReason } : {}),
+      }),
+    ), [mutatePlan]);
 
-  const removeOne = useCallback(
-    async (item: PlanItem, feedbackReason?: RecommendationFeedbackReason) => {
-      if (!ensureResult?.plan || planMutationPending.current) return;
-      planMutationPending.current = true;
-      setRemovingItemId(item.id);
-      setMutationError(null);
-      const currentRevision = ++changeRevision.current;
-      try {
-        const updated = await api.removePlanItem(ensureResult.plan.id, {
-          itemId: item.id,
-          ...(feedbackReason ? { feedbackReason } : {}),
-          expectedVersion: ensureResult.plan.version,
-        });
-        if (currentRevision === changeRevision.current) {
-          setEnsureResult({ status: 'ready', plan: updated });
-        } else {
-          queuedRefresh.current = true;
-        }
-      } catch (err: unknown) {
-        if (currentRevision === changeRevision.current) {
-          setMutationError({
-            err,
-            fallback: { en: 'Failed to remove problem.', zh: '移除题目失败。' },
-          });
-        }
-      } finally {
-        changeRevision.current++;
-        planMutationPending.current = false;
-        setRemovingItemId(null);
-        if (queuedRefresh.current) {
-          queuedRefresh.current = false;
-          void refresh();
-        }
-      }
-    },
-    [ensureResult, refresh],
-  );
+  const replaceAllUnfinished = useCallback(() =>
+    mutatePlan(
+      { kind: 'batch' },
+      { en: 'Failed to replace unfinished problems.', zh: '更换未完成题目失败。' },
+      plan => api.replacePlanItems(plan.id, { mode: 'all_unfinished', expectedVersion: plan.version }),
+    ), [mutatePlan]);
+
+  const appendOne = useCallback((kind?: 'new' | 'review') =>
+    mutatePlan(
+      { kind: 'append' },
+      { en: 'Failed to append problem.', zh: '加题失败。' },
+      plan => api.appendPlanItem(plan.id, { expectedVersion: plan.version, ...(kind ? { kind } : {}) }),
+    ), [mutatePlan]);
+
+  const removeOne = useCallback((item: PlanItem, feedbackReason?: RecommendationFeedbackReason) =>
+    mutatePlan(
+      { kind: 'remove', itemId: item.id },
+      { en: 'Failed to remove problem.', zh: '移除题目失败。' },
+      plan => api.removePlanItem(plan.id, {
+        itemId: item.id, expectedVersion: plan.version,
+        ...(feedbackReason ? { feedbackReason } : {}),
+      }),
+    ), [mutatePlan]);
 
   const onOverrideCommitted = useCallback((newPlan: DailyPlan) => {
     changeRevision.current++;
@@ -331,10 +246,10 @@ export function useDailyPlan(lang: Language = 'en'): UseDailyPlanReturn {
     ensureResult,
     plan: ensureResult?.plan ?? null,
     error: activeError ? localizeApiError(activeError.err, lang, activeError.fallback[lang]) : null,
-    replacingItemId,
-    replacingBatch,
-    appending,
-    removingItemId,
+    replacingItemId: mutation?.kind === 'replace' ? mutation.itemId : null,
+    replacingBatch: mutation?.kind === 'batch',
+    appending: mutation?.kind === 'append',
+    removingItemId: mutation?.kind === 'remove' ? mutation.itemId : null,
     isPlanMutationPending,
     clearError,
     refresh,

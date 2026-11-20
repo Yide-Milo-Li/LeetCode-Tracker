@@ -151,7 +151,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   app.addHook('onResponse', async (request, reply) => {
     if (reply.statusCode < 200 || reply.statusCode >= 300 ||
         !['POST', 'PATCH', 'PUT', 'DELETE'].includes(request.method) ||
-        request.url.startsWith('/api/v1/sync/')) return;
+        request.url.startsWith('/api/v1/sync/') || request.routeOptions.url === '/api/v1/goal-lists/memberships/lookup') return;
     deviceSync.observeLocalWrite();
   });
   registerAllRoutes(app, {

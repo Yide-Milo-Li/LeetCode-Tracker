@@ -89,6 +89,47 @@ describe('Fastify Dashboard & Activity API Endpoints', () => {
     } finally { await app.close(); db.close(); }
   });
 
+  it('adds date-range indexes to an existing v12 profile on writable open', async () => {
+    const { app, db } = await setupDashboardApp();
+    try {
+      db.exec('DROP INDEX idx_practice_status_time; DROP INDEX idx_progress_status_time; DROP INDEX idx_success_time;');
+      // A read-only MCP client may open the existing schema before the desktop upgrades its indexes.
+      db.exec('PRAGMA query_only = ON');
+      const reader = new CatalogStore(db, { skipBackup: true });
+      assert.ok(reader.getSettings());
+      db.exec('PRAGMA query_only = OFF');
+      await CatalogStore.open(db, { skipBackup: true });
+      const indexes = db.prepare("SELECT name FROM sqlite_schema WHERE type='index'").all().map(row => row.name);
+      for (const name of ['idx_practice_status_time', 'idx_progress_status_time', 'idx_success_time']) {
+        assert.ok(indexes.includes(name));
+      }
+    } finally { await app.close(); db.close(); }
+  });
+
+  it('reads all notes for a profile day even after 100 newer practices, including across midnight', async () => {
+    const { app, db, store } = await setupDashboardApp();
+    try {
+      await store.updateSettings({ timezone: 'America/Los_Angeles' });
+      const add = db.prepare(`INSERT INTO practice_records
+        (id, question_id, completed, practiced_at, time_precision, source_timezone, notes, status, created_at, updated_at)
+        VALUES (?, 'q1', 1, ?, ?, ?, ?, ?, 1, 1)`);
+      const day = '2020-03-08';
+      add.run('reflection', '2020-03-09T06:59:00Z', 'datetime', null, 'Kept after DST', 'active');
+      add.run('date-only', day, 'date', 'America/Los_Angeles', 'Same local day', 'active');
+      add.run('pending', day, 'date', 'Asia/Tokyo', 'Different local day', 'active');
+      add.run('revoked', day, 'date', 'America/Los_Angeles', 'Revoked', 'revoked');
+      add.run('blank', day, 'date', 'America/Los_Angeles', '  ', 'active');
+      for (let i = 0; i < 101; i++) add.run('later-' + i, '2020-03-09T07:01:00Z', 'datetime', null, 'Next day', 'active');
+      const reply = await app.inject('/api/v1/dashboard/day-notes?date=' + day);
+      assert.equal(reply.statusCode, 200);
+      assert.deepEqual(reply.json().items, [
+        { id: 'reflection', title: '#1 Two Sum', notes: 'Kept after DST' },
+        { id: 'date-only', title: '#1 Two Sum', notes: 'Same local day' },
+      ]);
+      assert.equal((await app.inject('/api/v1/dashboard/day-notes?date=2020-02-30')).statusCode, 400);
+    } finally { await app.close(); db.close(); }
+  });
+
   describe('GET /api/v1/dashboard', () => {
     it('returns valid dashboard structure and handles setup status when timezone is unset', async () => {
       const { app } = await setupDashboardApp();

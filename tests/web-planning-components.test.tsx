@@ -4,6 +4,7 @@
  * - StrategiesView (weekly schedule, strategy list, create modal with count-based difficulty validation)
  * - PromptOverrideModal (AI preview parsing and commit)
  */
+import { mockGoalReads } from './fixtures/web-goals.ts';
 import { afterEach, beforeEach, describe, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
@@ -30,7 +31,7 @@ const { PromptOverrideModal } = await import('../apps/web/src/components/PromptO
 const { translations } = await import('../apps/web/src/i18n.ts');
 
 beforeEach(() => {
-  mock.method(api, 'getGoalLists', async () => []);
+  mockGoalReads(api);
   mock.method(api, 'getFavoriteMemberships', async () => []);
 });
 
@@ -1643,7 +1644,7 @@ it('Today renders the entire ordered checklist and restores checked items to the
   const ids = Array.from({ length: 32 }, (_, index) => String(32 - index));
   let goal: GoalList = { id: crypto.randomUUID(), name: 'Interview', version: 1,
     items: ids.map(frontendId => ({ frontendId, title: 'Problem ' + frontendId, url: '', completed: false })) };
-  mock.method(api, 'getGoalLists', async () => [goal]);
+  mockGoalReads(api, () => [goal]);
   mock.method(api, 'editGoalItem', async (_id: string, { expectedVersion, edit }: Parameters<typeof api.editGoalItem>[1]) => {
     assert.equal(expectedVersion, 1);
     assert.deepEqual(edit, { action: 'setCompleted', frontendId: '2', completed: true });
@@ -1793,11 +1794,11 @@ it('selects one full goal list at a time, remembers the choice and falls back wh
   });
   const first = makeList('Arrays', ['4']), second = makeList('Trees', ['9', '3']);
   let lists = [first, second];
-  mock.method(api, 'getGoalLists', async () => lists);
+  mockGoalReads(api, () => lists);
   const view = (revision: number) => <WorkspaceContext.Provider value={{ ...defaults, revision }}><TodayGoalLists lang="en" /></WorkspaceContext.Provider>;
   let root = render(view(0));
   const selector = await screen.findByRole('combobox', { name: 'Select list (2)' });
-  fireEvent.change(selector, { target: { value: second.id } });
+  await act(async () => { fireEvent.change(selector, { target: { value: second.id } }); });
   assert.equal(screen.queryByText('#4 Arrays4'), null);
   const rows = Array.from(document.querySelectorAll('.goal-pending-items li'), row => [
     row.querySelector('.goal-item-position')?.textContent, row.querySelector('.goal-item-title')?.textContent,
@@ -1819,7 +1820,7 @@ it('exposes goal note navigation, a direct problem link, timer and list-scoped r
   const frontendId = problem.questionFrontendId;
   const goal: GoalList = { id: crypto.randomUUID(), name: 'Set', version: 1,
     items: [{ frontendId, completed: false, title: problem.title, url: problem.url }] };
-  mock.method(api, 'getGoalLists', async () => [goal]);
+  mockGoalReads(api, () => [goal]);
   const navigate = mock.fn();
   const edit = mock.method(api, 'editGoalItem', async () => {
     goal.items = [];
@@ -1855,7 +1856,7 @@ it('shares the selected goal between its ordered progress marks and pending rows
   });
   const first = makeGoal('Foundations', [false, true, false]);
   const long = makeGoal('Review list', Array.from({ length: 80 }, (_, i) => i < 15));
-  const lists = mock.method(api, 'getGoalLists', async () => [first, long]);
+  const lists = mockGoalReads(api, () => [first, long]);
   const plan = createMockPlan();
   plan.items[0].completed = true;
   plan.items[1].completed = false;
@@ -1883,7 +1884,7 @@ it('shares the selected goal between its ordered progress marks and pending rows
   fireEvent.click(screen.getByRole('button', { name: '2026-11-15, 3 completed. View records' }));
   assert.deepEqual(openRecords.mock.calls[0].arguments, [{ date: '2026-11-15' }]);
 
-  fireEvent.change(screen.getByRole('combobox', { name: 'Select list (2)' }), { target: { value: long.id } });
+  await act(async () => { fireEvent.change(screen.getByRole('combobox', { name: 'Select list (2)' }), { target: { value: long.id } }); });
   const meter = screen.getByRole('progressbar', { name: 'Goal progress: Review list' }) as HTMLProgressElement;
   assert.deepEqual([meter.value, meter.max], [15, 80]);
   assert.deepEqual(marks(), []);

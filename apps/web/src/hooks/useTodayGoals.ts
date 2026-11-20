@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import type { GoalList } from '../../../../packages/contracts/src/goal-lists.ts';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { goalListSummary, type GoalList, type GoalListSummary } from '../../../../packages/contracts/src/goal-lists.ts';
 import { api } from '../api.ts';
 import { localizeApiError } from '../error-i18n.ts';
 import type { Language } from '../i18n.ts';
@@ -7,57 +7,102 @@ import { useWorkspace } from '../workspace.tsx';
 
 const SELECTED_GOAL_KEY = 'leetcode_tracker_selected_goal_list';
 
-/** Share one selected list and revision-guarded read between the overview and the task panel. */
-export function useTodayGoals(lang: Language, active = true) {
+/** Share the list selector. Only Today needs the selected checklist's ordered rows. */
+export function useTodayGoals(lang: Language, active = true, showSelected = true) {
   const { revision } = useWorkspace();
-  const [lists, setLists] = useState<GoalList[]>([]);
-  const [loaded, setLoaded] = useState(false);
+  const [lists, setLists] = useState<GoalListSummary[]>([]);
+  const [summaryKey, setSummaryKey] = useState<string>();
   const [selectedId, setSelectedId] = useState<string | null>(() => {
     try { return window.localStorage.getItem(SELECTED_GOAL_KEY); } catch { return null; }
   });
-  const list = lists.find(goal => goal.id === selectedId) ?? lists[0];
+  const [detail, setDetail] = useState<{ list: GoalList; version: number; revision: number }>();
+  const [error, setError] = useState('');
+  const [readError, setReadError] = useState<unknown>();
+  const [detailError, setDetailError] = useState<unknown>();
+  const [generation, setGeneration] = useState(0);
+  const epoch = useRef(0);
+  const key = revision + ':' + generation;
+  const refresh = useCallback(() => {
+    epoch.current++;
+    setError('');
+    setGeneration(value => value + 1);
+  }, []);
+
+  useEffect(() => {
+    if (!active) return;
+    const controller = new AbortController();
+    const current = epoch.current;
+    async function load() {
+      let page: number | null = 1;
+      const summaries: GoalListSummary[] = [];
+      while (page !== null) {
+        const result = await api.getGoalListSummaries(page, { signal: controller.signal });
+        if (controller.signal.aborted || current !== epoch.current) return;
+        summaries.push(...result.items);
+        page = result.nextPage;
+      }
+      setLists(summaries);
+      setSummaryKey(key);
+      setReadError(undefined);
+      setSelectedId(id => summaries.some(list => list.id === id) ? id : summaries[0]?.id ?? null);
+    }
+    load().catch(cause => {
+      if (!controller.signal.aborted && current === epoch.current) setReadError(cause);
+    });
+    return () => controller.abort();
+  }, [active, key]);
+
+  const selected = lists.find(list => list.id === selectedId) ?? lists[0];
+  const id = selected?.id;
+  const version = selected?.version;
+  const summaryReady = summaryKey === key;
+  const cached = detail?.list.id === id && detail?.version === version && detail?.revision === revision;
+  useEffect(() => {
+    if (!active || !showSelected || !summaryReady || cached || !id || version === undefined) return;
+    const current = epoch.current;
+    const controller = new AbortController();
+    setDetailError(undefined);
+    api.getGoalList(id, { signal: controller.signal }).then(list => {
+      if (!controller.signal.aborted && current === epoch.current) setDetail({ list, version, revision });
+    }).catch(cause => {
+      if (!controller.signal.aborted && current === epoch.current) setDetailError(cause);
+    });
+    return () => controller.abort();
+  }, [active, showSelected, id, version, revision, summaryReady, cached]);
+
   function selectGoal(id: string | null) {
     setSelectedId(id);
     try {
       if (id) window.localStorage.setItem(SELECTED_GOAL_KEY, id);
       else window.localStorage.removeItem(SELECTED_GOAL_KEY);
-    } catch { /* Keep the selection in memory when storage is unavailable. */ }
+    } catch { /* The selection remains usable in memory. */ }
   }
-  const [error, setError] = useState('');
-  const [retry, setRetry] = useState(0);
-  const read = useRef(0);
-
-  function replaceLists(items: GoalList[]) {
-    ++read.current;
-    setLists(items);
-    setSelectedId(previous => items.some(goal => goal.id === previous) ? previous : items[0]?.id ?? null);
-    setLoaded(true);
-    setError('');
-  }
-  useEffect(() => {
-    if (!active) return;
-    const request = ++read.current;
-    api.getGoalLists().then(items => {
-      if (request !== read.current) return;
-      replaceLists(items);
-    }).catch(e => {
-      if (request === read.current) setError(localizeApiError(e, lang));
-    });
-    return () => { ++read.current; };
-  }, [active, revision, retry, lang]);
-
   function saved(id: string, goal: GoalList | null) {
-    ++read.current;
+    refresh();
     setLists(previous => {
       if (!goal) return previous.filter(list => list.id !== id);
-      if (!previous.some(list => list.id === id)) return [...previous, goal];
-      return previous.map(list => list.id === id ? goal : list);
+      const summary = goalListSummary(goal);
+      return previous.some(list => list.id === id)
+        ? previous.map(list => list.id === id ? summary : list) : [...previous, summary];
     });
-    setError('');
-    setRetry(n => n + 1);
+    if (goal) setDetail({ list: goal, version: goal.version, revision });
+    else setDetail(previous => previous?.list.id === id ? undefined : previous);
   }
-  function refresh() { setRetry(n => n + 1); }
-  return { lists, list, loaded, error, setError, selectGoal, saved, refresh, replaceLists };
+  function membershipSaved(listIds: string[], update: Awaited<ReturnType<typeof api.setProblemGoalMembership>>) {
+    // Apply the acknowledged change while the chooser closes, so a removed row can restore focus.
+    setDetail(previous => {
+      const summary = update.changed.find(list => list.id === previous?.list.id);
+      if (!previous || !summary || summary.version !== previous.list.version + 1) return previous;
+      const items = listIds.includes(previous.list.id)
+        ? [...previous.list.items, { ...update.problem, completed: false }]
+        : previous.list.items.filter(item => item.frontendId !== update.problem.frontendId);
+      return { ...previous, version: summary.version, list: { ...previous.list, version: summary.version, items } };
+    });
+    refresh();
+  }
+  const failure = readError ?? (showSelected && id ? detailError : undefined);
+  return { lists, selected, list: detail?.list.id === id ? detail?.list : undefined, loaded: summaryKey !== undefined, generation,
+    error: error || (failure ? localizeApiError(failure, lang) : ''), setError, selectGoal, saved, membershipSaved, refresh };
 }
 
 export type TodayGoals = ReturnType<typeof useTodayGoals>;

@@ -73,7 +73,7 @@ export {
   UnsupportedSchemaVersionError,
 } from './schema.ts';
 import { CURRENT_SCHEMA_VERSION } from './schema.ts';
-import { initOrMigrateSchema } from './migrations.ts';
+import { ensureActivityIndexes, initOrMigrateSchema } from './migrations.ts';
 
 // Catalog import exports
 export {
@@ -167,6 +167,7 @@ export class CatalogStore {
       await manager.performMigrationBackup(db, version, CURRENT_SCHEMA_VERSION);
     }
     const store = new CatalogStore(db, { ...options, skipBackup: true });
+    if (version === CURRENT_SCHEMA_VERSION) ensureActivityIndexes(db);
     store.backupManager = manager;
     return store;
   }

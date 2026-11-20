@@ -9,6 +9,36 @@ export function readGoalLists(db: DatabaseSync, id?: string): StoredGoalList[] {
   return rows.map(row => JSON.parse(String(row.value)) as StoredGoalList);
 }
 
+/** Only deserialize the lists that a membership write can change. */
+export function readGoalListsById(db: DatabaseSync, ids: Iterable<string>): StoredGoalList[] {
+  const keys = Array.from(ids, id => GOAL_LIST_PREFIX + id);
+  return db.prepare('SELECT value FROM catalog_meta WHERE key IN (SELECT value FROM json_each(?))')
+    .all(JSON.stringify(keys)).map(row => JSON.parse(String(row.value)) as StoredGoalList);
+}
+
+export function readGoalListPage(db: DatabaseSync, page: number, limit: number) {
+  const pattern = GOAL_LIST_PREFIX + '*';
+  const total = Number(db.prepare('SELECT count(*) AS n FROM catalog_meta WHERE key GLOB ?').get(pattern)!.n);
+  const rows = db.prepare(`SELECT value FROM catalog_meta WHERE key GLOB ?
+    ORDER BY json_extract(value, '$.name') COLLATE NOCASE, key LIMIT ? OFFSET ?`).all(pattern, limit, (page - 1) * limit);
+  return { total, lists: rows.map(row => JSON.parse(String(row.value)) as StoredGoalList) };
+}
+
+export function readGoalMemberships(db: DatabaseSync, frontendIds: string[]) {
+  const rows = db.prepare(`SELECT list.value->>'id' AS listId, item.value->>'frontendId' AS frontendId
+    FROM catalog_meta AS list, json_each(list.value,'$.items') AS item
+    WHERE list.key GLOB ? AND item.value->>'frontendId' IN (SELECT value FROM json_each(?))
+    ORDER BY list.key`).all(GOAL_LIST_PREFIX + '*', JSON.stringify(frontendIds));
+  const memberships = new Map<string, string[]>();
+  for (const row of rows) {
+    const id = String(row.frontendId);
+    const lists = memberships.get(id) ?? [];
+    lists.push(String(row.listId));
+    memberships.set(id, lists);
+  }
+  return memberships;
+}
+
 export function goalCatalog(db: DatabaseSync, ids: string[]) {
   const rows = db.prepare(`SELECT frontend_question_id AS frontendId, title, url FROM problems
     WHERE frontend_question_id IN (SELECT value FROM json_each(?))`).all(JSON.stringify(ids)) as
