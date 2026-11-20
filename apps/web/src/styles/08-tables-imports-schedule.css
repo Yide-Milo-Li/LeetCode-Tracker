@@ -805,6 +805,8 @@
   text-align: start;
   white-space: normal;
 }
+.favorite-folder-switcher { display: block; max-inline-size: 32rem; margin-block-end: 16px; }
+.favorite-folder-switcher select { inline-size: 100%; min-inline-size: 0; text-overflow: ellipsis; }
 .favorite-folder span,
 .favorite-choice span,
 .favorite-problem-title {

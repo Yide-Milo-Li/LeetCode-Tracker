@@ -457,6 +457,19 @@ it('creates a sorted goal from favorites and reviews cross-folder removal again 
   assert.equal(screen.queryByRole('group', { name: 'Bulk actions' }), null);
 });
 
+it('keeps a large folder library in one labeled picker with every destination available', async () => {
+  const { FavoriteFolderPicker } = await import('../apps/web/src/components/FavoriteFolders.tsx');
+  const folders = Array.from({ length: 50 }, (_, i) => ({ id: String(i), name: 'Long folder name '.repeat(5) + i, count: 3000 }));
+  const onSelect = mock.fn();
+  render(<FavoriteFolderPicker library={{ folders, total: 3000 }} selected="49" lang="en" onSelect={onSelect} />);
+  const select = screen.getByRole('combobox', { name: 'Choose a folder' }) as HTMLSelectElement;
+  assert.equal(select.options.length, 51);
+  assert.equal(select.value, '49');
+  assert.match(select.selectedOptions[0].text, /3,000/);
+  fireEvent.change(select, { target: { value: 'all' } });
+  assert.deepEqual(onSelect.mock.calls[0].arguments, ['all']);
+});
+
 it('windows thousands of selected problems while keeping the full save and removal payloads', async (t) => {
   const { GoalListEditor } = await import('../apps/web/src/components/GoalListEditor.tsx');
   const { RemoveFavoritesDialog } = await import('../apps/web/src/components/FavoriteFolders.tsx');

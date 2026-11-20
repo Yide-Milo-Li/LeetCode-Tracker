@@ -26,11 +26,19 @@ export function FavoriteFolderPicker({ library, selected, lang, onSelect }: {
 }) {
   const zh = lang === 'zh';
   const folders = [{ id: 'all', name: zh ? '全部收藏' : 'All favorites', count: library.total }, ...library.folders];
+  if (library.folders.length > 8) {
+    return <label className="favorite-folder-switcher">
+      <span className="visually-hidden">{zh ? '选择收藏夹' : 'Choose a folder'}</span>
+      <select value={selected} title={folders.find(folder => folder.id === selected)?.name} onChange={event => onSelect(event.currentTarget.value)}>
+        {folders.map(folder => <option key={folder.id} value={folder.id}>{folder.name} ({formatCount(folder.count, lang)})</option>)}
+      </select>
+    </label>;
+  }
   return <div className="favorite-folders" role="group" aria-label={zh ? '选择收藏夹' : 'Choose a folder'}>
     {folders.map(({ id, name, count }) => <button key={id} type="button" aria-pressed={id === selected}
       className="btn btn-secondary favorite-folder" onClick={() => onSelect(id)}>
       {id === 'all' ? <Star size={16} aria-hidden="true" /> : <Folder size={16} aria-hidden="true" />}
-      <span>{name}</span> <small>{count}</small>
+      <span>{name}</span> <small>{formatCount(count, lang)}</small>
     </button>)}
   </div>;
 }
