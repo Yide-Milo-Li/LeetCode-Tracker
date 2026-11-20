@@ -597,6 +597,101 @@ it('saves a catalog problem in two folders and browses each from the Favorites n
     assert.equal(records.length, 0);
 }));
 
+it('creates a folder with the selection spanning Favorites searches and keeps original memberships', () => withProblemCatalog(async () => {
+  const preview = await api.previewImport([
+    { id: '902', title: 'Synthetic Tree', difficulty: 'Easy' },
+    { id: '903', title: 'Synthetic Array', difficulty: 'Easy' },
+  ].map(item => JSON.stringify(item)).join('\n'));
+  await api.commitImport(preview.previewId);
+  const original = { id: crypto.randomUUID(), name: 'Original' };
+  await api.addFavorites({ frontendIds: ['901', '902', '903'], folderIds: [original.id], newFolder: original });
+  location.hash = 'favorites';
+  await act(async () => { render(<App />); });
+  const click = async (element: HTMLElement) => { await act(async () => { fireEvent.click(element); }); };
+  await click(await screen.findByRole('button', { name: 'Original 3' }));
+  await click(await screen.findByRole('checkbox', { name: 'Select #901 ' + problem.title }));
+  const search = screen.getByRole<HTMLInputElement>('searchbox');
+  await act(async () => { fireEvent.change(search, { target: { value: '902' } }); });
+  await click(await screen.findByRole('checkbox', { name: 'Select #902 Synthetic Tree' }));
+  assert.equal(screen.queryByRole('checkbox', { name: 'Select #901 ' + problem.title }), null);
+
+  const open = async () => {
+    await click(screen.getByRole('button', { name: 'Save to new folder' }));
+    return within(screen.getByRole('dialog', { name: 'New folder' }));
+  };
+  let editor = await open();
+  assert.ok(editor.getByText('Save 2 selected problems to this folder.'));
+  await click(editor.getByRole('button', { name: 'Cancel' }));
+  assert.ok(screen.getByText('2 selected'));
+  assert.equal((await api.getFavoriteLibrary()).folders.length, 1);
+
+  editor = await open();
+  const name = editor.getByRole('textbox', { name: 'Folder name' });
+  fireEvent.change(name, { target: { value: 'Original' } });
+  await click(editor.getByRole('button', { name: 'Save' }));
+  assert.ok(await editor.findByRole('alert'));
+  fireEvent.change(name, { target: { value: '  Interview  ' } });
+  await click(editor.getByRole('button', { name: 'Save' }));
+
+  assert.equal((await screen.findByRole('button', { name: 'Interview 2' })).getAttribute('aria-pressed'), 'true');
+  assert.ok(await screen.findByRole('checkbox', { name: 'Select #901 ' + problem.title }));
+  assert.ok(screen.getByRole('checkbox', { name: 'Select #902 Synthetic Tree' }));
+  assert.equal(screen.queryByRole('checkbox', { name: 'Select #903 Synthetic Array' }), null);
+  assert.equal(search.value, '');
+  assert.equal(screen.queryByRole('group', { name: 'Bulk actions' }), null);
+  assert.ok(screen.getByText('Saved 2 problems to “Interview”.'));
+
+  const library = await api.getFavoriteLibrary();
+  const interview = library.folders.find(folder => folder.name === 'Interview')!;
+  const memberships = new Map((await api.getFavoriteMemberships()).map(item => [item.frontendId, item.folderIds]));
+  assert.equal(library.total, 3);
+  assert.deepEqual(memberships.get('901'), [original.id, interview.id].sort());
+  assert.deepEqual(memberships.get('902'), [original.id, interview.id].sort());
+  assert.deepEqual(memberships.get('903'), [original.id]);
+}));
+
+it('adds the Favorites selection to multiple existing folders and recovers from a deleted destination', () => withProblemCatalog(async () => {
+  const preview = await api.previewImport(JSON.stringify({ id: '902', title: 'Synthetic Tree', difficulty: 'Easy' }));
+  await api.commitImport(preview.previewId);
+  const original = { id: crypto.randomUUID(), name: 'Original' };
+  const arrays = { id: crypto.randomUUID(), name: 'Arrays' };
+  const trees = { id: crypto.randomUUID(), name: 'Trees' };
+  const removed = { id: crypto.randomUUID(), name: 'Temporary' };
+  await api.addFavorites({ frontendIds: ['901', '902'], folderIds: [original.id], newFolder: original });
+  await api.addFavorites({ frontendIds: ['901'], folderIds: [arrays.id], newFolder: arrays });
+  await api.saveFavoriteFolder(trees, null);
+  await api.saveFavoriteFolder(removed, null);
+  location.hash = 'favorites';
+  await act(async () => { render(<App />); });
+  const click = async (element: HTMLElement) => { await act(async () => { fireEvent.click(element); }); };
+  await click(await screen.findByRole('button', { name: 'Original 2' }));
+  await click(await screen.findByRole('checkbox', { name: 'Select #901 ' + problem.title }));
+  await act(async () => { fireEvent.change(screen.getByRole('searchbox'), { target: { value: '902' } }); });
+  await click(await screen.findByRole('checkbox', { name: 'Select #902 Synthetic Tree' }));
+
+  await click(screen.getByRole('button', { name: 'Add to folders' }));
+  const editor = within(await screen.findByRole('dialog', { name: 'Add to folders' }));
+  const submit = editor.getByRole<HTMLButtonElement>('button', { name: 'Add to folders' });
+  assert.equal(submit.disabled, true);
+  assert.equal(editor.queryByRole('button', { name: 'New folder' }), null);
+  for (const name of ['Arrays', 'Trees', 'Temporary']) await click(editor.getByRole('checkbox', { name }));
+  await api.deleteFavoriteFolder(removed);
+  await click(submit);
+  assert.ok(await editor.findByRole('alert'));
+  await waitFor(() => assert.ok(!editor.queryByRole('checkbox', { name: 'Temporary' })));
+  assert.equal((await api.getFavoriteLibrary()).folders.find(folder => folder.id === trees.id)?.count, 0);
+  await click(submit);
+
+  assert.ok(await screen.findByText('Added 2 problems to 2 folders.'));
+  assert.ok(!screen.queryByRole('group', { name: 'Bulk actions' }));
+  assert.equal(screen.getByRole('button', { name: 'Original 2' }).getAttribute('aria-pressed'), 'true');
+  assert.ok(await screen.findByRole('button', { name: 'Trees 2' }));
+  assert.ok(screen.getByRole('button', { name: 'Arrays 2' }));
+  const memberships = await api.getFavoriteMemberships();
+  assert.equal(memberships.length, 2);
+  for (const item of memberships) assert.deepEqual(item.folderIds, [original.id, arrays.id, trees.id].sort());
+}));
+
 it('preserves a folder missing from the open Favorites directory when saving a fresh problem row', () => withProblemCatalog(async () => {
   const a = { id: crypto.randomUUID(), name: 'Arrays' };
   const b = { id: crypto.randomUUID(), name: 'Weekend' };
