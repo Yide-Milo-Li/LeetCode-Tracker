@@ -537,6 +537,7 @@ describe('NotesWorkspace Component', () => {
       },
     } });
     await act(async () => { render(<NotesWorkspace lang="en" />); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Export/i })); });
     const link = screen.getByRole('link', { name: /Obsidian/i });
     let defaultPrevented = false;
     link.addEventListener('click', (event) => {
@@ -706,7 +707,7 @@ describe('NotesWorkspace Component', () => {
       fireEvent.click(insertBtn);
     });
     assert.ok(textarea.value.includes('Key Idea & Approach'));
-    assert.equal(insertBtn.disabled, true);
+    assert.equal(screen.queryByRole('button', { name: /insert template/i }), null);
     assert.equal(saveBtn.disabled, true);
     assert.ok(screen.getByText(/Template Unedited/i));
 
@@ -1504,7 +1505,7 @@ describe('TodayProblemRow note entry consolidation', () => {
     assert.equal(screen.getAllByRole('button', { name: '笔记' }).length, 1);
   });
 
-  it('places AI format beside Save note, removes inline format-on-save toggle, and respects controlled notesFormatOnSave', async () => {
+  it('places AI format in editor toolbar, keeps Save note in problem header, removes inline format-on-save toggle, and respects controlled notesFormatOnSave', async () => {
     mockEditorProblems();
     const save = mock.method(api, 'upsertNote', async (id: string, content: string) => ({ note: editorNote(id, content) }));
     let workers = 0;
@@ -1520,7 +1521,8 @@ describe('TodayProblemRow note entry consolidation', () => {
 
       const saveBtn = screen.getByRole('button', { name: /save note/i });
       const aiFormatBtn = screen.getByRole('button', { name: /AI format/i });
-      assert.equal(saveBtn.parentElement, aiFormatBtn.parentElement);
+      assert.ok(saveBtn.closest('.nw-header-tools'));
+      assert.ok(aiFormatBtn.closest('.notes-toolbar'));
 
       await act(async () => {
         fireEvent.change(noteEditor(), { target: { value: '* raw draft' } });
@@ -1534,5 +1536,401 @@ describe('TodayProblemRow note entry consolidation', () => {
       if (previousWorker) Object.assign(globalThis, { Worker: previousWorker });
       else Reflect.deleteProperty(globalThis, 'Worker');
     }
+  });
+});
+
+describe('NotesWorkspace consolidated UI', () => {
+  it('groups current-problem and library exports into one Export menu and keeps library exports accessible when empty', async () => {
+    mock.method(api, 'listNotes', async () => ({ items: [], total: 0 }));
+    const { unmount } = await act(async () => render(<NotesWorkspace lang="en" />));
+
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Export/i })); });
+    assert.ok(screen.getByRole('link', { name: /Obsidian/i }));
+    assert.ok(screen.getByRole('link', { name: /Notion CSV/i }));
+    assert.equal(screen.queryByRole('button', { name: /Copy for Notion/i }), null);
+    unmount();
+
+    mockEditorProblems();
+    await act(async () => { render(<NotesWorkspace lang="en" />); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Export/i })); });
+    assert.ok(screen.getByRole('link', { name: /Export Markdown/i }));
+    assert.ok(screen.getByRole('link', { name: /Obsidian/i }));
+    const copyBtn = screen.getByRole('button', { name: /Copy for Notion/i });
+    await act(async () => { fireEvent.click(copyBtn); });
+    assert.ok(lastCopiedText.includes('Problem A'));
+    assert.ok(screen.getByText(/Copied to clipboard!/i));
+  });
+
+  it('consolidates difficulty, note status, and sort inside Filter & sort popover without grouping, with active chips and reset', async () => {
+    const calls: any[] = [];
+    mock.method(api, 'listNotes', async (query: any) => {
+      calls.push(query);
+      return { items: [], total: 0 };
+    });
+
+    await act(async () => { render(<NotesWorkspace lang="en" />); });
+    const searchInput = screen.getByPlaceholderText(/Search by problem/i) as HTMLInputElement;
+    await act(async () => { fireEvent.change(searchInput, { target: { value: 'Sum' } }); });
+    assert.equal(searchInput.value, 'Sum');
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Clear search/i })); });
+    assert.equal(searchInput.value, '');
+
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Filter & sort/i })); });
+    assert.equal(screen.queryByLabelText(/Group by/i), null);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Medium' })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'With Custom Note' })); });
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText(/Sort by/i), { target: { value: 'updated' } });
+    });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Newest first' })); });
+
+    assert.equal(document.querySelector('.nw-filter-badge')?.textContent, '3');
+    assert.ok(screen.getByRole('button', { name: /Remove difficulty filter: Medium/i }));
+    assert.ok(screen.getByRole('button', { name: /Remove note filter: With Custom Note/i }));
+    assert.ok(screen.getByRole('button', { name: /Reset sort:/i }));
+
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Remove difficulty filter: Medium/i })); });
+    assert.equal(document.querySelector('.nw-filter-badge')?.textContent, '2');
+
+    await act(async () => {
+      const resetBtns = screen.getAllByRole('button', { name: /^Reset$/i });
+      fireEvent.click(resetBtns[resetBtns.length - 1]);
+    });
+    assert.equal(document.querySelector('.nw-filter-badge'), null);
+    assert.equal(calls[calls.length - 1].difficulty, 'all');
+    assert.equal(calls[calls.length - 1].hasNote, 'all');
+    assert.equal(calls[calls.length - 1].sort, 'completed-desc');
+    assert.equal('groupBy' in calls[calls.length - 1], false);
+  });
+
+  it('portals Tooltip inside a [popover] ancestor so it is not occluded behind Top-Layer popovers', async () => {
+    const { Tooltip } = await import('../apps/web/src/components/ui.tsx');
+    await act(async () => {
+      render(
+        <div data-testid="popover-host" popover="auto">
+          <Tooltip text="Switch to oldest first" position="top">
+            <button type="button">Sort direction</button>
+          </Tooltip>
+        </div>
+      );
+    });
+
+    const host = screen.getByTestId('popover-host');
+    const trigger = screen.getByRole('button', { name: 'Sort direction', hidden: true });
+    await act(async () => { fireEvent.mouseEnter(trigger); });
+
+    const tooltip = screen.getByRole('tooltip', { hidden: true });
+    assert.equal(tooltip.textContent, 'Switch to oldest first');
+    assert.ok(host.contains(tooltip));
+  });
+
+  it('collapses >3 tags into +N, toggles inline practice timeline pill, and hides timeline & metadata in Zen mode', async () => {
+    mock.method(api, 'listNotes', async () => ({
+      items: [{
+        questionId: '1',
+        questionFrontendId: '1',
+        title: 'Two Sum',
+        titleSlug: 'two-sum',
+        url: 'https://leetcode.com/problems/two-sum/',
+        difficulty: 'Easy' as const,
+        tags: ['Array', 'Hash Table', 'Two Pointers', 'Sorting', 'Math'],
+        totalPractices: 1,
+        hasAccepted: true,
+        hasCustomNote: true,
+        customNoteUpdatedAt: 1,
+        lastPracticedAt: null,
+        reviewStage: null,
+        latestPracticeNotes: null,
+      }],
+      total: 1,
+    }));
+    mock.method(api, 'getNote', async () => ({ note: editorNote('1', 'Note body') }));
+    mock.method(api, 'getPracticeRecords', async () => ({
+      total: 1,
+      page: 1,
+      limit: 100,
+      items: [{
+        id: 'p1',
+        questionFrontendId: '1',
+        practicedAt: '2026-09-10T12:00:00.000Z',
+        timePrecision: 'date' as const,
+        completed: true,
+        status: 'active' as const,
+        notes: 'Solved cleanly',
+        revision: 1,
+        history: [],
+      }],
+    }));
+
+    await act(async () => { render(<NotesWorkspace lang="en" />); });
+
+    assert.ok(screen.getByText('#Array'));
+    assert.ok(screen.getByText('#Hash Table'));
+    assert.ok(screen.getByText('#Two Pointers'));
+    assert.equal(screen.queryByText('#Sorting'), null);
+    assert.ok(screen.getByText('+2'));
+
+    assert.equal(document.querySelector('.nw-timeline.is-open'), null);
+    const timelinePill = screen.getByRole('button', { name: /1 log/i });
+    await act(async () => { fireEvent.click(timelinePill); });
+    assert.ok(document.querySelector('.nw-timeline.is-open'));
+    assert.ok(screen.getByText(/"Solved cleanly"/));
+
+    // Entering Zen mode hides metadata row & expanded timeline
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Zen/i })); });
+    assert.equal(document.querySelector('.nw-meta-row'), null);
+    assert.equal(document.querySelector('.nw-timeline.is-open'), null);
+  });
+
+  it('hides formatting buttons in Preview mode and renders exactly one Insert Template button across view modes when empty', async () => {
+    mockEditorProblems();
+    mock.method(api, 'getNote', async () => ({ note: null }));
+
+    await act(async () => { render(<NotesWorkspace lang="en" />); });
+    assert.equal(screen.getAllByRole('button', { name: /Insert Template/i }).length, 1);
+    assert.ok(screen.getByRole('button', { name: /Bold/i }));
+
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Edit' })); });
+    assert.equal(screen.getAllByRole('button', { name: /Insert Template/i }).length, 1);
+
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Preview' })); });
+    assert.equal(screen.queryByRole('button', { name: /Bold/i }), null);
+    assert.equal(screen.getAllByRole('button', { name: /Insert Template/i }).length, 1);
+    assert.ok(screen.getByText('Preview mode'));
+  });
+});
+
+describe('NotesWorkspace markdown input & expanded toolbar', () => {
+  it('expands all formatting buttons onto top-level toolbar with Big-O complexity glyph and keeps only Code language dropdown', async () => {
+    mockEditorProblems();
+    mock.method(api, 'getNote', async () => ({ note: editorNote('1', 'hello') }));
+    await act(async () => { render(<NotesWorkspace lang="en" />); });
+
+    assert.equal(screen.queryByRole('button', { name: /^Insert$/i }), null);
+    for (const label of [
+      'Heading',
+      'Bold',
+      'Italic',
+      'Strikethrough',
+      'Inline Code',
+      'Link',
+      'Big-O / Math Formula',
+      'List',
+      'Ordered List',
+      'Task List',
+      'Blockquote',
+    ]) {
+      assert.ok(screen.getByRole('button', { name: label }), `Missing direct toolbar button: ${label}`);
+    }
+
+    const mathBtn = screen.getByRole('button', { name: 'Big-O / Math Formula' });
+    assert.equal(mathBtn.textContent?.trim(), 'O(n)');
+    assert.equal(mathBtn.textContent?.includes('$'), false);
+
+    // Clicking Code dropdown reveals only code languages (not Italic or Task List)
+    const codeDropdownTrigger = screen.getByRole('button', { name: 'Code Block' });
+    await act(async () => { fireEvent.click(codeDropdownTrigger); });
+    const menu = document.querySelector('.notes-dropdown-menu') as HTMLElement;
+    assert.ok(menu);
+    assert.equal(menu.textContent?.includes('Italic'), false);
+    assert.equal(menu.textContent?.includes('Task List'), false);
+    assert.ok(screen.getByRole('button', { name: /Python/i }));
+    assert.ok(screen.getByRole('button', { name: /TypeScript/i }));
+    assert.ok(screen.getByRole('button', { name: /JavaScript/i }));
+    assert.ok(screen.getByRole('button', { name: /Rust/i }));
+
+    const textarea = noteEditor();
+    textarea.setSelectionRange(5, 5);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Python/i })); });
+    assert.ok(textarea.value.includes('```python\n'));
+  });
+
+  it('supports Ctrl/Cmd markdown formatting, Enter list continuation, and Tab/Shift+Tab indentation', async () => {
+    mockEditorProblems();
+    mock.method(api, 'getNote', async () => ({ note: editorNote('1', 'hello world') }));
+    await act(async () => { render(<NotesWorkspace lang="en" />); });
+
+    const textarea = noteEditor();
+    textarea.focus();
+
+    // Bold toggle via Cmd+B
+    textarea.setSelectionRange(0, 5);
+    await act(async () => { fireEvent.keyDown(textarea, { key: 'b', metaKey: true }); });
+    assert.equal(textarea.value, '**hello** world');
+    assert.equal(textarea.selectionStart, 2);
+    assert.equal(textarea.selectionEnd, 7);
+
+    // Toggle Bold off via Cmd+B
+    await act(async () => { fireEvent.keyDown(textarea, { key: 'b', metaKey: true }); });
+    assert.equal(textarea.value, 'hello world');
+
+    // Italic, Strikethrough, Inline Code, Link, Math
+    textarea.setSelectionRange(0, 5);
+    await act(async () => { fireEvent.keyDown(textarea, { key: 'i', metaKey: true }); });
+    assert.equal(textarea.value, '*hello* world');
+    await act(async () => { fireEvent.keyDown(textarea, { key: 'i', metaKey: true }); });
+    assert.equal(textarea.value, 'hello world');
+
+    textarea.setSelectionRange(0, 5);
+    await act(async () => { fireEvent.keyDown(textarea, { key: 'x', metaKey: true, shiftKey: true }); });
+    assert.equal(textarea.value, '~~hello~~ world');
+    await act(async () => { fireEvent.keyDown(textarea, { key: 'x', metaKey: true, shiftKey: true }); });
+
+    textarea.setSelectionRange(0, 5);
+    await act(async () => { fireEvent.keyDown(textarea, { key: 'e', metaKey: true }); });
+    assert.equal(textarea.value, '`hello` world');
+    await act(async () => { fireEvent.keyDown(textarea, { key: 'e', metaKey: true }); });
+
+    textarea.setSelectionRange(0, 5);
+    await act(async () => { fireEvent.keyDown(textarea, { key: 'k', metaKey: true }); });
+    assert.equal(textarea.value, '[hello](url) world');
+    assert.equal(noteEditor().value.slice(textarea.selectionStart, textarea.selectionEnd), 'url');
+
+    // Reset to plain text and test Shift+7/8/9/. and Shift+M
+    await act(async () => { fireEvent.change(textarea, { target: { value: 'step', selectionStart: 4, selectionEnd: 4 } }); });
+    await act(async () => { fireEvent.keyDown(textarea, { key: '&', code: 'Digit7', ctrlKey: true, shiftKey: true }); });
+    assert.equal(textarea.value, '1. step');
+
+    // Enter continues ordered list
+    textarea.setSelectionRange(7, 7);
+    await act(async () => { fireEvent.keyDown(textarea, { key: 'Enter' }); });
+    assert.equal(textarea.value, '1. step\n2. ');
+
+    // Enter on empty item exits list
+    await act(async () => { fireEvent.keyDown(textarea, { key: 'Enter' }); });
+    assert.equal(textarea.value, '1. step\n');
+
+    // Unordered, Task, Quote, Math
+    await act(async () => { fireEvent.change(textarea, { target: { value: 'item', selectionStart: 4, selectionEnd: 4 } }); });
+    await act(async () => { fireEvent.keyDown(textarea, { key: '*', code: 'Digit8', metaKey: true, shiftKey: true }); });
+    assert.equal(textarea.value, '- item');
+    await act(async () => { fireEvent.keyDown(textarea, { key: '(', code: 'Digit9', metaKey: true, shiftKey: true }); });
+    assert.equal(textarea.value, '- [ ] item');
+    await act(async () => { fireEvent.keyDown(textarea, { key: 'Tab' }); });
+    assert.equal(textarea.value, '  - [ ] item');
+    await act(async () => { fireEvent.keyDown(textarea, { key: 'Tab', shiftKey: true }); });
+    assert.equal(textarea.value, '- [ ] item');
+    await act(async () => { fireEvent.keyDown(textarea, { key: '>', code: 'Period', metaKey: true, shiftKey: true }); });
+    assert.equal(textarea.value, '> - [ ] item');
+
+    await act(async () => { fireEvent.change(textarea, { target: { value: 'O(n)', selectionStart: 0, selectionEnd: 4 } }); });
+    await act(async () => { fireEvent.keyDown(textarea, { key: 'm', metaKey: true, shiftKey: true }); });
+    assert.equal(textarea.value, '$O(n)$');
+  });
+
+  it('unifies undo/redo across typing, shortcuts, toolbar actions, template insertion, beforeinput, and resets on switch', async () => {
+    mockEditorProblems();
+    mock.method(api, 'getNote', async (id: string) => ({ note: id === '1' ? null : editorNote(id, 'B original') }));
+    await act(async () => { render(<NotesWorkspace lang="en" />); });
+
+    const textarea = noteEditor();
+    textarea.focus();
+
+    // Insert template then undo with Cmd+Z
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Insert Template/i })); });
+    assert.ok(textarea.value.includes('Key Idea & Approach'));
+    await act(async () => { fireEvent.keyDown(textarea, { key: 'z', metaKey: true }); });
+    assert.equal(textarea.value, '');
+
+    // Typing + Bold shortcut + Toolbar click -> Undo -> Redo
+    await act(async () => { fireEvent.change(textarea, { target: { value: 'draft', selectionStart: 5, selectionEnd: 5 } }); });
+    textarea.setSelectionRange(0, 5);
+    await act(async () => { fireEvent.keyDown(textarea, { key: 'b', ctrlKey: true }); });
+    assert.equal(textarea.value, '**draft**');
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Italic' })); });
+    assert.equal(textarea.value, '***draft***');
+
+    // Undo via Ctrl+Z restores bold & selection
+    await act(async () => { fireEvent.keyDown(textarea, { key: 'z', ctrlKey: true }); });
+    assert.equal(textarea.value, '**draft**');
+    assert.equal(textarea.selectionStart, 2);
+    assert.equal(textarea.selectionEnd, 7);
+
+    // Undo via native beforeinput (macOS Edit menu) restores plain text & selection
+    await act(async () => {
+      const ev = new dom.window.InputEvent('beforeinput', { inputType: 'historyUndo', bubbles: true, cancelable: true });
+      textarea.dispatchEvent(ev);
+    });
+    assert.equal(textarea.value, 'draft');
+    assert.equal(textarea.selectionStart, 0);
+    assert.equal(textarea.selectionEnd, 5);
+
+    // Redo via Ctrl+Y and Cmd+Shift+Z
+    await act(async () => { fireEvent.keyDown(textarea, { key: 'y', ctrlKey: true }); });
+    assert.equal(textarea.value, '**draft**');
+    await act(async () => { fireEvent.keyDown(textarea, { key: 'z', metaKey: true, shiftKey: true }); });
+    assert.equal(textarea.value, '***draft***');
+
+    // Switching problems resets undo history so Problem B cannot undo into Problem A
+    await act(async () => { fireEvent.click(screen.getByText('Problem B')); });
+    const discardBtn = screen.getByRole('button', { name: /Discard Changes & Switch/i });
+    await act(async () => { fireEvent.click(discardBtn); });
+    assert.equal(textarea.value, 'B original');
+    await act(async () => { fireEvent.keyDown(textarea, { key: 'z', ctrlKey: true }); });
+    assert.equal(textarea.value, 'B original');
+  });
+
+  it('supports collapsed current-line copy/cut while preserving native behavior for non-empty selections', async () => {
+    mockEditorProblems();
+    mock.method(api, 'getNote', async () => ({ note: editorNote('1', 'first line\n\nlast line') }));
+    await act(async () => { render(<NotesWorkspace lang="en" />); });
+
+    const textarea = noteEditor();
+    textarea.focus();
+
+    // Collapsed copy on non-empty line copies line without modifying text
+    textarea.setSelectionRange(2, 2);
+    await act(async () => { fireEvent.keyDown(textarea, { key: 'c', metaKey: true }); });
+    assert.equal(lastCopiedText, 'first line');
+    assert.equal(textarea.value, 'first line\n\nlast line');
+
+    // Collapsed copy on empty line does not clobber clipboard
+    textarea.setSelectionRange(11, 11);
+    await act(async () => { fireEvent.keyDown(textarea, { key: 'c', ctrlKey: true }); });
+    assert.equal(lastCopiedText, 'first line');
+
+    // Collapsed cut deletes current line and copies it, and is undoable
+    textarea.setSelectionRange(14, 14);
+    await act(async () => { fireEvent.keyDown(textarea, { key: 'x', metaKey: true }); });
+    assert.equal(lastCopiedText, 'last line');
+    assert.equal(textarea.value, 'first line\n');
+    await act(async () => { fireEvent.keyDown(textarea, { key: 'z', metaKey: true }); });
+    assert.equal(textarea.value, 'first line\n\nlast line');
+
+    // Non-empty selection copy/cut does NOT preventDefault
+    textarea.setSelectionRange(0, 5);
+    const copyEvent = new dom.window.KeyboardEvent('keydown', { key: 'c', metaKey: true, bubbles: true, cancelable: true });
+    const cutEvent = new dom.window.KeyboardEvent('keydown', { key: 'x', metaKey: true, bubbles: true, cancelable: true });
+    await act(async () => {
+      textarea.dispatchEvent(copyEvent);
+      textarea.dispatchEvent(cutEvent);
+    });
+    assert.equal(copyEvent.defaultPrevented, false);
+    assert.equal(cutEvent.defaultPrevented, false);
+  });
+
+  it('wraps selected text with pasted URL and ignores shortcuts during IME composition', async () => {
+    mockEditorProblems();
+    mock.method(api, 'getNote', async () => ({ note: editorNote('1', 'read docs here') }));
+    await act(async () => { render(<NotesWorkspace lang="en" />); });
+
+    const textarea = noteEditor();
+    textarea.focus();
+    textarea.setSelectionRange(5, 9);
+    await act(async () => {
+      fireEvent.paste(textarea, {
+        clipboardData: { getData: (type: string) => (type === 'text/plain' ? 'https://example.com/docs' : '') },
+      });
+    });
+    assert.equal(textarea.value, 'read [docs](https://example.com/docs) here');
+
+    // IME composition suppresses shortcuts
+    textarea.setSelectionRange(0, 4);
+    await act(async () => {
+      textarea.dispatchEvent(
+        new dom.window.KeyboardEvent('keydown', { key: 'b', ctrlKey: true, isComposing: true, bubbles: true, cancelable: true }),
+      );
+    });
+    assert.equal(textarea.value, 'read [docs](https://example.com/docs) here');
   });
 });

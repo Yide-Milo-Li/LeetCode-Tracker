@@ -1,11 +1,11 @@
-/** Master column of the notes workspace: scope tabs, search, filters, problem list and pagination. */
-import { useId, useState } from 'react';
-import { ChevronRight, Search, FileText } from 'lucide-react';
+/** Master column of the notes workspace: scope tabs, compact search + filter/sort popover, problem list and pagination. */
+import { useId } from 'react';
+import { FileText, Search, SlidersHorizontal, X } from 'lucide-react';
 import { translations, type Language } from '../../i18n.ts';
-import type { NoteListGroup, ProblemNoteListQuery, ProblemNoteSummary } from '../../api.ts';
+import type { ProblemNoteListQuery, ProblemNoteSummary } from '../../api.ts';
 import { formatCalendarDate, formatInstant } from '../../date-format.ts';
 import { useWorkspace } from '../../workspace.tsx';
-import { Pagination, SortDirectionButton } from '../ui.tsx';
+import { Pagination, SortDirectionButton, useActionPopover } from '../ui.tsx';
 import type { NotesDifficultyFilter, NotesHasNoteFilter, NotesListState, NotesSortField } from './useNotesList.ts';
 
 interface NotesProblemListPaneProps {
@@ -61,19 +61,48 @@ export function NotesProblemListPane({ lang, zenMode, list, selectedId, onSelect
   const zh = lang === 'zh';
   const {
     scope, setScope, search, setSearch, difficulty, setDifficulty, hasNote, setHasNote,
-    sort, sortField, setSortField, sortDirection, setSortDirection, groupBy, changeGrouping, grouping, groupId, openGroup,
+    sort, sortField, setSortField, sortDirection, setSortDirection,
     page, setPage, limit, items, total, loadingList, listFailed,
   } = list;
 
   const controlsId = useId();
   const { timezone } = useWorkspace();
-  const [collapsedId, setCollapsedId] = useState<string | null>(null);
-  const openId = grouping?.groups.some(group => group.id === groupId) ? groupId : grouping?.activeId;
-  const groupName = (group: NoteListGroup) => {
-    if (group.name !== null) return group.name;
-    if (groupBy === 'goal') return zh ? '未加入题单' : 'No goal list';
-    if (group.id === 'unfiled') return zh ? '已收藏 · 未归档' : 'Unfiled favorites';
-    return zh ? '未收藏' : 'Not saved';
+  const filterMenu = useActionPopover({ align: 'end' });
+
+  const hasCustomSort = sortField !== 'completed' || sortDirection !== 'desc';
+  const activeFilterCount =
+    (difficulty !== 'all' ? 1 : 0) +
+    (hasNote !== 'all' ? 1 : 0) +
+    (hasCustomSort ? 1 : 0);
+
+  const resetFilters = () => {
+    setDifficulty('all');
+    setHasNote('all');
+    setSortField('completed');
+    setSortDirection('desc');
+    setPage(1);
+  };
+
+  const difficultyLabel = (value: NotesDifficultyFilter) => {
+    if (value === 'Easy') return t.statEasy;
+    if (value === 'Medium') return t.statMedium;
+    if (value === 'Hard') return t.statHard;
+    return zh ? '全部' : 'All';
+  };
+
+  const hasNoteLabel = (value: NotesHasNoteFilter) => {
+    if (value === 'true') return t.hasNoteOnly;
+    if (value === 'false') return t.noNoteOnly;
+    return zh ? '全部' : 'All';
+  };
+
+  const sortChipLabel = () => {
+    if (sortField === 'notes-first') return zh ? '有笔记优先' : 'Written notes first';
+    const fieldName = sortField === 'completed'
+      ? (zh ? '完成时间' : 'Last solved')
+      : (zh ? '笔记更新时间' : 'Note updated');
+    const dirName = sortDirection === 'asc' ? (zh ? '从旧到新' : 'Oldest') : (zh ? '从新到旧' : 'Newest');
+    return `${fieldName} · ${dirName}`;
   };
 
   const rows = items.map(item => (
@@ -93,7 +122,7 @@ export function NotesProblemListPane({ lang, zenMode, list, selectedId, onSelect
       // Runtime toggle kept inline: zen mode and its tests read `element.style.display`.
       style={{ display: zenMode ? 'none' : 'flex' }}
     >
-      {/* Scope switch: Sleek segmented control pill */}
+      {/* Row 1: Scope switch */}
       <div role="tablist" className="nw-scope-tabs">
         <button
           type="button"
@@ -121,88 +150,178 @@ export function NotesProblemListPane({ lang, zenMode, list, selectedId, onSelect
         </button>
       </div>
 
-      {/* Search bar */}
-      <div className="nw-search">
-        <Search size={14} className="nw-search-icon" />
-        <input
-          type="text"
-          className="nw-search-input"
-          aria-label={t.searchNotesPlaceholder}
-          placeholder={t.searchNotesPlaceholder}
-          value={search}
-          onChange={(e) => {
-            setSearch(e.target.value);
-            setPage(1);
-          }}
-        />
-      </div>
-
-      {/* Filter row: high contrast in both light and dark mode */}
-      <div className="nw-filters">
-        <select
-          className="nw-filter-select"
-          aria-label={zh ? '难度' : 'Difficulty'}
-          value={difficulty}
-          onChange={(e) => {
-            setDifficulty(e.target.value as NotesDifficultyFilter);
-            setPage(1);
-          }}
-        >
-          <option value="all">{t.allDifficulties}</option>
-          <option value="Easy">{t.statEasy}</option>
-          <option value="Medium">{t.statMedium}</option>
-          <option value="Hard">{t.statHard}</option>
-        </select>
-
-        <select
-          className="nw-filter-select"
-          aria-label={t.filterHasNote}
-          value={hasNote}
-          onChange={(e) => {
-            setHasNote(e.target.value as NotesHasNoteFilter);
-            setPage(1);
-          }}
-        >
-          <option value="all">{t.filterHasNote}: {zh ? '全部' : 'All'}</option>
-          <option value="true">{t.hasNoteOnly}</option>
-          <option value="false">{t.noNoteOnly}</option>
-        </select>
-      </div>
-
-      <div className="nw-filters nw-list-controls">
-        <div>
-          <label htmlFor={controlsId + '-sort'}>{zh ? '排序方式' : 'Sort by'}</label>
-          <div className="nw-sort-field">
-            <select id={controlsId + '-sort'} className="nw-filter-select" value={sortField} onChange={event => {
-              setSortField(event.currentTarget.value as NotesSortField);
+      {/* Row 2: Search input + Filter/Sort popover */}
+      <div className="nw-search-row">
+        <div className="nw-search">
+          <Search size={13} className="nw-search-icon" aria-hidden="true" />
+          <input
+            type="text"
+            className={`nw-search-input ${search ? 'has-clear' : ''}`}
+            aria-label={t.searchNotesPlaceholder}
+            placeholder={t.searchNotesPlaceholder}
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
               setPage(1);
-            }}>
-              <option value="completed">{zh ? '完成时间' : 'Last solved'}</option>
-              <option value="updated">{zh ? '笔记更新时间' : 'Note updated'}</option>
-              <option value="notes-first">{zh ? '有笔记优先' : 'Written notes first'}</option>
-            </select>
-            {sortField !== 'notes-first' && (
-              <SortDirectionButton className="nw-sort-direction" direction={sortDirection} lang={lang}
-                ascending={zh ? '从旧到新' : 'Oldest first'} descending={zh ? '从新到旧' : 'Newest first'}
-                onChange={direction => {
-                  setSortDirection(direction);
-                  setPage(1);
-                }} />
-            )}
-          </div>
+            }}
+          />
+          {search && (
+            <button
+              type="button"
+              className="nw-search-clear"
+              aria-label={zh ? '清空搜索' : 'Clear search'}
+              onClick={() => {
+                setSearch('');
+                setPage(1);
+              }}
+            >
+              <X size={12} aria-hidden="true" />
+            </button>
+          )}
         </div>
-        <div>
-          <label htmlFor={controlsId + '-group'}>{zh ? '分组方式' : 'Group by'}</label>
-          <select id={controlsId + '-group'} className="nw-filter-select" value={groupBy} onChange={event => {
-            setCollapsedId(null);
-            changeGrouping(event.currentTarget.value as ProblemNoteListQuery['groupBy']);
-          }}>
-            <option value="none">{zh ? '不分组' : 'No grouping'}</option>
-            <option value="goal">{zh ? '目标题单' : 'Goal list'}</option>
-            <option value="favorite">{zh ? '收藏夹' : 'Favorite folder'}</option>
-          </select>
+
+        <div className="notes-dropdown">
+          <button
+            type="button"
+            className={`nw-filter-trigger ${activeFilterCount > 0 ? 'is-active' : ''}`}
+            {...filterMenu.triggerProps}
+            aria-label={zh ? '筛选与排序' : 'Filter & sort'}
+            title={zh ? '筛选与排序' : 'Filter & sort'}
+          >
+            <SlidersHorizontal size={14} aria-hidden="true" />
+            {activeFilterCount > 0 && <span className="nw-filter-badge">{activeFilterCount}</span>}
+          </button>
+
+          {filterMenu.rendered && (
+            <div {...filterMenu.panelProps} className="notes-dropdown-menu notes-dropdown-menu-right nw-filter-popover">
+              <div className="nw-filter-popover-head">
+                <span className="nw-filter-popover-title">{zh ? '筛选与排序' : 'Filter & sort'}</span>
+                {activeFilterCount > 0 && (
+                  <button type="button" className="text-link nw-filter-reset" onClick={resetFilters}>
+                    {zh ? '重置' : 'Reset'}
+                  </button>
+                )}
+              </div>
+
+              <div className="nw-filter-section">
+                <span className="nw-filter-label">{zh ? '难度' : 'Difficulty'}</span>
+                <div className="nw-filter-pills" role="group" aria-label={zh ? '难度' : 'Difficulty'}>
+                  {(['all', 'Easy', 'Medium', 'Hard'] as const).map((diff) => (
+                    <button
+                      key={diff}
+                      type="button"
+                      className="nw-filter-pill"
+                      aria-pressed={difficulty === diff}
+                      onClick={() => {
+                        setDifficulty(diff);
+                        setPage(1);
+                      }}
+                    >
+                      {difficultyLabel(diff)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="nw-filter-section">
+                <span className="nw-filter-label">{t.filterHasNote}</span>
+                <div className="nw-filter-pills" role="group" aria-label={t.filterHasNote}>
+                  {(['all', 'true', 'false'] as const).map((status) => (
+                    <button
+                      key={status}
+                      type="button"
+                      className="nw-filter-pill"
+                      aria-pressed={hasNote === status}
+                      onClick={() => {
+                        setHasNote(status);
+                        setPage(1);
+                      }}
+                    >
+                      {hasNoteLabel(status)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="nw-filter-section">
+                <label htmlFor={controlsId + '-sort'} className="nw-filter-label">{zh ? '排序方式' : 'Sort by'}</label>
+                <div className="nw-sort-field">
+                  <select
+                    id={controlsId + '-sort'}
+                    className="nw-filter-select"
+                    value={sortField}
+                    onChange={event => {
+                      setSortField(event.currentTarget.value as NotesSortField);
+                      setPage(1);
+                    }}
+                  >
+                    <option value="completed">{zh ? '完成时间' : 'Last solved'}</option>
+                    <option value="updated">{zh ? '笔记更新时间' : 'Note updated'}</option>
+                    <option value="notes-first">{zh ? '有笔记优先' : 'Written notes first'}</option>
+                  </select>
+                  {sortField !== 'notes-first' && (
+                    <SortDirectionButton
+                      className="nw-sort-direction"
+                      direction={sortDirection}
+                      lang={lang}
+                      ascending={zh ? '从旧到新' : 'Oldest first'}
+                      descending={zh ? '从新到旧' : 'Newest first'}
+                      onChange={direction => {
+                        setSortDirection(direction);
+                        setPage(1);
+                      }}
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Conditional Row 3: Active non-default filters */}
+      {activeFilterCount > 0 && (
+        <div className="nw-active-chips">
+          {difficulty !== 'all' && (
+            <button
+              type="button"
+              className="nw-active-chip"
+              onClick={() => { setDifficulty('all'); setPage(1); }}
+              aria-label={zh ? `移除难度筛选：${difficultyLabel(difficulty)}` : `Remove difficulty filter: ${difficultyLabel(difficulty)}`}
+            >
+              <span>{difficultyLabel(difficulty)}</span>
+              <X size={11} aria-hidden="true" />
+            </button>
+          )}
+          {hasNote !== 'all' && (
+            <button
+              type="button"
+              className="nw-active-chip"
+              onClick={() => { setHasNote('all'); setPage(1); }}
+              aria-label={zh ? `移除笔记状态筛选：${hasNoteLabel(hasNote)}` : `Remove note filter: ${hasNoteLabel(hasNote)}`}
+            >
+              <span>{hasNoteLabel(hasNote)}</span>
+              <X size={11} aria-hidden="true" />
+            </button>
+          )}
+          {hasCustomSort && (
+            <button
+              type="button"
+              className="nw-active-chip"
+              onClick={() => { setSortField('completed'); setSortDirection('desc'); setPage(1); }}
+              aria-label={zh ? `恢复默认排序：${sortChipLabel()}` : `Reset sort: ${sortChipLabel()}`}
+            >
+              <span>{sortChipLabel()}</span>
+              <X size={11} aria-hidden="true" />
+            </button>
+          )}
+          {activeFilterCount >= 2 && (
+            <button type="button" className="text-link nw-chips-reset" onClick={resetFilters}>
+              {zh ? '重置' : 'Reset'}
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="notes-list-items nw-list-items">
         {listFailed ? (
@@ -212,30 +331,11 @@ export function NotesProblemListPane({ lang, zenMode, list, selectedId, onSelect
               {zh ? '重试' : 'Retry'}
             </button>
           </div>
-        ) : grouping?.groups.length ? grouping.groups.map(group => {
-          const expanded = group.id === openId && collapsedId !== group.id;
-          const panelId = controlsId + '-panel-' + group.id;
-          return (
-            <div className="nw-group" key={group.id}>
-              <button type="button" className="nw-group-toggle" aria-expanded={expanded} aria-controls={panelId}
-                onClick={() => {
-                  setCollapsedId(expanded ? group.id : null);
-                  if (group.id !== openId) openGroup(group.id);
-                }}>
-                <ChevronRight size={14} aria-hidden="true" />
-                <span className="nw-group-name">{groupName(group)}</span>
-                <span className="nw-group-count">{group.count}</span>
-              </button>
-              <div id={panelId} hidden={!expanded}>
-                {expanded && (loadingList || grouping.activeId !== openId ? loading : rows)}
-              </div>
-            </div>
-          );
-        }) : loadingList ? loading : items.length ? rows : (
+        ) : loadingList ? loading : items.length ? rows : (
           <div className="nw-list-empty">{t.noNotesFound}</div>
         )}
       </div>
-      {(groupBy === 'none' || (openId && collapsedId !== openId && grouping?.activeId === openId)) && pagination}
+      {pagination}
     </div>
   );
 }

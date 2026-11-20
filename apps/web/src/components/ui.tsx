@@ -479,7 +479,7 @@ export function Tooltip({
           <span>{tooltipContent}</span>
           {shortcut && <kbd className="tooltip-shortcut">{shortcut}</kbd>}
         </div>,
-        anchorRef.current?.closest('[data-overlay-host]') ?? document.body,
+        anchorRef.current?.closest('[data-overlay-host], [popover]') ?? document.body,
       )}
     </div>
   );
@@ -571,7 +571,7 @@ export function InfoPopover({
         >
           <div className="info-popover-content">{popoverContent}</div>
         </div>,
-        triggerRef.current?.closest('[data-overlay-host]') ?? document.body,
+        triggerRef.current?.closest('[data-overlay-host], [popover]') ?? document.body,
       )}
     </div>
   );

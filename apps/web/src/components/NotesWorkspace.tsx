@@ -8,17 +8,17 @@
  * the panes and dialogs in `notes/*`.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Archive, Download, BookOpen } from 'lucide-react';
-import { api } from '../api.ts';
+import { BookOpen } from 'lucide-react';
+import { hasMeaningfulNoteContent } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
-import { PageHeader, useActionPopover } from './ui.tsx';
-import { ExportLink } from './ExportLink.tsx';
+import { useActionPopover } from './ui.tsx';
 import { useWorkspace } from '../workspace.tsx';
 import { useFormatOnSaveSetting } from './notes/useFormatOnSaveSetting.ts';
 import { useNotesList } from './notes/useNotesList.ts';
 import { useNoteEditor } from './notes/useNoteEditor.ts';
 import { NotesProblemListPane } from './notes/NotesProblemListPane.tsx';
 import { NoteProblemHeader } from './notes/NoteProblemHeader.tsx';
+import { NotesExportMenu } from './notes/NotesExportMenu.tsx';
 import { PracticeTimeline } from './notes/PracticeTimeline.tsx';
 import { NoteEditorPanel } from './notes/NoteEditorPanel.tsx';
 import type { NotesViewMode } from './notes/NoteEditorToolbar.tsx';
@@ -77,6 +77,18 @@ export function NotesWorkspace({
   useEffect(() => { onNeedsSaveChange?.(needsSave); }, [needsSave, onNeedsSaveChange]);
 
   const [showTimeline, setShowTimeline] = useState(false);
+  const [copiedNotice, setCopiedNotice] = useState(false);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(copiedTimer.current), []);
+  useEffect(() => {
+    clearTimeout(copiedTimer.current);
+    setCopiedNotice(false);
+  }, [selectedId]);
+  const handleCopied = useCallback(() => {
+    clearTimeout(copiedTimer.current);
+    setCopiedNotice(true);
+    copiedTimer.current = setTimeout(() => setCopiedNotice(false), 2000);
+  }, []);
 
   // Phase 31: Workbench view mode & toolbar state
   const [viewMode, setViewMode] = useState<NotesViewMode>('split');
@@ -160,36 +172,11 @@ export function NotesWorkspace({
     ? items.find((it) => it.questionFrontendId === pendingTargetId) ?? null
     : null;
 
+  const unfilledTemplate = editor.noteContent.trim().length > 0 && !hasMeaningfulNoteContent(editor.noteContent);
+
   return (
     <div ref={rootRef} className="notes-workspace-view">
-      <PageHeader
-        title={t.notesWorkspaceTitle}
-        description={t.notesWorkspaceDesc}
-        actions={
-          <div className="nw-header-actions">
-            <ExportLink
-              lang={lang}
-              onExport={() => api.exportObsidianZip('all', lang)}
-              href={api.getObsidianZipUrl('all', lang)}
-              className="btn btn-secondary btn-sm nw-export-link"
-              title={t.exportObsidianTitle}
-            >
-              <Archive size={14} />
-              <span>{t.exportObsidianVault}</span>
-            </ExportLink>
-            <ExportLink
-              lang={lang}
-              onExport={() => api.exportNotionCsv('summary')}
-              href={api.getNotionCsvUrl('summary')}
-              className="btn btn-secondary btn-sm nw-export-link"
-              title={t.exportNotionSummaryTitle}
-            >
-              <Download size={14} />
-              <span>{zh ? 'Notion 题库表' : 'Notion CSV'}</span>
-            </ExportLink>
-          </div>
-        }
-      />
+      <h1 className="visually-hidden">{t.notesWorkspaceTitle}</h1>
 
       {/* Master-Detail Grid */}
       <div className={`notes-master-detail nw-master-detail ${zenMode ? 'zen' : ''}`}>
@@ -203,10 +190,10 @@ export function NotesWorkspace({
         />
 
         {/* Right Detail Column: Selected Problem Notes & Actions */}
-        <div className="notes-detail-pane nw-detail-pane">
+        <div className={`notes-detail-pane nw-detail-pane ${zenMode ? 'is-zen' : ''}`}>
           {selectedSummary ? (
             <>
-              {/* Problem header & copy/export bar */}
+              {/* Problem header, primary Save, unified Export menu, Zen & inline Timeline trigger */}
               <NoteProblemHeader
                 lang={lang}
                 summary={selectedSummary}
@@ -214,15 +201,29 @@ export function NotesWorkspace({
                 zenMode={zenMode}
                 onToggleZen={() => setZenMode((z) => !z)}
                 zenModeTitle={zenModeTitle}
+                practiceCount={editor.practices.length}
+                timelineOpen={showTimeline}
+                onToggleTimeline={() => setShowTimeline((prev) => !prev)}
+                isMac={isMac}
+                savingNote={editor.savingNote}
+                saveSuccess={editor.saveSuccess}
+                saveError={editor.saveError}
+                formatNotice={editor.formatNotice}
+                copiedNotice={copiedNotice}
+                onCopied={handleCopied}
+                canSave={canSave}
+                isModified={editor.isModified}
+                isBlank={editor.isBlank}
+                unfilledTemplate={unfilledTemplate}
+                onSave={handleSaveNote}
               />
 
-              {/* Practice timeline: Collapsible Accordion to save vertical height */}
+              {/* Expandable practice timeline body (0px height when collapsed or in Zen mode) */}
               <PracticeTimeline
                 lang={lang}
                 practices={editor.practices}
                 loading={editor.loadingPractices}
-                open={showTimeline}
-                onToggle={() => setShowTimeline((prev) => !prev)}
+                open={showTimeline && !zenMode}
               />
 
               {/* Long-form Note Editor & Markdown Workbench */}
@@ -239,6 +240,7 @@ export function NotesWorkspace({
             <div className="nw-detail-empty">
               <BookOpen size={36} className="nw-detail-empty-icon" />
               <div>{t.selectProblemToViewNotes}</div>
+              <NotesExportMenu lang={lang} />
             </div>
           )}
         </div>

@@ -469,7 +469,7 @@ export function App() {
             </div>
           </div>
         </aside>
-        <main id="main-content" className="main-content" tabIndex={-1}>
+        <main id="main-content" className={view === 'notes' ? 'main-content is-notes-workspace' : 'main-content'} tabIndex={-1}>
           {!viewingSync && syncAttention && syncAttention.key !== dismissedSync && (
             <Feedback tone={syncAttention.fork ? 'warning' : 'info'}>
               {syncAttention.fork

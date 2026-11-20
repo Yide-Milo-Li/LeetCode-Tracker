@@ -39,6 +39,15 @@ export function ShortcutHelpModal({ lang, onClose }: ShortcutHelpModalProps) {
       items: [
         { key: isMac ? '⌘S' : 'Ctrl+S', desc: zh ? '保存当前笔记' : 'Save active note' },
         { key: isMac ? '⌘\\' : 'Ctrl+\\', desc: zh ? '切换专注模式' : 'Toggle focus mode' },
+        { key: isMac ? '⌘Z' : 'Ctrl+Z', desc: zh ? '撤销编辑' : 'Undo edit' },
+        { key: isMac ? '⇧⌘Z' : 'Ctrl+Y', desc: zh ? '重做编辑' : 'Redo edit' },
+        { key: isMac ? '⌘B' : 'Ctrl+B', desc: zh ? '加粗 / 取消加粗' : 'Toggle bold' },
+        { key: isMac ? '⌘I' : 'Ctrl+I', desc: zh ? '斜体 / 取消斜体' : 'Toggle italic' },
+        { key: isMac ? '⌘E' : 'Ctrl+E', desc: zh ? '行内代码 / 代码块' : 'Inline code / code block' },
+        { key: isMac ? '⌘K' : 'Ctrl+K', desc: zh ? '插入链接' : 'Insert link' },
+        { key: isMac ? '⇧⌘X' : 'Ctrl+Shift+X', desc: zh ? '删除线' : 'Toggle strikethrough' },
+        { key: isMac ? '⌘C / ⌘X' : 'Ctrl+C / Ctrl+X', desc: zh ? '复制 / 剪切（无选区时操作当前行）' : 'Copy / cut selection or current line' },
+        { key: 'Tab / ⇧Tab', desc: zh ? '缩进 / 取消缩进' : 'Indent / outdent' },
       ],
     },
     {

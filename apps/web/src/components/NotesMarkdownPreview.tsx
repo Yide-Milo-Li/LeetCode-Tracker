@@ -1,5 +1,6 @@
 /** Render the same CommonMark, GFM and math syntax used by the formatter. */
 import React, { memo, useDeferredValue } from 'react';
+import { FileText } from 'lucide-react';
 import Markdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -46,10 +47,35 @@ const RenderedMarkdown = memo(function RenderedMarkdown({ content, lang }: { con
 });
 
 /** Defer expensive preview updates without delaying editor input. */
-export function NotesMarkdownPreview({ content, lang }: { content: string; lang: Language }) {
+export function NotesMarkdownPreview({
+  content,
+  lang,
+  showInsertTemplate = false,
+  onInsertTemplate,
+}: {
+  content: string;
+  lang: Language;
+  showInsertTemplate?: boolean;
+  onInsertTemplate?: () => void;
+}) {
   const deferredContent = useDeferredValue(content);
   if (!content.trim()) {
-    return <div className="notes-preview-pane notes-preview-empty">{translations[lang].previewEmptyNote}</div>;
+    return (
+      <div className="notes-preview-pane notes-preview-empty">
+        <p className="nw-preview-empty-text">{translations[lang].previewEmptyNote}</p>
+        {showInsertTemplate && onInsertTemplate && (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm nw-empty-template-btn"
+            onClick={onInsertTemplate}
+            title={translations[lang].insertTemplateTitle}
+          >
+            <FileText size={13} aria-hidden="true" />
+            <span>{translations[lang].insertTemplate}</span>
+          </button>
+        )}
+      </div>
+    );
   }
   return <div className="notes-preview-pane"><RenderedMarkdown content={deferredContent} lang={lang} /></div>;
 }

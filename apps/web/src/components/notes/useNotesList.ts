@@ -3,7 +3,7 @@
  * summaries and the summary of the selected problem.
  */
 import { useContext, useEffect, useState, type Dispatch, type SetStateAction } from 'react';
-import { api, type ProblemNoteSummary, type ProblemNoteListQuery, type ProblemNoteListResponse } from '../../api.ts';
+import { api, type ProblemNoteSummary, type ProblemNoteListQuery } from '../../api.ts';
 import { useWorkspace, ViewVisible } from '../../workspace.tsx';
 
 export type NotesScope = 'practiced' | 'all';
@@ -39,9 +39,6 @@ export function useNotesList({ selectedId, setSelectedId }: UseNotesListOptions)
   const [sortField, setSortField] = useState<NotesSortField>('completed');
   const [sortDirection, setSortDirection] = useState<'desc' | 'asc'>('desc');
   const sort: ProblemNoteListQuery['sort'] = sortField === 'notes-first' ? sortField : `${sortField}-${sortDirection}`;
-  const [groupBy, setGroupBy] = useState<ProblemNoteListQuery['groupBy']>('none');
-  const [groupId, setGroupId] = useState<string>();
-  const [grouping, setGrouping] = useState<ProblemNoteListResponse['grouping']>();
   const [page, setPage] = useState(1);
   const limit = NOTES_LIST_LIMIT;
 
@@ -94,8 +91,6 @@ export function useNotesList({ selectedId, setSelectedId }: UseNotesListOptions)
         difficulty,
         hasNote,
         sort,
-        groupBy,
-        groupId,
         page,
         limit,
       })
@@ -103,7 +98,6 @@ export function useNotesList({ selectedId, setSelectedId }: UseNotesListOptions)
         if (!active) return;
         setItems(res.items);
         setTotal(res.total);
-        setGrouping(res.grouping);
         const maxPage = Math.max(1, Math.ceil(res.total / limit));
         if (page > maxPage) {
           setPage(maxPage);
@@ -116,7 +110,6 @@ export function useNotesList({ selectedId, setSelectedId }: UseNotesListOptions)
         if (!active) return;
         setItems([]);
         setTotal(0);
-        setGrouping(undefined);
         setListFailed(true);
       })
       .finally(() => {
@@ -126,7 +119,7 @@ export function useNotesList({ selectedId, setSelectedId }: UseNotesListOptions)
     return () => {
       active = false;
     };
-  }, [scope, search, difficulty, hasNote, sort, groupBy, groupId, page, limit, visible,
+  }, [scope, search, difficulty, hasNote, sort, page, limit, visible,
     listRevision, revision, desktopAgentRevision, favoriteRevision, setSelectedId]);
 
   return {
@@ -143,19 +136,6 @@ export function useNotesList({ selectedId, setSelectedId }: UseNotesListOptions)
     setSortField,
     sortDirection,
     setSortDirection,
-    groupBy,
-    changeGrouping(mode: ProblemNoteListQuery['groupBy']) {
-      setGroupBy(mode);
-      setGroupId(undefined);
-      setGrouping(undefined);
-      setPage(1);
-    },
-    grouping,
-    groupId,
-    openGroup(id: string) {
-      setGroupId(id);
-      setPage(1);
-    },
     page,
     setPage,
     limit,

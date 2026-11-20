@@ -3,12 +3,14 @@ import { Check, Copy } from 'lucide-react';
 import { formatNotionCard } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
 
-export function CopyNotionCard({ lang, problem, record, customNote, disabled = false }: {
+export function CopyNotionCard({ lang, problem, record, customNote, disabled = false, className = 'btn btn-secondary btn-sm', onCopied }: {
   lang: Language;
   problem: Parameters<typeof formatNotionCard>[0];
   record?: Parameters<typeof formatNotionCard>[1];
   customNote?: string | null;
   disabled?: boolean;
+  className?: string;
+  onCopied?: () => void;
 }) {
   const t = translations[lang];
   const [copied, setCopied] = useState(false);
@@ -22,6 +24,7 @@ export function CopyNotionCard({ lang, problem, record, customNote, disabled = f
     try {
       await navigator.clipboard.writeText(formatNotionCard(problem, record, customNote, lang));
       setCopied(true);
+      onCopied?.();
       reset.current = setTimeout(() => setCopied(false), 2000);
     } catch {
       setCopied(false);
@@ -29,9 +32,9 @@ export function CopyNotionCard({ lang, problem, record, customNote, disabled = f
     }
   }
   return <>
-    <button type="button" className="btn btn-secondary btn-sm" disabled={disabled} onClick={() => void copy()}>
+    <button type="button" className={className} disabled={disabled} onClick={() => void copy()}>
       {copied ? <Check size={13} aria-hidden="true" /> : <Copy size={13} aria-hidden="true" />}
-      {copied ? t.cardCopied : t.copyNotionCard}
+      <span>{copied ? t.cardCopied : t.copyNotionCard}</span>
     </button>
     {failed && <small role="alert">{lang === 'zh' ? '无法写入剪贴板。' : 'Could not write to the clipboard.'}</small>}
   </>;
