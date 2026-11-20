@@ -225,6 +225,7 @@ export function createGoalListOperations({ store, writeLock }: ApplicationContex
           if (receiptKey) {
             const receipt = db.prepare("SELECT result_json->>'id' AS id FROM planning_operations WHERE id=? AND fingerprint=?")
               .get(receiptKey, edit.frontendId);
+            if (receipt?.id === null) return { ...view, linkedPractice: null };
             const record = typeof receipt?.id === 'string' ? store.getPracticeRecord(receipt.id) : null;
             if (record?.status === 'active' && record.completed) return { ...view, linkedPractice: record };
           }
@@ -239,7 +240,8 @@ export function createGoalListOperations({ store, writeLock }: ApplicationContex
         const updated = save({ ...goal, version: goal.version + 1 });
         let linkedPractice = plan && assignment ? completePlanItem(store, plan, assignment, now) : undefined;
         if (receiptKey) {
-          if (!linkedPractice) {
+          // null means the plan already has completion evidence from an import.
+          if (linkedPractice === undefined) {
             const problem = store.getProblem(edit.frontendId, 'frontendId');
             if (!problem) fail(404, { error: 'GOAL_UNKNOWN_PROBLEM', message: edit.frontendId });
             const validated = { questionFrontendId: edit.frontendId, completed: true, practicedAt: new Date(now).toISOString() };
@@ -248,7 +250,7 @@ export function createGoalListOperations({ store, writeLock }: ApplicationContex
             linkedPractice = store.getPracticeRecord(recordId)!;
           }
           db.prepare('INSERT INTO planning_operations(id,fingerprint,result_json) VALUES(?,?,?)')
-            .run(receiptKey, edit.frontendId, JSON.stringify({ id: linkedPractice.id }));
+            .run(receiptKey, edit.frontendId, JSON.stringify({ id: linkedPractice?.id ?? null }));
         }
         return linkedPractice === undefined ? updated : { ...updated, linkedPractice };
       });

@@ -1028,6 +1028,62 @@ it('records a standalone goal solve once and reconciles the check when the recor
   } finally { await app.close(); db.close(); }
 });
 
+it('reuses an imported solve for a goal check and reopens both tasks when that evidence is revoked', async ({ mock }) => {
+  mock.timers.enable({ apis: ['Date'], now: Date.UTC(2026, 10, 19, 12) });
+  const { app, db, store } = await createTestApp();
+  try {
+    const strategy = await app.inject({ method: 'POST', url: '/api/v1/strategies', payload: {
+      name: 'Imported evidence', weekdays: [0, 1, 2, 3, 4, 5, 6],
+      rules: { dailyCount: 1, difficulty: { Easy: 100, Medium: 0, Hard: 0 }, tags: [], premium: false,
+        reviewEnabled: false, reviewPercent: null, preference: '' },
+    } });
+    assert.equal(strategy.statusCode, 201, strategy.body);
+    const generated = await app.inject({ method: 'POST', url: '/api/v1/daily-plans/ensure' });
+    assert.equal(generated.statusCode, 200, generated.body);
+    const { plan } = generated.json();
+    const frontendId = plan.items[0].problem.questionFrontendId;
+    const readToday = async () => (await app.inject('/api/v1/daily-plans?date=' + plan.date)).json().items[0].items[0];
+
+    mock.timers.tick(5000);
+    const preview = store.previewProgressImport({ candidates: [{
+      frontendId, lastSubmitted: new Date().toISOString(), lastResult: 'Accepted', submissions: 1,
+    }] });
+    await store.commitProgressImport(preview.previewId, preview);
+    const imported = await readToday();
+    assert.equal(imported.completed, true);
+    assert.equal(imported.evidenceIds.length, 1);
+    assert.match(imported.evidenceIds[0], /^snapshot:/);
+
+    const created = await app.inject({ method: 'POST', url: '/api/v1/goal-lists',
+      payload: { name: 'Added after import', frontendIds: [frontendId] } });
+    assert.equal(created.statusCode, 201, created.body);
+    const goal = created.json<GoalList>();
+    assert.equal(goal.items[0].completed, false);
+    const url = '/api/v1/goal-lists/' + goal.id;
+    const check = () => app.inject({ method: 'PATCH', url: url + '/items', payload: {
+      expectedVersion: goal.version, edit: { action: 'setCompleted', frontendId, completed: true, recordPractice: true },
+    } });
+
+    const [first, retry] = await Promise.all([check(), check()]);
+    assert.equal(store.queryPracticeRecords().total, 0);
+    for (const result of [first, retry]) {
+      assert.equal(result.statusCode, 200, result.body);
+      assert.equal(result.json().version, goal.version + 1);
+      assert.equal(result.json().items[0].completed, true);
+      assert.equal(result.json().linkedPractice, null);
+    }
+    mock.timers.tick(86_400_000);
+    assert.equal((await check()).json().linkedPractice, null);
+    assert.deepEqual((await readToday()).evidenceIds, imported.evidenceIds);
+
+    await store.revokeProgressSnapshot(frontendId);
+    assert.equal((await app.inject(url)).json().items[0].completed, false);
+    assert.equal((await readToday()).completed, false);
+    assert.equal((await check()).statusCode, 409);
+    assert.equal(store.queryPracticeRecords().total, 0);
+  } finally { await app.close(); db.close(); }
+});
+
 it('shares one recorded solve across strategy and goal clicks, including concurrent requests and retries', async ({ mock }) => {
   mock.timers.enable({ apis: ['Date'], now: Date.UTC(2026, 10, 19, 12) });
   const { app, db, store } = await createTestApp();
