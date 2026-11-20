@@ -16,7 +16,7 @@ A local-first desktop workbench for algorithm practice: bring your own JSONL cat
 
 LeetCode Tracker packages the React interface, Fastify API, SQLite engine (schema v12), and a private Node.js 26.13.0 runtime into native Tauri desktop apps for **Windows 11 x64** and **Apple Silicon macOS 14+** (`aarch64-apple-darwin`) with aligned behavior and a single-file cross-device migration bundle. **End users do not need to install Node.js, npm, Git, or Rust.**
 
-Version 1.5.0 adds ordered goal lists, a Favorites library, and a new Today overview. Use App updates to upgrade from 1.4.0 or 1.4.1. Upgrading from 1.3.1 requires one manual install. [1.5.0 release notes](docs/releases/1.5.0.md)
+Version 1.5.1 brings the catalog, favorites and goal lists into one Problems workspace. Use App updates on official desktop builds from 1.4.0 onward. Upgrading from 1.3.1 or earlier requires one manual install. [1.5.1 release notes](docs/releases/1.5.1.md)
 
 ## Download and start
 
@@ -24,8 +24,8 @@ Download the installer for your OS from the [latest release](https://github.com/
 
 | Platform | Download | How to install & open |
 | --- | --- | --- |
-| **Windows 11 x64** | `LeetCode-Tracker_1.5.0_x64-setup.exe` | 1. Run the per-user installer (no administrator rights needed).<br>2. If Windows SmartScreen warns that the installer is unsigned, click **More info → Run anyway**.<br>3. Launch **LeetCode Tracker** from the Start Menu or Desktop shortcut. |
-| **macOS 14+ (Apple Silicon)** | `LeetCode-Tracker_1.5.0_aarch64.dmg` | 1. Open the `.dmg` and drag **LeetCode Tracker.app** into **Applications**.<br>2. Because the bundle is ad-hoc signed and unnotarized, if Gatekeeper warns on first open, go to **System Settings → Privacy & Security → Open Anyway** (or right-click **LeetCode Tracker.app → Open**). If needed, verify checksum and run `xattr -cr "/Applications/LeetCode Tracker.app"`.<br>3. Closing the red window button hides the window while keeping the sidecar ready in the Dock; click the Dock icon to reopen or press `Cmd+Q` to quit cleanly. |
+| **Windows 11 x64** | `LeetCode-Tracker_1.5.1_x64-setup.exe` | 1. Run the per-user installer (no administrator rights needed).<br>2. If Windows SmartScreen warns that the installer is unsigned, click **More info → Run anyway**.<br>3. Launch **LeetCode Tracker** from the Start Menu or Desktop shortcut. |
+| **macOS 14+ (Apple Silicon)** | `LeetCode-Tracker_1.5.1_aarch64.dmg` | 1. Open the `.dmg` and drag **LeetCode Tracker.app** into **Applications**.<br>2. Because the bundle is ad-hoc signed and unnotarized, if Gatekeeper warns on first open, go to **System Settings → Privacy & Security → Open Anyway** (or right-click **LeetCode Tracker.app → Open**). If needed, verify checksum and run `xattr -cr "/Applications/LeetCode Tracker.app"`.<br>3. Closing the red window button hides the window while keeping the sidecar ready in the Dock; click the Dock icon to reopen or press `Cmd+Q` to quit cleanly. |
 
 > [!TIP]
 > **Running from a source checkout instead?** Run `npm run desktop` (works on both Windows and macOS), `start.bat` on Windows, or `npm run desktop:mac` / `./scripts/start-desktop.sh` on macOS (pass `--port 3001` or `PORT=3001` to customize the port). Source mode requires **Node.js >=26.13.0 <27**.
@@ -37,7 +37,7 @@ Download the installer for your OS from the [latest release](https://github.com/
    - **Problems**: Import your own JSON Lines (`.jsonl`) catalog (upload a file or paste text).
    - **Study rhythm**: Pick the recommended weekday preset (`Weekdays · 3 a day`, 1 Easy + 2 Medium with 1 review) or open **Study schedule** to customize counts, difficulty mix, topic tags, and review mode. Any step can be skipped and updated later.
 2. **Daily practice & timer (`Today` & `Problems`)**: Click a problem title to open it in your system browser, use the built-in stopwatch to time your attempt, and click the completion circle to log completion (with optional duration, outcome feedback `Independent` / `Assisted` / `Unsolved`, and short notes). Use **Add one**, **Adjust today**, or **Replace** anytime.
-   - **Goal lists**: Open **Problems → Goal lists** to browse all lists, check their progress, or edit their contents. **Use on Today** selects the list for daily practice. Today shows daily plan progress, the selected goal’s completion in saved order, and a seven-day solve chart above the two task lists. Select a day to see its practice records. Use the list selector to switch goals. In **Today → New list**, search your catalog or paste problem IDs in practice order. In **Problems**, check rows across pages or filters and choose **Create goal list**. The draft starts in problem-number order and can be rearranged before saving. Scroll the list and check off problems as you go. **Edit** lets you reorder, replace, remove, or reopen an entry. Checking a problem shared with today’s strategy completes both entries with one practice record. Correcting or revoking its supporting practice updates the linked checkmark. It stays checked while another qualifying record exists. Goal-only and older checkmarks without a recorded link stay local to their list.
+   - **Goal lists**: Open **Problems → Goal lists** to browse all lists, check their progress, or edit their contents. **Use on Today** selects the list for daily practice. Today shows daily plan progress, the selected goal’s completion in saved order, and a seven-day solve chart above the two task lists. Select a day to see its practice records. Use the list selector to switch goals. In **Today → New list**, search your catalog or paste problem IDs in practice order. In **Problems**, check rows across pages or filters and choose **Create goal list**. The draft starts in problem-number order and can be rearranged before saving. Scroll the list and check off problems as you go. **Edit** lets you reorder, replace, remove, or reopen an entry. Checking a goal-only problem on Today saves practice and offers optional details. When the goal entry is shared with today’s strategy, both entries use the same completion evidence, including an imported Accepted submission. Correcting or revoking that evidence reopens the linked entries when no other qualifying evidence remains. Older unlinked checkmarks stay local to their list.
    - In **Today**, click the star beside a strategy task or goal-list problem. Choose any folders and click **Save favorite**, or leave them unchecked to save only to **All favorites**. Click a filled star to change folders or remove the favorite.
    - In **Problems**, the star saves a problem in **All favorites** and any folders you select. To save several at once, check rows in **Problems** and choose **Favorite**. This adds them to the selected folders and keeps their existing memberships. Open **Problems → Favorites** to browse your saved problems and manage folders. In **Favorites**, check problems across folders or pages, then choose **Create goal list** or **Unfavorite**. Confirming removal clears the selected problems from every favorite folder.
    - Use the flag beside a problem in **Problems**, **Favorites** or **Today** to choose its goal lists or create one. A filled flag means the problem belongs to at least one list. Adding it to another list places it at the end.
@@ -45,7 +45,7 @@ Download the installer for your OS from the [latest release](https://github.com/
 3. **Review progress & Topic Insights (`Progress`)**: View outcome KPIs, the 365-day activity heatmap, difficulty mastery, topics worth attention, and the searchable, recency-ordered **Topic Insights** table (expand any topic row for 30-day evidence).
 4. **Write notes, export, or switch computers (`Notes` & `Settings`)**: Edit Markdown notes with Split/Edit/Preview modes, local format-on-save (with undo), optional AI formatting, and Notion card copying or Markdown, ZIP, and CSV export. Moving between Windows and macOS? Export one **Snapshot Bundle v5** under **Settings → Data → Export migration file** and import it on the other computer (**Settings → Data → Import migration file**).
 
-The Windows installer is **unsigned** and uses the Evergreen WebView2 runtime (downloading its bootstrapper if missing, which requires internet access). Windows 11 x64 is the primary Windows target; clean-machine installation, Windows 10 compatibility, Apple Developer ID notarization, and non-developer Mac Gatekeeper UX remain outside automated checks. See [installation, data paths, and troubleshooting](docs/desktop.md) and [1.5.0 release notes](docs/releases/1.5.0.md).
+The Windows installer is **unsigned** and uses the Evergreen WebView2 runtime (downloading its bootstrapper if missing, which requires internet access). Windows 11 x64 is the primary Windows target; clean-machine installation, Windows 10 compatibility, Apple Developer ID notarization, and non-developer Mac Gatekeeper UX remain outside automated checks. See [installation, data paths, and troubleshooting](docs/desktop.md) and [1.5.1 release notes](docs/releases/1.5.1.md).
 
 ### Bring your own catalog
 
@@ -82,7 +82,7 @@ Browse a filterable problem list alongside a Markdown editor and CommonMark/GFM 
 
 ### Appearance and keyboard access
 
-Ten palettes, English/Chinese text, and light/dark/system appearance support desktop work, and selecting a palette dynamically tints the window/Dock icon to match. The eight screenshots show 1.5.0 in English with the default light palette and synthetic catalog and practice data.
+Ten palettes, English/Chinese text, and light/dark/system appearance support desktop work, and selecting a palette dynamically tints the window/Dock icon to match. The eight screenshots show 1.5.1 in English with the default light palette and synthetic catalog and practice data.
 
 | Shortcut | Action |
 | --- | --- |
@@ -154,7 +154,7 @@ CI checks TypeScript, automated tests, the production frontend, documentation, n
 
 ## Documentation
 
-- [Documentation index](docs/README.md) · [Desktop installation](docs/desktop.md) · [1.5.0 release notes](docs/releases/1.5.0.md) · [MCP setup](apps/mcp/README.md)
+- [Documentation index](docs/README.md) · [Desktop installation](docs/desktop.md) · [1.5.1 release notes](docs/releases/1.5.1.md) · [MCP setup](apps/mcp/README.md)
 - [Data format](docs/data-format.md) · [Device sync](docs/sync.md) · [AI providers](docs/llm-providers.md) · [Topic insights](docs/topic-practice-insights.md)
 - [Architecture](docs/architecture.md) · [Applications](apps/README.md) · [Shared packages](packages/README.md)
 - [Tests](tests/README.md) · [Scripts](scripts/README.md) · [Roadmap](docs/roadmap.md)

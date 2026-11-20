@@ -2125,7 +2125,7 @@ dependencies = [
 
 [[package]]
 name = "leetcode-tracker-desktop"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "dunce",
  "objc2",

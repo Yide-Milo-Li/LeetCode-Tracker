@@ -24,7 +24,7 @@ import { createTrackerApplication } from '../../../packages/application/src/appl
 import { localModelService } from '../../mcp/src/profile.ts';
 
 /** Version reported by health checks and written into sync snapshots. */
-export const APP_VERSION = '1.5.0';
+export const APP_VERSION = '1.5.1';
 
 /** Options for building Fastify app. */
 export interface AppOptions {

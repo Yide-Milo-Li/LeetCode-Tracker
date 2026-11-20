@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.5.1]
+
+- Bring the catalog, Favorites and Goal lists together in Problems. Search, sort and page through large collections, and keep selections while switching pages or filters.
+- Sort Notes by last solved or last note update in either direction, and group problems by goal list or favorite folder.
+- Offer optional practice details for goal-only completions. Reuse an imported Accepted submission when it already completes the same problem in today's strategy.
+
+See the [1.5.1 release notes](docs/releases/1.5.1.md).
+
 ## [1.5.0] - 2026-11-20
 
 - Added ordered goal lists and a Favorites library. Select problems across catalog pages, organize stars in folders, and append selections to multiple goal lists.

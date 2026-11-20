@@ -761,7 +761,7 @@ export class CatalogStore {
 
   /** Export catalog and all saved business history for another device. */
   public exportMigrationBundle(versionOrOptions: 2 | 3 | 5 | { formatVersion?: 2 | 3 | 5 } = 5): SnapshotBundleV2 | SnapshotBundleV3 | SnapshotBundleV5 {
-    return exportMigrationBundle(this.db, '1.5.0', versionOrOptions);
+    return exportMigrationBundle(this.db, '1.5.1', versionOrOptions);
   }
 
   /** Atomically restore database state from a SnapshotBundle with automatic safety backup. */

@@ -1,5 +1,11 @@
 # Implementation status
 
+## Release 1.5.1
+
+The Problems workspace groups the catalog, Favorites and Goal lists. Notes can sort and group problems, and a shared goal check can reuse an imported completion from Today's strategy. [Release notes](releases/1.5.1.md)
+
+Local candidate checks passed type checking, the production build and 707 application, renderer and bundled-sidecar tests. The goal regression covers concurrent requests, a next-day retry and revoking the imported evidence. An isolated 1.5.0 profile retained its catalog, practice, notes, favorites and goal order in 1.5.1. Its exported Snapshot Bundle v5 restored into 1.5.0 with all 22 tables intact. The refreshed README gallery uses synthetic data. [Candidate CI](https://github.com/Yide-Milo-Li/LeetCode-Tracker/actions/workflows/ci.yml?query=branch%3Arelease%2F1.5.1)
+
 ## Release 1.5.0
 
 Version 1.5.0 adds ordered goal lists, favorite folders, shared practice completion, and a Today activity overview. [Release notes](releases/1.5.0.md)

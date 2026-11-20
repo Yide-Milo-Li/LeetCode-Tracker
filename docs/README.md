@@ -1,10 +1,10 @@
 # Documentation index
 
-[1.5.0 release notes](releases/1.5.0.md) · [1.4.1 release notes](releases/1.4.1.md) · [1.4.0 release notes](releases/1.4.0.md) · [Desktop installation and native runtime (Windows & macOS)](desktop.md) · [Current verification and limitations](status.md)
+[1.5.1 release notes](releases/1.5.1.md) · [1.5.0 release notes](releases/1.5.0.md) · [1.4.1 release notes](releases/1.4.1.md) · [1.4.0 release notes](releases/1.4.0.md) · [Desktop installation and native runtime (Windows & macOS)](desktop.md) · [Current verification and limitations](status.md)
 
 Users provide their own JSONL problem metadata with appropriate usage rights. The application creates its own SQLite database. Catalog import and progress import are separate implemented workflows; the repository contains no dataset.
 
-All maintained documentation is English. Version 1.5.0 supports Chinese and English across Today, Problems, Progress, Notes, Favorites, and Settings. The published release includes a Windows 11 x64 Tauri NSIS installer and an Apple Silicon macOS 14+ `.app`/`.dmg` package. Browser source mode remains available on both platforms.
+All maintained documentation is English. The app supports Chinese and English across Today, Problems, Progress, Notes and Settings. Problems includes the catalog, Favorites and Goal lists. Desktop releases include a Windows 11 x64 Tauri NSIS installer and an Apple Silicon macOS 14+ `.app`/`.dmg` package. Browser source mode remains available on both platforms.
 
 ## Architecture & System Design
 

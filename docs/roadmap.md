@@ -1,6 +1,6 @@
 # Roadmap
 
-Release 1.5.0 adds ordered practice goals, favorite folders, and a Today overview with activity drill-down. The same goal and favorite operations are available to local MCP clients. [Release notes](releases/1.5.0.md) · [Verification](status.md)
+Release 1.5.1 brings the catalog, Favorites and Goal lists into Problems, adds sorting and grouping in Notes, and preserves shared completion evidence across Today and goal lists. Goal and favorite operations remain available to local MCP clients. [Release notes](releases/1.5.1.md) · [Verification](status.md)
 
 ## Desktop distribution: implemented and remaining
 
