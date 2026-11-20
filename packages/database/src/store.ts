@@ -43,7 +43,7 @@ import type { SnapshotBundleV2, SnapshotBundleV3, SnapshotBundleV5 } from '../..
 import { PlanningStore } from './planning-store.ts';
 import type {
   ProblemNote,
-  ProblemNoteSummary,
+  ProblemNoteListResponse,
   ProblemNoteListQuery,
   SnapshotBundleV1 as SnapshotBundle,
 } from '../../contracts/src/notes.ts';
@@ -750,7 +750,7 @@ export class CatalogStore {
   }
 
   /** Query problem note summaries with practice activity, difficulty, and tag filters. */
-  public listProblemNotes(query: Partial<ProblemNoteListQuery> = {}): { items: ProblemNoteSummary[]; total: number } {
+  public listProblemNotes(query: Partial<ProblemNoteListQuery> = {}): ProblemNoteListResponse {
     return listProblemNoteSummaries(this.db, query);
   }
 

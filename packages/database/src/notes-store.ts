@@ -7,8 +7,11 @@ import {
   hasMeaningfulNoteContent,
   type ProblemNote,
   type ProblemNoteListQuery,
+  type ProblemNoteListResponse,
   type ProblemNoteSummary,
 } from '../../contracts/src/notes.ts';
+import { latestCompletionsQuery } from './dashboard-query.ts';
+import { groupNoteProblems } from './note-groups.ts';
 
 const registeredConnections = new WeakSet<DatabaseSync>();
 
@@ -110,7 +113,7 @@ export function upsertProblemNotesTransaction(
 export function listProblemNoteSummaries(
   db: DatabaseSync,
   rawQuery: Partial<ProblemNoteListQuery> = {}
-): { items: ProblemNoteSummary[]; total: number } {
+): ProblemNoteListResponse {
   // Ensure connection-level scalar function is registered before query execution
   registerNotesFunctions(db);
 
@@ -175,19 +178,34 @@ export function listProblemNoteSummaries(
     params.push(query.tag.trim());
   }
 
-  const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+  const source = 'FROM problems p LEFT JOIN problem_notes n ON n.question_id = p.question_id';
+  const where = () => whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : '';
+  let grouping: ProblemNoteListResponse['grouping'];
+  let total: number;
+  if (query.groupBy === 'none') {
+    total = Number(db.prepare(`SELECT count(*) AS total ${source} ${where()}`).get(...params)!.total);
+  } else {
+    const matches = db.prepare(`SELECT p.frontend_question_id AS id ${source} ${where()}`).all(...params);
+    const groups = groupNoteProblems(db, query.groupBy, matches.map(row => String(row.id)));
+    const active = groups.find(group => group.id === query.groupId) ?? groups[0];
+    grouping = {
+      groups: groups.map(({ id, name, frontendIds }) => ({ id, name, count: frontendIds.length })),
+      activeId: active?.id ?? null,
+    };
+    if (!active) return { items: [], total: 0, grouping };
+    total = active.frontendIds.length;
+    whereClauses.push('p.frontend_question_id IN (SELECT value FROM json_each(?))');
+    params.push(JSON.stringify(active.frontendIds));
+  }
 
-  // Get total count
-  const countRow = db
-    .prepare(
-      `SELECT count(*) AS total
-       FROM problems p
-       LEFT JOIN problem_notes n ON n.question_id = p.question_id
-       ${whereSql}`
-    )
-    .get(...params) as { total: number };
-
-  const total = countRow.total;
+  const byCompletion = query.sort === 'completed-desc' || query.sort === 'completed-asc';
+  const order = {
+    'notes-first': 'noteUpdated IS NULL',
+    'completed-desc': 'c.completedEpoch DESC NULLS LAST',
+    'completed-asc': 'c.completedEpoch ASC NULLS LAST',
+    'updated-desc': 'noteUpdated DESC NULLS LAST',
+    'updated-asc': 'noteUpdated ASC NULLS LAST',
+  }[query.sort];
 
   // Pagination
   const page = Math.max(1, query.page ?? 1);
@@ -204,8 +222,8 @@ export function listProblemNoteSummaries(
          p.title_slug AS titleSlug,
          p.difficulty,
          p.url,
-         n.content AS customNote,
-         n.updated_at AS customNoteUpdatedAt,
+         CASE WHEN has_meaningful_note(n.content) = 1 THEN n.updated_at END AS noteUpdated,
+         ${byCompletion ? 'c.lastCompletedAt' : 'NULL'} AS lastCompletedAt,
          (SELECT count(*) FROM practice_records pr WHERE pr.question_id = p.question_id AND pr.status = 'active') AS totalPractices,
          (SELECT max(pr.practiced_at) FROM practice_records pr WHERE pr.question_id = p.question_id AND pr.status = 'active') AS lastPracticedAt,
          (SELECT pr.notes FROM practice_records pr WHERE pr.question_id = p.question_id AND pr.status = 'active' AND pr.notes IS NOT NULL ORDER BY pr.practiced_at DESC LIMIT 1) AS latestPracticeNotes,
@@ -218,11 +236,11 @@ export function listProblemNoteSummaries(
            )
          ) AS hasAccepted,
          (SELECT payload_json FROM problem_review_state prs WHERE prs.question_id = p.question_id) AS reviewPayload
-       FROM problems p
-       LEFT JOIN problem_notes n ON n.question_id = p.question_id
-       ${whereSql}
+       ${source}
+       ${byCompletion ? `LEFT JOIN (${latestCompletionsQuery(db)}) c ON c.questionId = p.question_id` : ''}
+       ${where()}
        ORDER BY
-         CASE WHEN has_meaningful_note(n.content) = 1 THEN 0 ELSE 1 END,
+         ${order},
          CAST(p.frontend_question_id AS INTEGER) ASC,
          p.frontend_question_id ASC
        LIMIT ? OFFSET ?`
@@ -234,8 +252,8 @@ export function listProblemNoteSummaries(
       titleSlug: string;
       difficulty: 'Easy' | 'Medium' | 'Hard';
       url: string;
-      customNote: string | null;
-      customNoteUpdatedAt: number | null;
+      noteUpdated: number | null;
+      lastCompletedAt: string | null;
       totalPractices: number;
       lastPracticedAt: string | null;
       latestPracticeNotes: string | null;
@@ -276,8 +294,6 @@ export function listProblemNoteSummaries(
       }
     }
 
-    const hasMeaningful = hasMeaningfulNoteContent(r.customNote);
-
     return {
       questionId: r.questionId,
       questionFrontendId: r.questionFrontendId,
@@ -286,8 +302,9 @@ export function listProblemNoteSummaries(
       difficulty: r.difficulty,
       tags: tagMap.get(r.questionId) ?? [],
       url: r.url,
-      hasCustomNote: hasMeaningful,
-      customNoteUpdatedAt: hasMeaningful ? r.customNoteUpdatedAt : null,
+      hasCustomNote: r.noteUpdated !== null,
+      customNoteUpdatedAt: r.noteUpdated,
+      ...(byCompletion && { lastCompletedAt: r.lastCompletedAt }),
       lastPracticedAt: r.lastPracticedAt,
       totalPractices: r.totalPractices,
       hasAccepted: r.hasAccepted === 1,
@@ -296,5 +313,5 @@ export function listProblemNoteSummaries(
     };
   });
 
-  return { items, total };
+  return grouping ? { items, total, grouping } : { items, total };
 }

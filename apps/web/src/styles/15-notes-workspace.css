@@ -111,12 +111,14 @@
 /* Filter row: high contrast in both light and dark mode */
 .nw-filters {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
 }
 
 .notes-workspace-view select.nw-filter-select {
-  padding: 5px 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 5px 24px 5px 8px;
   border-radius: 6px;
   border: 1px solid var(--border-color);
   background-color: var(--surface);
@@ -138,6 +140,48 @@
   flex-direction: column;
   gap: 6px;
   padding-right: 2px;
+}
+
+.nw-list-controls label {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.nw-group + .nw-group {
+  border-top: 1px solid var(--border-color);
+  padding-top: 4px;
+}
+
+.notes-workspace-view .nw-group-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-align: start;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-main);
+  box-shadow: none;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.notes-workspace-view .nw-group-toggle:hover {
+  background: var(--muted-surface);
+}
+
+.nw-group-toggle svg { flex-shrink: 0; }
+.nw-group-toggle[aria-expanded='true'] svg { transform: rotate(90deg); }
+.nw-group-name { flex: 1; overflow-wrap: anywhere; }
+.nw-group-count, .nw-row-date {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .nw-list-loading {
@@ -207,6 +251,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 1;
+}
+
+.nw-problem-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
 }
 
 .nw-problem-card.active .nw-problem-title {

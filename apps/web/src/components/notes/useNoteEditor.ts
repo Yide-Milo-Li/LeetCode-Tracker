@@ -97,7 +97,9 @@ export function useNoteEditor({
     savedSnapshot.current = { content, hash };
     setSavedContent(content);
   }, []);
-  const [loadingNote, setLoadingNote] = useState(false);
+  const [loadedId, setLoadedId] = useState<string | null>(null);
+  // Disable the previous editor in the render that switches problems, before effects run.
+  const loadingNote = selectedId !== null && loadedId !== selectedId;
   const [noteLoadError, setNoteLoadError] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -234,6 +236,7 @@ export function useNoteEditor({
   // Initial loads and retries share cancellation, independently of list and language changes.
   useEffect(() => {
     if (!selectedId) {
+      setLoadedId(null);
       setSelectedSummary(null);
       setNoteContent('');
       rememberSaved('');
@@ -243,7 +246,7 @@ export function useNoteEditor({
     }
 
     let active = true;
-    setLoadingNote(true);
+    setLoadedId(null);
     setSaveSuccess(false);
     setSaveError('');
     setNoteLoadError(false);
@@ -274,7 +277,7 @@ export function useNoteEditor({
         }
       })
       .finally(() => {
-        if (active) setLoadingNote(false);
+        if (active) setLoadedId(selectedId);
       });
 
     // Fetch practice timeline

@@ -28,7 +28,7 @@ import type {
   PracticeStats,
   ProblemNote,
   ProblemNoteListQuery,
-  ProblemNoteSummary,
+  ProblemNoteListResponse,
   NoteFormatRequest,
   NoteFormatResponse,
   ProgressCandidateInput,
@@ -536,7 +536,7 @@ export const notesApi = {
   },
   listNotes(
     query: Partial<ProblemNoteListQuery> = {}
-  ): Promise<{ items: ProblemNoteSummary[]; total: number }> {
+  ): Promise<ProblemNoteListResponse> {
     const params = new URLSearchParams();
     if (query.page) params.set('page', String(query.page));
     if (query.limit) params.set('limit', String(query.limit));
@@ -544,10 +544,13 @@ export const notesApi = {
     if (query.search) params.set('search', query.search);
     if (query.difficulty && query.difficulty !== 'all') params.set('difficulty', query.difficulty);
     if (query.hasNote && query.hasNote !== 'all') params.set('hasNote', query.hasNote);
+    if (query.sort) params.set('sort', query.sort);
+    if (query.groupBy && query.groupBy !== 'none') params.set('groupBy', query.groupBy);
+    if (query.groupId) params.set('groupId', query.groupId);
     if (query.scope) params.set('scope', query.scope);
     if (query.tag) params.set('tag', query.tag);
     const qs = params.toString();
-    return request<{ items: ProblemNoteSummary[]; total: number }>(`/notes${qs ? `?${qs}` : ''}`);
+    return request<ProblemNoteListResponse>(`/notes${qs ? `?${qs}` : ''}`);
   },
 
   getNote(frontendId: string, { signal }: ReadOptions = {}): Promise<{ note: ProblemNote | null; contentHash?: string }> {
