@@ -90,6 +90,7 @@ export function PracticeWorkspace({
     <Dialog
       lang={lang}
       onClose={onClose}
+      fallbackFocusRef={request.mode === 'enrich' ? request.fallbackFocusRef : undefined}
       drawer={request.mode === 'detail' || request.mode === 'evidence'}
       title={
         request.mode === 'enrich'

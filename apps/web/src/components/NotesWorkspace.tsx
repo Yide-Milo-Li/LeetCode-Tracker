@@ -60,7 +60,7 @@ export function NotesWorkspace({
 
   // Hook order keeps the original request order on mount: settings, summary lookup, list, then note.
   const formatSetting = useFormatOnSaveSetting(controlledFormatOnSave);
-  const list = useNotesList({ selectedId, setSelectedId, externalRevision: workspace.desktopAgentRevision });
+  const list = useNotesList({ selectedId, setSelectedId });
   const { items, selectedSummary } = list;
   const editor = useNoteEditor({
     lang,

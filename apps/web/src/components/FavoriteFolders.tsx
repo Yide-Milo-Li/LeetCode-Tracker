@@ -5,6 +5,7 @@ import { api, ApiError } from '../api.ts';
 import { localizeApiError } from '../error-i18n.ts';
 import { formatCount, type Language } from '../i18n.ts';
 import { Dialog, Feedback, Field, Tooltip } from './ui.tsx';
+import { COLLECTION_PICKER_PAGE_SIZE, CollectionChoices, CollectionPicker } from './CollectionPicker.tsx';
 
 import { useProblemListWindow } from '../hooks/useProblemListWindow.ts';
 import { useAsyncResource } from '../hooks/useAsyncResource.ts';
@@ -25,21 +26,21 @@ export function FavoriteFolderPicker({ library, selected, lang, onSelect }: {
   library: FavoriteLibrary; selected: string; lang: Language; onSelect(id: string): void;
 }) {
   const zh = lang === 'zh';
-  const folders = [{ id: 'all', name: zh ? '全部收藏' : 'All favorites', count: library.total }, ...library.folders];
-  if (library.folders.length > 8) {
-    return <label className="favorite-folder-switcher">
-      <span className="visually-hidden">{zh ? '选择收藏夹' : 'Choose a folder'}</span>
-      <select value={selected} title={folders.find(folder => folder.id === selected)?.name} onChange={event => onSelect(event.currentTarget.value)}>
-        {folders.map(folder => <option key={folder.id} value={folder.id}>{folder.name} ({formatCount(folder.count, lang)})</option>)}
-      </select>
-    </label>;
-  }
+  const all = { id: 'all', name: zh ? '全部收藏' : 'All favorites', count: library.total };
+  const large = library.folders.length > COLLECTION_PICKER_PAGE_SIZE;
+  const folders = large ? [all] : [all, ...library.folders];
+  const options = useMemo(() => large ? library.folders.map(folder => ({
+    ...folder, detail: formatCount(folder.count, lang),
+  })) : [], [large, library.folders, lang]);
   return <div className="favorite-folders" role="group" aria-label={zh ? '选择收藏夹' : 'Choose a folder'}>
     {folders.map(({ id, name, count }) => <button key={id} type="button" aria-pressed={id === selected}
       className="btn btn-secondary favorite-folder" onClick={() => onSelect(id)}>
       {id === 'all' ? <Star size={16} aria-hidden="true" /> : <Folder size={16} aria-hidden="true" />}
       <span>{name}</span> <small>{formatCount(count, lang)}</small>
     </button>)}
+    {large && <CollectionPicker options={options} selected={selected}
+      label={zh ? '切换收藏夹' : 'Browse folders'} searchLabel={zh ? '搜索收藏夹' : 'Search folders'}
+      lang={lang} onSelect={onSelect} />}
   </div>;
 }
 
@@ -131,33 +132,42 @@ export function RemoveFavoritesDialog({ problems, library, lang, onClose, onRemo
   </Dialog>;
 }
 
-export function FavoriteFolderEditor({ folder, lang, onClose, onSaved, onRefresh }: {
-  folder: FavoriteFolder | null; lang: Language; onClose(): void; onSaved(id: string): void; onRefresh(): void;
+export function FavoriteFolderEditor({ folder, frontendIds, lang, onClose, onSaved, onRefresh }: {
+  folder: FavoriteFolder | null; frontendIds?: string[]; lang: Language;
+  onClose(): void; onSaved(folder: FavoriteFolder | null): void; onRefresh(): void;
 }) {
   const zh = lang === 'zh';
+  const nameInput = useRef<HTMLInputElement>(null);
   const [id] = useState(() => folder?.id ?? crypto.randomUUID());
   const [name, setName] = useState(folder?.name ?? '');
   const [deleting, setDeleting] = useState(false);
   const { busy, error, submit } = useFavoriteWrite(lang, onRefresh);
   const title = deleting ? (zh ? '删除收藏夹' : 'Delete folder') : folder
     ? (zh ? '编辑收藏夹' : 'Edit folder') : (zh ? '新建收藏夹' : 'New folder');
-  return <Dialog title={title} lang={lang} onClose={onClose} closeDisabled={busy}>
+  return <Dialog title={title} lang={lang} onClose={onClose} closeDisabled={busy} initialFocusRef={frontendIds ? nameInput : undefined}>
     <form className="favorite-form" aria-label={title} onSubmit={event => {
       event.preventDefault();
       void submit(async () => {
         if (deleting && folder) {
           await api.deleteFavoriteFolder(folder);
-          onSaved('all');
+          onSaved(null);
         } else {
-          await api.saveFavoriteFolder({ id, name: name.trim() }, folder?.name ?? null);
-          onSaved(id);
+          const next = { id, name: name.trim() };
+          if (frontendIds) {
+            await api.addFavorites({ frontendIds, folderIds: [id], newFolder: next });
+            onSaved(next);
+          } else {
+            onSaved(await api.saveFavoriteFolder(next, folder?.name ?? null));
+          }
         }
       });
     }}>
+      {frontendIds && <p>{zh ? `将所选的 ${formatCount(frontendIds.length, lang)} 道题存入新收藏夹。`
+        : `Save ${formatCount(frontendIds.length, lang)} selected ${frontendIds.length === 1 ? 'problem' : 'problems'} to this folder.`}</p>}
       {deleting ? <p>{zh ? `删除「${folder?.name}」？其中的题目仍可在「全部收藏」中查看。`
         : `Delete “${folder?.name}”? Its problems will stay in All favorites.`}</p> :
         <Field label={zh ? '收藏夹名称' : 'Folder name'}>
-          <input name="folderName" required maxLength={100} pattern={'.*\\S.*'} autoComplete="off"
+          <input ref={nameInput} name="folderName" required maxLength={100} pattern={'.*\\S.*'} autoComplete="off"
             value={name} onChange={event => setName(event.target.value)} disabled={busy} />
         </Field>}
       {error && <Feedback>{error}</Feedback>}
@@ -175,11 +185,12 @@ export function FavoriteFolderEditor({ folder, lang, onClose, onSaved, onRefresh
 }
 
 export type FavoriteEditorProblem = Pick<CatalogListProblem, 'questionFrontendId' | 'title' | 'favoriteFolderIds'>;
-export type FavoriteEditorTarget = { problem: FavoriteEditorProblem; frontendIds?: never } | { frontendIds: string[]; problem?: never };
+export type FavoriteEditorTarget = { problem: FavoriteEditorProblem; frontendIds?: never; existingFoldersOnly?: never }
+  | { frontendIds: string[]; problem?: never; existingFoldersOnly?: boolean };
 
-export function FavoriteProblemEditor({ target: { problem, frontendIds }, library, loadError, lang, onClose, onSaved, onRefresh }: {
+export function FavoriteProblemEditor({ target: { problem, frontendIds, existingFoldersOnly }, library, loadError, lang, onClose, onSaved, onRefresh }: {
   target: FavoriteEditorTarget; library?: FavoriteLibrary | null; loadError: unknown; lang: Language;
-  onClose(): void; onSaved(action: 'saved' | 'removed'): void; onRefresh(): void;
+  onClose(): void; onSaved(action: 'saved' | 'removed', folderCount: number): void; onRefresh(): void;
 }) {
   const zh = lang === 'zh';
   const wasSaved = problem?.favoriteFolderIds !== undefined;
@@ -190,7 +201,10 @@ export function FavoriteProblemEditor({ target: { problem, frontendIds }, librar
   const [newId] = useState(() => crypto.randomUUID());
   const { busy, error, clearError, submit } = useFavoriteWrite(lang, onRefresh);
   const newFieldId = useId();
-  const title = frontendIds ? (zh ? `收藏选中的 ${formatCount(frontendIds.length, lang)} 道题` : `Favorite ${formatCount(frontendIds.length, lang)} selected ${frontendIds.length === 1 ? 'problem' : 'problems'}`)
+  const folderIds = existingFoldersOnly ? library?.folders.filter(folder => selectedFolders.has(folder.id)).map(folder => folder.id) ?? [] : selected;
+  const canSave = !busy && !!library && !loadError && (!existingFoldersOnly || folderIds.length > 0);
+  const title = existingFoldersOnly ? (zh ? '加入已有收藏夹' : 'Add to folders')
+    : frontendIds ? (zh ? `收藏选中的 ${formatCount(frontendIds.length, lang)} 道题` : `Favorite ${formatCount(frontendIds.length, lang)} selected ${frontendIds.length === 1 ? 'problem' : 'problems'}`)
     : wasSaved ? (zh ? '管理收藏' : 'Manage favorite') : (zh ? '收藏题目' : 'Save to favorites');
   function save(folderIds: string[] | null) {
     const newFolder = creating && folderIds !== null ? { id: newId, name: newName.trim() } : undefined;
@@ -205,7 +219,7 @@ export function FavoriteProblemEditor({ target: { problem, frontendIds }, librar
           folderIds: destinations, newFolder,
         });
       }
-      onSaved(destinations === null ? 'removed' : 'saved');
+      onSaved(destinations === null ? 'removed' : 'saved', destinations?.length ?? 0);
     });
   }
   const formId = useId();
@@ -213,42 +227,41 @@ export function FavoriteProblemEditor({ target: { problem, frontendIds }, librar
     {wasSaved && library && !loadError && <button type="button" disabled={busy} className="text-link danger-text"
       onClick={() => save(null)}>{zh ? '取消收藏' : 'Remove from favorites'}</button>}
     <button type="button" className="btn btn-secondary" disabled={busy} onClick={onClose}>{zh ? '取消' : 'Cancel'}</button>
-    <button type="submit" form={formId} className="btn btn-primary" disabled={busy || !library || !!loadError}>{zh ? '保存收藏' : frontendIds ? 'Save favorites' : 'Save favorite'}</button>
+    <button type="submit" form={formId} className="btn btn-primary" disabled={!canSave}>
+      {existingFoldersOnly ? (zh ? '加入收藏夹' : 'Add to folders') : zh ? '保存收藏' : frontendIds ? 'Save favorites' : 'Save favorite'}
+    </button>
   </div>;
   return <Dialog title={title} lang={lang} onClose={onClose} closeDisabled={busy} footer={footer}>
     {problem ? <p className="favorite-problem-title">#{problem.questionFrontendId} {problem.title}</p>
+      : existingFoldersOnly ? <p>{zh ? `已选 ${formatCount(frontendIds.length, lang)} 道题。`
+        : `${formatCount(frontendIds.length, lang)} selected ${frontendIds.length === 1 ? 'problem' : 'problems'}.`}</p>
       : <p>{zh ? '所选题目将存入「全部收藏」，并加入下方勾选的收藏夹。已有的收藏夹归属会保留。'
         : 'Save these problems in All favorites and any folders you check below. Existing folder memberships are kept.'}</p>}
     {loadError ? <Feedback retry={{ label: zh ? '重试' : 'Retry', run: onRefresh }}>
       {localizeApiError(loadError, lang)}
     </Feedback> : !library ? <p role="status">{zh ? '正在读取收藏夹…' : 'Loading folders…'}</p> :
-      <form id={formId} className="favorite-form" aria-label={title} onChange={clearError} onSubmit={event => {
+      <form id={formId} className="favorite-form" aria-label={title} onSubmit={event => {
         event.preventDefault();
-        save(selected);
+        if (canSave) save(folderIds);
       }}>
-        {(!frontendIds || library.folders.length > 0) && <fieldset className="favorite-choices" disabled={busy}>
-          <legend>{zh ? '收藏夹（可多选）' : 'Folders (optional)'}</legend>
-          {library.folders.map(folder => <label key={folder.id} className="favorite-choice">
-            <input type="checkbox" name="folder" value={folder.id} checked={selectedFolders.has(folder.id)}
-              onChange={event => {
-                const checked = event.currentTarget.checked;
-                setSelected(ids => checked ? [...ids, folder.id] : ids.filter(id => id !== folder.id));
-              }} />
-            <span>{folder.name}</span>
-          </label>)}
-          {!frontendIds && !library.folders.length && <p className="muted">{zh ? '可以直接保存到「全部收藏」，也可以新建收藏夹。'
+        {library.folders.length > 0 ? <CollectionChoices options={library.folders} selected={selected} lang={lang} disabled={busy}
+          name="folder" label={zh ? '收藏夹（可多选）' : existingFoldersOnly ? 'Folders (select one or more)' : 'Folders (optional)'}
+          searchLabel={zh ? '搜索收藏夹' : 'Search folders'} onChange={ids => { setSelected(ids); clearError(); }} />
+          : !frontendIds && <p className="muted">{zh ? '可以直接保存到「全部收藏」，也可以新建收藏夹。'
             : 'Save in All favorites, or create a folder below.'}</p>}
-        </fieldset>}
-        <button type="button" className="text-link" disabled={busy} aria-expanded={creating} aria-controls={newFieldId}
-          onClick={() => { clearError(); setCreating(value => !value); }}>
-          <FolderPlus size={16} aria-hidden="true" />{creating ? (zh ? '取消新建' : 'Cancel new folder') : (zh ? '新建收藏夹' : 'New folder')}
-        </button>
-        <div id={newFieldId} hidden={!creating}>
-          {creating && <Field label={zh ? '新收藏夹名称' : 'New folder name'}>
-            <input name="newFolder" autoFocus required maxLength={100} pattern={'.*\\S.*'} autoComplete="off"
-              value={newName} onChange={event => setNewName(event.target.value)} disabled={busy} />
-          </Field>}
-        </div>
+        {existingFoldersOnly ? (!library.folders.length && <p>{zh ? '还没有收藏夹。可返回后选择「存入新收藏夹」。'
+          : 'There are no folders yet. Go back and choose “Save to new folder”.'}</p>) : <>
+          <button type="button" className="text-link" disabled={busy} aria-expanded={creating} aria-controls={newFieldId}
+            onClick={() => { clearError(); setCreating(value => !value); }}>
+            <FolderPlus size={16} aria-hidden="true" />{creating ? (zh ? '取消新建' : 'Cancel new folder') : (zh ? '新建收藏夹' : 'New folder')}
+          </button>
+          <div id={newFieldId} hidden={!creating}>
+            {creating && <Field label={zh ? '新收藏夹名称' : 'New folder name'}>
+              <input name="newFolder" autoFocus required maxLength={100} pattern={'.*\\S.*'} autoComplete="off"
+                value={newName} onChange={event => { setNewName(event.target.value); clearError(); }} disabled={busy} />
+            </Field>}
+          </div>
+        </>}
         {error && <Feedback>{error}</Feedback>}
       </form>}
   </Dialog>;

@@ -20,7 +20,7 @@ Use a positive integer daily count and nonnegative integer difficulty counts tot
 
 ## User interface
 
-The primary destinations are Today (default), Problems, Progress, Notes and Favorites. Settings stays at the sidebar bottom. Desktop windows at 1024, 1440 and 1920 pixels, English/Chinese, light/dark/system themes and keyboard access are supported. Mobile UI is outside scope.
+The primary destinations are Today (default), Problems, Progress and Notes. Problems groups the catalog, Favorites and Goal lists. Settings stays at the sidebar bottom. Desktop windows at 1024, 1440 and 1920 pixels, English/Chinese, light/dark/system themes and keyboard access are supported. Mobile UI is outside scope.
 
 - Today shows seven calendar days including today in the configured timezone, the activity streak, generated-plan progress and actionable problems. Study schedule is a child workspace; Adjust today affects only the current plan. Keep replacement, versions, shortages, rest/setup and local fallback visible.
 - Users can create ordered goal lists from catalog selections or pasted IDs and add the same selection to several lists without resetting order or completion. Goal-only checks are local to the list. Shared plan completions use one practice record and follow subsequent corrections or revocation of qualifying evidence.

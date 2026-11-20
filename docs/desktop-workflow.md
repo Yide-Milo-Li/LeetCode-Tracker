@@ -4,7 +4,7 @@ The same desktop UI runs in the Windows and Apple Silicon macOS desktop apps as 
 
 ## Workspaces
 
-Today is the homepage. Problems is the local catalog. Notes provides problem Markdown editing, practice timelines, and export. Progress contains Statistics and Records, with Statistics selected by default. Favorites contains All favorites and your folders. Settings stays at the sidebar bottom. Expand the sidebar for full navigation labels. The app remembers the choice. Hover or focus navigation icons for their names. Escape dismisses a tooltip.
+Today is the homepage. Problems groups All problems, Favorites and Goal lists. Notes provides problem Markdown editing, practice timelines, and export. Progress contains Statistics and Records, with Statistics selected by default. Favorites contains All favorites and your folders. Settings stays at the sidebar bottom. Expand the sidebar for full navigation labels. The app remembers the choice. Hover or focus navigation icons for their names. Escape dismisses a tooltip.
 
 On a new installation, Today opens a three-step setup guide instead of an empty plan: timezone (saved as soon as it is picked, with a one-click device suggestion), catalog import, and study rhythm. The rhythm step offers a weekday preset (Monday–Friday, one Easy and two Medium problems, one of them a review) or a link to the full schedule editor. Only the current step is shown; finished steps are checked and every step can be revisited or skipped. Finishing or skipping the guide is remembered in this browser, and installations that already have a timezone, catalog and schedule never see it. Afterwards, Today flags an empty catalog with a link to Problems → Import problems.
 
@@ -21,10 +21,10 @@ Today shows one locally selected encouragement below its heading. The library co
 | Time a problem with the built-in stopwatch | Today → problem row → Start timer, or Problems → timer |
 | Open the original problem | Today → problem title link |
 | Replace unfinished problems or inspect versions | Today → More |
-| Make or edit an ordered goal list | Today → Goal lists → New list or Edit |
+| Make or edit an ordered goal list | Problems → Goal lists, or Today → Goal lists → New list or Edit |
 | Assign one problem to goal lists | Flag beside a problem in Today, Problems or Favorites |
 | Add a selection to existing goals | Problems or Favorites → select rows → Add to goal lists |
-| Organize starred problems | Favorites, or the star beside a problem |
+| Organize starred problems | Problems → Favorites, or the star beside a problem |
 | Import JSONL problem metadata | Problems → Import problems |
 | Bring in completed progress | Progress → Import progress |
 | Record extra or historical practice | Progress → Manual record |
@@ -43,9 +43,11 @@ Today shows one locally selected encouragement below its heading. The library co
 
 Today shows daily plan progress, the selected goal's progress in saved order, and seven days of activity. Select an activity day to see its records. Each problem counts once per day in the chart, using the profile timezone.
 
+In **Problems → Goal lists**, search across every page by list name, or sort by name, remaining problems or completion rate. The sort arrow switches between ascending and descending order, as in Notes. Expand a list to see its problems in practice order. **Filter problems** narrows the list by problem ID, title or completion status. **Use on Today** switches the active checklist. You can also reach the directory through **Today → Manage lists**.
+
 Create a goal list by searching the catalog or pasting problem IDs in order. In Problems or Favorites, select rows across pages to create a list or append to existing lists. Appending skips existing entries and adds new ones in natural problem ID order. Use **Edit** to move, replace, remove, or reopen entries. A goal-only check stays in its list. When the problem is also in today's active plan, a completion uses the same practice evidence for both places. Correcting or revoking the evidence reopens the linked check when no qualifying record remains. Older unlinked checks remain manual.
 
-Use the star to save a problem to All favorites and optionally to one or more folders. Use the Problems batch action to add stars while keeping existing folder memberships. Deleting a folder keeps its problems starred. Unfavoriting from a selection removes those stars from every folder.
+Use the star to save a problem to All favorites and optionally to one or more folders. When you have many folders, **Browse folders** lets you search by folder name or sort by problem count. In the folder and goal list checklists, filtering or paging keeps your selections until you save. Use the Problems batch action to add stars while keeping existing folder memberships. Deleting a folder keeps its problems starred. Unfavoriting from a selection removes those stars from every folder.
 
 ## Completing a planned problem
 

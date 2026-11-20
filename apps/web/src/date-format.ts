@@ -15,6 +15,7 @@ export function localeFor(lang: Language): 'zh-CN' | 'en-US' {
 
 /** Field sets matching the implicit defaults of `toLocaleString` / `toLocaleTimeString`. */
 const PRESETS = {
+  date: { dateStyle: 'medium' },
   datetime: { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' },
   time: { hour: 'numeric', minute: 'numeric', second: 'numeric' },
 } as const satisfies Record<string, Intl.DateTimeFormatOptions>;

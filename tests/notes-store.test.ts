@@ -7,6 +7,9 @@
 import { it, describe, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
+import { randomUUID } from 'node:crypto';
+import { saveGoalList } from '../packages/database/src/goal-lists.ts';
+import { FAVORITE_FOLDER_PREFIX, FAVORITE_PROBLEM_PREFIX } from '../packages/database/src/favorites.ts';
 import {
   CatalogStore,
   CURRENT_SCHEMA_VERSION,
@@ -123,6 +126,70 @@ describe('Notes Store & Schema v9', () => {
     const searchRes = store.listProblemNotes({ scope: 'all', search: 'Substring' });
     assert.equal(searchRes.total, 1);
     assert.equal(searchRes.items[0].questionFrontendId, '3');
+  });
+
+  it('orders the last known success across sources and pages, ignoring failed and revoked attempts', async () => {
+    async function practice(id: string, at: string, completed: boolean) {
+      return store.createPracticeRecord({ questionFrontendId: id, practicedAt: at, timePrecision: 'datetime', completed });
+    }
+    await practice('1', '2026-09-01T00:00:00Z', true);
+    await practice('1', '2026-09-03T02:00:00+08:00', true);
+    await practice('2', '2026-09-02T20:00:00Z', true);
+    await practice('2', '2026-09-10T00:00:00Z', false);
+    const revoked = await practice('4', '2026-09-11T00:00:00Z', true);
+    db.prepare("UPDATE practice_records SET status='revoked' WHERE id=?").run(revoked.id);
+    const qid = store.getProblem('3', 'frontendId')!.questionId;
+    db.prepare(`INSERT INTO progress_snapshots
+      (question_id,last_submitted_at,time_precision,last_result,total_submissions,has_accepted,updated_at)
+      VALUES (?, '2026-09-10', 'date', 'Wrong Answer', 8, 1, 1)`).run(qid);
+    db.prepare("INSERT INTO snapshot_successes VALUES (?, 1, '2026-09-04', 'date', NULL, 1)").run(qid);
+    const latest = store.listProblemNotes({ scope: 'all', sort: 'completed-desc', limit: 2 });
+    assert.deepEqual(latest.items.map(item => [item.questionFrontendId, item.lastCompletedAt]), [
+      ['3', '2026-09-04'], ['2', '2026-09-02T20:00:00Z'],
+    ]);
+    const oldest = store.listProblemNotes({ scope: 'all', sort: 'completed-asc' });
+    assert.deepEqual(oldest.items.map(item => item.questionFrontendId), ['1', '2', '3', '4']);
+    assert.equal(oldest.items[0].lastCompletedAt, '2026-09-03T02:00:00+08:00');
+    assert.equal(oldest.items[3].lastCompletedAt, null);
+  });
+
+  it('orders real note edits in both directions and puts empty and template notes last', () => {
+    const timestamps = db.prepare('UPDATE problem_notes SET updated_at=? WHERE question_id=?');
+    for (const [id, content, at] of [
+      ['1', 'First reflection', 20], ['2', 'Second reflection', 10], ['3', '## 💡 Key Idea & Approach', 30],
+    ] as const) {
+      timestamps.run(at, store.upsertProblemNote(id, content).questionId);
+    }
+    const ids = (sort: 'updated-desc' | 'updated-asc') =>
+      store.listProblemNotes({ scope: 'all', sort }).items.map(item => item.questionFrontendId);
+    assert.deepEqual(ids('updated-asc'), ['2', '1', '3', '4']);
+    assert.deepEqual(ids('updated-desc'), ['1', '2', '3', '4']);
+  });
+
+  it('groups the whole filtered result, including overlaps, unfiled favorites and unassigned problems', () => {
+    const first = randomUUID(), second = randomUUID();
+    for (const [id, name, ids] of [[first, 'Arrays', ['1', '2']], [second, 'Review', ['2', '3']]] as const) {
+      saveGoalList(db, { id, name, version: 1, items: ids.map(frontendId => ({ frontendId, completed: false })) });
+    }
+    const grouped = store.listProblemNotes({ groupBy: 'goal', scope: 'all', groupId: second, limit: 1, page: 2 });
+    assert.deepEqual(grouped.grouping?.groups.map(g => [g.id, g.count]), [[first, 2], [second, 2], ['unassigned', 1]]);
+    assert.equal(grouped.total, 2);
+    assert.equal(grouped.items[0].questionFrontendId, '3');
+    const filtered = store.listProblemNotes({ groupBy: 'goal', scope: 'all', groupId: second, difficulty: 'Hard' });
+    assert.deepEqual(filtered.grouping, { groups: [{ id: 'unassigned', name: null, count: 1 }], activeId: 'unassigned' });
+    assert.equal(filtered.items[0].questionFrontendId, '4');
+
+    const meta = db.prepare('INSERT INTO catalog_meta(key, value) VALUES (?, ?)');
+    meta.run(FAVORITE_FOLDER_PREFIX + first, 'Arrays');
+    meta.run(FAVORITE_FOLDER_PREFIX + second, 'Review');
+    meta.run(FAVORITE_PROBLEM_PREFIX + '1', JSON.stringify([first, second]));
+    meta.run(FAVORITE_PROBLEM_PREFIX + '2', JSON.stringify([first]));
+    meta.run(FAVORITE_PROBLEM_PREFIX + '3', '[]');
+    const folders = store.listProblemNotes({ scope: 'all', groupBy: 'favorite', groupId: 'unfiled' });
+    assert.deepEqual(folders.grouping?.groups.map(g => [g.id, g.count]), [[first, 2], [second, 1], ['unfiled', 1], ['unassigned', 1]]);
+    assert.deepEqual(folders.items.map(i => i.questionFrontendId), ['3']);
+    const empty = store.listProblemNotes({ scope: 'practiced', groupBy: 'favorite' });
+    assert.deepEqual(empty, { items: [], total: 0, grouping: { groups: [], activeId: null } });
   });
 
   it('generates single problem Markdown with frontmatter and practice history in English by default', () => {

@@ -93,6 +93,27 @@ function noteEditor() {
 }
 
 describe('NotesWorkspace request ownership', () => {
+  it('disables the previous editor in the same commit that selects a new row', async () => {
+    mockEditorProblems();
+    const next = deferred<{ note: ReturnType<typeof editorNote> }>();
+    mock.method(api, 'getNote', async (id: string) => id === '2' ? next.promise : { note: editorNote(id, 'Original A') });
+    const editableStates: boolean[] = [];
+    function observeCommit() {
+      if (document.querySelector('.nw-problem-card.active .nw-problem-title')?.textContent === 'Problem B') {
+        editableStates.push(Boolean(noteEditor() && !noteEditor().disabled));
+      }
+    }
+    await act(async () => {
+      render(<React.Profiler id="notes" onRender={observeCommit}><NotesWorkspace lang="en" /></React.Profiler>);
+    });
+    await act(async () => { fireEvent.click(screen.getByText('Problem B')); });
+    assert.ok(editableStates.length > 0);
+    assert.ok(editableStates.every(editable => !editable));
+    await act(async () => { next.resolve({ note: editorNote('2', 'Original B') }); });
+    assert.equal(noteEditor().value, 'Original B');
+    assert.equal(noteEditor().disabled, false);
+  });
+
   it('keeps a dirty draft after an AI client update and overwrites only the version shown', async () => {
     mockEditorProblems();
     let remote = { note: editorNote('1', 'Original'), contentHash: 'original' };

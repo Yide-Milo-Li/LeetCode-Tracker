@@ -75,11 +75,22 @@ const registered = new WeakSet<DatabaseSync>();
 
 function registerActivityFunctions(db: DatabaseSync) {
   if (registered.has(db)) return;
-  db.function('tracker_activity_epoch', { deterministic: true }, (at, precision) =>
-    Date.parse(precision === 'datetime' ? String(at) : at + 'T00:00:00Z') || 0);
+  db.function('tracker_activity_epoch', { deterministic: true }, (at, precision) => {
+    const epoch = Date.parse(precision === 'datetime' ? String(at) : at + 'T00:00:00Z');
+    return Number.isFinite(epoch) ? epoch : null;
+  });
   db.function('tracker_activity_date', { deterministic: true }, (at, precision, source, zone, now) =>
     resolveEventDate(String(at), precision as EventTime['timePrecision'], source as string | null, zone as string | null, Number(now)).date);
   registered.add(db);
+}
+
+/** Use the same dated successes and offset-aware ordering as the activity timeline.
+ * SQLite takes the bare timestamp from a row attaining the single MAX in each group. */
+export function latestCompletionsQuery(db: DatabaseSync) {
+  registerActivityFunctions(db);
+  return `SELECT questionId, timestamp AS lastCompletedAt,
+    MAX(tracker_activity_epoch(timestamp, timePrecision)) AS completedEpoch
+    FROM (${eventRows('all')}) WHERE solved = 1 GROUP BY questionId HAVING completedEpoch IS NOT NULL`;
 }
 
 /** Limit in SQL, including boundary ties so the existing locale-aware JS tie-break stays exact. */
@@ -105,7 +116,7 @@ export function dashboardActivityPage(db: DatabaseSync, query: DashboardActivity
       SELECT *, rank() OVER byTime AS firstRank,
         count(*) OVER (byTime RANGE BETWEEN CURRENT ROW AND CURRENT ROW) AS ties, count(*) OVER () AS total
       FROM (${filtered})
-      WINDOW byTime AS (ORDER BY tracker_activity_epoch(timestamp,timePrecision) DESC)
+      WINDOW byTime AS (ORDER BY coalesce(tracker_activity_epoch(timestamp,timePrecision), 0) DESC)
     )
     SELECT r.id, r.source, r.questionId, p.frontend_question_id AS questionFrontendId, p.title AS problemTitle,
       p.difficulty, r.action, r.status, r.timestamp, r.timePrecision, r.sourceTimezone, r.firstRank, r.total

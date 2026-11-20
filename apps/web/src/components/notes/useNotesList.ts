@@ -2,12 +2,14 @@
  * Problem list state for the notes workspace: filters, pagination, the current page of
  * summaries and the summary of the selected problem.
  */
-import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from 'react';
-import { api, type ProblemNoteSummary } from '../../api.ts';
+import { useContext, useEffect, useState, type Dispatch, type SetStateAction } from 'react';
+import { api, type ProblemNoteSummary, type ProblemNoteListQuery, type ProblemNoteListResponse } from '../../api.ts';
+import { useWorkspace, ViewVisible } from '../../workspace.tsx';
 
 export type NotesScope = 'practiced' | 'all';
 export type NotesDifficultyFilter = 'all' | 'Easy' | 'Medium' | 'Hard';
 export type NotesHasNoteFilter = 'all' | 'true' | 'false';
+export type NotesSortField = 'completed' | 'updated' | 'notes-first';
 
 /** Page size of the problem list. */
 export const NOTES_LIST_LIMIT = 25;
@@ -15,7 +17,6 @@ export const NOTES_LIST_LIMIT = 25;
 interface UseNotesListOptions {
   /** Currently selected problem, owned by the workspace selection guard. */
   selectedId: string | null;
-  externalRevision?: number;
   /** Used to auto-select the first loaded problem when nothing is selected yet. */
   setSelectedId: Dispatch<SetStateAction<string | null>>;
 }
@@ -27,12 +28,20 @@ interface UseNotesListOptions {
  * page) and for the list itself whenever a filter, the page or `listRevision` changes.
  * Superseded responses are ignored through per-request `active` flags; failures empty the list.
  */
-export function useNotesList({ selectedId, setSelectedId, externalRevision }: UseNotesListOptions) {
+export function useNotesList({ selectedId, setSelectedId }: UseNotesListOptions) {
+  const visible = useContext(ViewVisible);
+  const { revision, desktopAgentRevision, favoriteRevision } = useWorkspace();
   // Filters state
   const [scope, setScope] = useState<NotesScope>('practiced');
   const [search, setSearch] = useState('');
   const [difficulty, setDifficulty] = useState<NotesDifficultyFilter>('all');
   const [hasNote, setHasNote] = useState<NotesHasNoteFilter>('all');
+  const [sortField, setSortField] = useState<NotesSortField>('completed');
+  const [sortDirection, setSortDirection] = useState<'desc' | 'asc'>('desc');
+  const sort: ProblemNoteListQuery['sort'] = sortField === 'notes-first' ? sortField : `${sortField}-${sortDirection}`;
+  const [groupBy, setGroupBy] = useState<ProblemNoteListQuery['groupBy']>('none');
+  const [groupId, setGroupId] = useState<string>();
+  const [grouping, setGrouping] = useState<ProblemNoteListResponse['grouping']>();
   const [page, setPage] = useState(1);
   const limit = NOTES_LIST_LIMIT;
 
@@ -40,6 +49,7 @@ export function useNotesList({ selectedId, setSelectedId, externalRevision }: Us
   const [items, setItems] = useState<ProblemNoteSummary[]>([]);
   const [total, setTotal] = useState(0);
   const [loadingList, setLoadingList] = useState(true);
+  const [listFailed, setListFailed] = useState(false);
   const [listRevision, setListRevision] = useState(0);
 
   const [selectedSummary, setSelectedSummary] = useState<ProblemNoteSummary | null>(null);
@@ -72,15 +82,20 @@ export function useNotesList({ selectedId, setSelectedId, externalRevision }: Us
   }, [items, selectedId]);
 
   /** Fetch the current filters and return cancellation for superseded list requests. */
-  const loadList = useCallback(() => {
+  useEffect(() => {
+    if (!visible) return;
     let active = true;
     setLoadingList(true);
+    setListFailed(false);
     api
       .listNotes({
         scope,
         search: search.trim() || undefined,
         difficulty,
         hasNote,
+        sort,
+        groupBy,
+        groupId,
         page,
         limit,
       })
@@ -88,6 +103,7 @@ export function useNotesList({ selectedId, setSelectedId, externalRevision }: Us
         if (!active) return;
         setItems(res.items);
         setTotal(res.total);
+        setGrouping(res.grouping);
         const maxPage = Math.max(1, Math.ceil(res.total / limit));
         if (page > maxPage) {
           setPage(maxPage);
@@ -97,7 +113,11 @@ export function useNotesList({ selectedId, setSelectedId, externalRevision }: Us
         }
       })
       .catch(() => {
-        if (active) setItems([]);
+        if (!active) return;
+        setItems([]);
+        setTotal(0);
+        setGrouping(undefined);
+        setListFailed(true);
       })
       .finally(() => {
         if (active) setLoadingList(false);
@@ -106,11 +126,8 @@ export function useNotesList({ selectedId, setSelectedId, externalRevision }: Us
     return () => {
       active = false;
     };
-  }, [scope, search, difficulty, hasNote, page, limit]);
-
-  useEffect(() => {
-    return loadList();
-  }, [loadList, listRevision, externalRevision]);
+  }, [scope, search, difficulty, hasNote, sort, groupBy, groupId, page, limit, visible,
+    listRevision, revision, desktopAgentRevision, favoriteRevision, setSelectedId]);
 
   return {
     scope,
@@ -121,6 +138,24 @@ export function useNotesList({ selectedId, setSelectedId, externalRevision }: Us
     setDifficulty,
     hasNote,
     setHasNote,
+    sort,
+    sortField,
+    setSortField,
+    sortDirection,
+    setSortDirection,
+    groupBy,
+    changeGrouping(mode: ProblemNoteListQuery['groupBy']) {
+      setGroupBy(mode);
+      setGroupId(undefined);
+      setGrouping(undefined);
+      setPage(1);
+    },
+    grouping,
+    groupId,
+    openGroup(id: string) {
+      setGroupId(id);
+      setPage(1);
+    },
     page,
     setPage,
     limit,
@@ -128,6 +163,7 @@ export function useNotesList({ selectedId, setSelectedId, externalRevision }: Us
     setItems,
     total,
     loadingList,
+    listFailed,
     setListRevision,
     selectedSummary,
     setSelectedSummary,

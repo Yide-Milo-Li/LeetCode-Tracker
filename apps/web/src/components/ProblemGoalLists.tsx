@@ -7,6 +7,7 @@ import { useWorkspace, ViewVisible } from '../workspace.tsx';
 import { useTodayGoals, type TodayGoals } from '../hooks/useTodayGoals.ts';
 import { formatCount, type Language } from '../i18n.ts';
 import { Dialog, Feedback, Field, Tooltip } from './ui.tsx';
+import { CollectionChoices } from './CollectionPicker.tsx';
 
 interface ProblemRef { frontendId: string; title: string; fallbackFocusRef?: RefObject<HTMLButtonElement | null> }
 interface GoalControls {
@@ -187,18 +188,9 @@ function ProblemGoalEditor({ problem, lang, lists, initialIds, onClose, onSaved,
 function GoalListChoices({ lists, selected, onChange, lang, disabled }: {
   lists: Pick<GoalList, 'id' | 'name'>[]; selected: string[]; onChange: Dispatch<SetStateAction<string[]>>; lang: Language; disabled: boolean;
 }) {
-  const checked = new Set(selected);
-  return <fieldset className="favorite-choices" disabled={disabled}>
-    <legend>{lang === 'zh' ? '目标题单（可多选）' : 'Goal lists (select any)'}</legend>
-    {lists.map(list => <label key={list.id} className="favorite-choice">
-      <input type="checkbox" name="goalList" value={list.id} checked={checked.has(list.id)}
-        onChange={event => {
-          const include = event.currentTarget.checked;
-          onChange(previous => include ? [...previous, list.id] : previous.filter(id => id !== list.id));
-        }} />
-      <span>{list.name}</span>
-    </label>)}
-  </fieldset>;
+  return <CollectionChoices options={lists} selected={selected} onChange={onChange} lang={lang} disabled={disabled}
+    name="goalList" label={lang === 'zh' ? '目标题单（可多选）' : 'Goal lists (select any)'}
+    searchLabel={lang === 'zh' ? '搜索题单' : 'Search goal lists'} />;
 }
 
 export function AddToGoalListsDialog({ frontendIds, lang, onClose, onCreate, onAdded }: {

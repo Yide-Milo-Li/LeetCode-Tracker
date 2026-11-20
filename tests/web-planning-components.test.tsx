@@ -1647,7 +1647,7 @@ it('Today renders the entire ordered checklist and restores checked items to the
   mockGoalReads(api, () => [goal]);
   mock.method(api, 'editGoalItem', async (_id: string, { expectedVersion, edit }: Parameters<typeof api.editGoalItem>[1]) => {
     assert.equal(expectedVersion, 1);
-    assert.deepEqual(edit, { action: 'setCompleted', frontendId: '2', completed: true });
+    assert.deepEqual(edit, { action: 'setCompleted', frontendId: '2', completed: true, recordPractice: true });
     goal = { ...goal, version: 2, items: goal.items.map(item => ({ ...item, completed: item.frontendId === '2' })) };
     return goal;
   });

@@ -86,7 +86,7 @@ afterEach(() => {
   cleanup();
 });
 
-it('navigates to Problems on key "2", Progress on key "3", and Today on key "1"', async () => {
+it('navigates directly to Problems, Favorites, Progress and Today with number keys', async () => {
   await act(async () => {
     render(<App />);
   });
@@ -96,6 +96,12 @@ it('navigates to Problems on key "2", Progress on key "3", and Today on key "1"'
     window.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: '2', bubbles: true }));
   });
   assert.equal(window.location.hash, '#problems');
+
+  await act(async () => {
+    window.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: '5', bubbles: true }));
+  });
+  assert.equal(window.location.hash, '#favorites');
+  assert.equal(screen.getByRole('link', { name: 'Favorites' }).getAttribute('aria-current'), 'page');
 
   // Key "3" -> navigate to statistics (priority Progress view)
   await act(async () => {

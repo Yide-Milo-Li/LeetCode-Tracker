@@ -15,7 +15,7 @@ import React, {
   type ComponentType,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { X, AlertCircle, Info, ChevronLeft, ChevronRight } from 'lucide-react';
+import { X, AlertCircle, Info, ChevronLeft, ChevronRight, ArrowDownWideNarrow, ArrowUpNarrowWide } from 'lucide-react';
 import type { Language } from '../i18n.ts';
 
 /**
@@ -129,6 +129,28 @@ export function Field({ label, children, hint }: { label: string; children: Reac
       {hint && <small>{hint}</small>}
     </label>
   );
+}
+
+export type SortDirection = 'asc' | 'desc';
+
+export function SortDirectionButton({ direction, lang, ascending, descending, className = '', onChange }: {
+  direction: SortDirection; lang: Language; ascending?: string; descending?: string;
+  className?: string; onChange(direction: SortDirection): void;
+}) {
+  const zh = lang === 'zh';
+  const asc = ascending ?? (zh ? '升序' : 'Ascending');
+  const desc = descending ?? (zh ? '降序' : 'Descending');
+  const reversed = direction === 'desc';
+  const current = reversed ? desc : asc;
+  const next = reversed ? asc : desc;
+  const hint = zh ? `当前${current}，点击切换为${next}` : `${current}. Switch to ${next.toLowerCase()}.`;
+  const DirectionIcon = reversed ? ArrowDownWideNarrow : ArrowUpNarrowWide;
+  return <Tooltip text={hint} position="top">
+    <button type="button" className={`btn-icon ${className}`} aria-label={desc} aria-pressed={reversed}
+      onClick={() => onChange(reversed ? 'asc' : 'desc')}>
+      <DirectionIcon size={16} aria-hidden="true" />
+    </button>
+  </Tooltip>;
 }
 
 /**

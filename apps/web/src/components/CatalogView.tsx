@@ -1,5 +1,5 @@
 /** Local catalog discovery, filtering, metadata details and contextual manual recording. */
-import { Flag, FolderPlus, ListPlus, Pencil, RotateCcw, Plus, ExternalLink, Download, Star, StarOff, Upload } from 'lucide-react';
+import { Flag, Folder, FolderPlus, ListPlus, Pencil, RotateCcw, Plus, ExternalLink, Download, Star, StarOff, Upload } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import type { CatalogListProblem, FavoriteFolder } from '../../../../packages/contracts/src/favorites.ts';
 import type { GoalList } from '../../../../packages/contracts/src/goal-lists.ts';
@@ -35,7 +35,9 @@ function safeUrl(value: string): string | undefined {
 }
 
 type BulkResult = { kind: 'goal'; name: string } | { kind: 'favorites' | 'removed'; count: number }
-  | { kind: 'goalLists'; count: number; listCount: number; added: number };
+  | { kind: 'goalLists'; count: number; listCount: number; added: number }
+  | { kind: 'favoriteFolder'; name: string; count: number }
+  | { kind: 'favoriteFolders'; count: number; folderCount: number };
 
 function bulkResultText(result: BulkResult, lang: Language) {
   const zh = lang === 'zh';
@@ -47,6 +49,10 @@ function bulkResultText(result: BulkResult, lang: Language) {
     return zh ? `${formatCount(result.count, lang)} 道题均已加入所选的 ${formatCount(result.listCount, lang)} 个目标题单。`
       : `${quantity} ${result.count === 1 ? 'is' : 'are'} now in ${formatCount(result.listCount, lang)} selected goal ${result.listCount === 1 ? 'list' : 'lists'}.`;
   }
+  if (result.kind === 'favoriteFolder') return zh ? `已将 ${formatCount(result.count, lang)} 道题存入「${result.name}」。`
+    : `Saved ${quantity} to “${result.name}”.`;
+  if (result.kind === 'favoriteFolders') return zh ? `已将 ${formatCount(result.count, lang)} 道题加入 ${formatCount(result.folderCount, lang)} 个收藏夹。`
+    : `Added ${quantity} to ${formatCount(result.folderCount, lang)} ${result.folderCount === 1 ? 'folder' : 'folders'}.`;
   if (result.kind === 'favorites') return zh ? `已收藏 ${formatCount(result.count, lang)} 道题。` : `Saved ${quantity} to favorites.`;
   if (!result.count) return zh ? '所选题目已全部取消收藏。' : 'The selected problems are already out of your favorites.';
   return zh ? `已取消收藏 ${formatCount(result.count, lang)} 道题。` : `Removed ${quantity} from favorites.`;
@@ -105,7 +111,7 @@ function CatalogWorkspace({ lang, onNavigateSettings, favoritesOnly = false, fav
   }, [bulkResult]);
   const [recording, setRecording] = useState(false);
   const [favoriteTarget, setFavoriteTarget] = useState<FavoriteEditorTarget | null>(null);
-  const [folderEditor, setFolderEditor] = useState<FavoriteFolder | 'new' | null>(null);
+  const [folderEditor, setFolderEditor] = useState<{ folder: FavoriteFolder | null; frontendIds?: string[] } | null>(null);
   const [folderId, setFolderId] = useState('all');
   const [announcement, setAnnouncement] = useState('');
   const needsFolders = favoritesOnly || favoriteTarget !== null;
@@ -216,10 +222,10 @@ function CatalogWorkspace({ lang, onNavigateSettings, favoritesOnly = false, fav
       <PageHeader
         title={favoritesOnly ? (zh ? '我的收藏夹' : 'Favorites') : (zh ? '题库' : 'Problems')}
         actions={favoritesOnly ? <>
-          {folder && <button className="btn btn-secondary" onClick={() => setFolderEditor(folder)}>
+          {folder && <button className="btn btn-secondary" onClick={() => setFolderEditor({ folder })}>
             <Pencil size={15} aria-hidden="true" />{zh ? '编辑收藏夹' : 'Edit folder'}
           </button>}
-          <button className="btn btn-primary" onClick={() => setFolderEditor('new')}>
+          <button className="btn btn-primary" onClick={() => setFolderEditor({ folder: null })}>
             <FolderPlus size={16} aria-hidden="true" />{zh ? '新建收藏夹' : 'New folder'}
           </button>
         </> :
@@ -503,6 +509,14 @@ function CatalogWorkspace({ lang, onNavigateSettings, favoritesOnly = false, fav
             </button>
           </div>
           <div className="action-row">
+            {favoritesOnly && <button type="button" className="btn btn-secondary btn-sm" aria-haspopup="dialog"
+              onClick={() => setFavoriteTarget({ frontendIds: [...checkedProblems.keys()], existingFoldersOnly: true })}>
+              <Folder size={16} aria-hidden="true" />{zh ? '加入已有收藏夹' : 'Add to folders'}
+            </button>}
+            {favoritesOnly && <button type="button" className="btn btn-secondary btn-sm" aria-haspopup="dialog"
+              onClick={() => setFolderEditor({ folder: null, frontendIds: [...checkedProblems.keys()] })}>
+              <FolderPlus size={16} aria-hidden="true" />{zh ? '存入新收藏夹' : 'Save to new folder'}
+            </button>}
             {favoritesOnly ? <button type="button" className="btn btn-secondary btn-sm"
               onClick={() => setRemoval([...checkedProblems.values()])}>
               <StarOff size={16} aria-hidden="true" />{zh ? '取消收藏' : 'Unfavorite'}
@@ -614,9 +628,10 @@ function CatalogWorkspace({ lang, onNavigateSettings, favoritesOnly = false, fav
       )}
       {favoriteTarget && <FavoriteProblemEditor target={favoriteTarget}
         library={library.data} loadError={library.error} lang={lang} onClose={() => setFavoriteTarget(null)}
-        onRefresh={refreshFavorites} onSaved={action => {
+        onRefresh={refreshFavorites} onSaved={(action, folderCount) => {
           if (favoriteTarget.frontendIds) {
-            setBulkResult({ kind: 'favorites', count: favoriteTarget.frontendIds.length });
+            const count = favoriteTarget.frontendIds.length;
+            setBulkResult(favoriteTarget.existingFoldersOnly ? { kind: 'favoriteFolders', count, folderCount } : { kind: 'favorites', count });
             setCheckedProblems(new Map());
           } else {
             if (favoritesOnly && action === 'removed') {
@@ -628,12 +643,18 @@ function CatalogWorkspace({ lang, onNavigateSettings, favoritesOnly = false, fav
           setFavoriteTarget(null);
           refreshFavorites();
         }} />}
-      {folderEditor && <FavoriteFolderEditor folder={folderEditor === 'new' ? null : folderEditor} lang={lang}
-        onClose={() => setFolderEditor(null)} onRefresh={refreshFavorites} onSaved={id => {
+      {folderEditor && <FavoriteFolderEditor {...folderEditor} lang={lang}
+        onClose={() => setFolderEditor(null)} onRefresh={refreshFavorites} onSaved={savedFolder => {
           setFolderEditor(null);
-          setFolderId(id);
+          setFolderId(savedFolder?.id ?? 'all');
           setPage(1);
-          setAnnouncement(id === 'all' ? (zh ? '收藏夹已删除。' : 'Folder deleted.') : (zh ? '收藏夹已保存。' : 'Folder saved.'));
+          if (savedFolder && folderEditor.frontendIds) {
+            setSearch('');
+            setCheckedProblems(new Map());
+            setBulkResult({ kind: 'favoriteFolder', name: savedFolder.name, count: folderEditor.frontendIds.length });
+          } else {
+            setAnnouncement(savedFolder ? (zh ? '收藏夹已保存。' : 'Folder saved.') : (zh ? '收藏夹已删除。' : 'Folder deleted.'));
+          }
           refreshFavorites();
         }} />}
     </div>

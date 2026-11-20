@@ -72,6 +72,8 @@ export const problemNoteSummarySchema = z.object({
   url: z.string(),
   hasCustomNote: z.boolean(),
   customNoteUpdatedAt: z.number().int().nonnegative().nullable(),
+  /** Included when browsing by completion time. Date-only events keep their calendar date. */
+  lastCompletedAt: z.string().nullable().optional(),
   lastPracticedAt: z.string().nullable(),
   totalPractices: z.number().int().nonnegative(),
   hasAccepted: z.boolean(),
@@ -90,6 +92,9 @@ export const problemNoteListQuerySchema = z.object({
   /** Finer than hasNote: empty (no text), stub (unedited template only) or written. */
   noteState: z.enum(['empty', 'stub', 'written']).optional(),
   scope: z.enum(['practiced', 'all']).default('practiced'),
+  sort: z.enum(['notes-first', 'completed-desc', 'completed-asc', 'updated-desc', 'updated-asc']).default('notes-first'),
+  groupBy: z.enum(['none', 'goal', 'favorite']).default('none'),
+  groupId: z.string().min(1).max(100).optional(),
   tag: z.string().max(100).optional(),
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().min(1).max(100).default(30),
@@ -97,6 +102,20 @@ export const problemNoteListQuerySchema = z.object({
 
 export type ProblemNoteListQuery = z.infer<typeof problemNoteListQuerySchema>;
 export type ProblemNoteListQueryInput = z.input<typeof problemNoteListQuerySchema>;
+
+export interface NoteListGroup {
+  id: string;
+  /** Built-in groups have localized names in the client. */
+  name: string | null;
+  count: number;
+}
+
+export interface ProblemNoteListResponse {
+  items: ProblemNoteSummary[];
+  /** Number of matching problems in the open group, or the full flat list. */
+  total: number;
+  grouping?: { groups: NoteListGroup[]; activeId: string | null };
+}
 
 /** Query options for exporting the knowledge base. */
 export const exportKnowledgeQuerySchema = z.object({

@@ -10,6 +10,7 @@
  * - `data` keeps the last successful value while a reload is in flight (no flash of empty UI).
  * - `error` is cleared only by a later success, so a failed reload keeps the prior data visible.
  * - `loading` is true from the start of each run until it settles.
+ * - Disabling a retained view's read cancels it and keeps its last result until re-enabled.
  */
 import { useEffect, useRef, useState, type DependencyList } from 'react';
 
@@ -20,13 +21,14 @@ export interface AsyncResource<T> {
   loading: boolean;
 }
 
-export function useAsyncResource<T>(load: (signal: AbortSignal) => Promise<T>, deps: DependencyList): AsyncResource<T> {
+export function useAsyncResource<T>(load: (signal: AbortSignal) => Promise<T>, deps: DependencyList, enabled = true): AsyncResource<T> {
   const [state, setState] = useState<AsyncResource<T>>({ data: undefined, error: null, loading: true });
   // Read the latest loader without making its identity an effect dependency; callers list inputs in `deps`.
   const loadRef = useRef(load);
   loadRef.current = load;
 
   useEffect(() => {
+    if (!enabled) return;
     const controller = new AbortController();
     setState((prior) => (prior.loading ? prior : { ...prior, loading: true }));
     loadRef.current(controller.signal).then(
@@ -39,7 +41,7 @@ export function useAsyncResource<T>(load: (signal: AbortSignal) => Promise<T>, d
     );
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `deps` are the caller's inputs.
-  }, deps);
+  }, [enabled, ...deps]);
 
   return state;
 }

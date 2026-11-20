@@ -458,17 +458,53 @@ it('creates a sorted goal from favorites and reviews cross-folder removal again 
   assert.equal(screen.queryByRole('group', { name: 'Bulk actions' }), null);
 });
 
-it('keeps a large folder library in one labeled picker with every destination available', async () => {
+it('searches and sorts a large folder library without rendering every destination', async () => {
   const { FavoriteFolderPicker } = await import('../apps/web/src/components/FavoriteFolders.tsx');
-  const folders = Array.from({ length: 50 }, (_, i) => ({ id: String(i), name: 'Long folder name '.repeat(5) + i, count: 3000 }));
+  const folders = Array.from({ length: 50 }, (_, i) => ({ id: String(i), name: 'Long folder name '.repeat(5) + i, count: 3000 + i }));
   const onSelect = mock.fn();
   render(<FavoriteFolderPicker library={{ folders, total: 3000 }} selected="49" lang="en" onSelect={onSelect} />);
-  const select = screen.getByRole('combobox', { name: 'Choose a folder' }) as HTMLSelectElement;
-  assert.equal(select.options.length, 51);
-  assert.equal(select.value, '49');
-  assert.match(select.selectedOptions[0].text, /3,000/);
-  fireEvent.change(select, { target: { value: 'all' } });
-  assert.deepEqual(onSelect.mock.calls[0].arguments, ['all']);
+  fireEvent.click(screen.getByRole('button', { name: /^Browse folders.*49$/ }));
+  const picker = within(screen.getByRole('dialog', { name: 'Browse folders' }));
+  assert.ok(picker.getByText('Page 7 of 7 · 50 records'));
+  assert.equal(picker.getByRole('button', { name: /49 3,049/ }).getAttribute('aria-current'), 'true');
+  fireEvent.change(picker.getByRole('combobox', { name: 'Sort by' }), { target: { value: 'count' } });
+  const choices = within(picker.getByRole('list')).getAllByRole('button');
+  assert.equal(choices.length, 8);
+  assert.match(choices[0].textContent!, /49.*3,049/);
+  const direction = picker.getByRole('button', { name: 'Descending' });
+  assert.equal(direction.getAttribute('aria-pressed'), 'true');
+  assert.ok(direction.querySelector('.lucide-arrow-down-wide-narrow'));
+  fireEvent.click(direction);
+  assert.equal(direction.getAttribute('aria-pressed'), 'false');
+  assert.ok(direction.querySelector('.lucide-arrow-up-narrow-wide'));
+  assert.match(within(picker.getByRole('list')).getAllByRole('button')[0].textContent!, /0.*3,000/);
+  fireEvent.click(direction);
+  fireEvent.change(picker.getByRole('searchbox'), { target: { value: 'NAME ３' } });
+  assert.ok(picker.getByText('Page 1 of 2 · 11 records'));
+  fireEvent.click(picker.getByRole('button', { name: 'Next' }));
+  fireEvent.click(picker.getByRole('button', { name: /name 3 3,003/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'All favorites 3,000' }));
+  assert.deepEqual(onSelect.mock.calls.map(call => call.arguments), [['3'], ['all']]);
+});
+
+it('preserves favorite destinations while paging and searching the folder chooser', async () => {
+  const { FavoriteProblemEditor } = await import('../apps/web/src/components/FavoriteFolders.tsx');
+  const folders = Array.from({ length: 18 }, (_, i) => ({ id: String(i), name: 'Saved folder ' + i, count: i }));
+  const add = mock.method(api, 'addFavorites', async (_input: Parameters<typeof api.addFavorites>[0]) => ({ count: 1 }));
+  render(<FavoriteProblemEditor target={{ frontendIds: ['901'], existingFoldersOnly: true }}
+    library={{ folders, total: 1 }} loadError={null} lang="en" onClose={() => {}} onRefresh={() => {}} onSaved={() => {}} />);
+  const chooser = within(screen.getByRole('dialog'));
+  fireEvent.click(chooser.getByRole('checkbox', { name: 'Saved folder 0' }));
+  fireEvent.click(chooser.getByRole('button', { name: 'Next' }));
+  fireEvent.click(chooser.getByRole('checkbox', { name: 'Saved folder 9' }));
+  const search = chooser.getByRole('searchbox');
+  fireEvent.change(search, { target: { value: 'folder 17' } });
+  assert.ok(chooser.getByText('2 selected'));
+  fireEvent.click(chooser.getByRole('checkbox', { name: 'Saved folder 17' }));
+  assert.equal(fireEvent.keyDown(search, { key: 'Enter' }), false);
+  assert.equal(add.mock.callCount(), 0);
+  await act(async () => { fireEvent.click(chooser.getByRole('button', { name: 'Add to folders' })); });
+  assert.deepEqual(add.mock.calls[0].arguments[0].folderIds, ['0', '9', '17']);
 });
 
 it('windows thousands of selected problems while keeping the full save and removal payloads', async (t) => {

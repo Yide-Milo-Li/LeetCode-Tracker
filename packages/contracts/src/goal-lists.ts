@@ -53,7 +53,7 @@ export const goalItemAction = z.discriminatedUnion('action', [
   z.object({ action: z.literal('move'), frontendId, beforeId: frontendId.optional() }).strict(),
   z.object({ action: z.literal('replace'), frontendId, newFrontendId: frontendId }).strict(),
   z.object({ action: z.literal('remove'), frontendId }).strict(),
-  z.object({ action: z.literal('setCompleted'), frontendId, completed: z.boolean() }).strict(),
+  z.object({ action: z.literal('setCompleted'), frontendId, completed: z.boolean(), recordPractice: z.literal(true).optional() }).strict(),
 ]);
 export const editGoalItemSchema = z.object({ expectedVersion: version, edit: goalItemAction }).strict();
 export const deleteGoalListSchema = z.object({ expectedVersion: version }).strict();
