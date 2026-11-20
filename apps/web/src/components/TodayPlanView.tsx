@@ -10,7 +10,7 @@ import {
   AlertTriangle,
   ChevronDown,
 } from 'lucide-react';
-import { api, type DailyPlan, type PlanItem, type Strategy } from '../api.ts';
+import { api, ApiError, type DailyPlan, type PlanItem, type Strategy } from '../api.ts';
 import { localizeApiError } from '../error-i18n.ts';
 import { formatPlanAction, formatPlanSource, translations, type Language } from '../i18n.ts';
 import { formatInstant } from '../date-format.ts';
@@ -315,6 +315,7 @@ function TodayPlanViewInner({
       stopped?.minutes ?? getPendingMinutes(item.problem.questionFrontendId) ?? undefined;
     try {
       const record = await createPractice('today:' + plan.id + ':' + item.id, {
+        todayItem: { planId: plan.id, itemId: item.id },
         questionFrontendId: item.problem.questionFrontendId,
         completed: true,
         practicedAt: new Date().toISOString(),
@@ -331,6 +332,7 @@ function TodayPlanViewInner({
       workspace.openPractice({ mode: 'enrich', record, elapsedMinutes });
     } catch (err) {
       setRowErrors((old) => ({ ...old, [item.id]: localizeApiError(err, lang) }));
+      if (err instanceof ApiError && err.code === 'STALE_PLAN') workspace.notifyMutation();
     } finally {
       locks.current.delete(item.id);
       setSaving(new Set(locks.current));
@@ -813,7 +815,6 @@ function TodayPlanViewInner({
             url: quickNoteProblem.problem.url,
             difficulty: quickNoteProblem.problem.difficulty,
             tags: quickNoteProblem.problem.topicTags.map((t) => t.name),
-            slug: quickNoteProblem.problem.titleSlug,
           }}
           latestPracticeNotes={null}
           onClose={() => setQuickNoteProblem(null)}

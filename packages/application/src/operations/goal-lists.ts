@@ -5,6 +5,7 @@ import {
   goalListIdSchema, type EditGoalItem, type GoalList, type StoredGoalList,
 } from '../../../contracts/src/goal-lists.ts';
 import { goalCatalog, readGoalLists, saveGoalList } from '../../../database/src/goal-lists.ts';
+import { completePlanItem, currentPlan } from '../planned-completion.ts';
 import type { ApplicationContext } from '../context.ts';
 import { fail } from '../errors.ts';
 
@@ -35,7 +36,8 @@ function applyItemEdit(items: StoredGoalList['items'], edit: EditGoalItem['edit'
   }
 }
 
-export function createGoalListOperations({ store: { db }, writeLock }: ApplicationContext) {
+export function createGoalListOperations({ store, writeLock }: ApplicationContext) {
+  const { db } = store;
   function views(lists: StoredGoalList[]): GoalList[] {
     const catalog = goalCatalog(db, lists.flatMap(list => list.items.map(item => item.frontendId)));
     return lists.map(list => {
@@ -52,18 +54,7 @@ export function createGoalListOperations({ store: { db }, writeLock }: Applicati
   }
 
   function transaction<T>(fn: () => T) {
-    return writeLock.run(() => {
-      db.exec('BEGIN IMMEDIATE');
-      try {
-        const result = fn();
-        db.exec("UPDATE catalog_meta SET value=CAST(value AS INTEGER)+1 WHERE key='planning_revision'");
-        db.exec('COMMIT');
-        return result;
-      } catch (error) {
-        db.exec('ROLLBACK');
-        throw error;
-      }
-    });
+    return writeLock.run(() => store.protectedTransaction(fn));
   }
 
   function get(id: string) {
@@ -97,16 +88,38 @@ export function createGoalListOperations({ store: { db }, writeLock }: Applicati
       return transaction(() => {
         const goal = current(id, expectedVersion);
         const previous = new Map(goal.items.map(item => [item.frontendId, item.completed]));
-        return save({ ...goal, version: goal.version + 1, name: name ?? goal.name,
-          items: items?.map(({ frontendId, completed }) => ({ frontendId, completed: completed ?? previous.get(frontendId) ?? false })) ?? goal.items });
+        const nextItems = items?.map(({ frontendId, completed }) => ({
+          frontendId, completed: completed ?? previous.get(frontendId) ?? false,
+        })) ?? goal.items;
+        const updated = save({ ...goal, version: goal.version + 1, name: name ?? goal.name, items: nextItems });
+        const newlyChecked = new Set(nextItems.filter(item => item.completed && !previous.get(item.frontendId)).map(item => item.frontendId));
+        if (newlyChecked.size) {
+          const now = Date.now();
+          const plan = currentPlan(store, now);
+          if (plan) for (const item of plan.items) {
+            if (newlyChecked.has(item.problem.questionFrontendId)) completePlanItem(store, plan, item, now);
+          }
+        }
+        return updated;
       });
     },
     editItem(id: string, input: unknown) {
       const { expectedVersion, edit } = parse(editGoalItemSchema, input);
       return transaction(() => {
-        const goal = current(id, expectedVersion);
+        const goal = get(id);
+        const alreadyChecked = edit.action === 'setCompleted' && edit.completed &&
+          goal.items.some(item => item.frontendId === edit.frontendId && item.completed);
+        if (alreadyChecked) return views([goal])[0];
+        if (goal.version !== expectedVersion) fail(409, { error: 'STALE_GOAL_LIST' });
         applyItemEdit(goal.items, edit);
-        return save({ ...goal, version: goal.version + 1 });
+        const updated = save({ ...goal, version: goal.version + 1 });
+        if (edit.action !== 'setCompleted' || !edit.completed) return updated;
+        const now = Date.now();
+        const plan = currentPlan(store, now);
+        const assignment = plan?.items.find(item => item.problem.questionFrontendId === edit.frontendId);
+        if (!plan || !assignment) return updated;
+        const linkedPractice = completePlanItem(store, plan, assignment, now);
+        return { ...updated, linkedPractice };
       });
     },
     delete(id: string, input: unknown) {
@@ -114,6 +127,7 @@ export function createGoalListOperations({ store: { db }, writeLock }: Applicati
       return transaction(() => {
         current(id, expectedVersion);
         db.prepare('DELETE FROM catalog_meta WHERE key=?').run(GOAL_LIST_PREFIX + id);
+        db.exec("UPDATE catalog_meta SET value=CAST(value AS INTEGER)+1 WHERE key='planning_revision'");
         return { ok: true };
       });
     },

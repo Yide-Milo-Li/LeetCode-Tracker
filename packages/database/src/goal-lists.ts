@@ -19,6 +19,7 @@ export function goalCatalog(db: DatabaseSync, ids: string[]) {
 export function saveGoalList(db: DatabaseSync, list: StoredGoalList) {
   db.prepare(`INSERT INTO catalog_meta(key,value) VALUES(?,?)
     ON CONFLICT(key) DO UPDATE SET value=excluded.value`).run(GOAL_LIST_PREFIX + list.id, JSON.stringify(list));
+  db.exec("UPDATE catalog_meta SET value=CAST(value AS INTEGER)+1 WHERE key='planning_revision'");
 }
 
 /** Reject invalid goal documents before a migration or device sync can replace live data. */
@@ -33,5 +34,16 @@ export function validateGoalLists(rows: { key: string; value: string }[], proble
     if (row.key !== GOAL_LIST_PREFIX + list.id || new Set(ids).size !== ids.length || ids.some(id => !catalog.has(id))) {
       throw new Error('Invalid goal list identity or catalog membership.');
     }
+  }
+}
+
+/** Update each containing list once, preserving order and completed items. Called inside a write transaction. */
+export function checkGoalEntries(db: DatabaseSync, frontendId: string) {
+  for (const list of readGoalLists(db)) {
+    const item = list.items.find(item => item.frontendId === frontendId);
+    if (!item || item.completed) continue;
+    item.completed = true;
+    list.version++;
+    saveGoalList(db, list);
   }
 }

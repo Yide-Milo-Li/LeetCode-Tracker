@@ -310,6 +310,7 @@ export function useDailyPlan(lang: Language = 'en'): UseDailyPlanReturn {
                 if (
                   record.status === 'active' &&
                   record.completed &&
+                  record.questionId === item.problem.questionId &&
                   evidenceAfter(evidence, item.addedAt, Date.now())
                 )
                   evidenceIds.push(id);

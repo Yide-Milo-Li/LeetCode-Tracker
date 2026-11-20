@@ -163,7 +163,10 @@ export function App() {
   const practice = practiceQueue[0];
   const [outcomes, setOutcomes] = useState<PracticeOutcome[]>([]);
   /** Concurrent row saves retain the active draft and present subsequent details in order. */
-  const openPractice = useCallback((request: PracticeRequest) => setPracticeQueue((queue) => [...queue, request]), []);
+  const openPractice = useCallback((request: PracticeRequest) => setPracticeQueue(queue => {
+    if (request.mode === 'enrich' && queue.some(open => open.mode === 'enrich' && open.record.id === request.record.id)) return queue;
+    return [...queue, request];
+  }), []);
   const reportPracticeOutcome = useCallback((outcome: PracticeOutcome) => setOutcomes((items) => [...items, outcome]), []);
   const plan = useDailyPlan(lang);
   const [desktopAgentRevision, setDesktopAgentRevision] = useState(0);

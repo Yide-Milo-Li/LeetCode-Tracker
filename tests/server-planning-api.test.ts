@@ -848,3 +848,47 @@ it('keeps ordered goal membership, checkmarks and practice history independent a
     assert.equal(store.queryPracticeRecords().total, 1);
   } finally { await app.close(); db.close(); }
 });
+
+it('shares one recorded solve across strategy and goal clicks, including concurrent requests and retries', async () => {
+  const { app, db, store } = await createTestApp();
+  try {
+    const response = await app.inject({ method: 'POST', url: '/api/v1/strategies', payload: {
+      name: 'Overlap', weekdays: [0, 1, 2, 3, 4, 5, 6],
+      rules: { dailyCount: 3, difficulty: { Easy: 100, Medium: 0, Hard: 0 }, tags: [], premium: false,
+        reviewEnabled: false, reviewPercent: null, preference: '' },
+    } });
+    assert.equal(response.statusCode, 201, response.body);
+    const plan = (await app.inject({ method: 'POST', url: '/api/v1/daily-plans/ensure' })).json().plan;
+    const ids: string[] = plan.items.map((item: { problem: { questionFrontendId: string } }) => item.problem.questionFrontendId);
+    assert.equal(ids.length, 3);
+    const list = (await app.inject({ method: 'POST', url: '/api/v1/goal-lists', payload: { name: 'Same three', frontendIds: ids } })).json();
+    const url = '/api/v1/goal-lists/' + list.id;
+    const check = (i: number, version: number) => app.inject({ method: 'PATCH', url: url + '/items',
+      payload: { expectedVersion: version, edit: { action: 'setCompleted', frontendId: ids[i], completed: true } } });
+    const log = (i: number) => app.inject({ method: 'POST', url: '/api/v1/practice-records', payload: {
+      todayItem: { planId: plan.id, itemId: plan.items[i].id }, questionFrontendId: ids[i],
+      completed: true, practicedAt: new Date().toISOString(), timePrecision: 'datetime', operationId: randomUUID(),
+    } });
+    const assertProgress = async (count: number) => {
+      assert.equal(store.queryPracticeRecords().total, count);
+      const goal = (await app.inject({ method: 'GET', url })).json();
+      assert.deepEqual(goal.items.map((item: { completed: boolean }) => item.completed), ids.map((_, i) => i < count));
+      const today = (await app.inject({ method: 'GET', url: '/api/v1/daily-plans?date=' + plan.date })).json().items[0];
+      assert.deepEqual(today.items.map((item: { evidenceIds: string[] }) => item.evidenceIds.length), ids.map((_, i) => Number(i < count)));
+      return goal.version as number;
+    };
+    const first = await check(0, 1);
+    assert.equal(first.statusCode, 200, first.body);
+    assert.equal(first.json().linkedPractice.id, (await log(0)).json().id);
+    const version = await assertProgress(1);
+    assert.equal((await log(1)).statusCode, 201);
+    assert.equal((await check(1, version)).statusCode, 200);
+    const next = await assertProgress(2);
+    const both = await Promise.all([check(2, next), log(2)]);
+    assert.equal(both[0].statusCode, 200, both[0].body);
+    assert.equal(both[1].statusCode, 201, both[1].body);
+    await assertProgress(3);
+    assert.equal((await check(2, next)).statusCode, 200);
+    await assertProgress(3);
+  } finally { await app.close(); db.close(); }
+});

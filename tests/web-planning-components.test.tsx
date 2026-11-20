@@ -1690,3 +1690,38 @@ it('selects one full goal list at a time, remembers the choice and falls back wh
   assert.ok(screen.getByText('#4 Arrays4'));
   window.localStorage.removeItem('leetcode_tracker_selected_goal_list');
 });
+
+it('exposes goal note navigation, a direct problem link, timer and list-scoped removal without strategy replacement', async () => {
+  const { TodayGoalLists } = await import('../apps/web/src/components/TodayGoalLists.tsx');
+  const { WorkspaceContext } = await import('../apps/web/src/workspace.tsx');
+  const problem = createMockPlan().items[0].problem;
+  const frontendId = problem.questionFrontendId;
+  const goal: GoalList = { id: crypto.randomUUID(), name: 'Set', version: 1,
+    items: [{ frontendId, completed: false, title: problem.title, url: problem.url }] };
+  mock.method(api, 'getGoalLists', async () => [goal]);
+  const navigate = mock.fn();
+  const edit = mock.method(api, 'editGoalItem', async () => {
+    goal.items = [];
+    return { ...goal, version: 2 };
+  });
+  const component = <WorkspaceContext.Provider value={{ revision: 0, timezone: 'UTC', navigate, notifyMutation() {}, openPractice() {} }}>
+    <TodayGoalLists lang="en" />
+  </WorkspaceContext.Provider>;
+  await act(async () => { render(component); });
+  assert.equal(screen.getByRole('link', { name: new RegExp(problem.title) }).getAttribute('href'), problem.url);
+  assert.ok(screen.getByRole('button', { name: 'Start timer: ' + problem.title }));
+  assert.equal(screen.queryByRole('button', { name: /replace|obsidian/i }), null);
+  fireEvent.click(screen.getByRole('button', { name: 'Notes' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Write in Notes Workspace' }));
+  assert.deepEqual(navigate.mock.calls[0].arguments, ['notes', frontendId]);
+  const frame = Object.getOwnPropertyDescriptor(globalThis, 'requestAnimationFrame');
+  Object.defineProperty(globalThis, 'requestAnimationFrame', { configurable: true, value: () => 0 });
+  try {
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Remove from this list: #' + frontendId })));
+    assert.deepEqual(edit.mock.calls[0].arguments, [goal.id, { expectedVersion: 1, edit: { action: 'remove', frontendId } }]);
+    assert.ok(screen.getByText('This list is empty.'));
+  } finally {
+    if (frame) Object.defineProperty(globalThis, 'requestAnimationFrame', frame);
+    else Reflect.deleteProperty(globalThis, 'requestAnimationFrame');
+  }
+});

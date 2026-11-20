@@ -6,13 +6,15 @@ import { localizeApiError } from '../error-i18n.ts';
 import type { Language } from '../i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
 import { GoalListEditor } from './GoalListEditor.tsx';
+import { GoalProblemActions } from './GoalProblemActions.tsx';
+import { stopTimerFor, getPendingMinutes, clearPendingMinutes } from '../timer-service.ts';
 import { Feedback } from './ui.tsx';
 
 const SELECTED_GOAL_KEY = 'leetcode_tracker_selected_goal_list';
 
 export function TodayGoalLists({ lang }: { lang: Language }) {
   const zh = lang === 'zh';
-  const { revision } = useWorkspace();
+  const { revision, notifyMutation, openPractice } = useWorkspace();
   const [lists, setLists] = useState<GoalList[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(() => {
@@ -61,16 +63,28 @@ export function TodayGoalLists({ lang }: { lang: Language }) {
     setError('');
     setRetry(n => n + 1);
   }
-  async function complete(list: GoalList, frontendId: string) {
+  async function changeItem(list: GoalList, frontendId: string, action: 'complete' | 'remove') {
     if (completing.current) return;
     completing.current = true;
     setPending(list.id);
     setError('');
     const original = document.activeElement;
     try {
-      const goal = await api.editGoalItem(list.id, { expectedVersion: list.version, edit: { action: 'setCompleted', frontendId, completed: true } });
+      const goal = await api.editGoalItem(list.id, { expectedVersion: list.version, edit: action === 'remove'
+        ? { action: 'remove', frontendId } : { action: 'setCompleted', frontendId, completed: true } });
+      if (action === 'complete') {
+        const elapsed = stopTimerFor(frontendId)?.minutes ?? getPendingMinutes(frontendId) ?? undefined;
+        if (goal.linkedPractice !== undefined) {
+          notifyMutation(goal.linkedPractice ?? undefined);
+          if (goal.linkedPractice) {
+            if (elapsed !== undefined) clearPendingMinutes(frontendId);
+            openPractice({ mode: 'enrich', record: goal.linkedPractice, elapsedMinutes: elapsed });
+          }
+        }
+      }
       saved(list.id, goal);
-      announce(zh ? `#${frontendId} 已完成` : `Completed #${frontendId}`);
+      announce(action === 'complete' ? (zh ? `#${frontendId} 已完成` : `Completed #${frontendId}`)
+        : (zh ? `已从题单移除 #${frontendId}` : `Removed #${frontendId} from the list`));
       const position = list.items.findIndex(item => item.frontendId === frontendId);
       const next = list.items.slice(position + 1).find(item => !item.completed) ?? list.items.find(item => !item.completed && item.frontendId !== frontendId);
       requestAnimationFrame(() => {
@@ -113,10 +127,12 @@ export function TodayGoalLists({ lang }: { lang: Language }) {
             <div className="goal-item-line">
               <button type="button" className="completion-circle" data-problem={item.frontendId}
                 aria-label={zh ? `完成 #${item.frontendId} ${item.title}` : `Complete #${item.frontendId} ${item.title}`}
-                disabled={!!pending} onClick={() => void complete(list, item.frontendId)}><Circle size={20} aria-hidden="true" /></button>
+                disabled={!!pending} onClick={() => void changeItem(list, item.frontendId, 'complete')}><Circle size={20} aria-hidden="true" /></button>
               {/^https?:\/\//i.test(item.url)
-                ? <a className="problem-title-link" href={item.url} target="_blank" rel="noopener noreferrer">#{item.frontendId} {item.title}</a>
+                ? <a className="problem-title-link" href={item.url} target="_blank" rel="noopener noreferrer" title={zh ? '打开题目 ↗' : 'Open problem ↗'}>#{item.frontendId} {item.title}<span aria-hidden="true" className="problem-link-mark"> ↗</span></a>
                 : <span>#{item.frontendId} {item.title}</span>}
+              <GoalProblemActions lang={lang} frontendId={item.frontendId} title={item.title} disabled={!!pending}
+                onRemove={() => void changeItem(list, item.frontendId, 'remove')} />
             </div>
           </li>)}
         </ol> : <p className="text-muted">{list.items.length ? (zh ? '本单已全部完成。' : 'All problems completed.') : (zh ? '题单为空。' : 'This list is empty.')}</p>}

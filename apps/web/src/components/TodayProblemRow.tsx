@@ -3,14 +3,14 @@
  * Renders reliable completion circle, topic tags with overflow dropdown, and contextual action links.
  */
 import React from 'react';
-import { Check, Circle, RefreshCw, Plus, BookMarked, BookOpen, PenLine, Trash2 } from 'lucide-react';
+import { Check, Circle, RefreshCw, Plus, Trash2 } from 'lucide-react';
 import type { PlanItem } from '../api.ts';
 import type { RecommendationFeedbackReason } from '../../../../packages/contracts/src/recommendations.ts';
 import { translations, type Language } from '../i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
-import { Feedback, InfoPopover, Tooltip, useActionPopover } from './ui.tsx';
+import { Feedback, InfoPopover, Tooltip } from './ui.tsx';
 import { PracticeTimerButton } from './PracticeTimer.tsx';
-import { QuickCopyButtons } from './QuickCopyButtons.tsx';
+import { ProblemNoteMenu } from './ProblemNoteMenu.tsx';
 
 export interface TodayProblemRowProps {
   item: PlanItem;
@@ -52,9 +52,6 @@ export function TodayProblemRow({
   const zh = lang === 'zh';
   const t = translations[lang];
   const workspace = useWorkspace();
-
-  // Native popover handles outside clicks, Escape and the top layer; see useActionPopover.
-  const noteMenu = useActionPopover({ align: 'end' });
 
   const reasonText = item.reason[lang] || item.reason.en;
   const problemUrl = /^https?:\/\//i.test(item.problem.url) ? item.problem.url : undefined;
@@ -165,67 +162,7 @@ export function TodayProblemRow({
       </div>
 
       <div className="problem-actions">
-        <div className="notes-dropdown">
-          <Tooltip text={t.noteButtonLabel} position="top" disabled={noteMenu.open}>
-            <button
-              type="button"
-              className="btn-icon"
-              aria-label={t.noteButtonLabel}
-              {...noteMenu.triggerProps}
-            >
-              <BookMarked size={18} />
-            </button>
-          </Tooltip>
-
-          {noteMenu.rendered && (
-            <div
-              {...noteMenu.panelProps}
-              className="notes-dropdown-menu notes-dropdown-menu-right"
-              style={{ minWidth: '180px' }}
-            >
-              <button
-                type="button"
-                className="notes-dropdown-item"
-                onClick={() => {
-                  noteMenu.close();
-                  workspace.navigate('notes', item.problem.questionFrontendId);
-                }}
-              >
-                <span className="notes-dropdown-label">
-                  <PenLine size={14} className="notes-dropdown-icon" aria-hidden="true" />
-                  <span>{t.writeNewNoteInWorkspace}</span>
-                </span>
-              </button>
-              <button
-                type="button"
-                className="notes-dropdown-item"
-                onClick={() => {
-                  noteMenu.close();
-                  onOpenQuickNote?.(item);
-                }}
-              >
-                <span className="notes-dropdown-label">
-                  <BookOpen size={14} className="notes-dropdown-icon is-secondary" aria-hidden="true" />
-                  <span>{t.quickCheckPastNotes}</span>
-                </span>
-              </button>
-            </div>
-          )}
-        </div>
-        <Tooltip text={t.copyObsidianCard} position="top">
-          <QuickCopyButtons
-            lang={lang}
-            problem={{
-              frontendId: item.problem.questionFrontendId,
-              title: item.problem.title,
-              url: item.problem.url,
-              difficulty: item.problem.difficulty,
-              tags: item.problem.topicTags.map((t) => t.name),
-              slug: item.problem.titleSlug,
-            }}
-            compact
-          />
-        </Tooltip>
+        <ProblemNoteMenu lang={lang} frontendId={item.problem.questionFrontendId} onQuickNote={() => onOpenQuickNote?.(item)} />
         <Tooltip text={t.replaceOne} position="top">
           <button
             className="btn-icon"

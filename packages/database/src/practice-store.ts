@@ -4,7 +4,10 @@
  */
 import type { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
-import { isEventTime } from '../../contracts/src/time.ts';
+import { evidenceAfter } from '../../domain/src/recommendations.ts';
+import type { DailyPlan } from '../../contracts/src/recommendations.ts';
+import { checkGoalEntries } from './goal-lists.ts';
+import { isEventTime, isTimeZone, localDate } from '../../contracts/src/time.ts';
 import {
   createPracticeRecordSchema,
   updatePracticeRecordSchema,
@@ -246,7 +249,7 @@ export interface PreparedPracticeInsert {
  * Insert one practice inside the caller's open transaction, or return the
  * record an earlier request with the same operation ID created.
  */
-function insertPracticeRow(
+export function insertPracticeRow(
   db: DatabaseSync,
   { problem, validated, precision, fingerprint }: PreparedPracticeInsert,
   defaultTimezone: string | null
@@ -299,6 +302,14 @@ function insertPracticeRow(
     ).run(validated.operationId, fingerprint, id);
   }
 
+  if (validated.completed && defaultTimezone && isTimeZone(defaultTimezone)) {
+    const row = db.prepare('SELECT payload_json FROM daily_plans WHERE plan_date=?').get(localDate(now, defaultTimezone));
+    const plan: DailyPlan | undefined = row && JSON.parse(String(row.payload_json));
+    const item = plan?.items.find(item => item.problem.questionId === problem.questionId);
+    const evidence = { id, questionId: problem.questionId, at: validated.practicedAt, precision,
+      zone: validated.sourceTimezone ?? defaultTimezone, recordedAt: now };
+    if (item && evidenceAfter(evidence, item.addedAt, now)) checkGoalEntries(db, problem.questionFrontendId);
+  }
   incrementPracticeRevision(db);
   return { id, replayed: false };
 }

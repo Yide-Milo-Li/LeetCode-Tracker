@@ -1,3 +1,5 @@
+import { z } from 'zod';
+import { currentPlan, completePlanItem } from '../planned-completion.ts';
 import { notePracticeHistory } from '../../../database/src/practice-store.ts';
 /**
  * Business operations for manual practice record logging, query, updates, revocations, and stats.
@@ -11,7 +13,7 @@ import {
 import { PracticeConflictError } from '../../../database/src/store.ts';
 import { operationFingerprint, readBatchFingerprint } from '../../../database/src/operation-fingerprint.ts';
 import type { ApplicationContext } from '../context.ts';
-import { fail, artifact } from '../errors.ts';
+import { fail, artifact, ApplicationError } from '../errors.ts';
 /** Create operations over the owning application's shared context. */
 export function createPracticeOperations(context: ApplicationContext) {
   const { store, writeLock } = context;
@@ -25,10 +27,26 @@ export function createPracticeOperations(context: ApplicationContext) {
       });
     }
 
+    const target = (input as { todayItem?: unknown }).todayItem;
     try {
+      if (target !== undefined) {
+        const ref = z.object({ planId: z.string().min(1), itemId: z.string().min(1) }).strict().safeParse(target);
+        if (!ref.success || !parseRes.data.completed || parseRes.data.timePrecision !== 'datetime') {
+          return fail(400, { error: 'INVALID_REQUEST', message: 'Expected a Today completion with an exact time.' });
+        }
+        const record = await writeLock.run(() => store.protectedTransaction(() => {
+          const now = Date.now();
+          const plan = currentPlan(store, now);
+          const item = plan?.items.find(i => i.id === ref.data.itemId && i.problem.questionFrontendId === parseRes.data.questionFrontendId);
+          if (!plan || plan.id !== ref.data.planId || !item) return fail(409, { error: 'STALE_PLAN' });
+          return completePlanItem(store, plan, item, now, parseRes.data);
+        }));
+        return record ?? fail(409, { error: 'STALE_PLAN', message: 'Already completed by an imported result.' });
+      }
       const record = await writeLock.run(() => store.createPracticeRecord(parseRes.data));
       return record;
     } catch (err) {
+      if (err instanceof ApplicationError) throw err;
       if (err instanceof PracticeConflictError) {
         return fail(409, { error: err.code, message: err.message });
       }

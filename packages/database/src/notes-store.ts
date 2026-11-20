@@ -127,6 +127,11 @@ export function listProblemNoteSummaries(
     )`);
   }
 
+  if (query.frontendId !== undefined) {
+    whereClauses.push('p.frontend_question_id = ?');
+    params.push(query.frontendId);
+  }
+
   // Filter by search string
   if (query.search?.trim()) {
     const term = `%${query.search.trim().toLowerCase()}%`;

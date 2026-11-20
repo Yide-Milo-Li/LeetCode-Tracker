@@ -188,6 +188,21 @@ export class CatalogStore {
     return run;
   }
 
+  /** Acquire the store write queue and commit related changes as one SQLite transaction. */
+  public protectedTransaction<T>(write: () => T): Promise<T> {
+    return this.protectedWrite(() => {
+      this.db.exec('BEGIN IMMEDIATE');
+      try {
+        const result = write();
+        this.db.exec('COMMIT');
+        return result;
+      } catch (error) {
+        this.db.exec('ROLLBACK');
+        throw error;
+      }
+    });
+  }
+
   // ==========================================
   // Catalog Methods
   // ==========================================

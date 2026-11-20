@@ -22,7 +22,7 @@ export function registerGoalListTools({ register }: Registrar) {
   }, async (app, { id, ...args }) => json(await app.goalLists.update(id, args)), 'write', { destructive: true, idempotent: false });
 
   register('tracker_edit_goal_item', {
-    description: 'Add, move, replace, remove or check/uncheck one list entry. Add/move append by default or insert before beforeId. A replacement starts unchecked.',
+    description: 'Add, move, replace, remove or check/uncheck one list entry. Add/move append by default or insert before beforeId. Checking a problem shared with the daily plan links its practice.',
     inputSchema: editGoalItemSchema.extend({ id }),
   }, async (app, { id, ...args }) => json(await app.goalLists.editItem(id, args)), 'write', { destructive: true, idempotent: false });
 

@@ -129,7 +129,7 @@ Tools that work on several items take one item too; there are no separate single
 | `tracker_get_goal_lists` | read | Lists in saved problem order with all checkmarks and versions. Supply `id` to read one list. |
 | `tracker_create_goal_list` | write | Create a named checklist from ordered catalog `frontendIds`. An empty list is valid. |
 | `tracker_update_goal_list` | write, overwrites | Rename a list or replace its complete ordered `items`. Omit a retained item's `completed` flag to preserve it. |
-| `tracker_edit_goal_item` | write | Add, move, replace, remove, or set one entry's completion. For add/move, omit `beforeId` to append. |
+| `tracker_edit_goal_item` | write | Add, move, replace, remove, or set one entry's completion. For add/move, omit `beforeId` to append. Checking a problem shared with today’s plan reuses or creates one practice record. |
 | `tracker_delete_goal_list` | write, removes | Delete a list and its checkmarks. Practice history is kept. |
 | `tracker_get_strategies` | read | Study strategies (each with its assigned weekdays) |
 | `tracker_import_catalog` | write | Import a local `.jsonl` catalog file; `dryRun` |

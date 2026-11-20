@@ -23,7 +23,7 @@ export function PracticeTimerButton({
 }) {
   const zh = lang === 'zh';
   const t = translations[lang];
-  const timer = usePracticeTimer();
+  const timer = usePracticeTimer(undefined, frontendId);
   const running = timer.isActiveFor(frontendId);
   const elapsed = timer.active && running ? formatElapsed(getElapsedSeconds(timer.active)) : '';
 

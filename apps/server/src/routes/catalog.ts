@@ -10,5 +10,6 @@ export function registerCatalogRoutes(app: FastifyInstance, { application }: Rou
   app.get('/api/v1/imports/:id', applicationRoute(r => catalog.result({}, r.params as { id: string })));
   app.get('/api/v1/catalog', applicationRoute(r => catalog.query(r.query)));
   app.get('/api/v1/catalog/tags', applicationRoute(() => catalog.tags()));
+  app.get('/api/v1/catalog/problems/:frontendId', applicationRoute(r => catalog.read({}, r.params as { frontendId: string })));
   app.get('/api/v1/catalog/stats', applicationRoute(() => catalog.stats()));
 }

@@ -7,7 +7,7 @@ import React from 'react';
 import { ExternalLink, BookOpen, Clock, AlertCircle } from 'lucide-react';
 import { api, type ProblemNote, hasMeaningfulNoteContent } from '../api.ts';
 import { formatDifficulty, translations, type Language } from '../i18n.ts';
-import { QuickCopyButtons } from './QuickCopyButtons.tsx';
+import { CopyNotionCard } from './CopyNotionCard.tsx';
 import { Dialog } from './ui.tsx';
 import { useAsyncResource } from '../hooks/useAsyncResource.ts';
 import { useWorkspace } from '../workspace.tsx';
@@ -20,7 +20,6 @@ export interface QuickNoteDrawerProps {
     url: string;
     difficulty: 'Easy' | 'Medium' | 'Hard';
     tags: string[];
-    slug: string;
   };
   latestPracticeNotes?: string | null;
   onClose: () => void;
@@ -67,7 +66,7 @@ export function QuickNoteDrawer({
         <span className={`badge badge-${problem.difficulty.toLowerCase()}`}>
           {formatDifficulty(problem.difficulty, lang)}
         </span>
-        <a
+        {/^https?:\/\//i.test(problem.url) && <a
           href={problem.url}
           target="_blank"
           rel="noreferrer"
@@ -76,11 +75,11 @@ export function QuickNoteDrawer({
           aria-label="LeetCode ↗"
         >
           <ExternalLink size={14} aria-hidden="true" />
-        </a>
+        </a>}
       </div>
 
       <div className="quick-note-copy">
-        <QuickCopyButtons
+        <CopyNotionCard
           lang={lang}
           problem={problem}
           record={{ durationMinutes: null, notes: latestPracticeNotes ?? null }}

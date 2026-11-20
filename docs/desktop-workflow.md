@@ -110,7 +110,7 @@ The Notes Workspace provides a filterable master list, formatting toolbar, and E
 
 - **Focus and save**: `Ctrl+\` / `⌘\` toggles Notes focus mode; `Ctrl+S` / `⌘S` saves the active draft (the UI automatically displays `⌘S` and `⌘\` on macOS). Focus mode starts off. The practice timeline can be expanded separately.
 - **Unsaved changes**: Selecting another problem offers Save and switch, Discard and switch, or Cancel. Saving must succeed before switching; Cancel preserves the current draft.
-- **Quick copy**: The Copy menu exposes Obsidian and Notion card formats.
+- **Quick copy**: Use **Copy for Notion** to copy a card with the current note. Use **.md** to download the Markdown file.
 
 - **Scope independence**: A problem's inclusion in "Practiced Only" (`scope=practiced`) strictly requires active practice logs or valid progress snapshots; writing or having notes never alters practice categorization.
 - **Default blank editing & on-demand templates**: New problem notes open completely blank with instructional placeholders. Clicking **Insert Template** inserts a language-specific skeleton outline without default complexity answers or placeholder code. The action is enabled only when the editor is empty, and switching language never replaces or overwrites in-progress drafts.
@@ -118,7 +118,7 @@ The Notes Workspace provides a filterable master list, formatting toolbar, and E
 - **Save protection & proactive clearing**: Saving is disabled for untouched notes and blank or unedited new templates. Existing notes can be proactively cleared to an empty string and saved, updating the status to "Without Custom Note" while safely retaining all problem catalog data and practice records.
 - **Request ownership**: Loading and retry responses are cancelled when switching problems. Save responses from an earlier selection visit cannot change the current editor's saved baseline or feedback, even after switching back to the same problem. Edits made during a save remain in the editor; repeated save shortcuts cannot duplicate an in-flight write. Editing and template insertion wait until note loading succeeds.
 - **Complexity answers**: Standalone complexity notes and answers entered into today's blank templates count as meaningful, including `$O(N)$` time and `$O(1)$` space. Historical default answers are ignored only when the complete old template matches after whitespace normalization. Ambiguous partial notes with answers are retained as meaningful; original stored text is not rewritten on load or import.
-- **Card and export fallbacks**: Obsidian and Notion quick-copy cards and knowledge exports check for meaningful note content; unfilled templates automatically fall back to recent practice log notes.
+- **Card and export fallbacks**: Notion cards and knowledge exports check for meaningful note content; unfilled templates automatically fall back to recent practice log notes.
 
 ## Desktop launcher
 

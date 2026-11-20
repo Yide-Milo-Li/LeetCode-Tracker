@@ -803,3 +803,18 @@ progress::-moz-progress-bar {
     padding-inline: .75rem;
   }
 }
+
+.today-goal-lists { container: goal-tasks / inline-size; }
+.goal-item-line {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  gap: .35rem;
+  padding-block: .35rem;
+}
+.goal-item-line .completion-circle { width: 36px; height: 36px; }
+.goal-problem-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .15rem; }
+.goal-action-error { grid-column: 2 / -1; }
+@container goal-tasks (max-width: 30rem) {
+  .goal-item-line { grid-template-columns: 36px minmax(0, 1fr); }
+  .goal-problem-actions { grid-column: 2; }
+}

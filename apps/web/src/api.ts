@@ -143,6 +143,10 @@ const catalogApi = {
   /** Read the persisted catalog import result, including individual line errors. */
   getImportResult: (id: string) => request<ImportSummary>(`/imports/${encodeURIComponent(id)}`),
 
+  getCatalogProblem(frontendId: string, { signal }: ReadOptions = {}): Promise<{ problem: CatalogProblem | null }> {
+    return request(`/catalog/problems/${encodeURIComponent(frontendId)}`, { signal });
+  },
+
   getCatalogStats(): Promise<CatalogStats> {
     return request<CatalogStats>('/catalog/stats');
   },
@@ -228,12 +232,13 @@ const settingsApi = {
 // ==========================================
 // Practice Records API
 // ==========================================
+export type PracticeIntentInput = CreatePracticeRecordInput & { todayItem?: { planId: string; itemId: string } };
 const practiceApi = {
   getPracticeRecord(id: string): Promise<PracticeRecord> {
     return request<PracticeRecord>(`/practice-records/${encodeURIComponent(id)}`);
   },
 
-  createPracticeRecord(input: CreatePracticeRecordInput): Promise<PracticeRecord> {
+  createPracticeRecord(input: PracticeIntentInput): Promise<PracticeRecord> {
     return request<PracticeRecord>('/practice-records', {
       method: 'POST',
       body: JSON.stringify(input),
@@ -355,7 +360,7 @@ const planningApi = {
   updateGoalList(id: string, input: UpdateGoalList): Promise<GoalList> {
     return request(`/goal-lists/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
   },
-  editGoalItem(id: string, input: EditGoalItem): Promise<GoalList> {
+  editGoalItem(id: string, input: EditGoalItem): Promise<GoalList & { linkedPractice?: PracticeRecord | null }> {
     return request(`/goal-lists/${id}/items`, { method: 'PATCH', body: JSON.stringify(input) });
   },
   deleteGoalList(id: string, expectedVersion: number): Promise<{ ok: boolean }> {
@@ -488,6 +493,7 @@ export const notesApi = {
     const params = new URLSearchParams();
     if (query.page) params.set('page', String(query.page));
     if (query.limit) params.set('limit', String(query.limit));
+    if (query.frontendId) params.set('frontendId', query.frontendId);
     if (query.search) params.set('search', query.search);
     if (query.difficulty && query.difficulty !== 'all') params.set('difficulty', query.difficulty);
     if (query.hasNote && query.hasNote !== 'all') params.set('hasNote', query.hasNote);
