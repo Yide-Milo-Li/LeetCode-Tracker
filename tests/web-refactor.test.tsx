@@ -39,6 +39,8 @@ const { render, renderHook, fireEvent, screen, act, cleanup, waitFor, within } =
 const { api, ApiError } = await import('../apps/web/src/api.ts');
 const queryCatalogOverHttp = api.getCatalog;
 const readFavoritesOverHttp = api.getFavoriteMemberships;
+const readPracticeOverHttp = api.getPracticeRecords;
+const updatePracticeOverHttp = api.updatePracticeRecord;
 const goalReadsOverHttp = {
   getGoalListSummaries: api.getGoalListSummaries, getGoalList: api.getGoalList, getGoalMemberships: api.getGoalMemberships,
 };
@@ -476,6 +478,36 @@ async function withProblemCatalog(run: () => Promise<void>) {
     db.close();
   }
 }
+
+it('offers the shared practice feedback after completing a goal-only problem', () => withProblemCatalog(async () => {
+  const { getPendingMinutes, startTimer } = await import('../apps/web/src/timer-service.ts');
+  const goal = await api.createGoalList({ name: 'Interview', frontendIds: ['901'] });
+  plan.items = [];
+  mock.method(api, 'updatePracticeRecord', updatePracticeOverHttp);
+  startTimer({ frontendId: '901' }, Date.now() - 210_000);
+  await act(async () => { render(<App />); });
+  const goals = within(screen.getByRole('region', { name: 'Goal lists' }));
+  const complete = await goals.findByRole('button', { name: 'Complete #901 ' + problem.title });
+  await act(async () => { complete.focus(); fireEvent.click(complete); });
+
+  const dialog = within(await screen.findByRole('dialog', { name: 'Add practice details' }));
+  assert.ok(goals.getByText('All problems completed.'));
+  assert.ok((await api.getGoalList(goal.id)).items[0].completed);
+  const saved = await readPracticeOverHttp();
+  assert.equal(saved.total, 1);
+  assert.equal(dialog.getByRole<HTMLInputElement>('spinbutton').value, '4');
+  assert.equal(getPendingMinutes('901'), null);
+
+  fireEvent.change(dialog.getByLabelText('Practice feedback'), { target: { value: 'assisted' } });
+  await act(async () => { fireEvent.click(dialog.getByRole('button', { name: 'Save details' })); });
+  await waitFor(() => assert.equal(screen.queryByRole('dialog'), null));
+  assert.equal(document.activeElement, goals.getByRole('button', { name: 'Edit Interview' }));
+  const updated = await readPracticeOverHttp();
+  assert.equal(updated.total, 1);
+  assert.equal(updated.items[0].id, saved.items[0].id);
+  assert.equal(updated.items[0].outcome, 'assisted');
+  assert.equal(updated.items[0].durationMinutes, 4);
+}));
 
 it('saves a catalog problem in two folders and browses each from the Favorites navigation', () => withProblemCatalog(async () => {
     await api.createGoalList({ name: 'Interview', frontendIds: ['901'] });

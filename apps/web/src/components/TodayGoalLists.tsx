@@ -39,22 +39,20 @@ export function TodayGoalLists({ lang, goals, nextTaskRef }: {
     setPending(list.id);
     setError('');
     const original = document.activeElement;
+    const elapsedMinutes = action === 'complete'
+      ? stopTimerFor(frontendId)?.minutes ?? getPendingMinutes(frontendId) ?? undefined : undefined;
     try {
       const goal = await api.editGoalItem(list.id, { expectedVersion: list.version, edit: action === 'remove'
-        ? { action: 'remove', frontendId } : { action: 'setCompleted', frontendId, completed: true } });
-      if (action === 'complete') {
-        const elapsed = stopTimerFor(frontendId)?.minutes ?? getPendingMinutes(frontendId) ?? undefined;
-        if (goal.linkedPractice !== undefined) {
-          notifyMutation(goal.linkedPractice ?? undefined);
-          if (goal.linkedPractice) {
-            if (elapsed !== undefined) clearPendingMinutes(frontendId);
-            openPractice({ mode: 'enrich', record: goal.linkedPractice, elapsedMinutes: elapsed });
-          }
-        }
-      }
+        ? { action: 'remove', frontendId } : { action: 'setCompleted', frontendId, completed: true, recordPractice: true } });
       saved(list.id, goal);
       announce(action === 'complete' ? (zh ? `#${frontendId} 已完成` : `Completed #${frontendId}`)
         : (zh ? `已从题单移除 #${frontendId}` : `Removed #${frontendId} from the list`));
+      if (goal.linkedPractice !== undefined) notifyMutation(goal.linkedPractice ?? undefined);
+      if (goal.linkedPractice) {
+        if (elapsedMinutes !== undefined) clearPendingMinutes(frontendId);
+        openPractice({ mode: 'enrich', record: goal.linkedPractice, elapsedMinutes, fallbackFocusRef: editButton });
+        return;
+      }
       const position = list.items.findIndex(item => item.frontendId === frontendId);
       const next = list.items.slice(position + 1).find(item => !item.completed) ?? list.items.find(item => !item.completed && item.frontendId !== frontendId);
       requestAnimationFrame(() => {

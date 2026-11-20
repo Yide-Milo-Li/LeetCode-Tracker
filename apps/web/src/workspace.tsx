@@ -1,5 +1,5 @@
 /** Lightweight application coordination using React context and the existing local navigation. */
-import { createContext, useContext, useLayoutEffect, useRef, type ComponentPropsWithoutRef } from 'react';
+import { createContext, useContext, useLayoutEffect, useRef, type ComponentPropsWithoutRef, type RefObject } from 'react';
 import type { CatalogProblem, PracticeRecord, PlanItem } from './api.ts';
 
 export type View =
@@ -15,7 +15,7 @@ export type View =
   | 'settings';
 export type PracticeRequest =
   | { mode: 'manual'; problem?: CatalogProblem }
-  | { mode: 'enrich'; record: PracticeRecord; draft?: PracticeDraft; elapsedMinutes?: number }
+  | { mode: 'enrich'; record: PracticeRecord; draft?: PracticeDraft; elapsedMinutes?: number; fallbackFocusRef?: RefObject<HTMLElement | null> }
   | { mode: 'detail'; record: PracticeRecord; draft?: PracticeDraft }
   | { mode: 'evidence'; item: PlanItem };
 /** Retain the submitted fields when an editor closes before its request settles. */

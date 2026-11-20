@@ -7,6 +7,7 @@ import {
 } from '../../../contracts/src/goal-lists.ts';
 import { goalCatalog, readGoalLists, readGoalListsById, readGoalListPage, readGoalMemberships, saveGoalList } from '../../../database/src/goal-lists.ts';
 import { uuidFromFingerprint } from '../../../database/src/operation-fingerprint.ts';
+import { insertPracticeRow, practiceFingerprint } from '../../../database/src/practice-store.ts';
 import { completePlanItem, currentPlan } from '../planned-completion.ts';
 import type { ApplicationContext } from '../context.ts';
 import { fail } from '../errors.ts';
@@ -215,22 +216,41 @@ export function createGoalListOperations({ store, writeLock }: ApplicationContex
         const goal = get(id);
         const now = Date.now();
         const checking = edit.action === 'setCompleted' && edit.completed;
+        const receiptKey = checking && edit.recordPractice ? `goal-practice:${id}:${expectedVersion}` : undefined;
         const plan = checking ? currentPlan(store, now) : null;
         const assignment = plan?.items.find(item => item.problem.questionFrontendId === edit.frontendId);
         const entry = goal.items.find(item => item.frontendId === edit.frontendId);
         if (checking && entry?.completed) {
           const view = views([goal])[0];
+          if (receiptKey) {
+            const receipt = db.prepare("SELECT result_json->>'id' AS id FROM planning_operations WHERE id=? AND fingerprint=?")
+              .get(receiptKey, edit.frontendId);
+            const record = typeof receipt?.id === 'string' ? store.getPracticeRecord(receipt.id) : null;
+            if (record?.status === 'active' && record.completed) return { ...view, linkedPractice: record };
+          }
           if (!assignment?.completed || entry.linkedAfter !== assignment.addedAt) return view;
           const manual = assignment.evidenceIds.find(id => id.startsWith('manual:'));
           return { ...view, linkedPractice: manual ? store.getPracticeRecord(manual.slice('manual:'.length)) : null };
         }
         if (goal.version !== expectedVersion) fail(409, { error: 'STALE_GOAL_LIST' });
         applyItemEdit(goal.items, edit);
-        if (assignment && entry) entry.linkedAfter = assignment.addedAt;
+        // A standalone solve supplies its own evidence boundary so corrections can reopen it.
+        if (entry && (assignment || receiptKey)) entry.linkedAfter = assignment?.addedAt ?? Math.max(0, now - 1);
         const updated = save({ ...goal, version: goal.version + 1 });
-        if (!plan || !assignment) return updated;
-        const linkedPractice = completePlanItem(store, plan, assignment, now);
-        return { ...updated, linkedPractice };
+        let linkedPractice = plan && assignment ? completePlanItem(store, plan, assignment, now) : undefined;
+        if (receiptKey) {
+          if (!linkedPractice) {
+            const problem = store.getProblem(edit.frontendId, 'frontendId');
+            if (!problem) fail(404, { error: 'GOAL_UNKNOWN_PROBLEM', message: edit.frontendId });
+            const validated = { questionFrontendId: edit.frontendId, completed: true, practicedAt: new Date(now).toISOString() };
+            const { id: recordId } = insertPracticeRow(db, { problem, validated, precision: 'datetime',
+              fingerprint: practiceFingerprint(validated, 'datetime') }, store.getSettings().timezone);
+            linkedPractice = store.getPracticeRecord(recordId)!;
+          }
+          db.prepare('INSERT INTO planning_operations(id,fingerprint,result_json) VALUES(?,?,?)')
+            .run(receiptKey, edit.frontendId, JSON.stringify({ id: linkedPractice.id }));
+        }
+        return linkedPractice === undefined ? updated : { ...updated, linkedPractice };
       });
     },
     delete(id: string, input: unknown) {

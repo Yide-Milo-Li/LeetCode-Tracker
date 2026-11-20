@@ -996,6 +996,38 @@ it('validates whole goal-list edits against a sparse local catalog and preserves
   } finally { await app.close(); db.close(); }
 });
 
+it('records a standalone goal solve once and reconciles the check when the record is revoked', async ({ mock }) => {
+  mock.timers.enable({ apis: ['Date'], now: Date.UTC(2026, 10, 19, 12) });
+  const { app, db, store } = await createTestApp();
+  try {
+    const list = (await app.inject({ method: 'POST', url: '/api/v1/goal-lists', payload: { name: 'Goal only', frontendIds: ['2'] } })).json<GoalList>();
+    const url = '/api/v1/goal-lists/' + list.id;
+    const check = (expectedVersion: number) => app.inject({ method: 'PATCH', url: url + '/items', payload: {
+      expectedVersion, edit: { action: 'setCompleted', frontendId: '2', completed: true, recordPractice: true },
+    } });
+    assert.equal((await check(list.version + 1)).statusCode, 409);
+    assert.equal(store.queryPracticeRecords().total, 0);
+    const [first, concurrent] = await Promise.all([check(list.version), check(list.version)]);
+    assert.equal(first.statusCode, 200, first.body);
+    assert.equal(concurrent.statusCode, 200, concurrent.body);
+    const updated = first.json();
+    const record = updated.linkedPractice;
+    assert.equal(updated.version, list.version + 1);
+    assert.equal(updated.items[0].completed, true);
+    assert.equal(record.questionFrontendId, '2');
+    assert.equal(record.completed, true);
+    assert.equal(concurrent.json().linkedPractice.id, record.id);
+    mock.timers.tick(86_400_000);
+    assert.equal((await check(list.version)).json().linkedPractice.id, record.id);
+    assert.equal(store.queryPracticeRecords().total, 1);
+    assert.deepEqual((await app.inject({ method: 'GET', url: '/api/v1/daily-plans' })).json().items, []);
+
+    await store.revokePracticeRecord(record.id);
+    assert.equal((await app.inject(url)).json().items[0].completed, false);
+    assert.equal((await check(list.version)).statusCode, 409);
+  } finally { await app.close(); db.close(); }
+});
+
 it('shares one recorded solve across strategy and goal clicks, including concurrent requests and retries', async ({ mock }) => {
   mock.timers.enable({ apis: ['Date'], now: Date.UTC(2026, 10, 19, 12) });
   const { app, db, store } = await createTestApp();
@@ -1014,7 +1046,7 @@ it('shares one recorded solve across strategy and goal clicks, including concurr
     const list = (await app.inject({ method: 'POST', url: '/api/v1/goal-lists', payload: { name: 'Same three', frontendIds: ids } })).json();
     const url = '/api/v1/goal-lists/' + list.id;
     const check = (i: number, version: number) => app.inject({ method: 'PATCH', url: url + '/items',
-      payload: { expectedVersion: version, edit: { action: 'setCompleted', frontendId: ids[i], completed: true } } });
+      payload: { expectedVersion: version, edit: { action: 'setCompleted', frontendId: ids[i], completed: true, recordPractice: true } } });
     const log = (i: number) => app.inject({ method: 'POST', url: '/api/v1/practice-records', payload: {
       todayItem: { planId: plan.id, itemId: plan.items[i].id }, questionFrontendId: ids[i],
       completed: true, practicedAt: new Date().toISOString(), timePrecision: 'datetime', operationId: randomUUID(),
@@ -1037,6 +1069,7 @@ it('shares one recorded solve across strategy and goal clicks, including concurr
     const both = await Promise.all([check(2, next), log(2)]);
     assert.equal(both[0].statusCode, 200, both[0].body);
     assert.equal(both[1].statusCode, 201, both[1].body);
+    assert.equal(both[0].json().linkedPractice.id, both[1].json().id);
     await assertProgress(3);
     assert.equal((await check(2, next)).statusCode, 200);
     await assertProgress(3);
