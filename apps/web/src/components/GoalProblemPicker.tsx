@@ -5,17 +5,19 @@ import { localizeApiError } from '../error-i18n.ts';
 
 /** Catalog search stays optional beside paste. Ignore superseded results while typing. */
 export function GoalProblemPicker({
-  label,
+  replaceId,
   selected,
   onAdd,
   lang,
 }: {
-  label: string;
+  replaceId: string | null;
   selected: string[];
   onAdd(problem: CatalogProblem): void;
   lang: Language;
 }) {
   const zh = lang === 'zh';
+  const label = replaceId ? (zh ? `替换 #${replaceId} 为` : `Replace #${replaceId} with`)
+    : (zh ? '从题库添加' : 'Add from catalog');
   const id = useId();
   const [query, setQuery] = useState('');
   const [items, setItems] = useState<CatalogProblem[]>([]);
@@ -42,7 +44,7 @@ export function GoalProblemPicker({
     };
   }, [term, lang, zh]);
   return (
-    <div className="form-group">
+    <div className="form-field">
       <label htmlFor={id}>{label}</label>
       <input
         id={id}
@@ -64,24 +66,23 @@ export function GoalProblemPicker({
       />
       {term && (
         <>
-          <span role="status" className="text-muted">
-            {status}
-          </span>
+          {status && <span role="status" className="text-muted">{status}</span>}
           {items.length > 0 && (
             <ul className="goal-picker-results">
-              {items.map((item) => (
-                <li key={item.questionId}>
+              {items.map((item) => {
+                const id = item.questionFrontendId;
+                const included = selected.includes(id);
+                return <li key={item.questionId}>
                   <button
                     type="button"
                     className="text-link"
-                    disabled={selected.includes(item.questionFrontendId)}
+                    disabled={included}
                     onClick={() => onAdd(item)}
                   >
-                    #{item.questionFrontendId} {item.title}{' '}
-                    {selected.includes(item.questionFrontendId) ? '✓' : '+'}
+                    #{id} {item.title} {included ? '✓' : '+'}
                   </button>
-                </li>
-              ))}
+                </li>;
+              })}
             </ul>
           )}
         </>

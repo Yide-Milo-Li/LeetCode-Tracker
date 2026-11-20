@@ -1,7 +1,8 @@
-/** Desktop application shell: three destinations, retained workspaces and one daily-plan controller. */
+/** Desktop navigation, retained workspaces and the shared daily-plan controller. */
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   BookOpen,
+  Star,
   BookMarked,
   CalendarDays,
   ChartNoAxesCombined,
@@ -18,6 +19,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { CatalogView } from './components/CatalogView.tsx';
+import { GoalListsScope } from './components/ProblemGoalLists.tsx';
 import { ActivityRecords } from './components/ActivityRecords.tsx';
 import { TodayPlanView } from './components/TodayPlanView.tsx';
 import { PracticeWorkspace } from './components/PracticeWorkspace.tsx';
@@ -92,6 +94,7 @@ const views: View[] = [
   'schedule',
   'notes',
   'problems',
+  'favorites',
   'catalog-import',
   'records',
   'statistics',
@@ -121,6 +124,8 @@ export function App() {
     persistPreference,
   } = usePreferences();
   const [revision, setRevision] = useState(0);
+  const [favoriteRevision, setFavoriteRevision] = useState(0);
+  const refreshFavorites = useCallback(() => setFavoriteRevision(value => value + 1), []);
   const [focusRequest,setFocusRequest]=useState(0);
   const [selectedNoteProblem, setSelectedNoteProblem] = useState<string | null>(null);
   const [recordsFilter, setRecordsFilter] = useState<RecordsFilterRequest | null>(null);
@@ -245,6 +250,7 @@ export function App() {
     onNavigateProblems: () => navigate('problems'),
     onNavigateRecords: () => navigate('statistics'),
     onNavigateNotes: () => navigate('notes'),
+    onNavigateFavorites: () => navigate('favorites'),
     onOpenManualPractice: () => openPractice({ mode: 'manual' }),
     onFocusSearch: focusSearch,
     onToggleHelp: () => setShowShortcutHelp((open) => !open),
@@ -302,6 +308,8 @@ export function App() {
     view === 'schedule' ? 'today' : view === 'catalog-import' ? 'problems' : progress ? 'statistics' : view;
   return (
     <WorkspaceContext.Provider value={workspace}>
+      <GoalListsScope lang={lang} active={view === 'today' || view === 'problems' || view === 'favorites'}
+        onCreated={() => setRevision(value => value + 1)}>
       <div className="app-shell">
         <a
           className="skip-link"
@@ -352,6 +360,7 @@ export function App() {
                 { id: 'problems', icon: BookOpen, label: zh ? '题库' : 'Problems', shortcut: '2' },
                 { id: 'statistics', icon: ChartNoAxesCombined, label: zh ? '进展' : 'Progress', shortcut: '3' },
                 { id: 'notes', icon: BookMarked, label: zh ? '复盘' : 'Notes', shortcut: '4' },
+                { id: 'favorites', icon: Star, label: zh ? '收藏夹' : 'Favorites', shortcut: '5' },
               ] as const
             ).map((item) => {
               const navBtn = (
@@ -573,6 +582,9 @@ export function App() {
                 >
                   <TodayPlanView
                     lang={lang}
+                    active={view === 'today'}
+                    favoriteRevision={favoriteRevision}
+                    onFavoritesChanged={refreshFavorites}
                     planController={plan}
                     promptSwapFeedback={promptSwapFeedback}
                     onNavigateToSettings={() => {
@@ -610,7 +622,16 @@ export function App() {
             )}
             {visited.has('problems') && (
               <div hidden={view !== 'problems'} id="view-problems">
-                <CatalogView lang={lang} onNavigateSettings={() => navigate('catalog-import')} />
+                <CatalogView lang={lang} onNavigateSettings={() => navigate('catalog-import')}
+                  onGoalListCreated={() => setRevision(value => value + 1)}
+                  favoriteRevision={favoriteRevision} onFavoritesChanged={refreshFavorites} />
+              </div>
+            )}
+            {visited.has('favorites') && (
+              <div hidden={view !== 'favorites'} id="view-favorites">
+                <CatalogView lang={lang} onNavigateSettings={() => navigate('catalog-import')} favoritesOnly
+                  onGoalListCreated={() => setRevision(value => value + 1)}
+                  favoriteRevision={favoriteRevision} onFavoritesChanged={refreshFavorites} />
               </div>
             )}
             {visited.has('catalog-import') && (
@@ -684,6 +705,7 @@ export function App() {
           <ShortcutHelpModal lang={lang} onClose={() => setShowShortcutHelp(false)} />
         )}
       </div>
+      </GoalListsScope>
     </WorkspaceContext.Provider>
   );
 }

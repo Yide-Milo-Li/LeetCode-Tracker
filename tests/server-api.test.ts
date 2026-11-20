@@ -9,8 +9,163 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { CatalogStore } from '../packages/database/src/store.ts';
 import { buildApp } from '../apps/server/src/app.ts';
+
+it('persists favorites independently of folders, validates concurrent edits and restores memberships', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tracker-favorites-'));
+  const file = join(dir, 'profile.sqlite');
+  const open = async () => {
+    const db = new DatabaseSync(file);
+    const store = new CatalogStore(db, { backupDir: join(dir, 'backups'), skipBackup: true });
+    const app = await buildApp({ store, disableStatic: true });
+    return { db, store, app };
+  };
+  let profile = await open();
+  const call = async (method: 'GET' | 'PUT' | 'DELETE' | 'POST', path: string, payload?: object, status = 200) => {
+    const response = await profile.app.inject({ method, url: '/api/v1/' + path, payload });
+    assert.equal(response.statusCode, status, response.body);
+    return response.json();
+  };
+  const first = { id: randomUUID(), name: 'Review' };
+  const second = { id: randomUUID(), name: '图论' };
+  const frontendId = 'LCR 001';
+  const save = (expectedFolderIds: string[] | null, folderIds: string[] | null, status = 200) =>
+    call('PUT', 'favorites/problems', { frontendId, expectedFolderIds, folderIds }, status);
+  try {
+    await profile.store.importJsonl(JSON.stringify({ id: frontendId, questionId: 'internal-91', title: 'Sample', difficulty: 'Easy' }));
+    const legacy = await call('GET', 'bundle/export');
+    await call('PUT', 'favorites/folders', { ...first, expectedName: null });
+    await call('PUT', 'favorites/folders', { id: randomUUID(), name: 'review', expectedName: null }, 409);
+    await save(null, []);
+    assert.deepEqual((await call('GET', 'favorites/problems')).items, [{ frontendId, folderIds: [] }]);
+    const ids = [first.id, second.id];
+    const assign = { frontendId, expectedFolderIds: [], folderIds: ids, newFolder: second };
+    await call('PUT', 'favorites/problems', assign);
+    await call('PUT', 'favorites/problems', assign);
+    assert.deepEqual((await call('GET', 'favorites/problems')).items, [{ frontendId, folderIds: [...ids].sort() }]);
+    assert.deepEqual(await call('GET', 'favorites'), { total: 1, folders: [{ ...first, count: 1 }, { ...second, count: 1 }] });
+    assert.equal((await save([], [], 409)).error, 'STALE_FAVORITE');
+    await save(ids, [second.id, second.id], 400);
+    const unused = { id: randomUUID(), name: 'Uncommitted' };
+    await call('PUT', 'favorites/problems', { frontendId, expectedFolderIds: ids, folderIds: [unused.id, randomUUID()], newFolder: unused }, 409);
+    assert.equal((await call('GET', 'favorites')).folders.length, 2, 'invalid assignment rolls back the new folder');
+    await call('PUT', 'favorites/problems', { frontendId: 'unknown', expectedFolderIds: null, folderIds: [] }, 404);
+    assert.equal((await call('GET', 'catalog')).items[0].favoriteFolderIds, undefined);
+    for (const scope of ['all', first.id, second.id]) {
+      const result = await call('GET', 'catalog?favoriteScope=' + scope);
+      assert.equal(result.total, 1);
+      assert.equal(result.items[0].questionId, 'internal-91');
+      assert.deepEqual(result.items[0].favoriteFolderIds, [...ids].sort());
+    }
+    const snapshot = await call('GET', 'bundle/export?version=5');
+    await call('GET', 'bundle/export?version=3', undefined, 409);
+    await profile.app.close();
+    profile.db.close();
+    profile = await open();
+    assert.equal((await call('GET', 'favorites')).total, 1);
+    await save(ids, [second.id]);
+    assert.equal((await call('GET', 'catalog?favoriteScope=' + first.id)).total, 0);
+    assert.equal((await call('GET', 'catalog?favoriteScope=' + second.id)).total, 1);
+    await call('PUT', 'favorites/folders', { id: second.id, name: 'Trees', expectedName: second.name });
+    await call('DELETE', 'favorites/folders', second, 409);
+    await call('DELETE', 'favorites/folders', { id: second.id, name: 'Trees' });
+    assert.deepEqual((await call('GET', 'catalog?favoriteScope=all')).items[0].favoriteFolderIds, []);
+    await save([], null);
+    assert.deepEqual((await call('GET', 'favorites/problems')).items, []);
+    assert.equal((await call('GET', 'favorites')).total, 0);
+    assert.equal((await call('GET', 'catalog')).total, 1);
+    const broken = structuredClone(snapshot);
+    broken.tables.catalog_meta = broken.tables.catalog_meta.filter((row: { value: string }) => row.value !== first.name);
+    await call('POST', 'bundle/import', broken, 400);
+    assert.equal((await call('GET', 'favorites')).total, 0);
+    await call('POST', 'bundle/import', snapshot);
+    assert.deepEqual((await call('GET', 'catalog?favoriteScope=all')).items[0].favoriteFolderIds, [...ids].sort());
+    await call('POST', 'bundle/import', legacy);
+    assert.deepEqual(await call('GET', 'favorites'), { total: 0, folders: [] });
+  } finally {
+    await profile.app.close();
+    profile.db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it('bulk favorites merge live folder memberships atomically and repeated requests keep counts stable', async () => {
+  const db = new DatabaseSync(':memory:');
+  const store = new CatalogStore(db, { skipBackup: true });
+  const app = await buildApp({ store, disableStatic: true });
+  const ids = ['002', '2', 'LCR 01', '9007199254740993'];
+  const folder = (name: string) => ({ id: randomUUID(), name });
+  const previous = folder('Previous'), added = folder('Added together'), parallel = folder('Parallel');
+  const request = (path: string, payload?: object) => app.inject({
+    method: payload ? 'PUT' : 'GET', url: '/api/v1/' + path, payload,
+  });
+  const batch = (frontendIds: string[], folderIds: string[], newFolder?: ReturnType<typeof folder>) =>
+    request('favorites/problems/batch', { frontendIds, folderIds, newFolder });
+  const memberships = async () => (await request('catalog?favoriteScope=catalog')).json().items.map(
+    (row: { questionFrontendId: string; favoriteFolderIds?: string[] }) => [row.questionFrontendId, row.favoriteFolderIds]);
+  try {
+    await store.importJsonl(ids.map(id => JSON.stringify({ id, title: 'Test ' + id, difficulty: 'Easy' })).join('\n'));
+    assert.equal((await request('favorites/problems', { frontendId: '002', expectedFolderIds: null, folderIds: [previous.id], newFolder: previous })).statusCode, 200);
+    assert.equal((await batch([], [])).statusCode, 400);
+    assert.equal((await batch(['2', '2'], [])).json().count, 1);
+    const before = await memberships();
+    const missing = await batch(['002', '2', 'missing'], [added.id], added);
+    assert.equal(missing.statusCode, 404);
+    assert.equal(missing.json().frontendId, 'missing');
+    assert.equal((await batch(ids, [added.id, randomUUID()], added)).statusCode, 409);
+    assert.deepEqual(await memberships(), before);
+    assert.equal((await request('favorites')).json().folders.length, 1);
+    const results = await Promise.all([batch(ids, [added.id], added), batch(['002'], [parallel.id], parallel)]);
+    assert.deepEqual(results.map(r => r.statusCode), [200, 200]);
+    assert.equal((await batch([...ids, '002'], [added.id], added)).json().count, ids.length);
+    assert.equal((await batch(ids, [])).statusCode, 200);
+    const saved = new Map(await memberships());
+    assert.deepEqual(saved.get('002'), [previous.id, added.id, parallel.id].sort());
+    for (const id of ids.slice(1)) assert.deepEqual(saved.get(id), [added.id]);
+    const library = (await request('favorites')).json();
+    assert.equal(library.total, 4);
+    assert.equal(library.folders.find((f: { id: string }) => f.id === added.id).count, 4);
+  } finally { await app.close(); db.close(); }
+});
+
+it('removes only the reviewed favorites from every folder and rolls back the batch on a membership conflict', async () => {
+  const db = new DatabaseSync(':memory:');
+  const store = new CatalogStore(db, { skipBackup: true });
+  const app = await buildApp({ store, disableStatic: true });
+  const ids = ['2', '002', 'LCR 01'];
+  const a = { id: randomUUID(), name: 'First' }, b = { id: randomUUID(), name: 'Second' };
+  const batch = '/api/v1/favorites/problems/batch';
+  const remove = (expected: Array<{ frontendId: string; folderIds: string[] }>) =>
+    app.inject({ method: 'DELETE', url: batch, payload: { expected } });
+  const get = async (url: string) => (await app.inject({ method: 'GET', url: '/api/v1/' + url })).json();
+  try {
+    await store.importJsonl(ids.map(id => JSON.stringify({ id, title: 'Problem ' + id, difficulty: 'Easy' })).join('\n'));
+    const created = await app.inject({ method: 'POST', url: '/api/v1/goal-lists', payload: { name: 'Keep this list', frontendIds: ids } });
+    assert.equal(created.statusCode, 201);
+    const goal = created.json();
+    await store.createPracticeRecord({ questionFrontendId: '2', practicedAt: '2026-11-19', completed: true });
+    await app.inject({ method: 'PUT', url: batch, payload: { frontendIds: ids, folderIds: [a.id], newFolder: a } });
+    const expected = ids.slice(0, 2).map(frontendId => ({ frontendId, folderIds: [a.id] }));
+    await app.inject({ method: 'PUT', url: batch, payload: { frontendIds: ['002'], folderIds: [b.id], newFolder: b } });
+    const before = await get('favorites/problems');
+    assert.equal((await remove([])).statusCode, 400);
+    assert.equal((await remove([expected[0], expected[0]])).statusCode, 400);
+    const conflict = await remove(expected);
+    assert.equal(conflict.statusCode, 409);
+    assert.equal(conflict.json().error, 'STALE_FAVORITES');
+    assert.deepEqual(await get('favorites/problems'), before);
+    expected[1].folderIds = [b.id, a.id];
+    assert.deepEqual((await remove(expected)).json(), { removed: 2 });
+    assert.deepEqual((await remove(expected)).json(), { removed: 0 });
+    assert.deepEqual((await get('favorites/problems')).items, [{ frontendId: 'LCR 01', folderIds: [a.id] }]);
+    assert.deepEqual(await get('favorites'), { total: 1, folders: [{ ...a, count: 1 }, { ...b, count: 0 }] });
+    assert.deepEqual(await get('goal-lists/' + goal.id), goal);
+    assert.equal(store.queryPracticeRecords().total, 1);
+    assert.equal((await get('catalog')).total, 3);
+  } finally { await app.close(); db.close(); }
+});
 
 describe('Fastify Local API (/api/v1)', () => {
   it('generates import preview with accurate line analysis and counts', async () => {

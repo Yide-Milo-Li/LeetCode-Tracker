@@ -290,12 +290,7 @@ export class CatalogStore {
   }
 
   /** Query filtered and paginated catalog problems. */
-  public queryCatalog(queryInput: CatalogQueryInput = {}): {
-    total: number;
-    page: number;
-    limit: number;
-    items: CatalogProblem[];
-  } {
+  public queryCatalog(queryInput: CatalogQueryInput = {}) {
     return queryCatalogProblems(this.db, queryInput);
   }
 

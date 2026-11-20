@@ -14,6 +14,7 @@ import { validateMigrationBundle } from '../packages/database/src/migration-bund
 import { CatalogStore } from '../packages/database/src/store.ts';
 import { buildApp } from '../apps/server/src/app.ts';
 import type { StrategyInput, RulePatch } from '../packages/contracts/src/recommendations.ts';
+import type { GoalList } from '../packages/contracts/src/goal-lists.ts';
 
 /** Helper to seed an in-memory CatalogStore with synthetic problems and timezone. */
 async function createTestApp() {
@@ -782,6 +783,91 @@ it('rejects invalid strategy creation atomically at the API boundary', async () 
   } finally { await app.close(); db.close(); }
 });
 
+it('atomically assigns one problem to multiple goal lists, preserving order, completion and other memberships', async () => {
+  const { app, db, store } = await createTestApp();
+  const base = '/api/v1/goal-lists';
+  const create = async (name: string, frontendIds: string[]) =>
+    (await app.inject({ method: 'POST', url: base, payload: { name, frontendIds } })).json<GoalList>();
+  const assign = (payload: object) => app.inject({ method: 'PUT', url: base + '/memberships', payload });
+  try {
+    const keep = await create('Keep', ['2', '1', '3']);
+    const add = await create('Add', ['5', '4']);
+    const remove = await create('Remove', ['6', '1']);
+    await app.inject({ method: 'PATCH', url: base + '/' + keep.id + '/items',
+      payload: { expectedVersion: 1, edit: { action: 'setCompleted', frontendId: '1', completed: true } } });
+    const fresh = { id: randomUUID(), name: 'New' };
+    const changes = { frontendId: '1', expectedListIds: [remove.id, keep.id], listIds: [add.id, keep.id, fresh.id], newList: fresh };
+    const first = await assign(changes);
+    assert.equal(first.statusCode, 200, first.body);
+    const lists = first.json<{ items: GoalList[] }>().items;
+    const find = (id: string) => lists.find(list => list.id === id)!;
+    assert.deepEqual(find(keep.id).items.map(item => [item.frontendId, item.completed]), [['2', false], ['1', true], ['3', false]]);
+    assert.equal(find(keep.id).version, 2);
+    assert.deepEqual(find(add.id).items.map(item => item.frontendId), ['5', '4', '1']);
+    assert.equal(find(add.id).items.at(-1)?.completed, false);
+    assert.deepEqual(find(remove.id).items.map(item => item.frontendId), ['6']);
+    assert.deepEqual(find(fresh.id).items.map(item => item.frontendId), ['1']);
+    const revision = store.getPlanningRevision();
+    assert.deepEqual((await assign(changes)).json().items, lists, 'replaying a successful save leaves all versions intact');
+    const stale = await assign({ ...changes, newList: undefined, listIds: [keep.id] });
+    assert.equal(stale.statusCode, 409);
+    assert.equal(stale.json().error, 'STALE_GOAL_MEMBERSHIP');
+    const invalid = await assign({ ...changes, expectedListIds: changes.listIds, listIds: [fresh.id, randomUUID()] });
+    assert.equal(invalid.statusCode, 409);
+    assert.equal((await assign({ frontendId: 'missing', expectedListIds: [], listIds: [] })).statusCode, 404);
+    assert.equal(store.getPlanningRevision(), revision);
+    const concurrent = await Promise.all([assign({ frontendId: '1', expectedListIds: changes.listIds, listIds: [add.id] }),
+      assign({ frontendId: '1', expectedListIds: changes.listIds, listIds: [keep.id] })]);
+    assert.deepEqual(concurrent.map(result => result.statusCode).sort(), [200, 409]);
+    assert.equal(store.queryPracticeRecords().total, 0);
+  } finally { await app.close(); db.close(); }
+});
+
+it('appends missing problems to existing goal lists atomically and safely replays a bulk add', async () => {
+  const { app, db, store } = await createTestApp();
+  const url = '/api/v1/goal-lists';
+  const create = async (name: string, frontendIds: string[]) =>
+    (await app.inject({ method: 'POST', url, payload: { name, frontendIds } })).json<GoalList>();
+  const add = (frontendIds: string[], listIds: string[]) =>
+    app.inject({ method: 'PUT', url: url + '/memberships/batch', payload: { frontendIds, listIds } });
+  try {
+    const first = await create('First', ['7', '2', '5']);
+    const second = await create('Second', ['9', '3']);
+    const untouched = await create('Other', ['6']);
+    const marked = await app.inject({ method: 'PATCH', url: url + '/' + first.id + '/items',
+      payload: { expectedVersion: 1, edit: { action: 'setCompleted', frontendId: '2', completed: true } } });
+    assert.equal(marked.statusCode, 200);
+    const revision = store.getPlanningRevision();
+    const targets = [first.id, second.id];
+    assert.equal((await add(['4', 'absent'], targets)).json().error, 'GOAL_UNKNOWN_PROBLEM');
+    assert.equal((await add(['4'], [first.id, randomUUID()])).json().error, 'GOAL_LIST_NOT_FOUND');
+    assert.equal((await add([], targets)).statusCode, 400);
+    assert.equal((await add(['4'], [])).statusCode, 400);
+    assert.equal(store.getPlanningRevision(), revision);
+
+    const ids = ['2', '3', '4', '3'];
+    const saved = await add(ids, targets);
+    assert.equal(saved.statusCode, 200, saved.body);
+    const { items, added } = saved.json<{ items: GoalList[]; added: number }>();
+    assert.equal(added, 4);
+    const lookup = (id: string) => items.find(list => list.id === id)!;
+    assert.deepEqual(lookup(first.id).items.map(item => [item.frontendId, item.completed]),
+      [['7', false], ['2', true], ['5', false], ['3', false], ['4', false]]);
+    assert.deepEqual(lookup(second.id).items.map(item => item.frontendId), ['9', '3', '2', '4']);
+    assert.deepEqual(lookup(untouched.id), untouched);
+    assert.equal(lookup(first.id).version, 3);
+    assert.equal(lookup(second.id).version, 2);
+    const after = store.getPlanningRevision();
+    assert.deepEqual((await add(ids, targets)).json(), { items, added: 0 });
+    assert.equal(store.getPlanningRevision(), after);
+
+    const overlap = await Promise.all([add(['8', '10'], targets), add(['8', '1'], targets)]);
+    assert.ok(overlap.every(response => response.statusCode === 200));
+    assert.equal(overlap.reduce((sum, response) => sum + response.json().added, 0), 6);
+    assert.equal(store.queryPracticeRecords().total, 0);
+  } finally { await app.close(); db.close(); }
+});
+
 it('keeps ordered goal membership, checkmarks and practice history independent across clients and restores', async () => {
   const { app, db, store } = await createTestApp();
   try {
@@ -846,6 +932,67 @@ it('keeps ordered goal membership, checkmarks and practice history independent a
     assert.equal((await app.inject({ method: 'DELETE', url, payload: { expectedVersion: 5 } })).statusCode, 200);
     assert.equal((await app.inject({ method: 'GET', url })).statusCode, 404);
     assert.equal(store.queryPracticeRecords().total, 1);
+  } finally { await app.close(); db.close(); }
+});
+
+it('validates whole goal-list edits against a sparse local catalog and preserves arbitrary order at every size', async () => {
+  const { app, store, db } = await createTestApp();
+  try {
+    // More than 999 entries, with gaps, special collections and adjacent integers beyond JS number precision.
+    const numeric = Array.from({ length: 1025 }, (_, i) => String(7001 + i * 17));
+    const special = ['LCR 001', '面试题 01.01', '001', '9007199254740992', '9007199254740993', 'Z'.repeat(100)];
+    const order = [...numeric.filter((_, i) => i % 2).reverse(), ...special, ...numeric.filter((_, i) => i % 2 === 0)];
+    await store.importJsonl(order.map(id => JSON.stringify({ id, title: 'Test ' + id, difficulty: 'Easy' })).join('\n'));
+    const base = '/api/v1/goal-lists';
+    const created = await app.inject({ method: 'POST', url: base, payload: { name: 'Sparse catalog', frontendIds: order } });
+    assert.equal(created.statusCode, 201, created.body);
+    const goal = created.json();
+    const url = base + '/' + goal.id;
+    const patch = (payload: object) => app.inject({ method: 'PATCH', url, payload });
+    const read = async () => (await app.inject({ method: 'GET', url })).json();
+    assert.deepEqual(goal.items.map((item: { frontendId: string }) => item.frontendId), order);
+    const checked = new Set([order[0], special[1], special[4], order.at(-1)!]);
+    const marked = await patch({ expectedVersion: 1, items: order.map(frontendId => ({ frontendId, completed: checked.has(frontendId) })) });
+    assert.equal(marked.statusCode, 200, marked.body);
+    const before = marked.json();
+    const revision = store.getPlanningRevision();
+    const missing = ['0', '-1', '7002', '9007199254740994'];
+    const invalid = await patch({ expectedVersion: 2, name: 'Must roll back', items: [
+      { frontendId: missing[0] }, ...order.slice(0, 700).map(frontendId => ({ frontendId })),
+      ...missing.slice(1).map(frontendId => ({ frontendId })),
+    ] });
+    assert.equal(invalid.statusCode, 400);
+    assert.deepEqual(invalid.json().frontendIds, missing);
+    for (const badItems of [[...order, order[0]], ['Z'.repeat(101)], [' ']]) {
+      assert.equal((await patch({ expectedVersion: 2, items: badItems.map(frontendId => ({ frontendId })) })).statusCode, 400);
+    }
+    for (const edit of [
+      { action: 'remove', frontendId: '1' }, // In the catalog, absent from this list.
+      { action: 'move', frontendId: order[0], beforeId: '1' },
+      { action: 'replace', frontendId: order[2], newFrontendId: '7002' },
+    ]) {
+      const rejected = await app.inject({ method: 'PATCH', url: url + '/items', payload: { expectedVersion: 2, edit } });
+      assert.ok([400, 404].includes(rejected.statusCode), rejected.body);
+    }
+    assert.deepEqual(await read(), before);
+    assert.equal(store.getPlanningRevision(), revision);
+
+    const kept = order.filter((_, i) => i % 3 !== 1).reverse();
+    const edited = await patch({ expectedVersion: 2, items: kept.map(frontendId => ({ frontendId })) });
+    assert.equal(edited.statusCode, 200, edited.body);
+    assert.deepEqual(edited.json().items.map((item: { frontendId: string; completed: boolean }) => [item.frontendId, item.completed]),
+      kept.map(id => [id, checked.has(id)]));
+    const staleDelete = await app.inject({ method: 'DELETE', url, payload: { expectedVersion: 2 } });
+    assert.equal(staleDelete.statusCode, 409);
+    assert.deepEqual(await read(), edited.json());
+    const one = await patch({ expectedVersion: 3, items: [{ frontendId: special[4] }] });
+    assert.equal(one.json().items.length, 1);
+    assert.equal(one.json().items[0].frontendId, special[4]);
+    assert.deepEqual((await patch({ expectedVersion: 4, items: [] })).json().items, []);
+    assert.deepEqual((await patch({ expectedVersion: 5, name: 'Empty' })).json().items, []);
+    assert.equal((await app.inject({ method: 'DELETE', url, payload: { expectedVersion: 6 } })).statusCode, 200);
+    assert.equal((await patch({ expectedVersion: 6, items: [] })).statusCode, 404);
+    assert.equal(store.queryPracticeRecords().total, 0);
   } finally { await app.close(); db.close(); }
 });
 

@@ -7,6 +7,8 @@ export function registerPlanningRoutes(app: FastifyInstance, { application }: Ro
   const { goalLists } = application;
   const goalId = (params: unknown) => (params as { id: string }).id;
   app.get('/api/v1/goal-lists', applicationRoute(() => goalLists.list()));
+  app.put('/api/v1/goal-lists/memberships', applicationRoute(r => goalLists.setProblemMembership(r.body)));
+  app.put('/api/v1/goal-lists/memberships/batch', applicationRoute(r => goalLists.addProblems(r.body)));
   app.get('/api/v1/goal-lists/:id', applicationRoute(async r => (await goalLists.list(goalId(r.params))).items[0]));
   app.post('/api/v1/goal-lists', applicationRoute(r => goalLists.create(r.body), 201));
   app.patch('/api/v1/goal-lists/:id', applicationRoute(r => goalLists.update(goalId(r.params), r.body)));

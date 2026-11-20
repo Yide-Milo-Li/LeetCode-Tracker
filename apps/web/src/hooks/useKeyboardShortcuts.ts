@@ -14,6 +14,7 @@ export interface KeyboardShortcutHandlers {
   onNavigateRecords: () => void;
   /** Callback to navigate to the Notes workspace ('#notes'). */
   onNavigateNotes?: () => void;
+  onNavigateFavorites?: () => void;
   /** Callback to open the manual practice logging modal. */
   onOpenManualPractice: () => void;
   /** Callback to focus the search box in the problems catalog. */
@@ -99,6 +100,10 @@ export function useKeyboardShortcuts(handlers: KeyboardShortcutHandlers): void {
         case '4':
           event.preventDefault();
           current.onNavigateNotes?.();
+          break;
+        case '5':
+          event.preventDefault();
+          current.onNavigateFavorites?.();
           break;
         case 'n':
         case 'N':

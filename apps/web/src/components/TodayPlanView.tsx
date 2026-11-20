@@ -24,13 +24,17 @@ import { clearPendingMinutes, getPendingMinutes, stopTimerFor } from '../timer-s
 import { Dialog, Feedback, PageHeader, InfoPopover } from './ui.tsx';
 import { TodayGoalLists } from './TodayGoalLists.tsx';
 import { TodayOverview } from './TodayOverview.tsx';
-import { useTodayGoals } from '../hooks/useTodayGoals.ts';
+import { GoalListsScope, useSharedGoalLists } from './ProblemGoalLists.tsx';
 import { TodayProblemRow } from './TodayProblemRow.tsx';
+import { TodayFavorites } from './TodayFavorites.tsx';
 import { QuickNoteDrawer } from './QuickNoteDrawer.tsx';
 import type { RecommendationFeedbackReason } from '../../../../packages/contracts/src/recommendations.ts';
 
 interface TodayPlanViewProps {
   lang: Language;
+  active?: boolean;
+  favoriteRevision?: number;
+  onFavoritesChanged?: () => void;
   onNavigateToSettings: () => void;
   onNavigateToDashboard?: () => void;
   planController?: UseDailyPlanReturn;
@@ -184,6 +188,9 @@ function ReviewBacklogRow({ plan, lang, disabled, onAddReview }: {
 /** Keep plan refreshes independent of language/theme, and scope save state to a single task row. */
 function TodayPlanViewInner({
   lang,
+  active = true,
+  favoriteRevision = 0,
+  onFavoritesChanged,
   onNavigateToSettings,
   planController: controller,
   promptSwapFeedback = true,
@@ -191,7 +198,7 @@ function TodayPlanViewInner({
   const zh = lang === 'zh';
   const t = translations[lang];
   const workspace = useWorkspace();
-  const goals = useTodayGoals(lang);
+  const goals = useSharedGoalLists();
   const nextGoalRow = useRef<HTMLLIElement>(null);
   const quote = useEncouragement({ timeZone: workspace.timezone, lang });
   const [override, setOverride] = useState(false);
@@ -419,6 +426,8 @@ function TodayPlanViewInner({
           const row = nextGoalRow.current;
           (row?.querySelector<HTMLAnchorElement>('a.problem-title-link') ?? row)?.focus();
         }} />
+      <TodayFavorites lang={lang} active={active && Boolean(plan?.items.length || goals.list?.items.length)}
+        favoriteRevision={favoriteRevision} onChanged={onFavoritesChanged}>
       <div className="today-task-columns">
         <section className="today-strategy-tasks" aria-labelledby="strategy-tasks-title">
           <div className="today-task-heading">
@@ -735,6 +744,7 @@ function TodayPlanViewInner({
         </section>
         <TodayGoalLists lang={lang} goals={goals} nextTaskRef={nextGoalRow} />
       </div>
+      </TodayFavorites>
       {versions && (
         <Dialog title={t.planVersions} lang={lang} onClose={() => setVersions(null)} drawer>
           {versions.map((version) => (
@@ -910,9 +920,9 @@ function TodayStandalone(props: TodayPlanViewProps) {
 }
 /** Render Today without remounting the application-level plan lifecycle. */
 export function TodayPlanView(props: TodayPlanViewProps) {
-  return props.planController ? (
+  return <GoalListsScope lang={props.lang} active={props.active}>{props.planController ? (
     <TodayPlanViewInner {...props} planController={props.planController} />
   ) : (
     <TodayStandalone {...props} />
-  );
+  )}</GoalListsScope>;
 }

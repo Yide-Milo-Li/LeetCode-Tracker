@@ -7,6 +7,7 @@ export type View =
   | 'schedule'
   | 'notes'
   | 'problems'
+  | 'favorites'
   | 'catalog-import'
   | 'records'
   | 'statistics'

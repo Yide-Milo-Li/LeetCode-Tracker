@@ -6,6 +6,11 @@
 
 export type Language = 'en' | 'zh';
 
+const countFormat = { en: new Intl.NumberFormat('en-US'), zh: new Intl.NumberFormat('zh-CN') };
+export function formatCount(value: number, lang: Language) {
+  return countFormat[lang].format(value);
+}
+
 export const translations = {
   en: {
     appTitle: 'LeetCode Tracker',

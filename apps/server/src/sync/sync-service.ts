@@ -1048,7 +1048,7 @@ export class DeviceSyncService {
       const db = this.ctx.store.db;
       const row = db.prepare(
         `SELECT (SELECT COUNT(*) FROM problems) + (SELECT COUNT(*) FROM practice_records) + (SELECT COUNT(*) FROM problem_notes)
-          + (SELECT COUNT(*) FROM catalog_meta WHERE key GLOB 'goal-list:v1:*') AS n`
+          + (SELECT COUNT(*) FROM catalog_meta WHERE key GLOB 'goal-list:v1:*' OR key GLOB 'favorite:v1:*') AS n`
       ).get() as { n: number };
       return { baseId: null, dirty: row.n > 0 };
     }

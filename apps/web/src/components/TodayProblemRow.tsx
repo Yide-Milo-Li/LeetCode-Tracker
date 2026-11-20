@@ -11,6 +11,8 @@ import { useWorkspace } from '../workspace.tsx';
 import { Feedback, InfoPopover, Tooltip } from './ui.tsx';
 import { PracticeTimerButton } from './PracticeTimer.tsx';
 import { ProblemNoteMenu } from './ProblemNoteMenu.tsx';
+import { TodayFavoriteStar } from './TodayFavorites.tsx';
+import { ProblemGoalButton } from './ProblemGoalLists.tsx';
 
 export interface TodayProblemRowProps {
   item: PlanItem;
@@ -162,6 +164,8 @@ export function TodayProblemRow({
       </div>
 
       <div className="problem-actions">
+        <TodayFavoriteStar frontendId={item.problem.questionFrontendId} title={item.problem.title} />
+        <ProblemGoalButton frontendId={item.problem.questionFrontendId} title={item.problem.title} />
         <ProblemNoteMenu lang={lang} frontendId={item.problem.questionFrontendId} onQuickNote={() => onOpenQuickNote?.(item)} />
         <Tooltip text={t.replaceOne} position="top">
           <button

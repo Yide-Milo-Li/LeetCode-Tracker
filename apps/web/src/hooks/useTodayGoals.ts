@@ -8,7 +8,7 @@ import { useWorkspace } from '../workspace.tsx';
 const SELECTED_GOAL_KEY = 'leetcode_tracker_selected_goal_list';
 
 /** Share one selected list and revision-guarded read between the overview and the task panel. */
-export function useTodayGoals(lang: Language) {
+export function useTodayGoals(lang: Language, active = true) {
   const { revision } = useWorkspace();
   const [lists, setLists] = useState<GoalList[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -27,19 +27,24 @@ export function useTodayGoals(lang: Language) {
   const [retry, setRetry] = useState(0);
   const read = useRef(0);
 
+  function replaceLists(items: GoalList[]) {
+    ++read.current;
+    setLists(items);
+    setSelectedId(previous => items.some(goal => goal.id === previous) ? previous : items[0]?.id ?? null);
+    setLoaded(true);
+    setError('');
+  }
   useEffect(() => {
+    if (!active) return;
     const request = ++read.current;
     api.getGoalLists().then(items => {
       if (request !== read.current) return;
-      setLists(items);
-      setSelectedId(previous => items.some(goal => goal.id === previous) ? previous : items[0]?.id ?? null);
-      setLoaded(true);
-      setError('');
+      replaceLists(items);
     }).catch(e => {
       if (request === read.current) setError(localizeApiError(e, lang));
     });
     return () => { ++read.current; };
-  }, [revision, retry, lang]);
+  }, [active, revision, retry, lang]);
 
   function saved(id: string, goal: GoalList | null) {
     ++read.current;
@@ -52,7 +57,7 @@ export function useTodayGoals(lang: Language) {
     setRetry(n => n + 1);
   }
   function refresh() { setRetry(n => n + 1); }
-  return { lists, list, loaded, error, setError, selectGoal, saved, refresh };
+  return { lists, list, loaded, error, setError, selectGoal, saved, refresh, replaceLists };
 }
 
 export type TodayGoals = ReturnType<typeof useTodayGoals>;

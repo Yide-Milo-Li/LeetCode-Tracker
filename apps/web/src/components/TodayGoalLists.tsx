@@ -1,4 +1,4 @@
-import { useRef, useState, type CSSProperties, type Ref } from 'react';
+import { useMemo, useRef, useState, type CSSProperties, type Ref } from 'react';
 import { Circle, ListOrdered, Pencil, Plus } from 'lucide-react';
 import type { GoalList } from '../../../../packages/contracts/src/goal-lists.ts';
 import { api } from '../api.ts';
@@ -10,6 +10,9 @@ import { GoalProblemActions } from './GoalProblemActions.tsx';
 import { stopTimerFor, getPendingMinutes, clearPendingMinutes } from '../timer-service.ts';
 import type { TodayGoals } from '../hooks/useTodayGoals.ts';
 import { Feedback } from './ui.tsx';
+import { useProblemListWindow } from '../hooks/useProblemListWindow.ts';
+
+const pendingKey = (row: { item: GoalList['items'][number] }) => row.item.frontendId;
 
 export function TodayGoalLists({ lang, goals, nextTaskRef }: {
   lang: Language; goals: TodayGoals; nextTaskRef?: Ref<HTMLLIElement>;
@@ -17,12 +20,17 @@ export function TodayGoalLists({ lang, goals, nextTaskRef }: {
   const zh = lang === 'zh';
   const { notifyMutation, openPractice } = useWorkspace();
   const { lists, list, loaded, error, setError, selectGoal, saved, refresh } = goals;
-  const nextItem = list?.items.find(item => !item.completed);
+  const pendingRows = useMemo(() => list?.items.flatMap((item, i) => item.completed ? [] : [{ item, position: i + 1 }]) ?? [], [list]);
+  const nextItem = pendingRows[0]?.item;
+  const scrollList = useRef<HTMLOListElement>(null);
+  // The overview's “Next” action must still be able to focus the first pending problem from any scroll position.
+  const windowed = useProblemListWindow(pendingRows, pendingKey, scrollList, 52, 0);
   const [editing, setEditing] = useState<GoalList | null | undefined>();
   const [pending, setPending] = useState<string | null>(null);
   const [announcement, announce] = useState('');
   const section = useRef<HTMLElement>(null);
   const createButton = useRef<HTMLButtonElement>(null);
+  const editButton = useRef<HTMLButtonElement>(null);
   const completing = useRef(false);
 
   async function changeItem(list: GoalList, frontendId: string, action: 'complete' | 'remove') {
@@ -80,20 +88,24 @@ export function TodayGoalLists({ lang, goals, nextTaskRef }: {
             </select>
           </label> : <h3>{list.name}</h3>}
           <button type="button" className="btn btn-secondary btn-sm goal-edit-button" aria-label={(zh ? '编辑 ' : 'Edit ') + list.name}
-            disabled={!!pending} onClick={() => setEditing(list)}><Pencil size={14} aria-hidden="true" />{zh ? '编辑' : 'Edit'}</button>
+            ref={editButton} disabled={!!pending} onClick={() => setEditing(list)}><Pencil size={14} aria-hidden="true" />{zh ? '编辑' : 'Edit'}</button>
         </div>
-        {nextItem ? <ol className="goal-items goal-pending-items" role="list" aria-label={list.name}
-          style={{ '--goal-order-width': `${String(list.items.length).length + 1}ch` } as CSSProperties}>
-          {list.items.map((item, i) => item.completed ? null : <li key={item.frontendId} value={i + 1} className="goal-item-line"
-            ref={item === nextItem ? nextTaskRef : undefined} tabIndex={item === nextItem ? -1 : undefined}>
-            <span className="goal-item-position">{i + 1}.</span>
+        {nextItem ? <ol className="goal-items goal-pending-items" role="list" aria-label={list.name} ref={scrollList} {...windowed.listProps}
+          style={{ ...windowed.listProps.style, '--goal-order-width': `${String(list.items.length).length + 1}ch` } as CSSProperties}>
+          {windowed.renderRows(({ item, position }, i, rowProps) => <li key={item.frontendId} value={position} className="goal-item-line" {...rowProps}
+            ref={i === 0 && nextTaskRef ? node => {
+              rowProps.ref?.(node);
+              if (typeof nextTaskRef === 'function') return nextTaskRef(node);
+              nextTaskRef.current = node;
+            } : rowProps.ref} tabIndex={i === 0 ? -1 : undefined}>
+            <span className="goal-item-position">{position}.</span>
             <button type="button" className="completion-circle" data-problem={item.frontendId}
               aria-label={zh ? `完成 #${item.frontendId} ${item.title}` : `Complete #${item.frontendId} ${item.title}`}
               disabled={!!pending} onClick={() => void changeItem(list, item.frontendId, 'complete')}><Circle size={20} aria-hidden="true" /></button>
             {/^https?:\/\//i.test(item.url)
               ? <a className="goal-item-title problem-title-link" href={item.url} target="_blank" rel="noopener noreferrer" title={zh ? '打开题目 ↗' : 'Open problem ↗'}>#{item.frontendId} {item.title}<span aria-hidden="true" className="problem-link-mark"> ↗</span></a>
               : <span className="goal-item-title">#{item.frontendId} {item.title}</span>}
-            <GoalProblemActions lang={lang} frontendId={item.frontendId} title={item.title} disabled={!!pending}
+            <GoalProblemActions lang={lang} frontendId={item.frontendId} title={item.title} disabled={!!pending} fallbackFocusRef={editButton}
               onRemove={() => void changeItem(list, item.frontendId, 'remove')} />
           </li>)}
         </ol> : <p className="text-muted">{list.items.length ? (zh ? '本单已全部完成。' : 'All problems completed.') : (zh ? '题单为空。' : 'This list is empty.')}</p>}

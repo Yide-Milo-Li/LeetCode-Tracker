@@ -97,6 +97,10 @@ test('sync folder hands a profile to a second device and back, with acknowledgem
   const A = await device(a), B = await device(b);
   try {
     await seedMigrationProfile(a.store);
+    const folder = { id: randomUUID(), name: 'Revisit' };
+    assert.equal((await A.call('PUT', '/api/v1/favorites/problems', {
+      frontendId: '1', expectedFolderIds: null, folderIds: [folder.id], newFolder: folder,
+    })).status, 200);
     for (const [d, name] of [[A, 'Laptop'], [B, 'Mac']] as const) {
       assert.equal((await d.call('PUT', '/api/v1/sync/config', { transport: 'folder', folderPath: shared, deviceName: name })).status, 200);
     }
@@ -116,6 +120,8 @@ test('sync folder hands a profile to a second device and back, with acknowledgem
     const received = await B.call('POST', '/api/v1/sync/receive', { previewId: preview.body.previewId });
     assert.equal(received.status, 200, JSON.stringify(received.body));
     assert.equal(received.body.resolutionSnapshotId, null);
+    assert.deepEqual((await B.call('GET', '/api/v1/favorites')).body, { total: 1, folders: [{ ...folder, count: 1 }] });
+    assert.deepEqual((await B.call('GET', '/api/v1/catalog?favoriteScope=' + folder.id)).body.items[0].favoriteFolderIds, [folder.id]);
     assert.equal(b.store.getProblemNote('1')?.content, '# Synthetic note\n跨设备');
     assert.equal((await B.call('GET', '/api/v1/sync/status')).body.classification, 'up-to-date');
     assert.equal((await B.call('POST', '/api/v1/sync/receive', { previewId: preview.body.previewId })).body.error, 'SYNC_PREVIEW_EXPIRED');

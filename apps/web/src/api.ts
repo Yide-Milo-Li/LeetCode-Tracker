@@ -4,7 +4,8 @@
  * progress snapshot management, Gemini-assisted text formatting, and user preferences.
  */
 import type { RecommendationFeedbackReason } from '../../../packages/contracts/src/recommendations.ts';
-import type { CreateGoalList, UpdateGoalList, EditGoalItem, GoalList } from '../../../packages/contracts/src/goal-lists.ts';
+import type { AddProblemsToGoalLists, CreateGoalList, UpdateGoalList, EditGoalItem, GoalList, ProblemGoalMembership } from '../../../packages/contracts/src/goal-lists.ts';
+import type { AddFavorites, CatalogListProblem, FavoriteFolder, FavoriteLibrary, FavoriteMembership, RemoveFavorites, SaveFavorite } from '../../../packages/contracts/src/favorites.ts';
 import type { DesktopAgentStatus } from '../../../packages/contracts/src/desktop-agent.ts';
 import type {
   CatalogProblem,
@@ -105,16 +106,13 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
   });
 
   if (!res.ok) {
-    let errorMsg = `HTTP ${res.status}: ${res.statusText}`;
-    let errorCode = 'HTTP_ERROR';
+    let details;
     try {
-      const errJson = await res.json();
-      if (errJson.message) errorMsg = errJson.message;
-      if (errJson.error) errorCode = errJson.error;
+      details = await res.json();
     } catch {
       // ignore json parse error
     }
-    throw new ApiError(res.status, errorCode, errorMsg);
+    throw new ApiError(res.status, details?.error || 'HTTP_ERROR', details?.message || `HTTP ${res.status}: ${res.statusText}`, details);
   }
 
   return res.json() as Promise<T>;
@@ -151,7 +149,7 @@ const catalogApi = {
     return request<CatalogStats>('/catalog/stats');
   },
 
-  getCatalog(query: CatalogQuery = {}): Promise<{ total: number; page: number; limit: number; items: CatalogProblem[] }> {
+  getCatalog(query: CatalogQuery = {}): Promise<{ total: number; page: number; limit: number; items: CatalogListProblem[] }> {
     const params = new URLSearchParams();
     if (query.page) params.set('page', String(query.page));
     if (query.limit) params.set('limit', String(query.limit));
@@ -159,6 +157,7 @@ const catalogApi = {
     if (query.tag) params.set('tag', query.tag);
     if (query.premium) params.set('premium', query.premium);
     if (query.search) params.set('search', query.search);
+    if (query.favoriteScope) params.set('favoriteScope', query.favoriteScope);
 
     const qs = params.toString();
     return request(`/catalog${qs ? `?${qs}` : ''}`);
@@ -166,6 +165,28 @@ const catalogApi = {
 
   getAllTags(): Promise<{ tags: TopicTag[] }> {
     return request<{ tags: TopicTag[] }>('/catalog/tags');
+  },
+
+  getFavoriteLibrary({ signal }: ReadOptions = {}): Promise<FavoriteLibrary> {
+    return request('/favorites', { signal });
+  },
+  async getFavoriteMemberships({ signal }: ReadOptions = {}): Promise<FavoriteMembership[]> {
+    return (await request<{ items: FavoriteMembership[] }>('/favorites/problems', { signal })).items;
+  },
+  saveFavorite(input: SaveFavorite): Promise<{ folderIds: string[] | null }> {
+    return request('/favorites/problems', { method: 'PUT', body: JSON.stringify(input) });
+  },
+  addFavorites(input: AddFavorites): Promise<{ count: number }> {
+    return request('/favorites/problems/batch', { method: 'PUT', body: JSON.stringify(input) });
+  },
+  removeFavorites(input: RemoveFavorites): Promise<{ removed: number }> {
+    return request('/favorites/problems/batch', { method: 'DELETE', body: JSON.stringify(input) });
+  },
+  saveFavoriteFolder(folder: FavoriteFolder, expectedName: string | null): Promise<FavoriteFolder> {
+    return request('/favorites/folders', { method: 'PUT', body: JSON.stringify({ ...folder, expectedName }) });
+  },
+  deleteFavoriteFolder(folder: FavoriteFolder): Promise<{ ok: boolean }> {
+    return request('/favorites/folders', { method: 'DELETE', body: JSON.stringify({ id: folder.id, name: folder.name }) });
   },
 
   previewImport(content: string): Promise<ImportPreview> {
@@ -353,6 +374,12 @@ const progressApi = {
 const planningApi = {
   async getGoalLists(): Promise<GoalList[]> {
     return (await request<{ items: GoalList[] }>('/goal-lists')).items;
+  },
+  async setProblemGoalMembership(input: ProblemGoalMembership): Promise<GoalList[]> {
+    return (await request<{ items: GoalList[] }>('/goal-lists/memberships', { method: 'PUT', body: JSON.stringify(input) })).items;
+  },
+  addProblemsToGoalLists(input: AddProblemsToGoalLists): Promise<{ items: GoalList[]; added: number }> {
+    return request('/goal-lists/memberships/batch', { method: 'PUT', body: JSON.stringify(input) });
   },
   createGoalList(input: CreateGoalList): Promise<GoalList> {
     return request('/goal-lists', { method: 'POST', body: JSON.stringify(input) });

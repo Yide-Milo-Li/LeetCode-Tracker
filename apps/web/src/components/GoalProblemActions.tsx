@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { api, type CatalogProblem } from '../api.ts';
 import { localizeApiError } from '../error-i18n.ts';
@@ -8,13 +8,16 @@ import { PracticeTimerButton } from './PracticeTimer.tsx';
 import { ProblemNoteMenu } from './ProblemNoteMenu.tsx';
 import { QuickNoteDrawer } from './QuickNoteDrawer.tsx';
 import { Tooltip } from './ui.tsx';
+import { TodayFavoriteStar } from './TodayFavorites.tsx';
+import { ProblemGoalButton } from './ProblemGoalLists.tsx';
 
-export function GoalProblemActions({ lang, frontendId, title, disabled, onRemove }: {
+export function GoalProblemActions({ lang, frontendId, title, disabled, onRemove, fallbackFocusRef }: {
   lang: Language;
   frontendId: string;
   title: string;
   disabled: boolean;
   onRemove(): void;
+  fallbackFocusRef?: RefObject<HTMLButtonElement | null>;
 }) {
   const zh = lang === 'zh';
   const workspace = useWorkspace();
@@ -42,6 +45,8 @@ export function GoalProblemActions({ lang, frontendId, title, disabled, onRemove
   const removeLabel = (zh ? '从当前题单移除 #' : 'Remove from this list: #') + frontendId;
   return <>
     <div className="goal-problem-actions" role="group" aria-label={zh ? `#${frontendId} 题目操作` : `Actions for #${frontendId}`}>
+      <TodayFavoriteStar frontendId={frontendId} title={title} />
+      <ProblemGoalButton frontendId={frontendId} title={title} fallbackFocusRef={fallbackFocusRef} />
       <ProblemNoteMenu lang={lang} frontendId={frontendId} onQuickNote={() => void open('note')} />
       <Tooltip text={zh ? '记录练习' : 'Record practice'} position="top">
         <button type="button" className="btn-icon" disabled={disabled} onClick={() => void open('practice')}

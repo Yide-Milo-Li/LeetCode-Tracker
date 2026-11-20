@@ -29,7 +29,10 @@ const { StrategiesView } = await import('../apps/web/src/components/StrategiesVi
 const { PromptOverrideModal } = await import('../apps/web/src/components/PromptOverrideModal.tsx');
 const { translations } = await import('../apps/web/src/i18n.ts');
 
-beforeEach(() => { mock.method(api, 'getGoalLists', async () => []); });
+beforeEach(() => {
+  mock.method(api, 'getGoalLists', async () => []);
+  mock.method(api, 'getFavoriteMemberships', async () => []);
+});
 
 it('background refresh preserves unsaved prompt and does not overlap requests', async () => {
   let tick!: () => void;
@@ -1670,6 +1673,115 @@ it('Today renders the entire ordered checklist and restores checked items to the
     if (frame) Object.defineProperty(globalThis, 'requestAnimationFrame', frame);
     else Reflect.deleteProperty(globalThis, 'requestAnimationFrame');
   }
+});
+
+it('commits an in-list drop only on save and keeps completion attached to the moved problem', async (t) => {
+  const { GoalListEditor } = await import('../apps/web/src/components/GoalListEditor.tsx');
+  const goal: GoalList = { id: crypto.randomUUID(), name: 'Arrays', version: 3,
+    items: ['1', '49', '53', '238'].map(frontendId => ({ frontendId, title: '', url: '', completed: frontendId === '1' })) };
+  const save = mock.method(api, 'updateGoalList', async () => goal);
+  render(<GoalListEditor goal={goal} lang="en" onSaved={() => {}} onRefresh={() => {}} onClose={() => {}} />);
+  const list = screen.getByRole('list');
+  const handle = list.querySelector<HTMLElement>('.goal-drag-handle')!;
+  const order = () => Array.from(list.children, row => (row as HTMLElement).dataset.id);
+  const initial = order();
+
+  // jsdom has no layout or pointer capture. Supply four 36-pixel rows and deliver events to the handle.
+  mock.method(list, 'getBoundingClientRect', () => new dom.window.DOMRect(0, 0, 300, 144));
+  for (const row of list.children) {
+    Object.defineProperties(row, {
+      offsetTop: { get: () => Array.from(list.children).indexOf(row) * 36 },
+      offsetHeight: { value: 36 },
+    });
+  }
+  Object.assign(handle, { setPointerCapture() {}, hasPointerCapture: () => false });
+  for (const name of ['requestAnimationFrame', 'cancelAnimationFrame'] as const) {
+    const original = Object.getOwnPropertyDescriptor(globalThis, name);
+    Object.defineProperty(globalThis, name, { configurable: true, value: () => 0 });
+    t.after(() => original ? Object.defineProperty(globalThis, name, original) : Reflect.deleteProperty(globalThis, name));
+  }
+  const pointer = (type: string, x: number, y: number) => fireEvent(handle, new dom.window.PointerEvent(type,
+    { pointerId: 1, isPrimary: true, button: 0, clientX: x, clientY: y, bubbles: true }));
+  const start = () => { pointer('pointerdown', 10, 18); pointer('pointermove', 10, 143); };
+  start();
+  fireEvent.keyDown(handle, { key: 'Escape' });
+  pointer('pointerup', 10, 143);
+  assert.deepEqual(order(), initial);
+  start();
+  pointer('pointerup', 400, 143);
+  assert.deepEqual(order(), initial);
+  start();
+  pointer('pointerup', 10, 143);
+  const reordered = ['49', '53', '238', '1'];
+  assert.deepEqual(order(), reordered);
+  const lastDown = screen.getByRole<HTMLButtonElement>('button', { name: 'Move #1 down' });
+  assert.equal(lastDown.disabled, true);
+  assert.equal(save.mock.callCount(), 0);
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Save list' })));
+  assert.deepEqual(save.mock.calls[0].arguments, [goal.id, { name: goal.name, expectedVersion: goal.version,
+    items: reordered.map(frontendId => ({ frontendId, completed: frontendId === '1' })) }]);
+});
+
+it('round-trips imported string IDs and distinguishes an empty draft from incomplete bulk input', async () => {
+  const { parseGoalIds, formatGoalIds } = await import('../apps/web/src/goal-list-input.ts');
+  const ids = ['007', '9007199254740993', 'LCP 01', '面试题 01.01', 'A，B', '#1', 'a\nb', '"quoted"', ','];
+  const parsed = parseGoalIds(formatGoalIds(ids), 'en');
+  assert.deepEqual(parsed.ids, ids);
+  assert.equal(parsed.error, '');
+  assert.deepEqual(parseGoalIds(' #007，LCP 01、\r\n面试题 01.01,', 'en').ids, ['007', 'LCP 01', '面试题 01.01']);
+  assert.deepEqual(parseGoalIds('1,2\n"1,2"\n#3\n"#3"', 'en').ids, ['1', '2', '1,2', '3', '#3']);
+  assert.equal(parseGoalIds(' \r\n ', 'en').error, '');
+  for (const text of ['#', ',，、', '1, #', '7\n#7', 'X'.repeat(101), '"bad']) {
+    assert.ok(parseGoalIds(text, 'en').error, JSON.stringify(text));
+  }
+  assert.equal(parseGoalIds('X'.repeat(100), 'en').error, '');
+});
+
+it('preserves the bulk draft on rejection and only clears a list when an empty draft is saved', async (t) => {
+  const { GoalListEditor } = await import('../apps/web/src/components/GoalListEditor.tsx');
+  const { ApiError } = await import('../apps/web/src/api.ts');
+  const goal: GoalList = { id: crypto.randomUUID(), name: 'Sparse', version: 8,
+    items: ['97', 'LCP 01', '0001'].map(frontendId => ({ frontendId, completed: frontendId === 'LCP 01', url: '', title: '' })) };
+  const update = mock.method(api, 'updateGoalList', async (_id: string, input: Parameters<typeof api.updateGoalList>[1]) => {
+    if (input.items?.some(item => item.frontendId === '9999')) {
+      throw new ApiError(400, 'GOAL_UNKNOWN_PROBLEM', '9999', { frontendIds: ['9999', '0'] });
+    }
+    return goal;
+  });
+  const removeList = mock.method(api, 'deleteGoalList', async () => ({ ok: true }));
+  const frame = Object.getOwnPropertyDescriptor(globalThis, 'requestAnimationFrame');
+  Object.defineProperty(globalThis, 'requestAnimationFrame', { configurable: true, value: () => 0 });
+  t.after(() => frame ? Object.defineProperty(globalThis, 'requestAnimationFrame', frame) : Reflect.deleteProperty(globalThis, 'requestAnimationFrame'));
+  render(<GoalListEditor goal={goal} lang="en" onSaved={() => {}} onClose={() => {}} onRefresh={() => {}} />);
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+  const button = (name: string) => screen.getByRole('button', { name });
+  fireEvent.click(button('Remove #LCP 01'));
+  fireEvent.click(button('Edit IDs in bulk'));
+  const field = screen.getByRole('textbox', { name: /IDs to keep/ }) as HTMLTextAreaElement;
+  const type = (value: string) => fireEvent.change(field, { target: { value } });
+  const save = button('Save list') as HTMLButtonElement;
+  type('，、');
+  assert.equal(save.disabled, true);
+  fireEvent.submit(field.form!);
+  assert.equal(update.mock.callCount(), 0);
+  type('0001, #9999, LCP 01, 0');
+  await act(async () => fireEvent.click(save));
+  assert.equal(field.value, '0001, #9999, LCP 01, 0');
+  assert.ok(document.activeElement === field, 'Failed catalog validation should focus the bulk input');
+  assert.equal(field.getAttribute('aria-invalid'), 'true');
+  assert.match(screen.getByRole('alert').textContent!, /#9999, #0/);
+  type('0001, LCP 01');
+  assert.equal(field.getAttribute('aria-invalid'), 'false');
+  assert.ok(screen.getByText('Saving will remove 1 problem from this list.'));
+  await act(async () => fireEvent.click(save));
+  assert.deepEqual(update.mock.calls.at(-1)!.arguments[1].items, [
+    { frontendId: '0001', completed: false }, { frontendId: 'LCP 01', completed: true },
+  ]);
+  type('');
+  assert.ok(screen.getByText('Saving will remove 3 problems from this list.'));
+  await act(async () => fireEvent.click(save));
+  assert.deepEqual(update.mock.calls.at(-1)!.arguments[1], { expectedVersion: 8, name: 'Sparse', items: [] });
+  assert.equal(removeList.mock.callCount(), 0);
 });
 
 it('selects one full goal list at a time, remembers the choice and falls back when it is deleted elsewhere', async () => {

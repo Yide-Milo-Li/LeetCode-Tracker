@@ -11,6 +11,11 @@ interface BilingualMessage {
 }
 
 const API_ERROR_MESSAGES: Record<string, BilingualMessage> = {
+  FAVORITE_FOLDER_NAME_TAKEN: { en: 'A folder already has that name. Choose another name.', zh: '已有同名收藏夹，请换一个名称。' },
+  STALE_FAVORITE: { en: 'This favorite changed elsewhere. Reopen it to see the latest selection.', zh: '这道题的收藏已变更，请重新打开以查看最新选择。' },
+  STALE_FAVORITES: { en: 'Folder membership changed. Review the updated selection before confirming again.', zh: '收藏夹归属已变更。请核对更新后的范围，再次确认。' },
+  STALE_FAVORITE_FOLDER: { en: 'This folder changed elsewhere. Reopen the editor to use the latest folders.', zh: '收藏夹已变更，请重新打开编辑窗口以查看最新收藏夹。' },
+  FAVORITE_PROBLEM_NOT_FOUND: { en: 'This problem is no longer in your catalog.', zh: '当前题库中已找不到这道题。' },
   LLM_OUTPUT_TRUNCATED: {
     en: 'The provider truncated its response. Paste fewer progress rows at a time.',
     zh: '模型输出已截断。请减少每次粘贴的进度行数，分批整理。',
@@ -75,6 +80,7 @@ const API_ERROR_MESSAGES: Record<string, BilingualMessage> = {
     en: 'This list changed elsewhere. Reload the list and reapply your edit.',
     zh: '题单已在别处更新。请重新打开最新题单，再应用修改。',
   },
+  STALE_GOAL_MEMBERSHIP: { en: 'Goal lists changed elsewhere. Reopen the chooser to see the latest selection.', zh: '题单已在别处更新。请重新打开选择器查看最新归属。' },
   GOAL_LIST_NOT_FOUND: { en: 'This list was deleted. Reload your lists.', zh: '题单已被删除，请刷新题单。' },
   GOAL_LIST_EXISTS: { en: 'This list already exists. Reopen it from Today.', zh: '这份题单已存在，请从今日页重新打开。' },
   STALE_STRATEGY: {
@@ -318,7 +324,18 @@ export function localizeApiError(err: unknown, lang: Language, fallback?: string
   const defaultFallback = fallback ?? (lang === 'zh' ? '操作失败，请稍后重试。' : 'Request failed. Please try again.');
 
   if (err instanceof ApiError) {
-    if (err.code === 'GOAL_UNKNOWN_PROBLEM') return lang === 'zh' ? `本地题库中找不到 #${err.message}。` : `Problem #${err.message} was not found in the local catalog.`;
+    if (err.code === 'FAVORITE_PROBLEM_NOT_FOUND' && typeof err.details?.frontendId === 'string') {
+      return lang === 'zh' ? `题库中找不到 #${err.details.frontendId}。请重新选择要收藏的题目。`
+        : `Problem #${err.details.frontendId} is missing from the catalog. Select the problems to save again.`;
+    }
+    if (err.code === 'GOAL_UNKNOWN_PROBLEM') {
+      const missing = err.details?.frontendIds;
+      const ids = Array.isArray(missing) && missing.length && missing.every(id => typeof id === 'string') ? missing : [err.message];
+      const labels = ids.map(id => '#' + id).join(lang === 'zh' ? '、' : ', ');
+      return lang === 'zh' ? `本地题库中找不到 ${labels}。请修正题号，或先将题目导入题库。`
+        : `Missing from the local catalog: ${labels}. Correct the IDs or import those problems first.`;
+    }
+    if (err.code === 'GOAL_ITEM_NOT_FOUND') return lang === 'zh' ? `当前题单中找不到 #${err.message}。` : `Problem #${err.message} is not in this list.`;
     if (err.code === 'GOAL_DUPLICATE_PROBLEM') return lang === 'zh' ? `题单中有重复题号 #${err.message}。` : `Duplicate problem #${err.message} in the list.`;
     if (err.code === 'STALE_PLAN') {
       if (/only today can be modified/i.test(err.message)) {

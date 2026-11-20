@@ -9,6 +9,9 @@ export function hasRecommendationFields(value: unknown): boolean {
 
 /** Never export an old envelope that hides newer scheduling or user-feedback semantics. */
 export function assertLegacyRecommendationExport(db: DatabaseSync): void {
+  if (db.prepare("SELECT 1 FROM catalog_meta WHERE key GLOB 'favorite:v1:*' LIMIT 1").get()) {
+    throw new Error('BUNDLE_VERSION_REQUIRED: Favorites require portable Bundle v5.');
+  }
   if (db.prepare("SELECT 1 FROM catalog_meta WHERE key GLOB 'goal-list:v1:*' LIMIT 1").get()) {
     throw new Error('BUNDLE_VERSION_REQUIRED: Goal lists require portable Bundle v5.');
   }
