@@ -4,13 +4,17 @@ import { api } from '../../api.ts';
 import { localizeApiError } from '../../error-i18n.ts';
 import { translations, type Language } from '../../i18n.ts';
 import { ReviewSpacingOptions, type ReviewSpacingValue } from '../RecommendationOptions.tsx';
+import { useWorkspace } from '../../workspace.tsx';
 import { SettingSwitch } from './SettingSwitch.tsx';
 
 /**
  * Learner-wide review spacing. Loads the effective values (derived from older strategies until
  * first saved) and persists each change immediately, rolling back on failure.
  */
-function ReviewSpacingRow({ lang }: { lang: Language }) {
+export function ReviewSpacingRow({ lang, compact = false, onBusyChange }: {
+  lang: Language; compact?: boolean; onBusyChange?: (busy: boolean) => void;
+}) {
+  const workspace = useWorkspace();
   const zh = lang === 'zh';
   const [value, setValue] = useState<ReviewSpacingValue | null>(null);
   const [saving, setSaving] = useState(false);
@@ -19,10 +23,10 @@ function ReviewSpacingRow({ lang }: { lang: Language }) {
   useEffect(() => {
     let active = true;
     api.getSettings()
-      .then(settings => { if (active) setValue({ reviewPolicy: settings.reviewPolicy, personalDurationCalibration: settings.personalDurationCalibration }); })
+      .then(settings => { if (active) setValue({ reviewPolicy: settings.reviewPolicy, reviewIntervals: settings.reviewIntervals, personalDurationCalibration: settings.personalDurationCalibration }); })
       .catch(err => { if (active) setError(localizeApiError(err, lang, zh ? '加载复习设置失败。' : 'Failed to load review settings.')); });
     return () => { active = false; };
-  }, []);
+  }, [workspace.revision, lang]);
 
   /** Optimistically apply one change; restore the previous value if saving fails. */
   function update(patch: ReviewSpacingValue) {
@@ -30,24 +34,27 @@ function ReviewSpacingRow({ lang }: { lang: Language }) {
     const previous = value;
     setValue({ ...value, ...patch });
     setSaving(true);
+    onBusyChange?.(true);
     setError('');
     api.updateSettings(patch)
+      .then(() => workspace.notifyMutation())
       .catch(err => { setValue(previous); setError(localizeApiError(err, lang, zh ? '保存复习设置失败。' : 'Failed to save review settings.')); })
-      .finally(() => setSaving(false));
+      .finally(() => { setSaving(false); onBusyChange?.(false); });
   }
 
   return (
-    <section className="preference-row">
+    <section className={compact ? 'study-goal-fields' : 'preference-row'}>
       <div className="preference-label">
-        <h2>{zh ? '复习节奏' : 'Review rhythm'}</h2>
-        <p>{zh
-          ? '决定每道题何时再次到期。所有学习安排共用同一套节奏，同一道题在任何一天的到期日都一致。'
+        {!compact && <h2>{zh ? '复习节奏' : 'Review rhythm'}</h2>}
+        <p>{compact
+          ? (zh ? '切换复习策略会立即生效。修改天数后点击「应用全局间隔」。所有学习安排共用这些设置。' : 'Changing the spacing policy takes effect immediately. Apply interval lengths separately. Both settings apply to every plan.')
+          : zh ? '决定每道题何时再次到期。所有学习安排共用同一套节奏，同一道题在任何一天的到期日都一致。'
           : 'Decides when each problem is due again. Every strategy shares it, so a problem has the same due date on any day.'}</p>
         {error && <p role="alert" className="text-danger">{error}</p>}
       </div>
       <div>
         {value
-          ? <ReviewSpacingOptions lang={lang} value={value} disabled={saving} onChange={update} />
+          ? <ReviewSpacingOptions lang={lang} value={value} disabled={saving} showExperiment={!compact} onChange={update} />
           : !error && <p role="status" className="text-muted">{zh ? '加载中…' : 'Loading…'}</p>}
       </div>
     </section>

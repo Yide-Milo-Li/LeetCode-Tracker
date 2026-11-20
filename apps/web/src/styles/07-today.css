@@ -787,3 +787,62 @@ progress::-moz-progress-bar {
   height: 80px;
   margin: 12px 0;
 }
+
+.study-route {
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg, 12px);
+  padding: 1.25rem;
+  margin-block-end: 1rem;
+  overflow-wrap: anywhere;
+}
+.study-route h3 { margin: 0; }
+.study-route p { margin-block: .45rem; }
+.study-route details { border-top: 1px solid var(--border-color); }
+.study-route summary { padding-block: .65rem; cursor: pointer; }
+.study-route ol { padding-inline-start: 1.5rem; }
+.study-route li { margin-block: .5rem; }
+.study-calendar time { margin-inline-end: 1rem; font-variant-numeric: tabular-nums; }
+
+/* Source lists sit below the existing progress and seven-day overview. */
+.today-sources { display: grid; gap: 24px; align-items: start; }
+.today-source-section { min-width: 0; container-type: inline-size; }
+.today-source-section h2 { display: flex; align-items: center; gap: 8px; font-size: 1.0625rem; margin: 0; }
+.today-source-heading, .today-source-section > h2 { min-height: 40px; border-bottom: 1px solid var(--border-color); }
+.today-source-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.today-source-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 0; }
+.today-source-title strong, .today-source-title h3 { margin: 0; font-size: 1rem; overflow-wrap: anywhere; }
+.today-source-title span { margin-left: auto; white-space: nowrap; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.today-source-toggle { width: 100%; text-align: start; background: none; color: var(--text-main); border: 0; cursor: pointer; }
+.today-source-toggle:hover { color: var(--primary); }
+.today-source-toggle svg { flex-shrink: 0; }
+.today-source-toggle[aria-expanded="false"] svg { transform: rotate(-90deg); }
+.today-goal + .today-goal { border-top: 1px solid var(--border-color); }
+.source-practice { display: grid; gap: 10px; padding-bottom: 14px; }
+.source-practice .plan-actions-toolbar { margin: 0; padding: 0; border: 0; flex-wrap: wrap; }
+.source-practice .text-link { justify-self: start; }
+.source-context { margin: -4px 0 8px; font-size: .8125rem; color: var(--text-muted); }
+.source-route-details > summary, .shared-problem-source { color: var(--text-muted); font-size: .8125rem; }
+.source-route-details > summary { cursor: pointer; }
+.today-goal-results { max-height: 20rem; overflow: auto; margin-top: 8px; }
+.today-source-jumps { display: none; }
+.schedule-goal-select { display: flex; gap: 10px; align-items: center; margin-block: 12px; }
+.schedule-goal-select select { max-width: 26rem; min-width: 0; }
+@media (min-width: 960px) {
+  .today-sources.has-both { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); }
+}
+@media (max-width: 959px) {
+  .today-source-jumps { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 14px; }
+  .today-source-jumps a { color: var(--primary); text-underline-offset: 3px; }
+}
+@container (max-width: 545px) {
+  .source-practice .today-problem { grid-template-columns: 38px minmax(0, 1fr); gap: 6px 10px; padding: 12px; }
+  .source-practice .problem-actions { grid-column: 2; display: flex; flex-wrap: wrap; gap: 4px; }
+}
+@media (max-width: 760px) {
+  .today-unified-hub { grid-template-columns: minmax(0, 1fr); padding: 16px; gap: 16px; }
+  .today-unified-hub .hub-divider { width: 100%; height: 1px; }
+  .recent-overview .bento-card-header { flex-wrap: wrap; gap: 4px 10px; }
+  .rhythm-day-col:first-child .rhythm-tooltip { left: 0; translate: 50% 0; }
+  .rhythm-day-col:last-child .rhythm-tooltip { left: auto; right: 0; translate: 50% 0; }
+}

@@ -8,13 +8,13 @@
   <a href="https://github.com/Yide-Milo-Li/LeetCode-Tracker/releases/latest"><img src="https://img.shields.io/github/v/release/Yide-Milo-Li/LeetCode-Tracker?style=flat-square" alt="Latest release"></a>
   <a href="docs/desktop.md"><img src="https://img.shields.io/badge/desktop-Windows%20x64%20%2B%20macOS%20ARM64-455a64?style=flat-square" alt="Windows x64 and macOS ARM64"></a>
   <a href="https://github.com/Yide-Milo-Li/LeetCode-Tracker/actions/workflows/ci.yml"><img src="https://github.com/Yide-Milo-Li/LeetCode-Tracker/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI on main"></a>
-  <a href="docs/architecture.md"><img src="https://img.shields.io/badge/sqlite-schema%20v12-003b57?style=flat-square" alt="SQLite schema v12"></a>
+  <a href="docs/architecture.md"><img src="https://img.shields.io/badge/sqlite-schema%20v13-003b57?style=flat-square" alt="SQLite schema v13"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT License"></a>
 </p>
 
 A local-first desktop workbench for algorithm practice: bring your own JSONL catalog, plan a weekly routine, record practice, review progress, and keep problem notes together. The interface supports English and Simplified Chinese, desktop windows at 1024px and above, ten theme palettes with matching native app icons, and keyboard navigation.
 
-LeetCode Tracker packages the React interface, Fastify API, SQLite engine (schema v12), and a private Node.js 26.13.0 runtime into native Tauri desktop apps for **Windows 11 x64** and **Apple Silicon macOS 14+** (`aarch64-apple-darwin`) with aligned behavior and a single-file cross-device migration bundle. **End users do not need to install Node.js, npm, Git, or Rust.**
+LeetCode Tracker packages the React interface, Fastify API, SQLite engine (schema v13), and a private Node.js 26.13.0 runtime into native Tauri desktop apps for **Windows 11 x64** and **Apple Silicon macOS 14+** (`aarch64-apple-darwin`) with aligned behavior and a single-file cross-device migration bundle. **End users do not need to install Node.js, npm, Git, or Rust.**
 
 Version 1.4.0 adds device sync, MCP client integration and signed in-app updates. Version 1.4.1 keeps the selected macOS Dock icon after quitting. Upgrading from 1.3.1 requires one manual install. [1.4.1 release notes](docs/releases/1.4.1.md)
 
@@ -54,6 +54,18 @@ No proprietary problem dataset or crawler is shipped. Supply metadata you have p
 These are format examples, not a bundled curriculum. An AI-generated catalog can contain incorrect IDs, titles, tags, or links; review it before importing. See the [JSONL specification](docs/data-format.md) for accepted fields and normalization rules.
 
 ## Practice, understand, and retain
+
+### Multi-day study plans
+
+In **Study Schedule**, choose **New Study Arrangement**, then **Complete a Problem List** to enter ordered catalog IDs for a goal such as Hot 100. Choose **Set Up Weekly Practice** for a recurring routine. A connected AI can also preview and save a goal with named stages and prerequisites. **Today** and **Study Schedule** show the original dates, current forecast and actual completion dates.
+
+You can keep multiple goals active with or without a weekly strategy. Each weekday can have one strategy. Today shows each scheduled source separately, with a shared progress meter and the seven-day activity preview. Completing an overlapping problem credits both lists and counts once in the daily total.
+
+With a deadline, the app spreads outstanding list problems over the remaining study days and adds due reviews up to your review cap. Set an optional daily maximum for the combined workload. Preview the first five study days, the estimated finish and any shortfall before saving. Without a deadline, choose a daily count including reviews. Unfinished problems carry forward. You can keep that count fixed or let repeated manual edits and completions adjust it.
+
+Choose **Edit schedule** on an existing goal to preview and save a new deadline, switch pacing modes or adjust its preferences. Expand **Edit problem list** to add catalog IDs, remove problems or change their order. Bulk editing accepts one ID per line or comma-separated IDs in each stage. Keep prerequisites before dependent problems. The remaining work is rescheduled in place. Practice history, saved daily assignments and the original calendar remain available.
+
+Goals follow list order by default. You can give each difficulty a percentage to balance new problems across days. Review spacing is shared by all plans. Change the interval lengths and spacing policy in the goal editor or in **Settings → Practice**. Daily scheduling runs locally after the AI disconnects.
 
 ### Today's practice
 
@@ -110,7 +122,7 @@ See the [workflow guide](docs/desktop-workflow.md) for input guards and context-
 - API keys are stored in local SQLite settings without operating-system credential encryption. Raw database backups can contain keys; keep them private.
 - AI features send task-relevant inputs to the selected provider or configured gateway. These can include candidate problem metadata, strategy/override text, pasted progress text, or explicitly selected note text for AI formatting. Existing code blocks, inline code, formulas, links and other protected blocks are not sent as provider text. AI-assisted progress import and AI note formatting require a working provider; local note formatting does not.
 - Supported models and per-model reasoning effort controls in Settings: **Google Gemini** (`models/gemini-3.8-flash`, `models/gemini-4-hydrogen` via `thinkingConfig.thinkingLevel`), **OpenAI** (`gpt-6-luna`, `gpt-6.1-terra` via `reasoning_effort`), and **DeepSeek** (`deepseek-flash` via `reasoning_effort` and `thinking`).
-- Portable **Snapshot Bundle v5** (SQLite schema v12) is the complete one-time Windows ↔ macOS migration path for the catalog, saved practice progress, history, notes, plans, review state, and non-sensitive settings (`Settings → Data → Export migration file` / `Import migration file`). It excludes provider keys, preserves keys already configured on the target, validates references before writing, and replaces the target business profile only after confirmation. Legacy v1 bundles remain partial restore files; v2/v3 imports remain supported (v2 maps missing outcomes to unknown). Incompatible legacy exports fail explicitly rather than dropping newer policy/feedback semantics.
+- Portable **Snapshot Bundle v5** (SQLite schema v13) is the complete one-time Windows ↔ macOS migration path for the catalog, saved practice progress, history, notes, plans, review state, and non-sensitive settings (`Settings → Data → Export migration file` / `Import migration file`). It excludes provider keys, preserves keys already configured on the target, validates references before writing, and replaces the target business profile only after confirmation. Legacy v1 bundles remain partial restore files; v2/v3 imports remain supported (v2 maps missing outcomes to unknown). Incompatible legacy exports fail explicitly rather than dropping newer policy/feedback semantics.
 
 - **Device sync**: Settings → Sync publishes and receives complete snapshots through a sync folder (for example Google Drive for desktop) or directly through the Google Drive app data folder. Official installers use LCT's built-in OAuth client. Developers running from source can supply their own. One device is active at a time; forks are reported, never merged silently. See [device sync](docs/sync.md).
 

@@ -5,8 +5,9 @@
  * Practice): a problem's due date must not depend on which weekday plans it. The daily time budget
  * stays per strategy and per one-day override.
  */
-import React, { useId } from 'react';
+import React, { useId, useState } from 'react';
 import type { ReviewPolicy } from '../../../../packages/contracts/src/recommendations.ts';
+import { defaultReviewIntervals, reviewIntervalsSchema } from '../../../../packages/contracts/src/sync.ts';
 import type { Language } from '../i18n.ts';
 
 /**
@@ -45,12 +46,13 @@ export function reviewPolicyLabel(policy: string, lang: Language): string {
 /** Learner-wide spacing values edited in Settings. */
 export interface ReviewSpacingValue {
   reviewPolicy?: ReviewPolicy;
+  reviewIntervals?: number[];
   personalDurationCalibration?: boolean;
 }
 
 /** Spacing policy and duration experiment; each change is reported immediately for the parent to persist. */
-export function ReviewSpacingOptions({ lang, value, disabled = false, onChange }: {
-  lang: Language; value: ReviewSpacingValue; disabled?: boolean; onChange: (patch: ReviewSpacingValue) => void;
+export function ReviewSpacingOptions({ lang, value, disabled = false, showExperiment = true, onChange }: {
+  lang: Language; value: ReviewSpacingValue; disabled?: boolean; showExperiment?: boolean; onChange: (patch: ReviewSpacingValue) => void;
 }) {
   const id = useId(), zh = lang === 'zh';
   return <>
@@ -64,12 +66,17 @@ export function ReviewSpacingOptions({ lang, value, disabled = false, onChange }
       </select>
       {/* Describe only the selected option; the three descriptions stack, so one line shows the difference. */}
       <p id={id + '-policy-help'} className="text-muted">
-        {POLICY_COPY[value.reviewPolicy ?? 'fixed'].hint[lang]}
+        {value.reviewIntervals && (value.reviewPolicy ?? 'fixed') === 'fixed'
+          ? (zh ? `下次复习依次间隔 ${value.reviewIntervals.join('、')} 天。` : `Review gaps in days: ${value.reviewIntervals.join(', ')}.`)
+          : POLICY_COPY[value.reviewPolicy ?? 'fixed'].hint[lang]}
         {/* Chinese sentences join without a space after the full-width full stop. */}
         {zh ? '适用于所有学习安排，只影响之后的计划。' : ' Applies to every strategy and only to future plans.'}
       </p>
     </div>
-    <div className="form-group">
+    <ReviewIntervalsField key={(value.reviewIntervals ?? defaultReviewIntervals).join(',')}
+      intervals={value.reviewIntervals ?? defaultReviewIntervals} lang={lang} disabled={disabled}
+      onApply={reviewIntervals => onChange({ reviewIntervals })} />
+    {showExperiment && <div className="form-group">
       <label htmlFor={id + '-calibration'} className="checkbox-label">
         <input id={id + '-calibration'} type="checkbox" checked={!!value.personalDurationCalibration} disabled={disabled}
           aria-describedby={id + '-calibration-help'}
@@ -79,8 +86,30 @@ export function ReviewSpacingOptions({ lang, value, disabled = false, onChange }
       <p id={id + '-calibration-help'} className="text-muted">{zh
         ? '90 天内同难度至少 12 个独立完成题目日样本、6 道题和 4 天才启用个人用时估计。调度仍使用静态阈值；该实验不改变复习日期。'
         : 'Personal effort estimates require 12 independent question/day samples across 6 problems and 4 days in 90 days for that difficulty. Review scheduling keeps static thresholds; this experiment does not change due dates.'}</p>
-    </div>
+    </div>}
   </>;
+}
+
+function ReviewIntervalsField({ intervals, lang, disabled, onApply }: {
+  intervals: readonly number[]; lang: Language; disabled: boolean; onApply: (days: number[]) => void;
+}) {
+  const id = useId();
+  const zh = lang === 'zh';
+  const [text, setText] = useState(intervals.join(', '));
+  const parsed = reviewIntervalsSchema.safeParse(text.trim().split(/[,，、\s]+/u).map(Number));
+  const changed = parsed.success && parsed.data.join(',') !== intervals.join(',');
+  return <div className="form-group">
+    <label className="form-label" htmlFor={id}>{zh ? '各阶段间隔（天）' : 'Interval lengths (days)'}</label>
+    <input id={id} type="text" className="form-input" value={text} disabled={disabled}
+      onChange={event => setText(event.target.value)} aria-invalid={!parsed.success} aria-describedby={id + '-help'} />
+    <p id={id + '-help'} className="text-muted">{zh
+      ? '用逗号分隔 1 至 10 个递增的天数，每段 1 至 365 天。最后一段会重复使用。'
+      : 'Enter 1–10 increasing gaps of 1–365 days, separated by commas. The last gap repeats.'}</p>
+    <button type="button" className="btn btn-secondary" disabled={disabled || !changed}
+      onClick={() => { if (parsed.success) onApply(parsed.data); }}>
+      {zh ? '应用全局间隔' : 'Apply intervals to all plans'}
+    </button>
+  </div>;
 }
 
 /** Optional daily time budget in minutes; `null` clears it. */

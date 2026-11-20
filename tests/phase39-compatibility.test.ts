@@ -17,24 +17,25 @@ const assistant: IGeminiAssistant = { getStatus: () => ({ configured: false, mod
   formatProgressText: async () => ({ candidates: [], unparsedSnippets: [], model: 'local' }),
   generatePlanContent: async params => fallbackPlanContent(params.problems, params.rules) };
 
-it('migrates supported v3-v10 schemas with verified pre-migration snapshots and rejects reserved/future versions', async () => {
+it('migrates supported v3–v10 and v12 schemas with verified pre-migration snapshots and rejects reserved/future versions', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'phase39-migration-'));
   try {
-    for (let version = 3; version <= 10; version++) {
+    for (const version of [3, 4, 5, 6, 7, 8, 9, 10, 12]) {
       const db = new DatabaseSync(path.join(directory, 'v' + version + '.sqlite'));
       try {
         new CatalogStore(db, { skipBackup: true });
+        db.exec('CREATE UNIQUE INDEX historical_day ON daily_plans(plan_date)');
         if (version < 5) db.exec('DROP TABLE import_results');
         if (version === 3) db.exec('DROP TABLE settings; DROP TABLE catalog_meta; ALTER TABLE import_history DROP COLUMN unchanged_count; ALTER TABLE import_history DROP COLUMN duplicate_count;');
         db.prepare('UPDATE schema_version SET version=?').run(version);
         const backups = path.join(directory, 'backups-' + version);
         const store = await CatalogStore.open(db, { backupDir: backups });
-        assert.equal(inspectCatalogSchema(db), 12);
-        const migration = (await readdir(backups)).find(file => file.startsWith('migration-v' + version + '-to-v12'))!;
+        assert.equal(inspectCatalogSchema(db), 13);
+        const migration = (await readdir(backups)).find(file => file.startsWith('migration-v' + version + '-to-v13'))!;
         assert.ok(migration); assert.equal(store.backupManager!.verifyBackup(path.join(backups, migration)).version, version);
       } finally { db.close(); }
     }
-    for (const version of [11, 13, 99]) {
+    for (const version of [11, 14, 99]) {
       const db = new DatabaseSync(':memory:');
       try {
         db.exec('CREATE TABLE schema_version(version INTEGER PRIMARY KEY)'); db.prepare('INSERT INTO schema_version VALUES(?)').run(version);
@@ -63,7 +64,7 @@ it('roundtrips Bundle5 policy, feedback, saved reasons and replays; excludes sou
     const operationId = randomUUID();
     const current = await service.removePlanItem(first.id, { itemId: first.items[0].id, expectedVersion: 1, operationId, feedbackReason: 'topic_mismatch' });
     const bundle = source.exportMigrationBundle(5);
-    assert.equal(bundle.version, 5); assert.equal(bundle.schemaVersion, 12);
+    assert.equal(bundle.version, 5); assert.equal(bundle.schemaVersion, 13);
     assert.ok(!JSON.stringify(bundle).includes('synthetic-source-secret'));
     await target.importSnapshotBundle(bundle);
     assert.equal(target.getSettings().openaiApiKey, 'synthetic-target-secret');
@@ -113,7 +114,7 @@ it('aborts a v10 upgrade when its safety backup cannot be written', async () => 
   const directory = await mkdtemp(path.join(tmpdir(), 'phase39-backup-failure-'));
   const db = new DatabaseSync(path.join(directory, 'old.sqlite'));
   try {
-    new CatalogStore(db, { skipBackup: true }); db.exec('UPDATE schema_version SET version=10');
+    new CatalogStore(db, { skipBackup: true }); db.exec('CREATE UNIQUE INDEX historical_day ON daily_plans(plan_date); UPDATE schema_version SET version=10');
     const blocked = path.join(directory, 'blocked'); await writeFile(blocked, 'obstruction');
     await assert.rejects(CatalogStore.open(db, { backupDir: blocked }));
     assert.equal(inspectCatalogSchema(db), 10);

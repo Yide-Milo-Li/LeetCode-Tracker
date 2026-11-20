@@ -54,6 +54,7 @@ export function summarizePlan(plan: DailyPlan, lang: 'en' | 'zh' = 'en') {
     date: plan.date,
     version: plan.version,
     strategyId: plan.strategyId,
+    ...(plan.studyPlan && { studyPlan: plan.studyPlan, notices: plan.notices.map(n => n[lang]) }),
     completedCount: items.filter(item => item.completed).length,
     totalCount: items.length,
     // Due reviews left out by the review cap; an append step with kind "review" adds one.

@@ -135,6 +135,7 @@ export async function importSnapshotBundle(
   try {
     // Delete existing user-mutable tables (preserves problems and tags catalog)
     db.exec(`
+      DELETE FROM catalog_meta WHERE key GLOB 'study-plan:*';
       DELETE FROM practice_operations;
       DELETE FROM practice_records;
       DELETE FROM problem_notes;

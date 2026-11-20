@@ -13,7 +13,7 @@ export const DEVICE_SYNC_VERSION = 1;
 /** Highest migration bundle format this build can publish and receive. */
 export const DEVICE_SYNC_BUNDLE_VERSION = 5;
 /** Database schema version paired with {@link DEVICE_SYNC_BUNDLE_VERSION}. */
-export const DEVICE_SYNC_SCHEMA_VERSION = 12;
+export const DEVICE_SYNC_SCHEMA_VERSION = 13;
 /** Root folder name used by the sync-folder adapter. */
 export const DEVICE_SYNC_ROOT = 'LeetCodeTrackerSync';
 

@@ -100,15 +100,15 @@ export function SetupGate({ children, ...props }: SetupGateProps) {
   const [status, setStatus] = useState<SetupStatus | null>(null);
 
   useEffect(() => {
-    if (phase !== 'checking') return;
+    if (phase === 'done') return;
     let active = true;
-    Promise.all([api.getSettings(), api.getCatalogStats(), api.getStrategies()])
-      .then(([settings, stats, strategies]) => {
+    Promise.all([api.getSettings(), api.getCatalogStats(), api.getStrategies(), api.getStudyPlan()])
+      .then(([settings, stats, strategies, course]) => {
         if (!active) return;
         const next: SetupStatus = {
           timezone: settings.timezone ?? null,
           problemCount: stats.totalProblems,
-          hasSchedule: strategies.some((s) => !s.deleted && s.weekdays.length > 0),
+          hasSchedule: Boolean(course.plan) || strategies.some((s) => !s.deleted && s.weekdays.length > 0),
         };
         if (firstOpenStep(next) === 3) {
           // Existing installs (or a restored migration) skip the guide entirely.
@@ -175,13 +175,13 @@ function SetupGuide({
   useEffect(() => {
     if (workspace.revision === firstRevision.current) return;
     let active = true;
-    Promise.all([api.getCatalogStats(), api.getStrategies()])
-      .then(([stats, strategies]) => {
+    Promise.all([api.getCatalogStats(), api.getStrategies(), api.getStudyPlan()])
+      .then(([stats, strategies, course]) => {
         if (!active) return;
         setStatus((s) => ({
           ...s,
           problemCount: stats.totalProblems,
-          hasSchedule: strategies.some((item) => !item.deleted && item.weekdays.length > 0),
+          hasSchedule: Boolean(course.plan) || strategies.some((item) => !item.deleted && item.weekdays.length > 0),
         }));
       })
       .catch(() => {
@@ -375,8 +375,8 @@ function SetupGuide({
             <h2>{zh ? '选择你的学习节奏' : 'Pick a study rhythm'}</h2>
             <p className="setup-lead">
               {zh
-                ? '学习安排决定每天推荐几道题、什么难度。以后可以随时调整。'
-                : 'Your schedule decides how many problems you get each day, and how hard. You can change it any time.'}
+                ? '从一份题单开始目标计划，或设置每周练习。'
+                : 'Start with a goal and a list of problems, or set up weekly practice.'}
             </p>
             {done[2] ? (
               <div className="setup-done-note">
@@ -401,8 +401,8 @@ function SetupGuide({
                   <h3>{zh ? '自己定制' : 'Make your own'}</h3>
                   <p>
                     {zh
-                      ? '设置每天题量、难度比例、标签和复习方式，并分配到星期几。'
-                      : 'Set the daily count, difficulty mix, tags and review, then assign weekdays.'}
+                      ? '粘贴一份目标题单，或设置每周的练习日、题量和难度。'
+                      : 'Paste a problem list for a goal or choose weekly practice days, counts and difficulty.'}
                   </p>
                   <button type="button" className="btn btn-secondary" onClick={() => workspace.navigate('schedule')}>
                     <CalendarDays size={16} aria-hidden="true" />

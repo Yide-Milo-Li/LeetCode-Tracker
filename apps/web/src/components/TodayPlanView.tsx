@@ -1,3 +1,4 @@
+import { StudyPlanPanel, useStudyPlan } from './StudyPlanPanel.tsx';
 import React, { useEffect, useId, useRef, useState, type CSSProperties } from 'react';
 import {
   RefreshCw,
@@ -10,6 +11,7 @@ import {
   Target,
   AlertTriangle,
   ChevronDown,
+  Repeat2,
 } from 'lucide-react';
 import { api, type DailyPlan, type PlanItem, type Strategy } from '../api.ts';
 import { localizeApiError } from '../error-i18n.ts';
@@ -23,6 +25,7 @@ import { createPractice } from '../practice-service.ts';
 import { clearPendingMinutes, getPendingMinutes, stopTimerFor } from '../timer-service.ts';
 import { Dialog, Feedback, PageHeader, InfoPopover } from './ui.tsx';
 import { TodayRecentOverview } from './TodayRecentOverview.tsx';
+import { TodayGoalList } from './TodayGoalList.tsx';
 import { TodayProblemRow } from './TodayProblemRow.tsx';
 import { QuickNoteDrawer } from './QuickNoteDrawer.tsx';
 import type { RecommendationFeedbackReason } from '../../../../packages/contracts/src/recommendations.ts';
@@ -221,22 +224,33 @@ function ReviewBacklogRow({ plan, lang, disabled, onAddReview }: {
   );
 }
 
-/** Keep plan refreshes independent of language/theme, and scope save state to a single task row. */
-function TodayPlanViewInner({
-  lang,
-  onNavigateToSettings,
-  planController: controller,
-  promptSwapFeedback = true,
-}: TodayPlanViewProps & { planController: UseDailyPlanReturn }) {
+type SourcePracticeProps = {
+  plan: DailyPlan;
+  controller: UseDailyPlanReturn;
+  lang: Language;
+  promptSwapFeedback: boolean;
+  singleSource: boolean;
+  otherSources: Map<string, { id: string; name: string }[]>;
+  locks: React.RefObject<Set<string>>;
+  saving: Set<string>;
+  setSaving: (items: Set<string>) => void;
+};
+
+function GoalDetails({ id, lang }: { id: string; lang: Language }) {
+  const workspace = useWorkspace();
+  const course = useStudyPlan(String(workspace.revision), lang, id);
+  if (course.error) return <Feedback>{course.error}</Feedback>;
+  return course.view ? <StudyPlanPanel view={course.view} lang={lang} /> : null;
+}
+
+function SourcePractice({ plan, controller, lang, promptSwapFeedback, singleSource, otherSources, locks, saving, setSaving }: SourcePracticeProps) {
   const zh = lang === 'zh';
   const t = translations[lang];
   const workspace = useWorkspace();
-  const quote = useEncouragement({ timeZone: workspace.timezone, lang });
   const [override, setOverride] = useState(false);
   const [versions, setVersions] = useState<DailyPlan[] | null>(null);
   const [localError, setLocalError] = useState('');
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
-  const [saving, setSaving] = useState<Set<string>>(new Set());
   const [recentCompletions, setRecentCompletions] = useState<Set<string>>(new Set());
   const [quickNoteProblem, setQuickNoteProblem] = useState<PlanItem | null>(null);
   const [pendingAction, setPendingAction] = useState<{ type: 'replace' | 'remove'; item: PlanItem } | null>(null);
@@ -256,48 +270,13 @@ function TodayPlanViewInner({
       completionTimers.current.forEach(clearTimeout);
     };
   }, []);
-  const locks = useRef(new Set<string>());
-  const [strategies, setStrategies] = useState<Strategy[] | null>(null);
-  const [strategyRetry, setStrategyRetry] = useState(0);
-  useEffect(() => {
-    let active = true;
-    api
-      .getStrategies()
-      .then((items) => {
-        if (active) setStrategies(items);
-      })
-      .catch((err) => {
-        if (active) setLocalError(localizeApiError(err, lang));
-      });
-    return () => {
-      active = false;
-    };
-  }, [workspace.revision, strategyRetry]);
-  // An empty catalog leaves plans nothing to pick from; say so instead of showing a bare rest day.
-  const [catalogEmpty, setCatalogEmpty] = useState(false);
-  useEffect(() => {
-    let active = true;
-    api
-      .getCatalogStats()
-      .then((stats) => {
-        if (active) setCatalogEmpty(stats.totalProblems === 0);
-      })
-      .catch(() => {
-        // Catalog views report their own failures; this hint is best-effort.
-      });
-    return () => {
-      active = false;
-    };
-  }, [workspace.revision]);
-  const plan = controller.ensureResult?.plan;
-  const completed = plan?.items.filter((item) => item.completed).length ?? 0;
-  const strategy = strategies?.find((s) => s.id === plan?.strategyId);
-
+  const [showDetails, setShowDetails] = useState(false);
+  const [showAllItems, setShowAllItems] = useState(false);
+  const completed = plan.items.filter(item => item.completed).length;
   /** The base record succeeds before optional fields open; uncertain retries reuse the original timestamp. */
   async function complete(item: PlanItem) {
     if (
-      !plan ||
-      locks.current.has(item.id) ||
+      locks.current.has(item.problem.questionId) ||
       controller.appending ||
       controller.isPlanMutationPending()
     ) return;
@@ -305,7 +284,7 @@ function TodayPlanViewInner({
       workspace.openPractice({ mode: 'evidence', item });
       return;
     }
-    locks.current.add(item.id);
+    locks.current.add(item.problem.questionId);
     setSaving(new Set(locks.current));
     setRowErrors((old) => ({ ...old, [item.id]: '' }));
     // Clicking the completion circle also stops a running timer for this problem;
@@ -314,7 +293,7 @@ function TodayPlanViewInner({
     const elapsedMinutes =
       stopped?.minutes ?? getPendingMinutes(item.problem.questionFrontendId) ?? undefined;
     try {
-      const record = await createPractice('today:' + plan.id + ':' + item.id, {
+      const record = await createPractice('today:' + plan.date + ':' + item.problem.questionId, {
         questionFrontendId: item.problem.questionFrontendId,
         completed: true,
         practicedAt: new Date().toISOString(),
@@ -332,13 +311,12 @@ function TodayPlanViewInner({
     } catch (err) {
       setRowErrors((old) => ({ ...old, [item.id]: localizeApiError(err, lang) }));
     } finally {
-      locks.current.delete(item.id);
+      locks.current.delete(item.problem.questionId);
       setSaving(new Set(locks.current));
     }
   }
   /** Version history is read-only; failure leaves the current plan and all rows in place. */
   async function showVersions() {
-    if (!plan) return;
     try {
       setVersions(await api.getPlanVersions(plan.id));
     } catch (err) {
@@ -349,7 +327,7 @@ function TodayPlanViewInner({
   /** Execute uncompleted problem removal directly and notify workspace observers. */
   async function executeRemoveUncompleted(target: PlanItem, reason?: RecommendationFeedbackReason) {
     try {
-      await controller.removeOne(target, reason);
+      await controller.removeOne(target, reason, plan);
       workspace.notifyMutation();
     } catch (err) {
       setRowErrors((old) => ({
@@ -370,7 +348,7 @@ function TodayPlanViewInner({
       saving.size > 0
     ) return;
     if (explicitReason !== undefined || !promptSwapFeedback) {
-      void controller.replaceOne(target, explicitReason);
+      void controller.replaceOne(target, explicitReason, plan);
       return;
     }
     setActionReason('');
@@ -379,13 +357,12 @@ function TodayPlanViewInner({
 
   /**
    * Handle problem removal.
-   * Completed problems always require confirmation (removal revokes practice records); when enabled,
+   * Confirm removal of completed assignments; the practice record remains in history. When enabled,
    * the optional feedback selector is embedded in that confirmation dialog to avoid double modals.
    * Uncompleted problems prompt for optional feedback when enabled, or remove immediately when disabled.
    */
   async function handleRemoveItem(target: PlanItem, explicitReason?: RecommendationFeedbackReason) {
     if (
-      !plan ||
       controller.appending ||
       controller.isPlanMutationPending() ||
       Boolean(controller.removingItemId) ||
@@ -414,7 +391,7 @@ function TodayPlanViewInner({
     setPendingAction(null);
     setActionReason('');
     if (type === 'replace') {
-      void controller.replaceOne(item, reason);
+      void controller.replaceOne(item, reason, plan);
     } else {
       void executeRemoveUncompleted(item, reason);
     }
@@ -425,7 +402,7 @@ function TodayPlanViewInner({
     const target = problemToRemove;
     const reason = removalReason || undefined;
     try {
-      await controller.removeOne(target, reason);
+      await controller.removeOne(target, reason, plan);
       workspace.notifyMutation();
       setProblemToRemove(null);
       setRemovalReason('');
@@ -439,381 +416,147 @@ function TodayPlanViewInner({
     }
   }
   return (
-    <div className="today-view">
-      <PageHeader
-        title={zh ? '今日' : 'Today'}
-        description={
-          quote.text ? (
-            <span className="today-quote-editorial">
-              <span className="quote-sparkle-icon" aria-hidden="true">✦</span>
-              <span className="quote-editorial-text">{quote.text}</span>
-            </span>
-          ) : undefined
-        }
-        actions={
-          <button className="btn btn-secondary" onClick={() => workspace.navigate('schedule')}>
-            <CalendarDays size={16} />
-            {zh ? '学习安排' : 'Study schedule'}
-          </button>
-        }
-      />
-      {(controller.error || localError) && (
-        <Feedback
-          retry={{
-            label: t.retry,
-            run: () => {
-              setLocalError('');
-              setStrategyRetry((value) => value + 1);
-              controller.clearError?.();
-              void controller.refresh();
-            },
+    <div className="source-practice">
+      {localError && <Feedback>{localError}</Feedback>}
+      {plan.studyPlan && <details className="source-route-details" onToggle={e => setShowDetails(e.currentTarget.open)}>
+        <summary>{zh ? '目标详情与日历' : 'Goal details and calendar'}</summary>
+        {showDetails && <GoalDetails id={plan.studyPlan.id} lang={lang} />}
+      </details>}
+      <div className="plan-actions-toolbar">
+        <button
+          className="btn btn-primary btn-sm"
+          disabled={
+            controller.loading ||
+            controller.appending ||
+            controller.isPlanMutationPending() ||
+            controller.replacingBatch ||
+            Boolean(controller.replacingItemId) ||
+            saving.size > 0
+          }
+          aria-busy={controller.appending}
+          onClick={() => {
+            if (
+              controller.loading ||
+              controller.appending ||
+              controller.isPlanMutationPending() ||
+              saving.size > 0
+            ) return;
+            void controller.appendOne(undefined, plan);
           }}
         >
-          {controller.error || localError}
-        </Feedback>
-      )}
-      {catalogEmpty && controller.ensureResult?.status !== 'setup' && (
-        <Feedback tone="info">
-          {zh ? '题库还是空的，每日计划暂时没有题目可选。' : 'Your problem catalog is empty, so daily plans have nothing to pick from.'}{' '}
-          <button className="text-link" onClick={() => workspace.navigate('catalog-import')}>
-            {zh ? '导入题库' : 'Import problems'}
-          </button>
-        </Feedback>
-      )}
-      {controller.loading && !plan ? (
-        <div className="plan-skeleton" role="status">
-          <RefreshCw className="spin" size={20} />
-          <p>{zh ? '正在准备今日计划…' : 'Preparing today’s plan…'}</p>
-          <div />
-          <div />
-          <div />
-        </div>
-      ) : controller.ensureResult?.status === 'setup' ? (
-        <section className="empty-state">
-          <div className="empty-state-icon">
-            <Globe size={40} className="text-indigo" />
-          </div>
-          <h2>{t.setupTimezoneTitle}</h2>
-          <p>{t.setupTimezoneDesc}</p>
-          <button className="btn btn-primary" onClick={onNavigateToSettings}>
-            {zh ? '设置时区' : 'Set timezone'}
-          </button>
-        </section>
-      ) : controller.ensureResult?.status === 'rest' ? (
-        <>
-          <TodayRecentOverview lang={lang} />
-          <section className="empty-state">
-            <div className="empty-state-icon">
-              <Coffee size={40} className="text-muted" />
-            </div>
-            <h2>
-              {strategies?.length === 0 ? (zh ? '还没有学习安排' : 'No study schedule yet') : t.restDayTitle}
-            </h2>
-            <p>
-              {strategies?.length === 0
-                ? zh
-                  ? '选择适合自己的节奏，配置后再开始。'
-                  : 'Choose your study rhythm when you’re ready.'
-                : t.restDayDesc}
-            </p>
-            <div className="action-row">
-              <button className="btn btn-primary" onClick={() => workspace.navigate('schedule')}>
-                {zh ? '设置学习安排' : 'Set study schedule'}
-              </button>
-              <button className="btn btn-secondary" onClick={() => setOverride(true)}>
-                {t.createTemporaryPlan}
-              </button>
-            </div>
-          </section>
-        </>
-      ) : plan && plan.items.length === 0 ? (
-        <>
-          <TodayRecentOverview lang={lang} />
-          <section className="empty-state">
-            <div className="empty-state-icon">
-              <Coffee size={40} className="text-muted" />
-            </div>
-            <h2>{t.restDayTitle}</h2>
-            <p>{t.allProblemsRemovedRestDesc}</p>
-            <div className="action-row">
-              <button
-                className="btn btn-primary"
-                disabled={
-                  controller.loading ||
+          {controller.appending ? (
+            <RefreshCw size={14} className="spin" />
+          ) : (
+            <Plus size={14} />
+          )}
+          {controller.appending
+            ? zh
+              ? '加题中…'
+              : 'Adding…'
+            : zh
+              ? '加一题'
+              : 'Add one'}
+        </button>
+        <button
+          className="btn btn-secondary btn-sm"
+          disabled={
+            controller.loading ||
+            controller.appending ||
+            controller.isPlanMutationPending()
+          }
+          onClick={() => {
+            if (
+              controller.loading ||
+              controller.appending ||
+              controller.isPlanMutationPending()
+            ) return;
+            setOverride(true);
+          }}
+        >
+          {zh ? '调整今天' : 'Adjust today'}
+        </button>
+        <InfoPopover label={zh ? '计划详情' : 'Plan details'} content={
+          <dl className="detail-grid">
+            <dt>{zh ? '时区' : 'Timezone'}</dt><dd>{plan.timezone}</dd>
+            <dt>{zh ? '推荐来源' : 'Generator'}</dt><dd>{formatPlanSource(plan.source, lang)}{plan.model && ' · ' + plan.model}</dd>
+            <dt>{zh ? '计划版本' : 'Plan version'}</dt><dd>{plan.version}</dd>
+            <dt>{zh ? '策略版本' : 'Strategy version'}</dt><dd>{plan.strategyVersion ?? '—'}</dd>
+          </dl>} />
+        <details className="action-menu">
+          <summary aria-label={zh ? '更多计划操作' : 'More plan actions'}>
+            <MoreHorizontal size={18} />
+          </summary>
+          <div>
+            <button
+              disabled={
+                controller.replacingBatch ||
+                Boolean(controller.replacingItemId) ||
+                controller.appending ||
+                controller.isPlanMutationPending() ||
+                completed === plan.items.length ||
+                saving.size > 0
+              }
+              onClick={() => {
+                if (
                   controller.appending ||
                   controller.isPlanMutationPending() ||
-                  controller.replacingBatch ||
-                  Boolean(controller.replacingItemId) ||
                   saving.size > 0
-                }
-                aria-busy={controller.appending}
-                onClick={() => {
-                  if (
-                    controller.loading ||
-                    controller.appending ||
-                    controller.isPlanMutationPending() ||
-                    saving.size > 0
-                  ) return;
-                  void controller.appendOne();
-                }}
-              >
-                {controller.appending ? (
-                  <RefreshCw size={16} className="spin" />
-                ) : (
-                  <Plus size={16} />
-                )}
-                {controller.appending
-                  ? zh
-                    ? '加题中…'
-                    : 'Adding…'
-                  : zh
-                    ? '加一题'
-                    : 'Add one'}
-              </button>
-              <button
-                className="btn btn-secondary"
-                disabled={
-                  controller.loading ||
-                  controller.appending ||
-                  controller.isPlanMutationPending()
-                }
-                onClick={() => {
-                  if (
-                    controller.loading ||
-                    controller.appending ||
-                    controller.isPlanMutationPending()
-                  ) return;
-                  setOverride(true);
-                }}
-              >
-                {zh ? '调整今天' : 'Adjust today'}
-              </button>
-              <button className="btn btn-secondary" onClick={showVersions}>
-                {t.planVersions} · v{plan.version}
-              </button>
-            </div>
-          </section>
-        </>
-      ) : plan ? (
-        <>
-          {completed === plan.items.length && plan.items.length > 0 && (
-            <div className="goal-completion-badge" role="status" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <CheckCircle2 size={18} className="goal-badge-icon" />
-                <span>{zh ? '今日计划已完成' : 'Today’s plan complete'}</span>
-              </div>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                style={{ fontSize: '0.8125rem' }}
-                onClick={() => workspace.navigate('notes')}
-              >
-                {zh ? '前往复盘工作区整理思路 →' : 'Organize Notes & Solutions →'}
-              </button>
-            </div>
-          )}
-          <section className="today-unified-hub" aria-label={zh ? '今日工作台' : 'Today workbench'}>
-            <div className="hub-left">
-              <div>
-                <div className="bento-card-header">
-                  <span className="bento-card-title">
-                    <Target size={14} aria-hidden="true" />
-                    <span>{zh ? '今日目标推进' : 'Today’s Target'}</span>
-                  </span>
-                  <div className="strategy-capsule">
-                    <span className="strategy-capsule-name">
-                      {strategy?.name ?? (zh ? '临时计划' : 'Temporary plan')}
-                      {' · '}
-                      {plan.source === 'local'
-                        ? zh
-                          ? '本地推荐'
-                          : 'Local'
-                        : `${({ gemini: 'Gemini', openai: 'OpenAI', deepseek: 'DeepSeek' })[plan.source] ?? plan.source}`}
-                    </span>
-                    <InfoPopover
-                      label={zh ? '计划详情' : 'Plan details'}
-                      content={
-                        <dl className="detail-grid">
-                          <dt>{zh ? '时区' : 'Timezone'}</dt><dd>{plan.timezone}</dd>
-                          <dt>{zh ? '计划版本' : 'Plan version'}</dt><dd>v{plan.version}</dd>
-                          <dt>{zh ? '策略版本' : 'Strategy version'}</dt><dd>{plan.strategyVersion ?? '—'}</dd>
-                        </dl>
-                      }
-                    />
-                  </div>
-                </div>
-
-                <div className="progress-hero-row">
-                  <div className="progress-count-group">
-                    {/* Keyed by the count so each new solve replays the tick-in motion. */}
-                    <span key={completed} className="progress-big-num num-tabular">{completed}</span>
-                    <span className="progress-total-num num-tabular">
-                      {zh ? `/ ${plan.items.length} 题已完成` : `of ${plan.items.length} solved`}
-                    </span>
-                  </div>
-                  <span className="progress-percent-text num-tabular">
-                    {plan.items.length > 0
-                      ? `${Math.round((completed / plan.items.length) * 100)}%`
-                      : zh ? '暂无目标' : 'No target yet'}
-                  </span>
-                </div>
-
-                <TargetMeter
-                  completed={completed}
-                  total={plan.items.length}
-                  label={zh ? '今日完成进度' : 'Today completion progress'}
-                />
-                <p className="progress-meter-note">
-                  {plan.items.length === 0
-                    ? zh ? '安排今日题目后，在这里查看完成进度。' : 'Set today’s problems to track your progress here.'
-                    : completed >= plan.items.length
-                      ? zh ? '今日计划已全部完成。' : 'Every planned problem is solved.'
-                      : zh
-                        ? `还剩 ${plan.items.length - completed} 题。点击圆圈即可记录完成，时长可稍后补充。`
-                        : `${plan.items.length - completed} left. Click a circle to log a solve, add duration later.`}
-                </p>
-              </div>
-
-              <div className="plan-actions-toolbar">
-                <button
-                  className="btn btn-primary btn-sm"
-                  disabled={
-                    controller.loading ||
-                    controller.appending ||
-                    controller.isPlanMutationPending() ||
-                    controller.replacingBatch ||
-                    Boolean(controller.replacingItemId) ||
-                    saving.size > 0
-                  }
-                  aria-busy={controller.appending}
-                  onClick={() => {
-                    if (
-                      controller.loading ||
-                      controller.appending ||
-                      controller.isPlanMutationPending() ||
-                      saving.size > 0
-                    ) return;
-                    void controller.appendOne();
-                  }}
-                >
-                  {controller.appending ? (
-                    <RefreshCw size={14} className="spin" />
-                  ) : (
-                    <Plus size={14} />
-                  )}
-                  {controller.appending
-                    ? zh
-                      ? '加题中…'
-                      : 'Adding…'
-                    : zh
-                      ? '加一题'
-                      : 'Add one'}
-                </button>
-                <button
-                  className="btn btn-secondary btn-sm"
-                  disabled={
-                    controller.loading ||
-                    controller.appending ||
-                    controller.isPlanMutationPending()
-                  }
-                  onClick={() => {
-                    if (
-                      controller.loading ||
-                      controller.appending ||
-                      controller.isPlanMutationPending()
-                    ) return;
-                    setOverride(true);
-                  }}
-                >
-                  {zh ? '调整今天' : 'Adjust today'}
-                </button>
-                <details className="action-menu">
-                  <summary aria-label={zh ? '更多计划操作' : 'More plan actions'}>
-                    <MoreHorizontal size={18} />
-                  </summary>
-                  <div>
-                    <button
-                      disabled={
-                        controller.replacingBatch ||
-                        Boolean(controller.replacingItemId) ||
-                        controller.appending ||
-                        controller.isPlanMutationPending() ||
-                        completed === plan.items.length ||
-                        saving.size > 0
-                      }
-                      onClick={() => {
-                        if (
-                          controller.appending ||
-                          controller.isPlanMutationPending() ||
-                          saving.size > 0
-                        ) return;
-                        void controller.replaceAllUnfinished();
-                      }}
-                    >
-                      {t.replaceAllUnfinished}
-                    </button>
-                    <button onClick={showVersions}>
-                      {t.planVersions} · v{plan.version}
-                    </button>
-                  </div>
-                </details>
-              </div>
-            </div>
-
-            <div className="hub-divider" aria-hidden="true" />
-
-            <TodayRecentOverview lang={lang} embedded={true} />
-          </section>
-          {plan.timeEstimate && !plan.timeEstimate.feasible && (
-            <section className="form-group" aria-label={zh ? '计划用时估计' : 'Plan effort estimate'}>
-              <Feedback tone="warning">
-                <p>{zh ? '预计用时超出预算，题数与难度保持不变。' : 'The estimate exceeds your budget. Counts and difficulty remain unchanged.'}</p>
-                <button type="button" className="btn btn-secondary" disabled={controller.isPlanMutationPending()} onClick={() => setOverride(true)}>{zh ? '明确调整题数或预算' : 'Adjust count or budget'}</button>
-              </Feedback>
-            </section>
-          )}
-          <PlanNoticesStrip plan={plan} lang={lang} />
-          <ReviewBacklogRow
-            plan={plan}
-            lang={lang}
-            disabled={controller.loading || controller.appending || controller.isPlanMutationPending() || saving.size > 0}
-            onAddReview={() => {
-              if (controller.loading || controller.appending || controller.isPlanMutationPending() || saving.size > 0) return;
-              void controller.appendOne('review');
-            }}
-          />
-          <div className="today-problems">
-            {plan.items.map((item) => (
-              <TodayProblemRow
-                key={item.id}
-                item={item}
-                lang={lang}
-                isSaving={saving.has(item.id)}
-                justCompleted={recentCompletions.has(item.id)}
-                rowError={rowErrors[item.id]}
-                replacingBatch={controller.replacingBatch}
-                replacingItemId={controller.replacingItemId}
-                isAppending={controller.appending || controller.isPlanMutationPending()}
-                canRemove={true}
-                isRemoving={controller.removingItemId === item.id}
-                onComplete={(target) => void complete(target)}
-                onReplaceOne={(target, reason) => handleReplaceClick(target, reason)}
-                onRemove={(target, reason) => void handleRemoveItem(target, reason)}
-                onOpenQuickNote={(target) => setQuickNoteProblem(target)}
-              />
-            ))}
-          </div>
-        </>
-      ) : (
-        !controller.error && (
-          <section className="empty-state">
-            <h2>{t.noPlans}</h2>
-            <button className="btn btn-primary" onClick={() => void controller.refresh()}>
-              {t.retry}
+                ) return;
+                void controller.replaceAllUnfinished(plan);
+              }}
+            >
+              {t.replaceAllUnfinished}
             </button>
-          </section>
-        )
+            <button onClick={showVersions}>
+              {t.planVersions} · v{plan.version}
+            </button>
+          </div>
+        </details>
+      </div>
+      {plan.items.length === 0 && <p className="text-muted">{!plan.studyPlan && singleSource ? t.allProblemsRemovedRestDesc : zh ? '这个来源今天没有题目。' : 'No problems in this list today.'}</p>}
+      {plan.timeEstimate && !plan.timeEstimate.feasible && (
+        <section className="form-group" aria-label={zh ? '计划用时估计' : 'Plan effort estimate'}>
+          <Feedback tone="warning">
+            <p>{zh ? '预计用时超出预算，题数与难度保持不变。' : 'The estimate exceeds your budget. Counts and difficulty remain unchanged.'}</p>
+            <button type="button" className="btn btn-secondary" disabled={controller.isPlanMutationPending()} onClick={() => setOverride(true)}>{zh ? '明确调整题数或预算' : 'Adjust count or budget'}</button>
+          </Feedback>
+        </section>
       )}
+      <PlanNoticesStrip plan={plan} lang={lang} />
+      <ReviewBacklogRow
+        plan={plan}
+        lang={lang}
+        disabled={controller.loading || controller.appending || controller.isPlanMutationPending() || saving.size > 0}
+        onAddReview={() => {
+          if (controller.loading || controller.appending || controller.isPlanMutationPending() || saving.size > 0) return;
+          void controller.appendOne('review', plan);
+        }}
+      />
+      <div className="today-problems">
+        {(showAllItems ? plan.items : plan.items.slice(0, 3)).map((item) => (
+          <TodayProblemRow
+            key={item.id}
+            item={item}
+            lang={lang}
+            otherSources={(otherSources.get(item.problem.questionId) ?? []).filter(source => source.id !== plan.id).map(source => source.name)}
+            isSaving={saving.has(item.problem.questionId)}
+            justCompleted={recentCompletions.has(item.id)}
+            rowError={rowErrors[item.id]}
+            replacingBatch={controller.replacingBatch}
+            replacingItemId={controller.replacingItemId}
+            isAppending={controller.appending || controller.isPlanMutationPending()}
+            canRemove={true}
+            isRemoving={controller.removingItemId === item.id}
+            onComplete={(target) => void complete(target)}
+            onReplaceOne={(target, reason) => handleReplaceClick(target, reason)}
+            onRemove={(target, reason) => void handleRemoveItem(target, reason)}
+            onOpenQuickNote={(target) => setQuickNoteProblem(target)}
+          />
+        ))}
+      </div>
+      {plan.items.length > 3 && <button type="button" className="text-link" aria-expanded={showAllItems} onClick={() => setShowAllItems(!showAllItems)}>
+        {showAllItems ? (zh ? '收起题目' : 'Show fewer') : (zh ? `再看 ${plan.items.length - 3} 题` : `Show ${plan.items.length - 3} more`)}
+      </button>}
       {versions && (
         <Dialog title={t.planVersions} lang={lang} onClose={() => setVersions(null)} drawer>
           {versions.map((version) => (
@@ -979,6 +722,266 @@ function TodayPlanViewInner({
           </div>
         </Dialog>
       )}
+    </div>
+  );
+}
+
+function TodayPlanViewInner({
+  lang,
+  onNavigateToSettings,
+  planController: controller,
+  promptSwapFeedback = true,
+}: TodayPlanViewProps & { planController: UseDailyPlanReturn }) {
+  const zh = lang === 'zh';
+  const t = translations[lang];
+  const workspace = useWorkspace();
+  const quote = useEncouragement({ timeZone: workspace.timezone, lang });
+  const [override, setOverride] = useState(false);
+  const [localError, setLocalError] = useState('');
+  const locks = useRef(new Set<string>());
+  const [saving, setSaving] = useState<Set<string>>(new Set());
+  const [strategies, setStrategies] = useState<Strategy[] | null>(null);
+  const [strategyRetry, setStrategyRetry] = useState(0);
+  useEffect(() => {
+    let active = true;
+    api
+      .getStrategies()
+      .then((items) => {
+        if (active) setStrategies(items);
+      })
+      .catch((err) => {
+        if (active) setLocalError(localizeApiError(err, lang));
+      });
+    return () => {
+      active = false;
+    };
+  }, [workspace.revision, strategyRetry]);
+  // An empty catalog leaves plans nothing to pick from; say so instead of showing a bare rest day.
+  const [catalogEmpty, setCatalogEmpty] = useState(false);
+  useEffect(() => {
+    let active = true;
+    api
+      .getCatalogStats()
+      .then((stats) => {
+        if (active) setCatalogEmpty(stats.totalProblems === 0);
+      })
+      .catch(() => {
+        // Catalog views report their own failures; this hint is best-effort.
+      });
+    return () => {
+      active = false;
+    };
+  }, [workspace.revision]);
+  const plan = controller.ensureResult?.plan;
+  const [hasGoals, setHasGoals] = useState(false);
+  useEffect(() => {
+    let active = true;
+    if (controller.ensureResult?.status === 'rest') api.getStudyPlan().then(result => { if (active) setHasGoals(Boolean(result.plan)); }).catch(() => {});
+    return () => { active = false; };
+  }, [controller.ensureResult?.status, workspace.revision]);
+  const plans = controller.ensureResult?.plans ?? (plan ? [plan] : []);
+  const goals = plans.filter((source): source is DailyPlan & { studyPlan: NonNullable<DailyPlan['studyPlan']> } => Boolean(source.studyPlan))
+    .sort((a, b) => Number(!a.items.length) - Number(!b.items.length) ||
+      (a.studyPlan.deadline ?? '9999').localeCompare(b.studyPlan.deadline ?? '9999'));
+  const weekly = plans.find(source => !source.studyPlan);
+  const sourceName = (source: DailyPlan) => source.studyPlan?.name ?? strategies?.find(s => s.id === source.strategyId)?.name ??
+    (source.strategyId ? (zh ? '每周策略' : 'Weekly strategy') : (zh ? '临时计划' : 'Temporary plan'));
+  const unique = new Map<string, boolean>();
+  const otherSources = new Map<string, { id: string; name: string }[]>();
+  const label = (source: DailyPlan) => source.studyPlan ? (zh ? '目标 · ' : 'Goal · ') + sourceName(source) :
+    source.strategyId ? (zh ? '策略 · ' : 'Strategy · ') + sourceName(source) : sourceName(source);
+  for (const source of plans) {
+    for (const item of source.items) {
+      const id = item.problem.questionId;
+      unique.set(id, Boolean(unique.get(id) || item.completed));
+      const names = otherSources.get(id) ?? [];
+      names.push({ id: source.id, name: label(source) });
+      otherSources.set(id, names);
+    }
+  }
+  const total = unique.size;
+  const completed = [...unique.values()].filter(Boolean).length;
+  const renderSource = (source: DailyPlan) => <SourcePractice key={source.id} plan={source} lang={lang} controller={controller}
+    promptSwapFeedback={promptSwapFeedback} locks={locks} saving={saving} setSaving={setSaving} otherSources={otherSources}
+    singleSource={plans.length === 1} />;
+  return (
+    <div className="today-view">
+      <PageHeader
+        title={zh ? '今日' : 'Today'}
+        description={
+          quote.text ? (
+            <span className="today-quote-editorial">
+              <span className="quote-sparkle-icon" aria-hidden="true">✦</span>
+              <span className="quote-editorial-text">{quote.text}</span>
+            </span>
+          ) : undefined
+        }
+        actions={
+          <button className="btn btn-secondary" onClick={() => workspace.navigate('schedule')}>
+            <CalendarDays size={16} />
+            {zh ? '学习安排' : 'Study schedule'}
+          </button>
+        }
+      />
+      {(controller.error || localError) && (
+        <Feedback
+          retry={{
+            label: t.retry,
+            run: () => {
+              setLocalError('');
+              setStrategyRetry((value) => value + 1);
+              controller.clearError?.();
+              void controller.refresh();
+            },
+          }}
+        >
+          {controller.error || localError}
+        </Feedback>
+      )}
+      {catalogEmpty && controller.ensureResult?.status !== 'setup' && (
+        <Feedback tone="info">
+          {zh ? '题库还是空的，每日计划暂时没有题目可选。' : 'Your problem catalog is empty, so daily plans have nothing to pick from.'}{' '}
+          <button className="text-link" onClick={() => workspace.navigate('catalog-import')}>
+            {zh ? '导入题库' : 'Import problems'}
+          </button>
+        </Feedback>
+      )}
+      {controller.loading && !plan ? (
+        <div className="plan-skeleton" role="status">
+          <RefreshCw className="spin" size={20} />
+          <p>{zh ? '正在准备今日计划…' : 'Preparing today’s plan…'}</p>
+          <div />
+          <div />
+          <div />
+        </div>
+      ) : controller.ensureResult?.status === 'setup' ? (
+        <section className="empty-state">
+          <div className="empty-state-icon">
+            <Globe size={40} className="text-indigo" />
+          </div>
+          <h2>{t.setupTimezoneTitle}</h2>
+          <p>{t.setupTimezoneDesc}</p>
+          <button className="btn btn-primary" onClick={onNavigateToSettings}>
+            {zh ? '设置时区' : 'Set timezone'}
+          </button>
+        </section>
+      ) : controller.ensureResult?.status === 'rest' ? (
+        <>
+          <TodayRecentOverview lang={lang} />
+          <section className="empty-state">
+            <div className="empty-state-icon">
+              <Coffee size={40} className="text-muted" />
+            </div>
+            <h2>
+              {strategies?.length === 0 && !hasGoals ? (zh ? '还没有学习安排' : 'No study schedule yet') : t.restDayTitle}
+            </h2>
+            <p>
+              {strategies?.length === 0 && !hasGoals
+                ? zh
+                  ? '选择适合自己的节奏，配置后再开始。'
+                  : 'Choose your study rhythm when you’re ready.'
+                : t.restDayDesc}
+            </p>
+            <div className="action-row">
+              <button className="btn btn-primary" onClick={() => workspace.navigate('schedule')}>
+                {zh ? '设置学习安排' : 'Set study schedule'}
+              </button>
+              <button className="btn btn-secondary" onClick={() => setOverride(true)}>
+                {t.createTemporaryPlan}
+              </button>
+            </div>
+          </section>
+        </>
+      ) : plan ? (
+        <>
+          {completed === total && total > 0 && (
+            <div className="goal-completion-badge" role="status" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <CheckCircle2 size={18} className="goal-badge-icon" />
+                <span>{zh ? '今日计划已完成' : 'Today’s plan complete'}</span>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                style={{ fontSize: '0.8125rem' }}
+                onClick={() => workspace.navigate('notes')}
+              >
+                {zh ? '前往复盘工作区整理思路 →' : 'Organize Notes & Solutions →'}
+              </button>
+            </div>
+          )}
+          <section className="today-unified-hub" aria-label={zh ? '今日工作台' : 'Today workbench'}>
+            <div className="hub-left">
+              <div>
+                <div className="bento-card-header">
+                  <span className="bento-card-title">
+                    <Target size={14} aria-hidden="true" />
+                    <span>{zh ? '今日目标推进' : 'Today’s Target'}</span>
+                  </span>
+
+                </div>
+
+                <div className="progress-hero-row">
+                  <div className="progress-count-group">
+                    {/* Keyed by the count so each new solve replays the tick-in motion. */}
+                    <span key={completed} className="progress-big-num num-tabular">{completed}</span>
+                    <span className="progress-total-num num-tabular">
+                      {zh ? `/ ${total} 题已完成` : `of ${total} solved`}
+                    </span>
+                  </div>
+                  <span className="progress-percent-text num-tabular">
+                    {total > 0
+                      ? `${Math.round((completed / total) * 100)}%`
+                      : zh ? '暂无目标' : 'No target yet'}
+                  </span>
+                </div>
+
+                <TargetMeter
+                  completed={completed}
+                  total={total}
+                  label={zh ? '今日完成进度' : 'Today completion progress'}
+                />
+                <p className="progress-meter-note">
+                  {total === 0
+                    ? zh ? '安排今日题目后，在这里查看完成进度。' : 'Set today’s problems to track your progress here.'
+                    : completed >= total
+                      ? zh ? '今日计划已全部完成。' : 'Every planned problem is solved.'
+                      : zh
+                        ? `还剩 ${total - completed} 题。点击圆圈即可记录完成，时长可稍后补充。`
+                        : `${total - completed} left. Click a circle to log a solve, add duration later.`}
+                </p>
+              </div>
+
+            </div>
+            <div className="hub-divider" aria-hidden="true" />
+            <TodayRecentOverview lang={lang} embedded />
+          </section>
+          {total === 0 && <h2>{t.restDayTitle}</h2>}
+          {goals.length > 0 && weekly && <nav className="today-source-jumps" aria-label={zh ? '跳至题单' : 'Jump to list'}>
+            <a href="#today-goals" onClick={e => {e.preventDefault(); document.getElementById('today-goals')?.focus();}}>{zh ? '学习目标' : 'Study goals'}</a>
+            <a href="#today-weekly" onClick={e => {e.preventDefault(); document.getElementById('today-weekly')?.focus();}}>{zh ? '当日策略' : 'Daily strategy'}</a>
+          </nav>}
+          <div className={'today-sources' + (goals.length > 0 && weekly ? ' has-both' : '')}>
+            {goals.length > 0 && <TodayGoalList goals={goals} lang={lang} renderSource={renderSource} />}
+            {weekly && <section aria-labelledby="today-weekly" className="today-source-section">
+              <h2 id="today-weekly" tabIndex={-1}><Repeat2 size={17} />{weekly.strategyId ? (zh ? '当日策略' : 'Daily strategy') : (zh ? '临时计划' : 'Temporary plan')}</h2>
+              <div className="today-source-title"><h3>{sourceName(weekly)}</h3><span>{weekly.items.filter(i => i.completed).length}/{weekly.items.length}</span></div>
+              {renderSource(weekly)}
+            </section>}
+          </div>
+        </>
+      ) : (
+        !controller.error && (
+          <section className="empty-state">
+            <h2>{t.noPlans}</h2>
+            <button className="btn btn-primary" onClick={() => void controller.refresh()}>
+              {t.retry}
+            </button>
+          </section>
+        )
+      )}
+      {override && <PromptOverrideModal isOpen onClose={() => setOverride(false)} currentPlan={null} lang={lang}
+        onApplied={updated => { controller.onOverrideCommitted(updated); workspace.notifyMutation(); }} />}
     </div>
   );
 }

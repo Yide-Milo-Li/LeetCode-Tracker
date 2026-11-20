@@ -120,7 +120,8 @@ Tools that work on several items take one item too; there are no separate single
 | `tracker_search_problems` | read | Search the catalog by keyword, difficulty or tag |
 | `tracker_get_problems` | read | 1 to 50 problems with note state, practice count and recent attempts (with `revision`) |
 | `tracker_catalog_coverage` | read | Catalog size, counts by difficulty and missing frontend ID ranges; works before a profile exists |
-| `tracker_get_today` | read | The stored plan for today or a given date, with its `version` (never generates one) |
+| `tracker_get_today` | read | Read a saved plan or a course forecast. A forecast has `projected: true`. Save today's forecast with `tracker_create_today` before editing its items. |
+| `tracker_get_study_plan` | read | Read the original and projected calendars, progress, flexible daily pace (or the next regular study day’s calculated total for a deadline, `baseDailyCount`), estimated finish and `deadlineShortfall` for plans with deadlines. Pass an ID to look up an earlier course. |
 | `tracker_list_practices` | read | Paginated practice records with `revision`, newest or oldest first, optionally for one problem, or specific records by `ids` |
 | `tracker_list_notes` | read | Note summaries (`scope: "practiced"` by default, or `"all"`), filtered by `tag` or `noteState` |
 | `tracker_get_notes` | read | 1 to 20 notes with state and `contentHash`; long notes are read in parts with `offset` |
@@ -137,9 +138,11 @@ Tools that work on several items take one item too; there are no separate single
 | `tracker_save_strategy` | write, overwrites | Create a strategy from counts and assign weekdays, or update an existing one (needs `strategyId` and `expectedVersion`) |
 | `tracker_delete_strategy` | write, removes | Delete a strategy; its weekdays become rest days and generated plans stay (needs `expectedVersion`) |
 | `tracker_set_timezone` | write | Set the IANA timezone that decides "today"; creates the profile when missing |
+| `tracker_update_study_plan` | write or preview | Read the current goal ID and version, then pass `expectedVersion`, a stable `operationId` and a `changes` object. Set `deadline: null` for flexible pacing. To edit membership or order, send `changes.stageProblemIds`, one complete array of catalog frontend IDs per existing stage (for example `[["1","15"],["42"]]`). Retained problems keep their prerequisites and optional status. Preview with `dryRun` before saving. |
+| `tracker_create_study_plan` | write or preview | Save an ordered list of catalog frontend IDs. Specify weekdays (Sunday = 0), `reviewCap` and stages. List prerequisites first. Supply a `deadline` to derive pace, or `dailyCount` for a flexible finish. Flexible goals accept `adaptivePace: false` to keep that count fixed. Optional `maxDailyCount` caps the combined new and review workload. Optional `difficulty` weights new problems across study days. Use `dryRun` to preview and a stable UUID as `operationId`. |
 | `tracker_create_today` | write | Generate the day's plan, or return the existing one |
-| `tracker_edit_today` | write, removes | Edit up to 10 plan items in order using `expectedVersion`. Use `dryRun` to see the manual practice records that removals would revoke. |
-| `tracker_apply_today_rules` | write, overwrites | Rebuild the day's plan with one-day rule changes (needs `expectedVersion`); `dryRun` |
+| `tracker_edit_today` | write, removes | Choose a source with `planId` on multi-source days. Edit up to 10 items using `expectedVersion`. Use `dryRun` to see the manual practice records that removals would revoke. |
+| `tracker_apply_today_rules` | write, overwrites | Apply one-day rules to the selected `planId` with `expectedVersion`. Supports `dryRun`. |
 | `tracker_export_notes` | writes files | Write the notes knowledge base and a mistake log to a local directory |
 
 `tracker_list_notes` filters `noteState` by `empty`, `stub` (only the unedited note template) or `written`.

@@ -238,25 +238,28 @@ export function registerBatchTools({ register }: Registrar): void {
       description: `Apply 1 to ${MAX_PLAN_STEPS} ordered plan edits with expectedVersion and operationId. Actions: "remove", "replace", "append", "replace_unfinished" (last). Removing a completed item can also revoke practice records. Use dryRun to list the affected records, then get user confirmation and pass their IDs on the remove step.`,
       inputSchema: z.object({
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('YYYY-MM-DD; defaults to today in the configured timezone'),
-        expectedVersion: z.number().int().positive().describe('Plan version from tracker_get_today'),
+        planId: z.uuid().optional(),
+        expectedVersion: z.number().int().positive().describe('Source plan version'),
         steps: z.array(planStepSchema).min(1).max(MAX_PLAN_STEPS),
         operationId: batchOperationIdSchema,
         dryRun: z.boolean().optional().default(false).describe('Validate targets and list practice records that would be revoked without changing the plan'),
       }),
     },
-    async (application, { date, expectedVersion, steps, operationId, dryRun }) => {
+    async (application, { date, planId, expectedVersion, steps, operationId, dryRun }) => {
       const batchFingerprint = dryRun ? undefined : await bindBatch(
         operationId,
         [date ?? null, expectedVersion, steps.map(step => ({
           ...step,
           ...(step.action === 'remove' ? { confirmRevokePracticeIds: [...(step.confirmRevokePracticeIds ?? [])].sort() } : {}),
-        }))],
+        })), ...(planId ? [planId] : [])],
         steps.length,
         application.planning.fingerprintForOperation,
         'OPERATION_REUSED',
       );
       const targetDate = date ?? localDate(Date.now(), await configuredZone(application));
-      const plan = (await application.planning.plans({ date: targetDate })).items[0];
+      const { items: plans } = await application.planning.plans({ date: targetDate });
+      if (!planId && plans.length > 1) return refuse('PLAN_SOURCE_REQUIRED', 'Choose a planId from tracker_get_today.');
+      const plan = planId ? plans.find(item => item.id === planId) : plans[0];
       if (!plan) return refuse('PLAN_NOT_FOUND', `No study plan exists for ${targetDate}. Create it with tracker_create_today first.`);
       if (dryRun && plan.version !== expectedVersion) {
         return refuse('STALE_PLAN', `The plan is now at version ${plan.version}. Read it again before previewing changes.`);
@@ -292,7 +295,7 @@ export function registerBatchTools({ register }: Registrar): void {
         if (step.action !== 'remove') return [];
         const item = plan.items.find(candidate => candidate.id === itemId);
         if (!item) return []; // An earlier attempt may already have removed this item.
-        const practiceIds = item.evidenceIds.filter(id => id.startsWith('manual:')).map(id => id.slice('manual:'.length)).sort();
+        const practiceIds = plan.studyPlan || plans.length > 1 ? [] : item.evidenceIds.filter(id => id.startsWith('manual:')).map(id => id.slice('manual:'.length)).sort();
         return [{ index, frontendId: step.frontendId, practiceIds, count: practiceIds.length }];
       });
       if (dryRun) return json({ dryRun: true, date: plan.date, version: plan.version, steps: resolved.map(item => item.label), removals });

@@ -187,7 +187,7 @@ it('backs up v7 before upgrade, preserves historical evidence, and replays after
     const historicalStats = original.getPracticeStats();
     const historicalProjection = original.getDashboardRawData();
     db.exec(
-      'DROP TABLE practice_operations; ALTER TABLE practice_records DROP COLUMN duration_minutes; ALTER TABLE practice_records DROP COLUMN revision; UPDATE schema_version SET version=7;',
+      'DROP TABLE practice_operations; ALTER TABLE practice_records DROP COLUMN duration_minutes; ALTER TABLE practice_records DROP COLUMN revision; CREATE UNIQUE INDEX historical_day ON daily_plans(plan_date); UPDATE schema_version SET version=7;',
     );
     assert.equal(inspectCatalogSchema(db), 7);
     const evidence = db.prepare('SELECT * FROM snapshot_successes').all();
@@ -268,7 +268,7 @@ it('blocks new writes on backup failure but permits read-only replay of an exist
     assert.equal(guarded.queryPracticeRecords().total, 1);
     assert.equal((await guarded.createPracticeRecord({ ...input, operationId: 'already-written' })).id, original.id);
     db.exec(
-      'DROP TABLE practice_operations; ALTER TABLE practice_records DROP COLUMN duration_minutes; ALTER TABLE practice_records DROP COLUMN revision; UPDATE schema_version SET version=7;',
+      'DROP TABLE practice_operations; ALTER TABLE practice_records DROP COLUMN duration_minutes; ALTER TABLE practice_records DROP COLUMN revision; CREATE UNIQUE INDEX historical_day ON daily_plans(plan_date); UPDATE schema_version SET version=7;',
     );
     await assert.rejects(CatalogStore.open(db, { backupDir: obstruction }));
     assert.equal(inspectCatalogSchema(db), 7);

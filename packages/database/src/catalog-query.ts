@@ -12,6 +12,7 @@ import {
   normalizeReasoningEffort,
   resolveModelReasoningEffort,
   themePaletteSchema,
+  reviewIntervalsSchema,
   type CatalogProblem,
   type CatalogQueryInput,
   type CatalogStats,
@@ -314,6 +315,7 @@ export function getUserSettings(db: DatabaseSync): UserSettings {
   let llmProvider: 'gemini' | 'openai' | 'deepseek' = 'gemini';
   // Undefined means "never chosen": planning derives both from active strategies instead.
   let reviewPolicy: 'fixed' | 'duration-v1' | 'outcome-v2' | undefined;
+  let reviewIntervals: number[] | undefined;
   let personalDurationCalibration: boolean | undefined;
 
   let geminiApiKey: string | null = null;
@@ -362,6 +364,10 @@ export function getUserSettings(db: DatabaseSync): UserSettings {
     }
     if (r.key === 'review_policy' && (r.value === 'fixed' || r.value === 'duration-v1' || r.value === 'outcome-v2')) {
       reviewPolicy = r.value;
+    }
+    if (r.key === 'review_intervals') {
+      const parsed = reviewIntervalsSchema.safeParse(r.value.split(',').map(Number));
+      if (parsed.success) reviewIntervals = parsed.data;
     }
     if (r.key === 'personal_duration_calibration' && (r.value === 'true' || r.value === 'false')) {
       personalDurationCalibration = r.value === 'true';
@@ -464,6 +470,7 @@ export function getUserSettings(db: DatabaseSync): UserSettings {
     palette,
     timezone,
     llmProvider,
+    ...(reviewIntervals && { reviewIntervals }),
     ...(reviewPolicy ? { reviewPolicy } : {}),
     ...(personalDurationCalibration !== undefined ? { personalDurationCalibration } : {}),
     geminiApiKey,
@@ -524,7 +531,8 @@ export function updateUserSettingsTransaction(
       updateStmt.run('llm_provider', input.llmProvider, now);
     }
     // Review spacing changes every projected due date, so cached plan inputs and previews go stale.
-    if (input.reviewPolicy !== undefined || input.personalDurationCalibration !== undefined) {
+    if (input.reviewPolicy !== undefined || input.reviewIntervals !== undefined || input.personalDurationCalibration !== undefined) {
+      if (input.reviewIntervals !== undefined) updateStmt.run('review_intervals', input.reviewIntervals.join(','), now);
       if (input.reviewPolicy !== undefined) updateStmt.run('review_policy', input.reviewPolicy, now);
       if (input.personalDurationCalibration !== undefined) {
         updateStmt.run('personal_duration_calibration', String(input.personalDurationCalibration), now);

@@ -1184,7 +1184,7 @@ export class DeviceSyncService {
         appVersion: envelope.appVersion,
         payloadBytes: envelope.payloadBytes,
         compatible: envelope.payloadFormat.bundleVersion === DEVICE_SYNC_BUNDLE_VERSION
-          && envelope.payloadFormat.schemaVersion === DEVICE_SYNC_SCHEMA_VERSION,
+          && [12, DEVICE_SYNC_SCHEMA_VERSION].includes(envelope.payloadFormat.schemaVersion),
       };
     }
     const future = futureEnvelopeSchema.safeParse(raw);

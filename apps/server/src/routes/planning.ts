@@ -4,6 +4,9 @@ import { applicationRoute } from './application-route.ts';
 
 export function registerPlanningRoutes(app: FastifyInstance, { application }: RouteContext): void {
   const { planning } = application;
+  app.get('/api/v1/study-plan', applicationRoute(r => planning.studyPlan((r.query as {id?:string}).id)));
+  app.post('/api/v1/study-plan', applicationRoute(r => planning.saveStudyPlan(r.body)));
+  app.patch('/api/v1/study-plan', applicationRoute(r => planning.updateStudyPlan(r.body)));
   app.get('/api/v1/strategies', applicationRoute(() => planning.strategies()));
   app.post('/api/v1/strategies', applicationRoute(r => planning.createStrategy(r.body), 201));
   app.patch('/api/v1/strategies/:id', applicationRoute(r => planning.updateStrategy(r.body, r.params as { id: string })));

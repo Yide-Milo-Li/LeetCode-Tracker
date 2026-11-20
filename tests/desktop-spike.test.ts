@@ -552,7 +552,7 @@ test('Desktop bundled server lifecycle, session auth, and data persistence', asy
       assert.equal(exportResponse.status, 200);
       const exported = await exportResponse.json();
       assert.equal(exported.version, 5);
-      assert.equal(exported.schemaVersion, 12);
+      assert.equal(exported.schemaVersion, 13);
     } finally {
       const exit2 = await stopTestServer(server2);
       assert.equal(exit2, 0);

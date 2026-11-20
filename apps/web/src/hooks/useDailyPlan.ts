@@ -8,7 +8,7 @@ import { api, type DailyPlan, type EnsureResult, type PlanItem, type PracticeRec
 import type { Language } from '../i18n.ts';
 import { localizeApiError } from '../error-i18n.ts';
 import type { RecommendationFeedbackReason } from '../../../../packages/contracts/src/recommendations.ts';
-import { evidenceAfter } from '../../../../packages/domain/src/index.ts';
+import { evidenceAfter, createEvidenceDateResolver } from '../../../../packages/domain/src/recommendations.ts';
 
 export interface UseDailyPlanReturn {
   /** Indicates initial load of today's plan is in progress. */
@@ -35,13 +35,13 @@ export interface UseDailyPlanReturn {
   refresh: () => Promise<void>;
   /** Append one question to today's plan. */
   /** Append one problem; `review` pulls the next due review even when today's review cap is full. */
-  appendOne: (kind?: 'new' | 'review') => Promise<void>;
+  appendOne: (kind?: 'new' | 'review', source?: DailyPlan) => Promise<void>;
   /** Remove a single question from today's plan. */
-  removeOne: (item: PlanItem, feedbackReason?: RecommendationFeedbackReason) => Promise<void>;
+  removeOne: (item: PlanItem, feedbackReason?: RecommendationFeedbackReason, source?: DailyPlan) => Promise<void>;
   /** Replace a single problem in today's plan while preserving slot properties. */
-  replaceOne: (item: PlanItem, feedbackReason?: RecommendationFeedbackReason) => Promise<void>;
+  replaceOne: (item: PlanItem, feedbackReason?: RecommendationFeedbackReason, source?: DailyPlan) => Promise<void>;
   /** Replace all unfinished problems in today's plan. */
-  replaceAllUnfinished: () => Promise<void>;
+  replaceAllUnfinished: (source?: DailyPlan) => Promise<void>;
   /** Synchronize newly committed plan after a prompt rule override. */
   onOverrideCommitted: (newPlan: DailyPlan) => void;
   /** Reload plan status after a practice session is logged or updated. */
@@ -133,22 +133,33 @@ export function useDailyPlan(lang: Language = 'en'): UseDailyPlanReturn {
     };
   }, [refresh]);
 
+  const acceptPlan = useCallback((updated: DailyPlan) => {
+    setEnsureResult(current => {
+      const prior = current?.plans ?? (current?.plan ? [current.plan] : []);
+      const sameDay = prior.filter(plan => plan.date === updated.date);
+      const plans = sameDay.some(plan => plan.id === updated.id)
+        ? sameDay.map(plan => plan.id === updated.id ? updated : plan)
+        : [...sameDay, updated];
+      return { status: 'ready', plan: plans[0], plans };
+    });
+  }, []);
+
   const replaceOne = useCallback(
-    async (item: PlanItem, feedbackReason?: RecommendationFeedbackReason) => {
-      if (!ensureResult?.plan || planMutationPending.current) return;
+    async (item: PlanItem, feedbackReason?: RecommendationFeedbackReason, source = ensureResult?.plan) => {
+      if (!source || planMutationPending.current) return;
       planMutationPending.current = true;
       setReplacingItemId(item.id);
       setMutationError(null);
       const currentRevision = ++changeRevision.current;
       try {
-        const updated = await api.replacePlanItems(ensureResult.plan.id, {
+        const updated = await api.replacePlanItems(source.id, {
           mode: 'one',
           itemId: item.id,
           ...(feedbackReason ? { feedbackReason } : {}),
-          expectedVersion: ensureResult.plan.version,
+          expectedVersion: source.version,
         });
         if (currentRevision === changeRevision.current) {
-          setEnsureResult({ status: 'ready', plan: updated });
+          acceptPlan(updated);
         } else {
           queuedRefresh.current = true;
         }
@@ -169,22 +180,22 @@ export function useDailyPlan(lang: Language = 'en'): UseDailyPlanReturn {
         }
       }
     },
-    [ensureResult, refresh],
+    [ensureResult, refresh, acceptPlan],
   );
 
-  const replaceAllUnfinished = useCallback(async () => {
-    if (!ensureResult?.plan || planMutationPending.current) return;
+  const replaceAllUnfinished = useCallback(async (source = ensureResult?.plan) => {
+    if (!source || planMutationPending.current) return;
     planMutationPending.current = true;
     setReplacingBatch(true);
     setMutationError(null);
     const currentRevision = ++changeRevision.current;
     try {
-      const updated = await api.replacePlanItems(ensureResult.plan.id, {
+      const updated = await api.replacePlanItems(source.id, {
         mode: 'all_unfinished',
-        expectedVersion: ensureResult.plan.version,
+        expectedVersion: source.version,
       });
       if (currentRevision === changeRevision.current) {
-        setEnsureResult({ status: 'ready', plan: updated });
+        acceptPlan(updated);
       } else {
         queuedRefresh.current = true;
       }
@@ -204,21 +215,21 @@ export function useDailyPlan(lang: Language = 'en'): UseDailyPlanReturn {
         void refresh();
       }
     }
-  }, [ensureResult, refresh]);
+  }, [ensureResult, refresh, acceptPlan]);
 
-  const appendOne = useCallback(async (kind?: 'new' | 'review') => {
-    if (!ensureResult?.plan || planMutationPending.current) return;
+  const appendOne = useCallback(async (kind?: 'new' | 'review', source = ensureResult?.plan) => {
+    if (!source || planMutationPending.current) return;
     planMutationPending.current = true;
     setAppending(true);
     setMutationError(null);
     const currentRevision = ++changeRevision.current;
     try {
-      const updated = await api.appendPlanItem(ensureResult.plan.id, {
-        expectedVersion: ensureResult.plan.version,
+      const updated = await api.appendPlanItem(source.id, {
+        expectedVersion: source.version,
         ...(kind ? { kind } : {}),
       });
       if (currentRevision === changeRevision.current) {
-        setEnsureResult({ status: 'ready', plan: updated });
+        acceptPlan(updated);
       } else {
         queuedRefresh.current = true;
       }
@@ -238,23 +249,24 @@ export function useDailyPlan(lang: Language = 'en'): UseDailyPlanReturn {
         void refresh();
       }
     }
-  }, [ensureResult, refresh]);
+  }, [ensureResult, refresh, acceptPlan]);
 
   const removeOne = useCallback(
-    async (item: PlanItem, feedbackReason?: RecommendationFeedbackReason) => {
-      if (!ensureResult?.plan || planMutationPending.current) return;
+    async (item: PlanItem, feedbackReason?: RecommendationFeedbackReason, source = ensureResult?.plan) => {
+      if (!source || planMutationPending.current) return;
       planMutationPending.current = true;
       setRemovingItemId(item.id);
       setMutationError(null);
       const currentRevision = ++changeRevision.current;
       try {
-        const updated = await api.removePlanItem(ensureResult.plan.id, {
+        const updated = await api.removePlanItem(source.id, {
+          keepPractice: true,
           itemId: item.id,
           ...(feedbackReason ? { feedbackReason } : {}),
-          expectedVersion: ensureResult.plan.version,
+          expectedVersion: source.version,
         });
         if (currentRevision === changeRevision.current) {
-          setEnsureResult({ status: 'ready', plan: updated });
+          acceptPlan(updated);
         } else {
           queuedRefresh.current = true;
         }
@@ -275,14 +287,14 @@ export function useDailyPlan(lang: Language = 'en'): UseDailyPlanReturn {
         }
       }
     },
-    [ensureResult, refresh],
+    [ensureResult, refresh, acceptPlan],
   );
 
   const onOverrideCommitted = useCallback((newPlan: DailyPlan) => {
     changeRevision.current++;
     setMutationError(null);
-    setEnsureResult({ status: 'ready', plan: newPlan });
-  }, []);
+    acceptPlan(newPlan);
+  }, [acceptPlan]);
 
   const onPracticeLogged = useCallback(
     async (record?: PracticeRecord) => {
@@ -301,22 +313,21 @@ export function useDailyPlan(lang: Language = 'en'): UseDailyPlanReturn {
             zone: record.sourceTimezone,
             recordedAt: record.createdAt,
           };
-          return {
-            ...current,
-            plan: {
-              ...current.plan,
-              items: current.plan.items.map((item) => {
-                const evidenceIds = item.evidenceIds.filter((value) => value !== id);
-                if (
-                  record.status === 'active' &&
-                  record.completed &&
-                  evidenceAfter(evidence, item.addedAt, Date.now())
-                )
-                  evidenceIds.push(id);
-                return { ...item, evidenceIds, completed: evidenceIds.length > 0 };
-              }),
-            },
-          };
+          const sources = current.plans ?? [current.plan];
+          const sharedGoalItem = sources.some(source => source.studyPlan && source.items.some(item => item.problem.questionId === record.questionId));
+          const now = Date.now();
+          const plans = sources.map(source => ({
+            ...source,
+            items: source.items.map(item => {
+              if (item.problem.questionId !== record.questionId) return item;
+              const evidenceIds = item.evidenceIds.filter(value => value !== id);
+              if (record.status === 'active' && record.completed &&
+                (sharedGoalItem ? createEvidenceDateResolver(source.timezone, now)(evidence) === source.date : evidenceAfter(evidence, item.addedAt, now)))
+                evidenceIds.push(id);
+              return { ...item, evidenceIds, completed: evidenceIds.length > 0 };
+            }),
+          }));
+          return { ...current, plans, plan: plans[0] };
         });
       await refresh();
     },

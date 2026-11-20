@@ -7,6 +7,7 @@
  */
 import { readFile, stat } from 'node:fs/promises';
 import * as path from 'node:path';
+import { studyPlanEditSchema, studyPlanRequestSchema } from '../../../packages/contracts/src/study-plan.ts';
 import { z } from 'zod';
 import { isTimeZone, localDate } from '../../../packages/contracts/src/time.ts';
 import type { CatalogProblem } from '../../../packages/contracts/src/sync.ts';
@@ -29,6 +30,21 @@ export function createTrackerToolRegistry(profile: Pick<TrackerProfile, 'exists'
   registerNoteTools(registrar);
   registerBatchTools(registrar);
   registerCatalogTools(registrar);
+
+  server.registerTool('tracker_create_study_plan', {
+    description: 'Add a goal from ordered catalog IDs. Weekdays start at Sun=0. Put prerequisites first. Reuse the UUID on retry.',
+    inputSchema: studyPlanRequestSchema,
+  }, async (application, args) => json(await application.planning.saveStudyPlan(args)),
+  args => args.dryRun ? 'preview' : 'write', { destructive: true, idempotent: true });
+  server.registerTool('tracker_update_study_plan', {
+    description: 'Edit a goal’s list or schedule and replan. Read its id/version first. Null clears deadline, maximum or mix.',
+    inputSchema: studyPlanEditSchema,
+  }, async (app, args) => json(await app.planning.updateStudyPlan(args)),
+  args => args.dryRun ? 'preview' : 'write', { destructive: false, idempotent: true });
+  server.registerTool('tracker_get_study_plan', {
+    description: 'List goals and read one goal’s stages, progress and calendars by ID.',
+    inputSchema: z.object({ id: z.string().uuid().optional() }),
+  }, async (application, {id}) => json(await application.planning.studyPlan(id)));
 
   // 1. tracker_status
   server.registerTool(
@@ -53,13 +69,16 @@ export function createTrackerToolRegistry(profile: Pick<TrackerProfile, 'exists'
         const plansResult = await application.planning.plans({ date: activeDate });
         const plan = plansResult.items[0] ?? null;
         if (plan) {
+          const items = plansResult.items.flatMap(source => source.items);
+          const total = new Set(items.map(item => item.problem.questionId)).size;
           todayPlanSummary = {
             hasPlan: true,
             planId: plan.id,
             date: plan.date,
-            targetCount: plan.rules.dailyCount,
-            completedCount: plan.items.filter((i) => i.completed).length,
-            totalItems: plan.items.length,
+            targetCount: plansResult.items.length > 1 ? total : plan.rules.dailyCount,
+            completedCount: new Set(items.filter(i => i.completed).map(i => i.problem.questionId)).size,
+            totalItems: total,
+            ...(plansResult.items.length > 1 && { planIds: plansResult.items.map(p => p.id) }),
           };
         } else {
           todayPlanSummary = {
@@ -144,7 +163,7 @@ export function createTrackerToolRegistry(profile: Pick<TrackerProfile, 'exists'
   server.registerTool(
     'tracker_get_today',
     {
-      description: 'Read a stored daily plan with frontend IDs, reasons, completion and version for edits. Generate one with tracker_create_today.',
+      description: 'Read a saved day or read-only course forecast. For edits, save a projected day with tracker_create_today first.',
       inputSchema: z.object({
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Explicit date in YYYY-MM-DD format (defaults to current date in configured timezone)'),
       }),
@@ -165,18 +184,20 @@ export function createTrackerToolRegistry(profile: Pick<TrackerProfile, 'exists'
         targetDate = localDate(Date.now(), tz);
       }
 
-      const plansResult = await application.planning.plans({ date: targetDate });
-      const plan = plansResult.items[0] ?? null;
+      const { plan, plans, projected, projectedIds, pendingStrategy } = await application.planning.readDay(targetDate);
 
       if (!plan) {
         return json({
           hasPlan: false,
           date: targetDate,
+          ...(pendingStrategy && { pendingStrategy }),
           message: `No study plan has been generated for date "${targetDate}" yet.`,
         });
       }
 
-      return json(summarizePlan(plan, await profileLang(application)));
+      const lang = await profileLang(application);
+      return json({ ...summarizePlan(plan, lang), ...(pendingStrategy && { pendingStrategy }), ...(projected && { projected: true }),
+        ...(plans.length > 1 && { plans: plans.map(p => ({ ...summarizePlan(p, lang), projected: projectedIds.includes(p.id) })) }) });
     },
   );
 

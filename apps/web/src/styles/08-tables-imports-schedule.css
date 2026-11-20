@@ -470,6 +470,68 @@
   font-size: 12px;
 }
 /* Study schedule and quota editor preserve the complete rule surface. */
+.study-arrangement-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
+  gap: 12px;
+  margin-block-end: 24px;
+}
+.study-arrangement-option {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  padding: 14px;
+  text-align: start;
+  white-space: normal;
+}
+.study-arrangement-option > span {
+  font-size: 13px;
+}
+.study-goal-fields .form-group {
+  display: block;
+  margin: 0;
+}
+.study-goal-options {
+  padding-block: 12px;
+  border-block-start: 1px solid var(--border);
+}
+.study-goal-options summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.study-goal-options[open] > :nth-child(2),
+.study-goal-preview {
+  margin-block-start: 14px;
+}
+.study-goal-preferences {
+  display: grid;
+  gap: 12px;
+}
+.study-goal-preferences p {
+  margin: 0;
+}
+.study-edit-list {
+  margin: 0;
+  padding-inline-start: 1.75rem;
+}
+.study-edit-line, .study-edit-actions {
+  display: flex;
+  align-items: center;
+}
+.study-edit-line {
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-block: 0.25rem;
+  border-block-end: 1px solid var(--border);
+}
+.study-edit-line > span { overflow-wrap: anywhere; }
+.study-edit-actions { flex-shrink: 0; }
+.study-goal-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 145px), 1fr));
+  align-items: end;
+  gap: 12px;
+}
 .view-header {
   margin-bottom: 24px;
 }

@@ -440,6 +440,10 @@ export type LLMProvider = z.infer<typeof llmProviderSchema>;
  */
 const settingsReviewPolicySchema = z.enum(['fixed', 'duration-v1', 'outcome-v2']);
 
+export const defaultReviewIntervals = [1, 3, 7, 14, 30] as const;
+export const reviewIntervalsSchema = z.array(z.number().int().min(1).max(365)).min(1).max(10)
+  .refine(days => days.every((value, index) => index === 0 || value > days[index - 1]), 'Review intervals must increase at each stage');
+
 /** Persisted user preference settings. */
 export const userSettingsSchema = z.object({
   language: z.enum(['en', 'zh']),
@@ -447,6 +451,7 @@ export const userSettingsSchema = z.object({
   promptSwapFeedback: z.boolean().optional(),
   /** Absent until chosen in Settings; planning then derives it from active strategies. */
   reviewPolicy: settingsReviewPolicySchema.optional(),
+  reviewIntervals: reviewIntervalsSchema.optional(),
   /** Absent until chosen in Settings; planning then derives it from active strategies. */
   personalDurationCalibration: z.boolean().optional(),
   theme: z.enum(['light', 'dark', 'system']),
@@ -503,6 +508,7 @@ export const updateSettingsInputSchema = z.object({
   notesFormatOnSave: z.boolean().optional(),
   promptSwapFeedback: z.boolean().optional(),
   reviewPolicy: settingsReviewPolicySchema.optional(),
+  reviewIntervals: reviewIntervalsSchema.optional(),
   personalDurationCalibration: z.boolean().optional(),
   theme: z.enum(['light', 'dark', 'system']).optional(),
   palette: themePaletteSchema.optional(),
@@ -527,6 +533,7 @@ export const updateSettingsInputSchema = z.object({
   data.notesFormatOnSave !== undefined ||
   data.promptSwapFeedback !== undefined ||
   data.reviewPolicy !== undefined ||
+  data.reviewIntervals !== undefined ||
   data.personalDurationCalibration !== undefined ||
   data.theme !== undefined ||
   data.palette !== undefined ||

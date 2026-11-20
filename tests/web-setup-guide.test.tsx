@@ -34,6 +34,7 @@ const baseSettings = { language: 'en' as const, theme: 'light' as const, timezon
 
 /** Stub the three facts the gate checks. */
 function stubStatus({ timezone = null as string | null, problems = 0, scheduled = false } = {}) {
+  mock.method(api, 'getStudyPlan', async () => ({plan:null}));
   mock.method(api, 'getSettings', async () => ({ ...baseSettings, timezone }));
   mock.method(api, 'getCatalogStats', async () => ({ totalProblems: problems }) as never);
   mock.method(api, 'getStrategies', async () =>
@@ -145,4 +146,11 @@ it('builds a weekday preset that passes the shared strategy contract', () => {
     assert.equal(parsed.data?.rules.dailyCount, 3);
     assert.equal(parsed.data?.rules.reviewCount, 1);
   }
+});
+
+it('opens Today directly when an MCP course supplies the first study schedule', async () => {
+  stubStatus({timezone:'UTC', problems:4});
+  mock.method(api, 'getStudyPlan', async () => ({plan:{status:'active'}} as never));
+  await renderGate();
+  assert.equal(localStorage.getItem(SETUP_DONE_KEY), 'true');
 });

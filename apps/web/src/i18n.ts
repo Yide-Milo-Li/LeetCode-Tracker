@@ -212,7 +212,7 @@ export const translations = {
 
     // Phase 4: Navigation & Today Plan
     navToday: "Today's Plan",
-    navStrategies: 'Strategies & Schedule',
+    navStrategies: 'Study Schedule',
     todayTitle: "Today's Study Plan",
     todaySubtitle: 'Intelligent daily recommendation customized for your study goals',
     restDayTitle: 'Rest Day',
@@ -228,9 +228,9 @@ export const translations = {
     replaceAllUnfinished: 'Replace Unfinished',
     removeProblem: 'Remove from today’s plan',
     removingProblem: 'Removing problem…',
-    confirmRemoveCompletedTitle: 'Revoke Record & Remove Problem',
-    confirmRemoveCompletedMessage: 'This problem is already marked complete. Removing it will also revoke its practice record and completion statistics. Are you sure you want to remove it?',
-    confirmRemoveBtn: 'Remove & Revoke',
+    confirmRemoveCompletedTitle: 'Remove from this list',
+    confirmRemoveCompletedMessage: 'Remove this completed problem from this list? Your practice record and progress in other sources will be kept.',
+    confirmRemoveBtn: 'Remove problem',
     cannotRemoveLastProblem: 'Today’s plan must retain at least one problem.',
     allProblemsRemovedRestDesc: 'All problems for today have been removed. Today is a rest day. Rest up and recharge.',
     promptOverride: 'Adjust with AI Prompt',
@@ -251,7 +251,13 @@ export const translations = {
     noPlans: 'No daily plans recorded yet.',
 
     // Phase 4: Strategy Management
-    strategiesTitle: 'Recommendation Strategies',
+    strategiesTitle: 'Study Schedule',
+    newStudyArrangement: 'New Study Arrangement',
+    newStudyGoal: 'Complete a Problem List',
+    newStudyGoalHint: 'Set a goal and adapt the daily workload to your progress.',
+    newWeeklyPractice: 'Set Up Weekly Practice',
+    newWeeklyPracticeHint: 'Choose the days, problem count and preferences that repeat each week.',
+    emptyStudySchedule: 'Create a goal from a problem list or set up a weekly practice routine.',
     strategiesSubtitle: 'Define daily question counts, difficulty mixes, and weekly schedules',
     newStrategy: 'New Strategy',
     editStrategy: 'Edit Strategy',
@@ -708,7 +714,7 @@ export const translations = {
 
     // Phase 4: Navigation & Today Plan
     navToday: '今日计划',
-    navStrategies: '推荐策略与排期',
+    navStrategies: '学习安排',
     todayTitle: '今日学习计划',
     todaySubtitle: '根据推荐策略与刷题进度定制的今日任务',
     restDayTitle: '今天是休息日',
@@ -724,9 +730,9 @@ export const translations = {
     replaceAllUnfinished: '换一批未完成',
     removeProblem: '从今日计划移除',
     removingProblem: '移除题目中…',
-    confirmRemoveCompletedTitle: '撤销打卡并移除题目',
-    confirmRemoveCompletedMessage: '该题目已打卡完成。移除后将一并撤销本次做题记录与完成统计，是否确认删除？',
-    confirmRemoveBtn: '确认撤销并移除',
+    confirmRemoveCompletedTitle: '从当前题单移除',
+    confirmRemoveCompletedMessage: '这道题已完成。确认从当前题单移除？你的练习记录和其他来源的进度都会保留。',
+    confirmRemoveBtn: '确认移除',
     cannotRemoveLastProblem: '今日计划至少需保留 1 道题目。',
     allProblemsRemovedRestDesc: '今日任务已全部移除，今天是休息日。好好放松，保持节奏。',
     promptOverride: 'Prompt 临时调整',
@@ -747,7 +753,13 @@ export const translations = {
     noPlans: '暂无每日计划记录。',
 
     // Phase 4: Strategy Management
-    strategiesTitle: '推荐策略',
+    strategiesTitle: '学习安排',
+    newStudyArrangement: '新建学习安排',
+    newStudyGoal: '完成一份题单',
+    newStudyGoalHint: '设定目标，按完成进度自动调整每日题量。',
+    newWeeklyPractice: '按周练习',
+    newWeeklyPracticeHint: '设置每周练习日、题量和选题偏好。',
+    emptyStudySchedule: '从一份题单开始目标计划，或设置每周练习。',
     strategiesSubtitle: '配置每日题量、难度配比、标签偏好与星期排期',
     newStrategy: '新建策略',
     editStrategy: '编辑策略',

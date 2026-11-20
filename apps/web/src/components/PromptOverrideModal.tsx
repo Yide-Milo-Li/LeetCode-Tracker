@@ -356,6 +356,7 @@ export const PromptOverrideModal: React.FC<PromptOverrideModalProps> = ({
       }
 
       const prev = await api.previewDailyPlanOverride({
+        ...(currentPlan && { planId: currentPlan.id }),
         ...(manual ? { rules: patchToSend } : { prompt: trimmed }),
         date: currentPlan?.date,
       });

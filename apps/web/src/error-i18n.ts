@@ -35,6 +35,22 @@ const API_ERROR_MESSAGES: Record<string, BilingualMessage> = {
     en: 'Study strategy not found.',
     zh: '未找到对应的学习策略。',
   },
+  TIMEZONE_REQUIRED: {
+    en: 'Set your time zone in Settings to schedule practice on your local dates.',
+    zh: '请先在设置中选择时区，再按当地日期安排练习。',
+  },
+  ACTIVE_STUDY_PLAN: {
+    en: 'A goal is already active. Refresh the schedule and reopen the goal editor to replace it.',
+    zh: '已有进行中的目标。请刷新学习安排，再打开目标表单进行替换。',
+  },
+  STUDY_PLAN_NOT_FOUND: {
+    en: 'This goal could not be found. Reopen Study Schedule.',
+    zh: '找不到这份题单，请重新打开学习安排。',
+  },
+  STALE_STUDY_PLAN: {
+    en: 'The active goal changed. Refresh the schedule and reopen the goal editor.',
+    zh: '当前目标已发生变化。请刷新学习安排，再打开目标表单。',
+  },
   INVALID_DATE: {
     en: 'Invalid plan date.',
     zh: '计划日期无效。',
@@ -269,6 +285,23 @@ function splitMixedBilingual(message: string, lang: Language): string | null {
  * to localized copy while preserving English assertions in `en` mode.
  */
 function matchKnownErrorMessage(message: string, lang: Language): string | null {
+  if (message === 'Include at least one new-problem day; review-only days must be study days.')
+    return lang === 'zh' ? '请至少保留一个可安排新题的学习日。' : message;
+  if (message === 'The deadline has passed.') return lang === 'zh' ? '请选择今天或之后的截止日。' : message;
+  const dependency = /^#(.+) requires #(.+)\. List prerequisites earlier in the route\.$/.exec(message);
+  if (dependency) return lang === 'zh' ? `#${dependency[1]} 依赖 #${dependency[2]}。请将 #${dependency[2]} 放在它前面，或一并移除依赖它的题目。` : message;
+  const duplicateRoute = /^Duplicate route item #(.+)\.$/.exec(message);
+  if (duplicateRoute) return lang === 'zh' ? `题号 #${duplicateRoute[1]} 在题单中重复了，请保留一次。` : message;
+  if (message === 'Use up to 150 problems, including at least one core problem.')
+    return lang === 'zh' ? '请保留至少一道必做题，整份题单最多 150 道。' : message;
+  const unknownProblem = /^Unknown catalog problem #(.+)\.$/.exec(message);
+  if (unknownProblem) {
+    return lang === 'zh' ? `本地题库中找不到题号 #${unknownProblem[1]}，请检查题号或先导入这道题。` : message;
+  }
+  const filteredGoalProblem = /^Stage ".+": #(.+) cannot be scheduled with these tags, Premium or difficulty rules\.$/.exec(message);
+  if (filteredGoalProblem) {
+    return lang === 'zh' ? `题号 #${filteredGoalProblem[1]} 与目标的题目筛选条件冲突，请检查难度占比、标签和会员题设置。` : message;
+  }
   if (/no eligible candidates found/i.test(message)) {
     return lang === 'zh'
       ? '没有符合当前难度与题型条件的候选题目，请调整规则后再试。'

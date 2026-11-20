@@ -191,6 +191,7 @@ export interface Candidate extends CatalogProblem {
   adaptiveReason?: string | null;
 }
 export interface PlanItem {
+  studyNodeId?: string;
   id: string;
   problem: CatalogProblem;
   kind: 'new' | 'review';
@@ -205,6 +206,7 @@ export interface PlanItem {
   adaptiveReason?: string | null;
 }
 export interface DailyPlan {
+  studyPlan?: { id: string; name: string; stage?: string; deadline?: string };
   id: string; date: string; timezone: string; version: number; strategyId: string | null; strategyVersion: number | null;
   rules: Rules; items: PlanItem[]; source: 'gemini' | 'openai' | 'deepseek' | 'local'; model: string | null; encouragement: Bilingual;
   notices: Bilingual[]; catalogRevision: number; practiceRevision: number; planningRevision: number;
@@ -217,11 +219,12 @@ export interface DailyPlan {
 }
 export interface RevisionStamp { catalog: number; practice: number; planning: number; timezone: string | null }
 export interface OverridePreview {
+  planId?: string;
   id: string; date: string; expiresAt: number; base: Rules | null; rules: RulePatch; changed: string[];
   issues: string[]; unresolved: string[]; candidateCount: number; counts: Record<Difficulty, number>;
   revision: RevisionStamp; planVersion: number | null; analysisDate?: string;
 }
-export interface EnsureResult { status: 'ready' | 'rest' | 'setup'; plan: DailyPlan | null }
+export interface EnsureResult { status: 'ready' | 'rest' | 'setup'; plan: DailyPlan | null; plans?: DailyPlan[] }
 export const operationSchema = z.object({ operationId: z.string().uuid() });
 export const updateStrategySchema = z.object({
   expectedVersion: z.number().int().positive(),
@@ -258,13 +261,14 @@ export const appendPlanItemSchema = operationSchema.extend({
 export type AppendPlanItemInput = z.infer<typeof appendPlanItemSchema>;
 
 export const removePlanItemSchema = operationSchema.extend({
+  keepPractice: z.boolean().optional(),
   expectedVersion: z.number().int().positive(),
   itemId: z.string().uuid(),
   feedbackReason: recommendationFeedbackReasonSchema.optional(),
 }).strict();
 export type RemovePlanItemInput = z.infer<typeof removePlanItemSchema>;
 
-export const overrideRequestSchema = z.object({ prompt: z.string().trim().min(1).max(4000).optional(), rules: rulePatchSchema.optional(), unresolved: z.array(z.string().max(500)).max(20).optional(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).strict();
+export const overrideRequestSchema = z.object({ planId: z.uuid().optional(), prompt: z.string().trim().min(1).max(4000).optional(), rules: rulePatchSchema.optional(), unresolved: z.array(z.string().max(500)).max(20).optional(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).strict();
 
 /** Stable public errors provide localized UI messages without leaking provider payloads. */
 export class PlanningError extends Error {

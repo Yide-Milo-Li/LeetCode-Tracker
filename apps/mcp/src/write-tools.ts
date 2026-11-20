@@ -242,7 +242,7 @@ export function registerWriteTools({ register }: Registrar): void {
   register(
     'tracker_create_today',
     {
-      description: 'Generate the study plan for today (or a date) from the scheduled strategy, or return the existing one. status "rest" means no strategy for that weekday; "setup" means catalog or strategy is missing.',
+      description: 'Ensure daily lists for goals and the scheduled strategy. Rest means no assignments. Setup means a timezone is needed.',
       inputSchema: z.object({
         date: dateSchema.optional().describe('YYYY-MM-DD; defaults to today in the configured timezone'),
         operationId: operationIdSchema,
@@ -251,7 +251,9 @@ export function registerWriteTools({ register }: Registrar): void {
     async (application, { date, operationId = randomUUID() }) => {
       const zone = await configuredZone(application);
       const result = await application.planning.ensure({ date, timezone: zone, operationId });
-      return json({ status: result.status, operationId, plan: result.plan ? summarizePlan(result.plan, await profileLang(application)) : null });
+      const lang = await profileLang(application);
+      return json({ status: result.status, operationId, plan: result.plan ? summarizePlan(result.plan, lang) : null,
+        ...(result.plans && result.plans.length > 1 && { plans: result.plans.map(plan => summarizePlan(plan, lang)) }) });
     },
     'write',
     { destructive: false, idempotent: true },
@@ -273,15 +275,16 @@ export function registerWriteTools({ register }: Registrar): void {
       description: 'Rebuild a day\'s plan with one-day rule changes (keeping completed items). Pass expectedVersion from tracker_get_today, or null if no plan exists yet. Set dryRun to preview candidate counts and issues.',
       inputSchema: z.object({
         date: dateSchema.optional(),
+        planId: z.uuid().optional().describe("Required for a multi-source day."),
         rules: todayRulesSchema,
         expectedVersion: z.number().int().positive().nullable(),
         operationId: requiredOperationIdSchema,
         dryRun: z.boolean().optional().default(false).describe('Check the rule change without applying it (default false)'),
       }),
     },
-    async (application, { date, rules, expectedVersion, operationId, dryRun = false }) => {
+    async (application, { date, planId, rules, expectedVersion, operationId, dryRun = false }) => {
       if (dryRun) {
-        const preview = await application.planning.previewOverride({ rules, date: await resolveDate(application, date) });
+        const preview = await application.planning.previewOverride({ rules, planId, date: await resolveDate(application, date) });
         return json({
           dryRun: true,
           date: preview.date,
@@ -293,7 +296,7 @@ export function registerWriteTools({ register }: Registrar): void {
           counts: preview.counts,
         });
       }
-      const { plan, changed } = await application.planning.applyRules({ rules, date, expectedVersion, operationId });
+      const { plan, changed } = await application.planning.applyRules({ rules, date, planId, expectedVersion, operationId });
       return json({ status: 'applied', operationId, changed, plan: summarizePlan(plan, await profileLang(application)) });
     },
     ({ dryRun }) => (dryRun ? 'read' : 'write'),

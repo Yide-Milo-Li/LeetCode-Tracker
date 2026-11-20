@@ -13,6 +13,7 @@ import { PracticeTimerButton } from './PracticeTimer.tsx';
 import { QuickCopyButtons } from './QuickCopyButtons.tsx';
 
 export interface TodayProblemRowProps {
+  otherSources?: string[];
   item: PlanItem;
   lang: Language;
   isSaving: boolean;
@@ -47,6 +48,7 @@ export function TodayProblemRow({
   onComplete,
   onReplaceOne,
   onRemove,
+  otherSources = [],
   onOpenQuickNote,
 }: TodayProblemRowProps) {
   const zh = lang === 'zh';
@@ -106,6 +108,11 @@ export function TodayProblemRow({
             </>
           )}
         </h3>
+        {otherSources.length > 0 && <div className="shared-problem-source">
+          {zh ? '也在' : 'Also in'} {otherSources[0]}
+          {otherSources.length > 1 && <InfoPopover label={zh ? `另有 ${otherSources.length - 1} 个来源` : `${otherSources.length - 1} more sources`}
+            content={<ul>{otherSources.slice(1).map((name, index) => <li key={index}>{name}</li>)}</ul>} />}
+        </div>}
         <div className="problem-meta">
           <span className={'difficulty ' + item.problem.difficulty.toLowerCase()}>
             {t[('stat' + item.problem.difficulty) as keyof typeof t]}

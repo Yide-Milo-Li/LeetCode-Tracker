@@ -330,6 +330,23 @@ export function initOrMigrateSchema(db: DatabaseSync, validateVersion?: (version
     createPracticeMetadataSchema(db);
     createNotesSchema(db);
     createOutcomeSchema(db);
+    // Rebuild both ends of the foreign key inside the migration transaction.
+    db.exec(`
+      ALTER TABLE daily_plan_versions RENAME TO old_daily_plan_versions;
+      ALTER TABLE daily_plans RENAME TO old_daily_plans;
+      CREATE TABLE daily_plans (
+        id TEXT PRIMARY KEY, plan_date TEXT NOT NULL, version INTEGER NOT NULL, payload_json TEXT NOT NULL,
+        goal_id TEXT GENERATED ALWAYS AS (coalesce(json_extract(payload_json, '$.studyPlan.id'), '')) VIRTUAL,
+        UNIQUE(plan_date, goal_id)
+      );
+      CREATE TABLE daily_plan_versions (plan_id TEXT NOT NULL REFERENCES daily_plans(id),
+        version INTEGER NOT NULL, payload_json TEXT NOT NULL, PRIMARY KEY(plan_id, version));
+      INSERT INTO daily_plans(id, plan_date, version, payload_json)
+        SELECT id, plan_date, version, payload_json FROM old_daily_plans;
+      INSERT INTO daily_plan_versions SELECT * FROM old_daily_plan_versions;
+      DROP TABLE old_daily_plan_versions;
+      DROP TABLE old_daily_plans;
+    `);
     // v12 fences strategy/provenance JSON semantics; v11 is reserved by LC-2.0.
     db.prepare('UPDATE schema_version SET version = ?').run(CURRENT_SCHEMA_VERSION);
     inspectCatalogSchema(db);

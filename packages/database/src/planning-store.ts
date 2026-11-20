@@ -1,5 +1,8 @@
+import { defaultReviewIntervals } from '../../contracts/src/sync.ts';
 /** Scheduling persistence shares catalog write ownership; provider calls never hold this queue. */
 import type { DatabaseSync } from 'node:sqlite';
+import { activeStudyIds, insertStudyPlan, readStudyPlan, updateStudyDocument, type StoredStudyPlan } from './study-plans.ts';
+import { localDate } from '../../contracts/src/time.ts';
 import { createEvidenceDateResolver } from '../../domain/src/recommendations.ts';
 import { randomUUID } from 'node:crypto';
 import type { CatalogStore } from './store.ts';
@@ -30,6 +33,19 @@ export class PlanningStore {
       this.db.exec('BEGIN IMMEDIATE');
       try { const value = fn(); this.db.exec('COMMIT'); return value; }
       catch (error) { this.db.exec('ROLLBACK'); throw error; }
+    });
+  }
+
+  saveStudyPlan(record: StoredStudyPlan, stamp: RevisionStamp, day: string, expectedVersion?: number, replaceId?: string): Promise<void> {
+    return this.write(() => {
+      this.assertStamp(stamp);
+      if (!stamp.timezone || localDate(Date.now(), stamp.timezone) !== day) throw new PlanningError('STALE_DATA', 'Calendar date changed; retry.');
+      if (expectedVersion === undefined) insertStudyPlan(this.db, record, replaceId);
+      else {
+        if (!activeStudyIds(this.db).includes(record.plan.id) || readStudyPlan(this.db, record.plan.id)?.plan.version !== expectedVersion)
+          throw new PlanningError('STALE_STUDY_PLAN', 'The goal changed. Reload it before editing.');
+        updateStudyDocument(this.db, record);
+      }
     });
   }
 
@@ -167,8 +183,9 @@ export class PlanningStore {
       ...events.filter(e => e.id.startsWith('snapshot:')).map(e => ({ ...e, completed: true, outcome: null })),
     ];
     const policy = this.reviewPolicy();
-    const states = projectPolicyReviewStates(policy, { problems: raw.problems, events, reviewEvents, solved, zone, baseline, now, resolveDate });
-    return { raw, events, reviewEvents, solved, baseline, policy, states, resolveDate };
+    const reviewIntervals = this.catalog.getSettings().reviewIntervals ?? defaultReviewIntervals;
+    const states = projectPolicyReviewStates(policy, { problems: raw.problems, events, reviewEvents, solved, zone, baseline, now, resolveDate, intervals: reviewIntervals });
+    return { raw, events, reviewEvents, solved, baseline, policy, states, resolveDate, reviewIntervals };
   }
 
   /** Expose only aggregate insight facts; GET never updates review caches or revisions. */
@@ -183,25 +200,58 @@ export class PlanningStore {
     return calculateKnowledgeProfile({ ...raw, now, userZone: zone, reviewStates: states, revision: this.stamp() }, resolveDate);
   }
 
-  /** Reconcile completion without mutating a historical version's event timestamps. */
+  /** A shared goal assignment credits the same local-day evidence in every source. */
+  private reconcileSources(plans: DailyPlan[], now: number, goalQuestions: Set<string>): DailyPlan[] {
+    if (!plans.length) return [];
+    const evidence = new Map<string, Evidence[]>();
+    for (const event of this.evidence()) {
+      const events = evidence.get(event.questionId) ?? [];
+      events.push(event);
+      evidence.set(event.questionId, events);
+    }
+    return plans.map(plan => {
+      const resolveDay = createEvidenceDateResolver(plan.timezone, now);
+      return { ...plan, items: plan.items.map(item => {
+        const questionId = item.problem.questionId;
+        const events = evidence.get(questionId) ?? [];
+        const sharedDay = plan.studyPlan || goalQuestions.has(questionId);
+        const evidenceIds = events.filter(event => sharedDay
+          ? resolveDay(event) === plan.date : evidenceAfter(event, item.addedAt, now)).map(event => event.id);
+        return { ...item, completed: evidenceIds.length > 0, evidenceIds };
+      }) };
+    });
+  }
+
   reconcile(plan: DailyPlan, now: number): DailyPlan {
-    const events = this.evidence();
-    return { ...plan, items: plan.items.map(item => {
-      const evidenceIds = events.filter(e => e.questionId === item.problem.questionId && evidenceAfter(e, item.addedAt, now)).map(e => e.id);
-      return { ...item, completed: evidenceIds.length > 0, evidenceIds };
-    }) };
+    const goals = plan.studyPlan ? [] : this.db.prepare(
+      "SELECT payload_json FROM daily_plans WHERE plan_date = ? AND goal_id <> ''"
+    ).all(plan.date).map(row => JSON.parse(String(row.payload_json)) as DailyPlan);
+    return this.reconcileSources([plan], now, this.goalQuestions(goals))[0];
   }
 
-  /** Read current plans; live completion is derived, while saved versions remain auditable. */
+  private goalQuestions(plans: DailyPlan[]): Set<string> {
+    return new Set(plans.flatMap(plan => plan.studyPlan ? plan.items.map(item => item.problem.questionId) : []));
+  }
+
+  /** Read current plans; immutable versions retain their original evidence. */
   plans(now = Date.now()): DailyPlan[] {
-    const rows = this.db.prepare('SELECT payload_json FROM daily_plans ORDER BY plan_date DESC').all() as { payload_json: string }[];
-    return rows.map(r => this.reconcile(JSON.parse(r.payload_json), now));
+    const dates = this.db.prepare('SELECT DISTINCT plan_date FROM daily_plans ORDER BY plan_date DESC').all();
+    return dates.flatMap(row => this.plansByDate(String(row.plan_date), now));
   }
 
-  /** Find a daily plan by calendar date string (YYYY-MM-DD). */
+  plansByDate(date: string, now = Date.now()): DailyPlan[] {
+    const rows = this.db.prepare('SELECT payload_json FROM daily_plans WHERE plan_date = ? ORDER BY rowid').all(date);
+    const plans = rows.map(row => JSON.parse(String(row.payload_json)) as DailyPlan);
+    return this.reconcileDay(plans, now);
+  }
+
+  reconcileDay(plans: DailyPlan[], now: number): DailyPlan[] {
+    return this.reconcileSources(plans, now, this.goalQuestions(plans));
+  }
+
+  /** Legacy callers use the first saved source when no plan ID was supplied. */
   planByDate(date: string, now = Date.now()): DailyPlan | null {
-    const row = this.db.prepare('SELECT payload_json FROM daily_plans WHERE plan_date = ?').get(date) as { payload_json: string } | undefined;
-    return row ? this.reconcile(JSON.parse(row.payload_json), now) : null;
+    return this.plansByDate(date, now)[0] ?? null;
   }
 
   /** Find a daily plan by UUID. */
@@ -264,8 +314,8 @@ export class PlanningStore {
       const replay = this.replay(operationId, fingerprint); if (replay) return replay;
       validate?.(); // Recheck request lifetime after waiting for the shared backup/write queue.
       this.assertStamp(stamp);
-      const current = this.db.prepare('SELECT version FROM daily_plans WHERE plan_date=?').get(plan.date);
-      if ((current?.version ?? null) !== expectedVersion) throw new PlanningError('STALE_PLAN', 'Plan changed; reload it');
+      const current = this.db.prepare('SELECT id, version FROM daily_plans WHERE plan_date=? AND goal_id=?').get(plan.date, plan.studyPlan?.id ?? '');
+      if ((current?.version ?? null) !== expectedVersion || (current && current.id !== plan.id)) throw new PlanningError('STALE_PLAN', 'Plan changed; reload it');
       const json = JSON.stringify(plan);
       if (changed) {
         this.db.prepare('INSERT INTO daily_plans VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET version=excluded.version,payload_json=excluded.payload_json').run(plan.id, plan.date, plan.version, json);

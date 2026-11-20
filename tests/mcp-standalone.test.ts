@@ -118,8 +118,8 @@ test('stdio server lists annotated tools and answers reads from the profile', as
   const { client } = await StdioClient.start(sourceEntry, w.dbPath);
   try {
     const { tools } = (await client.request('tools/list')).result;
-    assert.equal(tools.length, 25);
-    assert.ok(JSON.stringify(tools).length < 23500, `tools/list too large: ${JSON.stringify(tools).length}`);
+    assert.equal(tools.length, 28);
+    assert.ok(JSON.stringify(tools).length < 28500, `tools/list too large: ${JSON.stringify(tools).length}`);
     assert.deepEqual(tools.map((tool: { name: string }) => tool.name).sort(), [...TOOL_NAMES].sort());
     for (const tool of tools) {
       assert.equal(tool.annotations.readOnlyHint, (READ_TOOL_NAMES as readonly string[]).includes(tool.name), tool.name);

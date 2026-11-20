@@ -1,7 +1,7 @@
 /** Read-only compatibility checks shared by storage initialization and recovery. */
 import type { DatabaseSync } from 'node:sqlite';
 
-export const CURRENT_SCHEMA_VERSION = 12;
+export const CURRENT_SCHEMA_VERSION = 13;
 
 /** Unsupported historical or future catalog layout. */
 export class UnsupportedSchemaVersionError extends Error {
@@ -56,7 +56,7 @@ export function inspectCatalogSchema(db: DatabaseSync, allowEmpty = false): numb
   }
   if (versions.length !== 1 || !Number.isInteger(versions[0].version)) throw new DatabaseCorruptionError('Exactly one integer schema version is required');
   const version = versions[0].version;
-  if (![3, 4, 5, 6, 7, 8, 9, 10, CURRENT_SCHEMA_VERSION].includes(version)) throw new UnsupportedSchemaVersionError(`Unsupported catalog schema version ${version}; supported versions are 3 through 10 and ${CURRENT_SCHEMA_VERSION} (11 belongs to a different development format)`);
+  if (![3, 4, 5, 6, 7, 8, 9, 10, 12, CURRENT_SCHEMA_VERSION].includes(version)) throw new UnsupportedSchemaVersionError(`Unsupported catalog schema version ${version}; supported versions are 3 through 10, 12 and ${CURRENT_SCHEMA_VERSION} (11 belongs to a different development format)`);
   const required = { ...columns };
   if (version >= 4) {
     required.import_history = [...columns.import_history, 'unchanged_count', 'duplicate_count'];
@@ -159,7 +159,7 @@ export function inspectCatalogSchema(db: DatabaseSync, allowEmpty = false): numb
   }
 
   if (version >= 7) {
-    for (const [table, key] of Object.entries({ strategies: ['id'], strategy_versions: ['strategy_id', 'version'], weekday_assignments: ['weekday'], daily_plans: ['plan_date'], daily_plan_versions: ['plan_id', 'version'], planning_operations: ['id'], snapshot_successes: ['question_id', 'version'], problem_review_state: ['question_id'] })) requireKey(db, table, key);
+    for (const [table, key] of Object.entries({ strategies: ['id'], strategy_versions: ['strategy_id', 'version'], weekday_assignments: ['weekday'], daily_plans: version >= 13 ? ['plan_date', 'goal_id'] : ['plan_date'], daily_plan_versions: ['plan_id', 'version'], planning_operations: ['id'], snapshot_successes: ['question_id', 'version'], problem_review_state: ['question_id'] })) requireKey(db, table, key);
     for (const key of ['planning_revision', 'review_baseline']) {
       const row = db.prepare('SELECT value FROM catalog_meta WHERE key=?').get(key) as { value: string } | undefined;
       if (!row || !/^\d+$/.test(row.value) || !Number.isSafeInteger(Number(row.value))) throw new DatabaseCorruptionError(`Invalid planning metadata ${key}`);

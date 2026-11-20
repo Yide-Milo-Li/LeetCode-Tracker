@@ -37,7 +37,7 @@ export function attemptDays(events: ReviewEvent[], zone: string, now: number,
  * pass it to share one date-resolution pass with `longWindowFeatures`. It is read, never mutated.
  */
 export function projectOutcomeReviewStates(problems: CatalogProblem[], events: ReviewEvent[], solved: Set<string>, zone: string, baseline: number, now: number,
-  precomputedDays?: readonly AttemptDay[], resolveDate = createEvidenceDateResolver(zone, now)): ReviewState[] {
+  precomputedDays?: readonly AttemptDay[], resolveDate = createEvidenceDateResolver(zone, now), gaps: readonly number[] = intervals): ReviewState[] {
   const grouped = new Map<string, AttemptDay[]>();
   for (const day of precomputedDays ?? attemptDays(events, zone, now, resolveDate)) {
     const group = grouped.get(day.questionId) ?? []; group.push(day); grouped.set(day.questionId, group);
@@ -51,9 +51,9 @@ export function projectOutcomeReviewStates(problems: CatalogProblem[], events: R
         if (event.completed && event.recordedAt <= baseline) baselineSuccesses.push(event);
       }
     }
-    const legacy = reviewState(questionId, solved.has(questionId), baselineSuccesses, zone, baseline, now, { resolveDate });
-    const anchor = legacy.dueDate ? addDays(legacy.dueDate, -1) : null;
-    let due = legacy.dueDate, stage = 0, intervalDays = 1, established = due !== null;
+    const legacy = reviewState(questionId, solved.has(questionId), baselineSuccesses, zone, baseline, now, { resolveDate, intervals: gaps });
+    const anchor = legacy.dueDate ? addDays(legacy.dueDate, -gaps[0]) : null;
+    let due = legacy.dueDate, stage = 0, intervalDays = gaps[0], established = due !== null;
     const undatedSolved = solved.has(questionId) && !days.some(day => day.completed);
     let decision: ReviewDecision | undefined = anchor ? {
       policyVersion: 'outcome-v2', reason: 'baseline', stage, intervalDays, dueDate: due,
@@ -73,16 +73,16 @@ export function projectOutcomeReviewStates(problems: CatalogProblem[], events: R
           const recovery = addDays(day.date, 1); due = due && due < recovery ? due : recovery;
         }
       } else if (day.completed) {
-        if (!established) { established = true; due = addDays(day.date, 1); }
+        if (!established) { established = true; intervalDays = gaps[0]; due = addDays(day.date, intervalDays); }
         else if (day.outcome === 'assisted') {
-          intervalDays = Math.max(1, Math.floor(intervals[stage] / 2));
+          intervalDays = Math.max(1, Math.floor(gaps[stage] / 2));
           const proposed = addDays(day.date, intervalDays);
           due = priorDue && day.date < priorDue && priorDue < proposed ? priorDue : proposed;
         } else if (due === null || day.date >= due) {
           if (!afterBaseline) continue; // Baseline successes never charge another stage.
           if (day.outcome === 'independent' && threshold !== null && validDuration(day.duration) && day.duration >= threshold) {
-            intervalDays = Math.max(1, Math.floor(intervals[stage] / 2)); reason = 'duration_threshold';
-          } else { stage = Math.min(stage + 1, intervals.length - 1); intervalDays = intervals[stage]; }
+            intervalDays = Math.max(1, Math.floor(gaps[stage] / 2)); reason = 'duration_threshold';
+          } else { stage = Math.min(stage + 1, gaps.length - 1); intervalDays = gaps[stage]; }
           due = addDays(day.date, intervalDays);
         } else continue;
       } else continue;
@@ -157,6 +157,7 @@ export function estimatePlanTime(items: Pick<PlanItem, 'kind' | 'problem' | 'exp
 /** Inputs shared by every spacing policy; mirrors `PlanningStore.analysisContext`. */
 export interface ReviewProjectionInput {
   problems: CatalogProblem[];
+  intervals?: readonly number[];
   /** Completed success evidence (manual completions and snapshot successes). */
   events: Evidence[];
   /** Every active attempt, including incomplete ones; used by outcome-based spacing. */
@@ -180,7 +181,7 @@ export function projectPolicyReviewStates(policy: 'fixed' | 'duration-v1' | 'out
   const { problems, events, reviewEvents, solved, zone, baseline, now, resolveDate } = input;
   if (policy === 'outcome-v2') {
     return projectOutcomeReviewStates(problems, reviewEvents, solved, zone, baseline, now,
-      input.days ?? attemptDays(reviewEvents, zone, now, resolveDate), resolveDate);
+      input.days ?? attemptDays(reviewEvents, zone, now, resolveDate), resolveDate, input.intervals);
   }
-  return projectReviewStates(problems, events, solved, zone, baseline, now, policy === 'duration-v1', resolveDate);
+  return projectReviewStates(problems, events, solved, zone, baseline, now, policy === 'duration-v1', resolveDate, input.intervals);
 }

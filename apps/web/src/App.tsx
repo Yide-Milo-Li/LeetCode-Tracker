@@ -582,15 +582,6 @@ export function App() {
             )}
             {visited.has('schedule') && (
               <div hidden={view !== 'schedule'} id="view-schedule">
-                <PageHeader
-                  title={zh ? '学习安排' : 'Study schedule'}
-                  description={
-                    zh
-                      ? '星期安排决定每天的策略。调整今天只影响当前计划。'
-                      : 'Your weekly schedule selects each day’s strategy. Adjust today changes only the current plan.'
-                  }
-                  back={{ label: zh ? '返回今日' : 'Back to Today', run: () => navigate('today') }}
-                />
                 <StrategiesView lang={lang} focusRequest={focusRequest} />
               </div>
             )}

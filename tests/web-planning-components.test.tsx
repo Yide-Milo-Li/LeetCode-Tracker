@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import type { DailyPlan, OverridePreview, Strategy } from '../apps/web/src/api.ts';
+import type { StudyPlanEdit, StudyPlanRequest, StudyPlanView } from '../packages/contracts/src/study-plan.ts';
 
 // Configure virtual DOM environment before React renders
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/' });
@@ -15,21 +16,28 @@ Object.assign(globalThis, {
   window: dom.window,
   document: dom.window.document,
   HTMLElement: dom.window.HTMLElement,
+  FormData: dom.window.FormData,
   FileReader: dom.window.FileReader,
   IS_REACT_ACT_ENVIRONMENT: true,
 });
 Object.defineProperty(globalThis, 'navigator', { configurable: true, value: dom.window.navigator });
 
 const React = await import('react');
-const { render, fireEvent, screen, act, cleanup } = await import('@testing-library/react');
+const { render, fireEvent, screen, act, cleanup, within } = await import('@testing-library/react');
 const { api } = await import('../apps/web/src/api.ts');
 const { TodayPlanView } = await import('../apps/web/src/components/TodayPlanView.tsx');
 const { StrategiesView } = await import('../apps/web/src/components/StrategiesView.tsx');
 const { PromptOverrideModal } = await import('../apps/web/src/components/PromptOverrideModal.tsx');
 const { translations } = await import('../apps/web/src/i18n.ts');
+const { WorkspaceContext } = await import('../apps/web/src/workspace.tsx');
+
+beforeEach(() => {
+  mock.method(api, 'getStudyPlan', async () => ({ plan: null }));
+});
 
 afterEach(() => {
   cleanup();
+  mock.restoreAll();
 });
 
 it('background refresh preserves unsaved prompt and does not overlap requests', async () => {
@@ -366,9 +374,7 @@ it('renders weekly schedule and saves difficulty counts with immediate validatio
   assert.ok(screen.getAllByText('Graph Mastery').length >= 1);
 
   // Open create modal
-  await act(async () => {
-    fireEvent.click(screen.getByRole('button', { name: /New Strategy/i }));
-  });
+  chooseNewArrangement('Set Up Weekly Practice');
   assert.ok(screen.getByText('Strategy Name *'));
 
   // Initially, save button is disabled because fields are empty
@@ -487,6 +493,7 @@ it('parses natural language override preview and commits via PromptOverrideModal
   assert.equal(previewMock.mock.callCount(), 1);
   assert.deepEqual(previewMock.mock.calls[0].arguments[0], {
     prompt: 'Only greedy problems today',
+    planId: 'plan-2026-03-30',
     date: '2026-03-30',
   });
 
@@ -504,6 +511,212 @@ it('parses natural language override preview and commits via PromptOverrideModal
   assert.equal(closed, true);
 });
 
+function chooseNewArrangement(name: string) {
+  fireEvent.click(screen.getByRole('button', { name: 'New Study Arrangement' }));
+  fireEvent.click(screen.getByRole('button', { name }));
+}
+
+it('creates an ordered goal through the shared entry, retries safely, and creates a second independent goal', async () => {
+  mock.method(api, 'getStrategies', async () => []);
+  mock.method(api, 'getWeeklySchedule', async () => []);
+  mock.method(api, 'getAllTags', async () => ({ tags: [] }));
+  mock.method(api, 'getMasteryReport', async () => ({ tags: [] } as never));
+  let currentGoal: StudyPlanView | null = null;
+  mock.method(api, 'getStudyPlan', async () => ({ plan: currentGoal }));
+  let fail = true;
+  const create = mock.method(api, 'createStudyPlan', async (input: StudyPlanRequest) => {
+    if (fail) throw new Error('Could not save the goal.');
+    const { plan, operationId, dryRun } = input;
+    currentGoal = {
+      id: operationId, version: 1, name: plan.name, goal: '', stages: ['Goal problem list'],
+      settings: { deadline: null, weekdays: plan.weekdays, reviewsOnlyWeekdays: [], dailyCount: 2, adaptivePace: true,
+        maxDailyCount: null, reviewCap: 1, difficulty: null, premium: false, tags: [], filterReviewTags: false },
+      status: 'active', startDate: plan.startDate, totalCore: plan.stages[0].items.length,
+      completedCore: 0, forecastCore: plan.stages[0].items.length, baseDailyCount: 2,
+      estimatedFinish: null, calendar: [], initialCalendar: [], nodes: [], notices: [],
+    };
+    return { plan: currentGoal, dryRun };
+  });
+  function Schedule() {
+    const [revision, setRevision] = React.useState(0);
+    return (
+      <WorkspaceContext.Provider value={{ revision, timezone: 'America/Los_Angeles', navigate() {}, openPractice() {},
+        notifyMutation: () => setRevision((value) => value + 1) }}>
+        <StrategiesView lang="en" />
+      </WorkspaceContext.Provider>
+    );
+  }
+  await act(async () => { render(<Schedule />); });
+  assert.ok(screen.getByText(translations.en.emptyStudySchedule));
+  chooseNewArrangement('Complete a Problem List');
+  fireEvent.change(screen.getByLabelText('Goal Name'), { target: { value: 'Window practice' } });
+  const ids = screen.getByLabelText('Problem IDs');
+  fireEvent.change(ids, { target: { value: '643, #643' } });
+  const save = screen.getByRole('button', { name: 'Save Goal' });
+  fireEvent.click(save);
+  assert.match(screen.getByRole('alert').textContent!, /only one copy of problem #643/);
+  assert.equal(create.mock.callCount(), 0);
+
+  fireEvent.change(ids, { target: { value: '#643，1456\nLCR 001' } });
+  await act(async () => { fireEvent.click(save); });
+  assert.equal((ids as HTMLTextAreaElement).value, '#643，1456\nLCR 001');
+  const sent = create.mock.calls[0].arguments[0];
+  assert.deepEqual(sent.plan.stages[0].items.map((item) => item.frontendId), ['643', '1456', 'LCR 001']);
+  fail = false;
+  await act(async () => { fireEvent.click(save); });
+  assert.equal(create.mock.calls[1].arguments[0].operationId, sent.operationId);
+  assert.ok(screen.getByRole('heading', { name: 'Window practice' }));
+  assert.equal(screen.queryByText(translations.en.emptyStudySchedule), null);
+  assert.equal(screen.queryByText('Weekly Assignment'), null);
+  assert.equal(screen.getAllByRole('button', { name: 'New Study Arrangement' }).length, 1);
+
+  chooseNewArrangement('Complete a Problem List');
+  assert.equal(screen.queryByText(/Saving archives/), null);
+  fireEvent.change(screen.getByLabelText('Goal Name'), { target: { value: 'Next goal' } });
+  fireEvent.change(screen.getByLabelText('Problem IDs'), { target: { value: '76' } });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save Goal' })); });
+  assert.equal(create.mock.calls[2].arguments[0].replacePlanId, undefined);
+  assert.ok(screen.getByRole('heading', { name: 'Next goal' }));
+});
+
+it('edits an existing goal from its panel with prefilled settings and previews before saving', async () => {
+  const { StudyPlanPanel } = await import('../apps/web/src/components/StudyPlanPanel.tsx');
+  const view: StudyPlanView = {
+    id: '1384c4b2-0596-4472-ab45-cad1da0a21fc', version: 3, name: 'Graph drills', goal: '', stages: ['Core'],
+    startDate: '2026-01-01', deadline: '2026-01-15', status: 'expired', completedCore: 4, totalCore: 10,
+    forecastCore: 4, baseDailyCount: 0, estimatedFinish: null, nodes: [], initialCalendar: [], calendar: [], notices: [],
+    settings: { deadline: '2026-01-15', weekdays: [0, 6], reviewsOnlyWeekdays: [6], dailyCount: 4, maxDailyCount: 8,
+      adaptivePace: false, reviewCap: 2, difficulty: { Easy: 50, Medium: 40, Hard: 10 }, premium: true, tags: ['graph'], filterReviewTags: true },
+  };
+  const update = mock.method(api, 'updateStudyPlan', async (input: StudyPlanEdit) => ({ dryRun: input.dryRun, plan: { ...view, status: 'active' as const } }));
+  const create = mock.method(api, 'createStudyPlan');
+  const notify = mock.fn();
+  render(<WorkspaceContext.Provider value={{ revision: 0, timezone: 'UTC', openPractice() {}, navigate() {}, notifyMutation: notify }}>
+    <StudyPlanPanel view={view} lang="en" />
+  </WorkspaceContext.Provider>);
+  fireEvent.click(screen.getByRole('button', { name: 'Edit schedule' }));
+  assert.ok(screen.getByRole('dialog', { name: 'Edit “Graph drills”' }));
+  assert.equal(screen.queryByLabelText('Problem IDs'), null);
+  assert.equal((screen.getByLabelText('Deadline') as HTMLInputElement).value, view.deadline);
+  assert.equal((screen.getByLabelText(translations.en.weekdays[0], { exact: true }) as HTMLInputElement).checked, true);
+  fireEvent.click(screen.getByText('Workload, difficulty and reviews'));
+  assert.equal((screen.getByLabelText('Hard (%)') as HTMLInputElement).value, '10');
+  assert.equal((screen.getByLabelText('Allow Premium problems') as HTMLInputElement).checked, true);
+  fireEvent.change(screen.getByLabelText('Pacing'), { target: { value: 'flexible' } });
+  assert.equal((screen.getByLabelText('Problems per study day (including reviews)') as HTMLInputElement).value, '4');
+  fireEvent.change(screen.getByLabelText('Problems per study day (including reviews)'), { target: { value: '5' } });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Preview schedule' })); });
+  const args = update.mock.calls[0].arguments[0];
+  assert.equal(args.id, view.id);
+  assert.equal(args.expectedVersion, 3);
+  assert.equal(args.dryRun, true);
+  assert.equal(args.changes.deadline, null);
+  assert.equal(args.changes.dailyCount, 5);
+  assert.deepEqual(args.changes.weekdays, [0, 6]);
+  assert.equal(args.changes.reviewCap, 2);
+  assert.equal(args.changes.maxDailyCount, 8);
+  assert.equal(args.changes.tags, undefined);
+  assert.equal(notify.mock.callCount(), 0);
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save and reschedule' })); });
+  assert.equal(update.mock.calls[1].arguments[0].dryRun, false);
+  assert.equal(update.mock.calls[1].arguments[0].operationId, args.operationId);
+  assert.equal(notify.mock.callCount(), 1);
+  assert.equal(create.mock.callCount(), 0);
+  assert.equal(screen.queryByRole('dialog'), null);
+});
+
+it('edits the route with row controls and bulk IDs, invalidates a preview, and saves the staged lists', async () => {
+  const { StudyGoalEditor } = await import('../apps/web/src/components/StudyGoalEditor.tsx');
+  const node = (id: string, stage: number) => ({ frontendId: id, questionId: id, stage, title: 'Practice ' + id,
+    purpose: 'Learn', optional: false, completed: false, requires: [], attempted: false,
+    completedDate: null, scheduledDate: null, originalDate: null });
+  const view: StudyPlanView = {
+    id: '1384c4b2-0596-4472-ab45-cad1da0a21fc', version: 2, name: 'Practice', goal: '', stages: ['Intro', 'Next'],
+    startDate: '2026-01-01', status: 'active', completedCore: 0, totalCore: 3, forecastCore: 3, estimatedFinish: null,
+    baseDailyCount: 2, nodes: [node('1', 0), node('2', 0), node('3', 1)], initialCalendar: [], calendar: [], notices: [],
+    settings: { deadline: null, weekdays: [1], reviewsOnlyWeekdays: [], dailyCount: 2, maxDailyCount: null,
+      adaptivePace: false, reviewCap: 0, difficulty: null, premium: false, tags: [], filterReviewTags: false },
+  };
+  const update = mock.method(api, 'updateStudyPlan', async (input: StudyPlanEdit) => ({ dryRun: input.dryRun, plan: view }));
+  const saved = mock.fn();
+  render(<StudyGoalEditor lang="en" timezone="UTC" editing={view} onSaved={saved} onClose={() => {}} />);
+  fireEvent.click(screen.getByText('Edit problem list (3)'));
+  fireEvent.click(await screen.findByRole('button', { name: 'Move #2 up' }));
+  assert.match(screen.getByRole('status').textContent!, /#2 is now number 1/);
+  fireEvent.click(screen.getByRole('button', { name: 'Move #1 down' }));
+  assert.equal((screen.getByLabelText('Stage') as HTMLSelectElement).value, '1');
+  fireEvent.click(screen.getByRole('button', { name: 'Remove #3' }));
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Preview schedule' })); });
+  assert.deepEqual(update.mock.calls[0].arguments[0].changes.stageProblemIds, [['2'], ['1']]);
+  assert.ok(screen.getByRole('region', { name: 'Schedule preview' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Add or edit problem IDs' }));
+  const field = screen.getByLabelText('Stage problem IDs in practice order');
+  fireEvent.change(field, { target: { value: '4，2' } });
+  assert.equal(screen.queryByRole('region', { name: 'Schedule preview' }), null);
+  fireEvent.click(screen.getByRole('button', { name: 'Save and reschedule' }));
+  assert.match(screen.getByRole('alert').textContent!, /one copy of problem #2/);
+  assert.equal(update.mock.callCount(), 1);
+  fireEvent.change(field, { target: { value: '4，#1' } });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save and reschedule' })); });
+  const commit = update.mock.calls[1].arguments[0];
+  assert.equal(commit.dryRun, false);
+  assert.equal(commit.expectedVersion, 2);
+  assert.deepEqual(commit.changes.stageProblemIds, [['2'], ['4', '1']]);
+  assert.equal(saved.mock.callCount(), 1);
+});
+
+it('previews the deadline workload and discards irrelevant fields when switching to a fixed pace', async () => {
+  const { StudyGoalEditor } = await import('../apps/web/src/components/StudyGoalEditor.tsx');
+  const save = mock.fn();
+  const request = mock.method(api, 'createStudyPlan', async (input: StudyPlanRequest) => ({
+    dryRun: input.dryRun,
+    plan: {
+      completedCore: 0, totalCore: 3, deadlineShortfall: 1, estimatedFinish: null,
+      calendar: [{ date: '2027-01-04', items: [{ kind: 'new' }, { kind: 'review' }] }],
+    } as StudyPlanView,
+  }));
+  render(<StudyGoalEditor lang="en" timezone="America/Los_Angeles" onClose={() => {}} onSaved={save} />);
+  const change = (name: string, value: string) => fireEvent.change(screen.getByLabelText(name), { target: { value } });
+  change('Goal Name', 'My list');
+  change('Problem IDs', '1,2,3');
+  change('Problems per study day (including reviews)', '6');
+  change('Pacing', 'deadline');
+  assert.equal(screen.queryByRole('spinbutton', { name: 'Problems per study day (including reviews)' }), null);
+  change('Start Date', '2027-01-01');
+  change('Deadline', '2027-01-04');
+  fireEvent.click(screen.getByText('Workload, difficulty and reviews'));
+  change('New problem order', 'mix');
+  change('Easy (%)', '50');
+  const preview = screen.getByRole('button', { name: 'Preview schedule' });
+  fireEvent.click(preview);
+  assert.match(screen.getByRole('alert').textContent!, /100%/);
+  assert.equal(request.mock.callCount(), 0);
+  change('Medium (%)', '30');
+  change('Daily maximum (optional)', '4');
+  await act(async () => { fireEvent.click(preview); });
+  const sent = request.mock.calls[0].arguments[0];
+  assert.equal(sent.dryRun, true);
+  assert.equal(sent.plan.dailyCount, undefined);
+  assert.equal(sent.plan.adaptivePace, undefined);
+  assert.deepEqual(sent.plan.difficulty, { Easy: 50, Medium: 30, Hard: 20 });
+  assert.equal(sent.plan.maxDailyCount, 4);
+  assert.equal(save.mock.callCount(), 0);
+  assert.match(screen.getByRole('region', { name: 'Schedule preview' }).textContent!, /1 core problem falls.*1 new · 1 review/);
+  change('Pacing', 'flexible');
+  assert.equal(screen.queryByRole('region', { name: 'Schedule preview' }), null);
+  change('New problem order', 'list');
+  fireEvent.click(screen.getByLabelText(/Adapt my pace/));
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save Goal' })); });
+  const fixed = request.mock.calls[1].arguments[0];
+  assert.equal(fixed.dryRun, false);
+  assert.equal(fixed.plan.deadline, undefined);
+  assert.equal(fixed.plan.dailyCount, 6);
+  assert.equal(fixed.plan.adaptivePace, false);
+  assert.equal(fixed.plan.maxDailyCount, undefined);
+  assert.equal(fixed.plan.difficulty, undefined);
+  assert.equal(save.mock.callCount(), 1);
+});
+
 /** Set up an isolated editor with mock persistence; no personal strategies are touched. */
 async function openCountEditor(existing?: Strategy) {
   mock.method(api, 'getStrategies', async () => existing ? [existing] : []);
@@ -519,7 +732,8 @@ async function openCountEditor(existing?: Strategy) {
   const create = mock.method(api, 'createStrategy', async (input: any) => ({ ...input, id: 'saved', version: 1 }));
   const update = mock.method(api, 'updateStrategy', async (_id: string, input: any) => ({ ...input, id: 'saved', version: 2 }));
   await act(async () => { render(<StrategiesView lang="en" />); });
-  fireEvent.click(screen.getAllByRole('button', { name: existing ? 'Edit Strategy' : 'New Strategy' })[0]);
+  if (existing) fireEvent.click(screen.getByRole('button', { name: 'Edit Strategy' }));
+  else chooseNewArrangement('Set Up Weekly Practice');
   return { create, update };
 }
 
@@ -1093,7 +1307,7 @@ describe('Phase 26: Today remove plan item UI', () => {
     assert.equal(removeMock.mock.callCount(), 1);
     assert.deepEqual(removeMock.mock.calls[0].arguments, [
       'plan-2026-03-30',
-      { expectedVersion: 1, itemId: 'item-1' },
+      { expectedVersion: 1, itemId: 'item-1', keepPractice: true },
     ]);
 
     // Verify no confirmation dialog was rendered
@@ -1104,7 +1318,7 @@ describe('Phase 26: Today remove plan item UI', () => {
     assert.ok(screen.getByRole('heading', { name: /198\. House Robber/ }));
   });
 
-  it('prompts confirmation dialog when deleting completed problem and cascadingly revokes on confirm', async () => {
+  it('prompts confirmation dialog when deleting completed problem and preserves the practice record on confirm', async () => {
     const basePlan = createMockPlan();
     mock.method(api, 'ensureDailyPlan', async () => ({ status: 'ready' as const, plan: basePlan }));
     mock.method(api, 'getStrategies', async () => []);
@@ -1157,7 +1371,7 @@ describe('Phase 26: Today remove plan item UI', () => {
     assert.equal(removeMock.mock.callCount(), 1);
     assert.deepEqual(removeMock.mock.calls[0].arguments, [
       'plan-2026-03-30',
-      { expectedVersion: 1, itemId: 'item-2' },
+      { expectedVersion: 1, itemId: 'item-2', keepPractice: true },
     ]);
 
     // Dialog closed and DOM updated
@@ -1200,7 +1414,7 @@ describe('Phase 26: Today remove plan item UI', () => {
     assert.equal(removeMock.mock.callCount(), 1);
     assert.deepEqual(removeMock.mock.calls[0].arguments, [
       'plan-2026-03-30',
-      { expectedVersion: 1, itemId: 'item-1' },
+      { expectedVersion: 1, itemId: 'item-1', keepPractice: true },
     ]);
 
     // DOM should now render the rest day view (今天是休息日)
@@ -1623,8 +1837,68 @@ it('edits the learner-wide review rhythm in Practice settings and rolls back a f
   assert.deepEqual(update.mock.calls[0].arguments[0], { reviewPolicy: 'outcome-v2' });
   assert.equal(select.value, 'outcome-v2');
 
+  const gaps = screen.getByLabelText('Interval lengths (days)');
+  const applyGaps = screen.getByRole('button', { name: 'Apply intervals to all plans' }) as HTMLButtonElement;
+  fireEvent.change(gaps, { target: { value: '2, 2' } });
+  assert.equal(applyGaps.disabled, true);
+  fireEvent.change(gaps, { target: { value: '2, 5, 12' } });
+  await act(async () => { fireEvent.click(applyGaps); });
+  assert.deepEqual(update.mock.calls[1].arguments[0], { reviewIntervals: [2, 5, 12] });
+
   fail = true;
   await act(async () => { fireEvent.change(select, { target: { value: 'fixed' } }); });
   assert.equal(select.value, 'outcome-v2');
   assert.ok(screen.getByRole('alert'));
+});
+
+it('Today shows an authored course, its shifted calendar and original date', async () => {
+  const plan = createMockPlan({studyPlan:{id:'course',name:'Window practice'}});
+  mock.method(api, 'ensureDailyPlan', async () => ({status:'ready',plan}));
+  mock.method(api, 'getStudyPlan', async () => ({plan: {
+    ...plan.studyPlan, version:1, goal:'Learn fixed windows', stages:['Fixed'], status:'active',
+    totalCore:2, completedCore:1, forecastCore:2, startDate:'2026-11-16', estimatedFinish:'2026-11-18',
+    notices:[{en:'Unfinished work moved to today.', zh:'上次未完成，顺延至今天。'}],
+    nodes:[{questionId:'b',frontendId:'1456',stage:0,title:'Vowels',purpose:'Apply the window',optional:false,
+      requires:[],completed:false,completedDate:null,attempted:false,originalDate:'2026-11-16',scheduledDate:'2026-11-18'}],
+    calendar:[{date:'2026-11-18',items:[{questionId:'b',frontendId:'1456',kind:'new'}],backlog:0}],
+    initialCalendar:[{date:'2026-11-16',items:[{questionId:'b',frontendId:'1456',kind:'new'}],backlog:0}],
+  }} as never));
+  try {
+    await act(async () => { render(<TodayPlanView lang="en" onNavigateToSettings={() => {}} />); });
+    await act(async () => { const details = screen.getByText('Goal details and calendar').closest('details')!; details.open = true; fireEvent(details, new window.Event('toggle')); });
+    const panel = screen.getByRole('region',{name:'Study plan'});
+    assert.match(panel.textContent!, /Core problems 1\/2/);
+    assert.match(panel.textContent!, /Unfinished work moved to today/);
+    const summary = screen.getByText('Learning route');
+    fireEvent.click(summary);
+    assert.ok(summary.closest('details')?.open);
+    assert.match(panel.textContent!, /Originally 2026-11-16/);
+    assert.ok(screen.getByText('Original calendar'));
+  } finally { mock.restoreAll(); }
+});
+
+it('shows independent goal and strategy lists, unique daily progress and a single seven-day preview', async () => {
+  const goal = createMockPlan({ id: 'goal-day', studyPlan: { id: 'goal', name: 'Hot 100' } });
+  const weekly = createMockPlan({ id: 'strategy-day', items: [goal.items[0]] });
+  const goals = Array.from({ length: 6 }, (_, index) => index === 0 ? goal : {
+    ...goal, id: 'goal-day-' + index, studyPlan: { id: 'goal-' + index, name: 'Goal ' + index },
+  });
+  let sources = [...goals, weekly];
+  mock.method(api, 'ensureDailyPlan', async () => ({ status: 'ready' as const, plan: sources[0], plans: sources }));
+  const append = mock.method(api, 'appendPlanItem', async (id: string) => {
+    const source = sources.find(p => p.id === id)!;
+    const updated = { ...source, version: source.version + 1 };
+    sources = sources.map(p => p.id === id ? updated : p);
+    return updated;
+  });
+  await act(async () => { render(<TodayPlanView lang="en" onNavigateToSettings={() => {}} />); });
+  const strategy = screen.getByRole('region', { name: 'Daily strategy' });
+  assert.ok(screen.getByRole('region', { name: 'Study goals' }));
+  assert.equal(screen.getAllByText('7-Day Rhythm').length, 1);
+  assert.equal(document.querySelectorAll('.today-goal').length, 3);
+  const meter = screen.getByRole('progressbar', { name: 'Today completion progress' });
+  assert.equal(meter.getAttribute('aria-valuemax'), String(goal.items.length));
+  await act(async () => { fireEvent.click(within(strategy).getByRole('button', { name: 'Add one' })); });
+  assert.equal(append.mock.calls[0].arguments[0], weekly.id);
+  assert.ok(screen.getByRole('button', { name: 'All 6 goals' }));
 });

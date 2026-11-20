@@ -620,3 +620,49 @@ test('Phase 48: today reports the review backlog and a typed append pulls one re
     p.cleanup();
   }
 });
+
+test('MCP creates and reopens a course, previews Today without writing, and saves the same assignment', async () => {
+  const p = profileWithCatalog();
+  let { client } = await StdioClient.start(entry, p.dbPath);
+  try {
+    const date = today();
+    const request = {operationId: randomUUID(), plan: { name:'Array foundations', startDate:date,
+      weekdays:[0,1,2,3,4,5,6], dailyCount:2, maxDailyCount:3, reviewCap:1,
+      stages:[{name:'Basics',items:[{frontendId:'1',purpose:'Warm up'}, {frontendId:'2',purpose:'Apply the pattern'}]},
+        {name:'Next',items:[{frontendId:'12',purpose:'Extend it',requires:['2']}]}] }};
+    const preview = (await client.call('tracker_create_study_plan', {...request, dryRun:true})).structuredContent;
+    assert.equal(preview.plan.totalCore,3);
+    assert.equal(preview.plan.baseDailyCount,2);
+    assert.equal((await client.call('tracker_get_study_plan', {})).structuredContent.plan,null);
+    assert.equal((await client.call('tracker_create_study_plan', request)).structuredContent.plan.id,request.operationId);
+    await client.close();
+    client = (await StdioClient.start(entry, p.dbPath)).client;
+    const first = (await client.call('tracker_get_today', {})).structuredContent;
+    assert.equal(first.projected,true);
+    assert.deepEqual(first.items.map((i: {frontendId:string}) => i.frontendId), ['1','2']);
+    assert.equal((await createPractice(client,{questionFrontendId:'1',completed:true})).isError,undefined);
+    const frozen = (await client.call('tracker_create_today', {})).structuredContent.plan;
+    assert.equal(frozen.planId,first.planId);
+    assert.deepEqual(frozen.items.map((i: {frontendId:string}) => i.frontendId), ['1','2']);
+    assert.equal(frozen.items[0].completed,true);
+    const route = (await client.call('tracker_get_study_plan', {})).structuredContent.plan;
+    assert.equal(route.completedCore,1);
+    assert.equal(route.calendar[0].dailyCount,2);
+    assert.deepEqual(route.initialCalendar,preview.plan.initialCalendar);
+    const edit = { id: route.id, expectedVersion: route.version, operationId: randomUUID(),
+      changes: { dailyCount: 1, reviewCap: 0, maxDailyCount: null } };
+    const dry = await client.call('tracker_update_study_plan', { ...edit, dryRun: true });
+    assert.equal(dry.structuredContent.plan.settings.dailyCount, 1);
+    assert.equal((await client.call('tracker_get_study_plan', {})).structuredContent.plan.version, 1);
+    const updated = (await client.call('tracker_update_study_plan', edit)).structuredContent.plan;
+    assert.equal(updated.version, 2);
+    assert.deepEqual(updated.calendar[0].items, route.calendar[0].items);
+    const listEdit = { id: route.id, expectedVersion: updated.version, operationId: randomUUID(),
+      changes: { stageProblemIds: [['2', '1', '3'], ['12']] } };
+    const checkedList = (await client.call('tracker_update_study_plan', { ...listEdit, dryRun: true })).structuredContent.plan;
+    assert.deepEqual(checkedList.nodes.map((n: { frontendId: string }) => n.frontendId), ['2', '1', '3', '12']);
+    const committedList = (await client.call('tracker_update_study_plan', listEdit)).structuredContent.plan;
+    assert.deepEqual(committedList.calendar, checkedList.calendar);
+    assert.equal(committedList.version, updated.version + 1);
+  } finally { await client.close(); p.cleanup(); }
+});

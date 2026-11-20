@@ -614,6 +614,7 @@ export function Dialog({
   drawer = false,
   wide = false,
   closeDisabled = false,
+  initialFocusRef,
 }: {
   title: string;
   children: ReactNode;
@@ -624,6 +625,7 @@ export function Dialog({
   wide?: boolean;
   /** A pending transaction may require this dialog to stay open until it settles. */
   closeDisabled?: boolean;
+  initialFocusRef?: React.RefObject<HTMLElement | null>;
 }) {
   const titleId = useId();
   const panel = useRef<HTMLDivElement>(null);
@@ -691,7 +693,7 @@ export function Dialog({
           !isInsideClosedPopover(n),
       );
 
-    const focusTimer = setTimeout(() => (targets()[0] ?? panel.current)?.focus(), 0);
+    const focusTimer = setTimeout(() => (initialFocusRef?.current ?? targets()[0] ?? panel.current)?.focus(), 0);
 
     const keydown = (event: KeyboardEvent) => {
       if (
@@ -752,7 +754,7 @@ export function Dialog({
       node.remove();
       if (trigger?.isConnected && !trigger.closest('[hidden]')) trigger.focus();
     };
-  }, [requestClose, finishClose]);
+  }, [requestClose, finishClose, initialFocusRef]);
 
   return createPortal(
     <DialogClosingContext.Provider value={closingRef}>

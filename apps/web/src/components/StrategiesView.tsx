@@ -1,3 +1,4 @@
+import { StudyPlanPanel, useStudyPlan } from './StudyPlanPanel.tsx';
 /**
  * Strategies & Weekly Schedule View component.
  * Allows users to configure recommendation strategies (daily count, review cap, new-problem mix,
@@ -9,7 +10,8 @@ import { Plus, CheckCircle2, AlertCircle, Clock } from 'lucide-react';
 import { api, type Strategy, type StrategyInput, type TopicTag, type TagMastery } from '../api.ts';
 import { localizeApiError } from '../error-i18n.ts';
 import { translations, type Language } from '../i18n.ts';
-import { Dialog } from './ui.tsx';
+import { Dialog, PageHeader } from './ui.tsx';
+import { StudyGoalEditor } from './StudyGoalEditor.tsx';
 import { useWorkspace } from '../workspace.tsx';
 import { difficulties, strategyInputSchema } from '../../../../packages/contracts/src/recommendations.ts';
 import {
@@ -50,7 +52,12 @@ interface StrategiesViewProps {
 export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusRequest }) => {
   const t = translations[lang];
   const workspace = useWorkspace();
-
+  const [selectedGoal, setSelectedGoal] = useState<string>();
+  const course = useStudyPlan(String(workspace.revision), lang, selectedGoal);
+  const arrangementId = React.useId();
+  const arrangementButton = useRef<HTMLButtonElement>(null);
+  const [choosingArrangement, setChoosingArrangement] = useState(false);
+  const [goalEditor, setGoalEditor] = useState(false);
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [schedule, setSchedule] = useState<{ weekday: number; strategy: Strategy | null }[]>([]);
   const [allTags, setAllTags] = useState<TopicTag[]>([]);
@@ -83,7 +90,6 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
   /** Ignore superseded library responses and never populate editor drafts during refresh. */
   const loadData = useCallback(async () => {
     const sequence = ++loadSequence.current;
-    setLoading(true);
     setError(null);
     try {
       const [strats, sched, tagsRes] = await Promise.all([
@@ -319,6 +325,16 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
     }
   }
 
+  function chooseArrangement(kind: 'goal' | 'weekly') {
+    arrangementButton.current?.focus();
+    setChoosingArrangement(false);
+    if (kind === 'weekly') {
+      openCreateModal();
+    } else {
+      setGoalEditor(true);
+    }
+  }
+
   if (loading && !modalOpen) {
     return (
       <div className="empty-state">
@@ -330,15 +346,30 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
 
   return (
     <div className="strategies-container">
-      {/* Header bar */}
-      <div className="view-header">
-        <div>
-          <h2 className="view-title">{t.strategiesTitle}</h2>
-        </div>
-        <button className="btn btn-primary" onClick={openCreateModal}>
-          <Plus size={16} />
-          {t.newStrategy}
-        </button>
+      <PageHeader
+        title={t.strategiesTitle}
+        back={{ label: lang === 'zh' ? '返回今日' : 'Back to Today', run: () => workspace.navigate('today') }}
+        actions={
+          <button type="button" ref={arrangementButton} className="btn btn-primary"
+            aria-expanded={choosingArrangement} aria-controls={arrangementId}
+            onClick={() => setChoosingArrangement((expanded) => !expanded)}>
+            <Plus size={16} aria-hidden="true" />
+            {t.newStudyArrangement}
+          </button>
+        }
+      />
+      <div id={arrangementId} hidden={!choosingArrangement} className="study-arrangement-options">
+        {([
+          { kind: 'goal', label: t.newStudyGoal, hint: t.newStudyGoalHint },
+          { kind: 'weekly', label: t.newWeeklyPractice, hint: t.newWeeklyPracticeHint },
+        ] as const).map(({ kind, label, hint }) => (
+          <button key={kind} type="button" className="btn btn-secondary study-arrangement-option"
+            aria-labelledby={`${arrangementId}-${kind}`} aria-describedby={`${arrangementId}-${kind}-hint`}
+            onClick={() => chooseArrangement(kind)}>
+            <strong id={`${arrangementId}-${kind}`}>{label}</strong>
+            <span id={`${arrangementId}-${kind}-hint`} className="text-muted">{hint}</span>
+          </button>
+        ))}
       </div>
 
       {error && (
@@ -348,26 +379,18 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
         </div>
       )}
 
-      {/* Weekly Schedule Row */}
-      <WeeklyScheduleGrid schedule={schedule} lang={lang} />
-
-      {/* Strategies List */}
-      <div className="strategy-library">
-
-
-        {strategies.length === 0 ? (
-          <div className="empty-state u-padding-2rem">
-            <p className="text-muted">
-              {lang === 'zh'
-                ? '尚未创建策略，请先配置学习安排。'
-                : 'No strategies yet. Create one to set your study schedule.'}
-            </p>
-            <button className="btn btn-primary u-margin-top-1rem" onClick={openCreateModal}>
-              <Plus size={16} />
-              {t.newStrategy}
-            </button>
-          </div>
-        ) : (
+      {course.goals.length > 1 && (
+        <label className="schedule-goal-select">{lang === 'zh' ? '学习目标' : 'Study goal'}
+          <select className="form-input" value={course.view?.id ?? ''} onChange={e => setSelectedGoal(e.target.value)}>
+            {course.goals.map(goal => <option key={goal.id} value={goal.id}>{goal.name}</option>)}
+          </select>
+        </label>
+      )}
+      {course.view && <StudyPlanPanel view={course.view} lang={lang} />}
+      {course.error && <p role="alert">{course.error}</p>}
+      {strategies.length > 0 ? (
+        <div className="strategy-library">
+          <WeeklyScheduleGrid schedule={schedule} lang={lang} />
           <div className="strategies-grid">
             {strategies.map((s) => (
               <StrategyCard
@@ -379,8 +402,21 @@ export const StrategiesView: React.FC<StrategiesViewProps> = ({ lang, focusReque
               />
             ))}
           </div>
-        )}
-      </div>
+        </div>
+      ) : !course.view && !course.error ? (
+        <div className="empty-state u-padding-2rem">
+          <p className="text-muted">{t.emptyStudySchedule}</p>
+        </div>
+      ) : null}
+
+      {goalEditor && (
+        <StudyGoalEditor lang={lang} timezone={workspace.timezone}
+          onClose={() => setGoalEditor(false)} onSaved={() => {
+            setGoalEditor(false);
+            setSelectedGoal(undefined);
+            workspace.notifyMutation();
+          }} />
+      )}
 
       {/* Strategy Editor Modal */}
       {modalOpen && (

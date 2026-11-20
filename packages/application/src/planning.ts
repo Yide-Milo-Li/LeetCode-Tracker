@@ -1,8 +1,10 @@
+import { activeStudyIds } from '../../database/src/study-plans.ts';
 /**
  * Planning service module.
  * Coordinates daily recommendation plan generation, item replacement,
  * rule overrides, and strategy schedule management.
  */
+import { studyDailyPlan, studyEditCandidates } from './study-plans.ts';
 import { randomUUID } from 'node:crypto';
 import type { CatalogStore } from '../../database/src/store.ts';
 import type { PlanningStore } from '../../database/src/planning-store.ts';
@@ -170,10 +172,32 @@ export class PlanningService {
   /** Get all daily plans or plan for a specific date. */
   public getPlans(date?: string): DailyPlan[] {
     if (date) {
-      const plan = this.planning.planByDate(date);
-      return plan ? [plan] : [];
+      return this.planning.plansByDate(date);
     }
     return this.planning.plans();
+  }
+
+  public readDay(date: string) {
+    const now = Date.now();
+    const plans = this.planning.plansByDate(date, now);
+    const zone = this.store.getSettings().timezone;
+    const projectedIds: string[] = [];
+    if (zone && date >= localDate(now, zone)) {
+      const savedGoals = new Set(plans.map(plan => plan.studyPlan?.id));
+      for (const id of activeStudyIds(this.store.db)) {
+        if (savedGoals.has(id)) continue;
+        const goal = studyDailyPlan(this.store, date, zone, now, id);
+        if (goal) {
+          plans.push(this.withTimeEstimate(goal));
+          projectedIds.push(goal.id);
+        }
+      }
+    }
+    const current = projectedIds.length ? this.planning.reconcileDay(plans, now) : plans;
+    const strategy = zone && date >= localDate(now, zone) && !plans.some(plan => !plan.studyPlan)
+      ? this.planning.strategyForWeekday(new Date(date + 'T12:00:00Z').getUTCDay()) : null;
+    return { plan: current[0] ?? null, plans: current, projected: projectedIds.includes(current[0]?.id), projectedIds,
+      pendingStrategy: strategy ? { id: strategy.id, name: strategy.name } : undefined };
   }
 
   /** Get plan by UUID. */
@@ -187,8 +211,8 @@ export class PlanningService {
   }
 
   /**
-   * Ensure today's daily plan exists.
-   * Auto-generates missing plan once when strategy is assigned to the current weekday.
+   * Materialize each scheduled goal and the optional weekday strategy once.
+   * Older callers can keep using the first saved plan; source-aware callers use plans.
    */
   public async ensureDailyPlan(options: {
     date?: string;
@@ -207,14 +231,9 @@ export class PlanningService {
       throw new PlanningError('INVALID_DATE', `Invalid calendar date '${targetDate}'`, 400);
     }
 
-    // Check if plan already exists for this date
-    const existing = this.planning.planByDate(targetDate, now);
-    if (existing) {
-      return { status: 'ready', plan: existing };
-    }
-
-    // Reject generation of new daily plans for past calendar dates
     if (targetDate < today) {
+      const plans = this.planning.plansByDate(targetDate, now);
+      if (plans.length) return { status: 'ready', plan: plans[0], plans };
       throw new PlanningError('CANNOT_GENERATE_HISTORICAL_PLAN', 'Cannot generate recommendations for past dates', 400);
     }
 
@@ -356,9 +375,18 @@ export class PlanningService {
     return { ...plan, timeEstimate, notices };
   }
 
-  /** Preserve prior-version exclusions consistently in preview and commit. */
-  private excludedQuestions(plan:DailyPlan|null):Set<string> {
-    return new Set(plan?this.planning.versions(plan.id).flatMap(v=>v.items.map(i=>i.problem.questionId)):[]);
+  /** Temporary adjustments can reuse unfinished route assignments within the unlocked stages. */
+  private overrideCandidates(plan: DailyPlan | null, rules: Rules, date: string, zone: string, now: number, seed: string) {
+    const excluded = new Set(plan ? this.planning.versions(plan.id).flatMap(v => v.items.map(i => i.problem.questionId)) : []);
+    if (plan?.studyPlan) {
+      for (const item of plan.items) if (!item.completed) excluded.delete(item.problem.questionId);
+    }
+    const context = this.candidateContext(rules, date, zone, now, seed, excluded, plan?.strategyId ?? null);
+    if (plan?.studyPlan) {
+      const route = studyEditCandidates(this.store, plan, context.pool, now)!;
+      context.pool = context.pool.filter(candidate => candidate.kind === 'review' || route.allowed.has(candidate.questionId));
+    }
+    return context;
   }
 
   /**
@@ -379,15 +407,36 @@ export class PlanningService {
     const now = Date.now();
     const deadline = now + this.timeoutMs;
     const epoch = this.transientEpoch;
-    // Capture before reading any inputs; a later mutation must invalidate this work.
-    const stamp = this.planning.stamp();
-    // Compute weekday (0=Sun .. 6=Sat) for targetDate in target timezone
-    const targetInstant = Date.parse(`${targetDate}T12:00:00Z`);
-    const weekday = new Date(targetInstant).getUTCDay();
-
+    const weekday = new Date(targetDate + 'T12:00:00Z').getUTCDay();
     const strategy = this.planning.strategyForWeekday(weekday);
+    const plans = this.planning.plansByDate(targetDate, now);
+    const savedGoals = new Set(plans.map(plan => plan.studyPlan?.id));
+    let addedGoal = false;
+    for (const id of activeStudyIds(this.store.db)) {
+      if (savedGoals.has(id)) continue;
+      const routeDay = studyDailyPlan(this.store, targetDate, userTimezone, now, id);
+      if (!routeDay) continue;
+      if (targetDate !== localDate(now, userTimezone)) {
+        if (plans.length || strategy) continue;
+        throw new PlanningError('STUDY_DAY_FORECAST', 'Future course days are forecasts. Read the study plan calendar.', 400);
+      }
+      const stamp = this.planning.stamp();
+      const committed = await this.commitPlan(this.withTimeEstimate(routeDay), stamp, null, routeDay.id,
+        `study-day:${id}:${targetDate}`, true, () => {
+          if (epoch !== this.transientEpoch || localDate(Date.now(), userTimezone) !== targetDate)
+            throw new PlanningError('STALE_DATA', 'The profile or calendar day changed; retry.');
+        });
+      plans.push(committed);
+      addedGoal = true;
+    }
+    if (plans.some(plan => !plan.studyPlan)) {
+      const current = addedGoal ? this.planning.plansByDate(targetDate) : plans;
+      return { status: 'ready', plan: current[0], plans: current };
+    }
+    const stamp = this.planning.stamp();
     if (!strategy) {
-      return { status: 'rest', plan: null };
+      const current = addedGoal ? this.planning.plansByDate(targetDate) : plans;
+      return current.length ? { status: 'ready', plan: current[0], plans: current } : { status: 'rest', plan: null };
     }
 
     const rules = normalizeRules(strategy.rules);
@@ -452,7 +501,7 @@ export class PlanningService {
     if (this.transientEpoch !== epoch) {
       throw new PlanningError('STALE_DATA', 'Profile changed while the daily plan was being generated; retry', 409);
     }
-    const committed = await this.commitPlan(
+    await this.commitPlan(
       this.withTimeEstimate(plan),
       stamp,
       null,
@@ -466,7 +515,8 @@ export class PlanningService {
       { reviewStates: context.reviewStates },
     );
 
-    return { status: 'ready', plan: committed };
+    const current = this.planning.plansByDate(targetDate);
+    return { status: 'ready', plan: current[0], plans: current };
   }
 
   /**
@@ -541,6 +591,7 @@ export class PlanningService {
     const context=this.candidateContext(plan.rules,plan.date,plan.timezone,now,
       plan.date+':replace:'+plan.version+':'+options.operationId,excludedIds,plan.strategyId);
     const {pool}=context;
+    const course = studyEditCandidates(this.store, plan, pool, now);
 
     let changed = false;
     const notices = [...plan.notices,...context.notices];
@@ -551,7 +602,8 @@ export class PlanningService {
 
       // New problems keep the slot difficulty; a review is replaced by the next due review of any difficulty.
       const eligible = pool.filter(p => !excludedIds.has(p.questionId));
-      const candidate = selectCandidateSlots(eligible, [{ difficulty: item.kind === 'review' ? null : item.problem.difficulty, kind: item.kind,
+      const routePick = item.kind === 'new' ? course?.pick(item.problem.difficulty, excludedIds) : undefined;
+      const candidate = course && item.kind === 'new' ? routePick?.problem : selectCandidateSlots(eligible, [{ difficulty: item.kind === 'review' ? null : item.problem.difficulty, kind: item.kind,
         ordinal: item.explanation?.explorationOrdinal ?? null }], context.nextOrdinal, retained, !!plan.rules.focusWeakTags, [], plan.rules.timeBudgetMinutes != null).selected[0];
 
       if (candidate) {
@@ -563,7 +615,8 @@ export class PlanningService {
           problem: candidate,
           kind: candidate.kind,
           addedAt: now,
-          reason: fallbackPlanContent([candidate], plan.rules).reasons[candidate.questionId] ?? {
+          ...(routePick && { studyNodeId: routePick.node.questionId }),
+          reason: routePick ? { en: routePick.node.purpose, zh: routePick.node.purpose } : fallbackPlanContent([candidate], plan.rules).reasons[candidate.questionId] ?? {
             en: candidate.isFocusTopic
               ? `Replacement problem focusing on weak topic: ${candidate.matchedWeakTags?.join(', ') || candidate.difficulty}.`
               : `Replacement ${candidate.difficulty} problem to continue today's study focus.`,
@@ -709,7 +762,9 @@ export class PlanningService {
     const targetDifficulty = targetKind === 'review' ? null
       : nextDifficultyForAppend(plan.rules.difficulty, plan.items.filter(i => i.kind === 'new'));
 
-    const candidate = selectCandidateSlots(context.pool, [{ difficulty: targetDifficulty, kind: targetKind }],
+    const course = targetKind === 'new' ? studyEditCandidates(this.store, plan, context.pool, now) : null;
+    const routePick = course?.pick(targetDifficulty, excluded, true);
+    const candidate = course ? routePick?.problem : selectCandidateSlots(context.pool, [{ difficulty: targetDifficulty, kind: targetKind }],
       context.nextOrdinal, plan.items, !!plan.rules.focusWeakTags, [], plan.rules.timeBudgetMinutes != null).selected[0];
 
     if (!candidate) {
@@ -725,7 +780,8 @@ export class PlanningService {
       problem: candidate,
       kind: candidate.kind,
       addedAt: Date.now(),
-      reason: localContent.reasons[candidate.questionId] ?? {
+      ...(routePick && { studyNodeId: routePick.node.questionId }),
+      reason: routePick ? { en: routePick.node.purpose, zh: routePick.node.purpose } : localContent.reasons[candidate.questionId] ?? {
         en: candidate.isFocusTopic
           ? `Selected ${candidate.difficulty} problem targeting weak topic (${candidate.matchedWeakTags?.join(', ') || candidate.difficulty}) for focused breakthrough.`
           : `Selected ${candidate.difficulty} problem to practice core algorithms.`,
@@ -803,6 +859,7 @@ export class PlanningService {
     planId: string,
     options: {
       itemId: string;
+      keepPractice?: boolean;
       feedbackReason?: RecommendationFeedbackReason;
       expectedVersion: number;
       operationId: string;
@@ -810,7 +867,7 @@ export class PlanningService {
     batchFingerprint?: string,
   ): Promise<DailyPlan> {
     const request = `remove:${planId}:${options.expectedVersion}:${options.itemId}${options.feedbackReason ? ':' + options.feedbackReason : ''}`;
-    const fingerprint = withBatchFingerprint(request, batchFingerprint);
+    const fingerprint = withBatchFingerprint(options.keepPractice ? request + ':keep-practice' : request, batchFingerprint);
     const replayed = this.planning.replay(options.operationId, fingerprint);
     if (replayed) {
       return replayed;
@@ -839,7 +896,7 @@ export class PlanningService {
     const targetItem = plan.items[targetIndex];
 
     // Cascade practice revocation: revoke any manual practice records tied to this problem
-    if (targetItem.evidenceIds?.length) {
+    if (!options.keepPractice && !plan.studyPlan && this.planning.plansByDate(plan.date, now).length === 1 && targetItem.evidenceIds?.length) {
       for (const evidenceId of targetItem.evidenceIds) {
         if (evidenceId.startsWith('manual:')) {
           const recordId = evidenceId.slice('manual:'.length);
@@ -911,6 +968,7 @@ export class PlanningService {
    * detects completed quota conflicts, and returns a 30-minute preview.
    */
   public async previewDailyPlanOverride(options: {
+    planId?: string;
     prompt?: string;
     rules?: RulePatch;
     date?: string;
@@ -922,7 +980,10 @@ export class PlanningService {
     const now = Date.now();
     const targetDate = options.date ?? localDate(now, userTimezone);
 
-    const basePlan = this.planning.planByDate(targetDate, now);
+    const dayPlans = this.planning.plansByDate(targetDate, now);
+    if (!options.planId && dayPlans.length > 1) throw new PlanningError('PLAN_SOURCE_REQUIRED', 'Choose a source plan for this adjustment.', 400);
+    const basePlan = options.planId ? dayPlans.find(plan => plan.id === options.planId) : dayPlans[0];
+    if (options.planId && !basePlan) throw new PlanningError('PLAN_NOT_FOUND', 'This source plan could not be found.', 404);
     const targetInstant = Date.parse(`${targetDate}T12:00:00Z`);
     const weekday = new Date(targetInstant).getUTCDay();
     const strategy = this.planning.strategyForWeekday(weekday);
@@ -1119,7 +1180,7 @@ export class PlanningService {
     let candidateCount = 0;
     if (issues.length === 0 && proposed.dailyCount && proposed.difficulty) {
       const safeRules=rulesSchema.parse({tags:[],premium:false,reviewPercent:null,preference:'',...proposed});
-      const {pool}=this.candidateContext(safeRules,targetDate,userTimezone,now,targetDate+':preview',this.excludedQuestions(basePlan));
+      const {pool}=this.overrideCandidates(basePlan ?? null, safeRules, targetDate, userTimezone, now, targetDate + ':preview');
       candidateCount = pool.length;
     }
 
@@ -1139,6 +1200,7 @@ export class PlanningService {
       counts,
       revision: stamp,
       analysisDate: localDate(now,userTimezone),
+      planId: basePlan?.id,
       planVersion: basePlan?.version ?? null,
     };
 
@@ -1152,20 +1214,21 @@ export class PlanningService {
    * identifies a retry; replay precedes date resolution and current-state checks.
    */
   public async applyDailyPlanRules(options: {
+    planId?: string;
     rules: RulePatch;
     date?: string;
     expectedVersion: number | null;
     operationId: string;
   }): Promise<{ plan: DailyPlan; changed: string[] }> {
     const rules = rulePatchSchema.parse(options.rules);
-    const fingerprint = `rules:${JSON.stringify([options.date ?? null, options.expectedVersion, rules])}`;
+    const fingerprint = `rules:${JSON.stringify([options.date ?? null, options.expectedVersion, rules, ...(options.planId ? [options.planId] : [])])}`;
     const replay = this.planning.replayResult(options.operationId, fingerprint);
     if (replay) return { plan: replay.plan, changed: replay.changed ?? [] };
 
     if (!options.date && !isTimeZone(this.store.getSettings().timezone ?? '')) {
       throw new PlanningError('TIMEZONE_REQUIRED', 'Configure a timezone before applying rules for today.', 400);
     }
-    const preview = await this.previewDailyPlanOverride({ rules, date: options.date });
+    const preview = await this.previewDailyPlanOverride({ rules, date: options.date, planId: options.planId });
     if (preview.issues.length || preview.unresolved.length) {
       this.activeOverridePreviews.delete(preview.id);
       throw new PlanningError('RULES_NOT_APPLICABLE', [...preview.issues, ...preview.unresolved].join('; '), 400);
@@ -1217,7 +1280,7 @@ export class PlanningService {
     const now = Date.now();
     const deadline = now + this.timeoutMs;
     const epoch = this.transientEpoch;
-    const basePlan = this.planning.planByDate(preview.date, now);
+    const basePlan = preview.planId ? this.planning.planById(preview.planId, now) : this.planning.planByDate(preview.date, now);
     if (preview.planVersion !== options.expectedVersion || (basePlan?.version ?? null) !== options.expectedVersion) {
       throw new PlanningError('STALE_PLAN', 'Plan changed since preview was generated; reload and retry', 409);
     }
@@ -1258,15 +1321,8 @@ export class PlanningService {
     this.planning.validateTags(effectiveRules);
 
     const retainedItems: PlanItem[] = basePlan?.items.filter(i => i.completed) ?? [];
-    const versions = basePlan ? this.planning.versions(basePlan.id) : [];
-    const excluded = new Set<string>();
-    for (const v of versions) {
-      for (const item of v.items) excluded.add(item.problem.questionId);
-    }
-    for (const item of retainedItems) excluded.add(item.problem.questionId);
-
-    const context=this.candidateContext(effectiveRules,preview.date,userTimezone,now,
-      preview.date+':override:'+options.operationId,excluded,basePlan?.strategyId ?? null);
+    const context = this.overrideCandidates(basePlan, effectiveRules, preview.date, userTimezone, now,
+      preview.date + ':override:' + options.operationId);
     const {pool}=context;
 
     const slotPlan = planSlots(pool, effectiveRules, retainedItems);
@@ -1280,6 +1336,7 @@ export class PlanningService {
       id: randomUUID(),
       problem: p,
       kind: p.kind,
+      ...(basePlan?.studyPlan && p.kind === 'new' && { studyNodeId: p.questionId }),
       addedAt: Date.now(),
       reason: aiContent.reasons[p.questionId] ?? {
         en: `Selected ${p.difficulty} problem under temporary rule override.`,

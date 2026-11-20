@@ -1,3 +1,4 @@
+import type { StudyPlanEdit, StudyPlanRequest, StudyPlanView } from '../../../packages/contracts/src/study-plan.ts';
 /**
  * Typed client API client for communicating with local /api/v1 Fastify server.
  * Provides typed methods for catalog browsing, JSONL problem import, manual practice records,
@@ -387,6 +388,23 @@ const planningApi = {
     return res.items;
   },
 
+  getStudyPlan(id?: string) {
+    return request<{ plan: StudyPlanView | null; goals?: { id: string; name: string }[] }>('/study-plan' + (id ? '?id=' + encodeURIComponent(id) : ''));
+  },
+
+  updateStudyPlan(input: StudyPlanEdit) {
+    return request<{ plan: StudyPlanView; dryRun: boolean }>('/study-plan', {
+      method: 'PATCH', body: JSON.stringify(input),
+    });
+  },
+
+  createStudyPlan(input: StudyPlanRequest) {
+    return request<{ plan: StudyPlanView; dryRun: boolean }>('/study-plan', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
   ensureDailyPlan(options?: { date?: string; timezone?: string }): Promise<EnsureResult> {
     return request<EnsureResult>('/daily-plans/ensure', {
       method: 'POST',
@@ -403,11 +421,11 @@ const planningApi = {
     return planningMutation(`/daily-plans/${planId}/append`, options);
   },
 
-  removePlanItem(planId: string, options: { itemId: string; expectedVersion: number; feedbackReason?: RecommendationFeedbackReason }): Promise<DailyPlan> {
+  removePlanItem(planId: string, options: { itemId: string; keepPractice?: boolean; expectedVersion: number; feedbackReason?: RecommendationFeedbackReason }): Promise<DailyPlan> {
     return planningMutation(`/daily-plans/${planId}/remove-item`, options);
   },
 
-  previewDailyPlanOverride(options: { prompt?: string; rules?: RulePatch; date?: string }): Promise<OverridePreview> {
+  previewDailyPlanOverride(options: { planId?: string; prompt?: string; rules?: RulePatch; date?: string }): Promise<OverridePreview> {
     return request<OverridePreview>('/daily-plan-overrides/preview', {
       method: 'POST',
       body: JSON.stringify(options),

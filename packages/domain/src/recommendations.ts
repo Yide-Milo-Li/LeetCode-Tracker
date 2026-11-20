@@ -15,7 +15,7 @@ import {
   type Bilingual,
 } from '../../contracts/src/recommendations.ts';
 import { isEventTime, localDate, addDays, isTimeZone } from '../../contracts/src/time.ts';
-import type { CatalogProblem } from '../../contracts/src/sync.ts';
+import { defaultReviewIntervals, type CatalogProblem } from '../../contracts/src/sync.ts';
 import type { AdaptiveSlot } from './adaptive-topics.ts';
 import { selectCandidateSlots } from './selection.ts';
 
@@ -23,7 +23,7 @@ import { ANALYSIS_VERSION, DURATION_THRESHOLDS, REVIEW_VERSION, validDuration } 
 
 /** Phase 48: reviews ignore the difficulty mix, the review count is a cap, and spare review slots become new problems. */
 export const ALGORITHM_VERSION = 'phase48-v1';
-export const intervals = [1, 3, 7, 14, 30] as const;
+export const intervals = defaultReviewIntervals;
 const ZH_DIFFICULTY: Record<Difficulty, string> = { Easy: '简单', Medium: '中等', Hard: '困难' };
 
 /**
@@ -156,8 +156,9 @@ export function createEvidenceDateResolver(zone:string,now:number):(e:Evidence)=
 /** Replay success days; opt-in adjustments hold stage and never inspect free text. */
 export function reviewState(
   questionId:string,solved:boolean,evidence:Evidence[],zone:string,baseline:number,now:number,
-  options:{adaptive?:boolean;difficulty?:Difficulty;resolveDate?:(e:Evidence)=>string|null}={}
+  options:{intervals?:readonly number[];adaptive?:boolean;difficulty?:Difficulty;resolveDate?:(e:Evidence)=>string|null}={}
 ):ReviewState {
+  const gaps=options.intervals ?? intervals;
   const resolve=options.resolveDate??createEvidenceDateResolver(zone,now);
   const historical:string[]=[],days=new Map<string,number|null>();
   for(const event of evidence){
@@ -167,18 +168,18 @@ export function reviewState(
     days.set(date,duration===null?days.get(date)??null:Math.max(days.get(date)??0,duration));
   }
   historical.sort();
-  let stage=0,due=historical.length?addDays(historical[historical.length-1],1):null,intervalDays=1;
+  let stage=0,due=historical.length?addDays(historical[historical.length-1],gaps[0]):null,intervalDays=gaps[0];
   let adjustment:ReviewState['adjustment']=null;
   for(const date of [...days.keys()].sort()){
-    if(due===null){due=addDays(date,1);continue;}
+    if(due===null){due=addDays(date,gaps[0]);continue;}
     if(date<due)continue;
     const duration=days.get(date),threshold=options.difficulty?DURATION_THRESHOLDS[options.difficulty]:null;
     if(options.adaptive && threshold!==null && validDuration(duration) && duration>=threshold){
-      const baseIntervalDays=intervals[stage];
+      const baseIntervalDays=gaps[stage];
       intervalDays=Math.max(1,Math.floor(baseIntervalDays/2));
       adjustment={policyVersion:REVIEW_VERSION,durationMinutes:duration,thresholdMinutes:threshold,baseIntervalDays,intervalDays};
     }else{
-      stage=Math.min(stage+1,intervals.length-1);intervalDays=intervals[stage];adjustment=null;
+      stage=Math.min(stage+1,gaps.length-1);intervalDays=gaps[stage];adjustment=null;
     }
     due=addDays(date,intervalDays);
   }
@@ -189,12 +190,12 @@ export function reviewState(
 /** Index once; fixed and adaptive projections never share mutable state. */
 export function projectReviewStates(
   problems: CatalogProblem[], events: Evidence[], solved: Set<string>, zone: string, baseline: number, now: number, adaptive = false,
-  resolveDate = createEvidenceDateResolver(zone, now)
+  resolveDate = createEvidenceDateResolver(zone, now), gaps: readonly number[] = intervals
 ): ReviewState[] {
   const grouped=new Map<string,Evidence[]>(),byId=new Map(problems.map(p=>[p.questionId,p]));
   for(const event of events){const group=grouped.get(event.questionId);if(group)group.push(event);else grouped.set(event.questionId,[event]);}
   return [...solved].map(id=>reviewState(id,true,grouped.get(id)??[],zone,baseline,now,
-    {adaptive,difficulty:byId.get(id)?.difficulty,resolveDate}));
+    {adaptive,difficulty:byId.get(id)?.difficulty,resolveDate,intervals:gaps}));
 }
 /** Premium access is a hard constraint for every kind of problem. */
 function passesPremium(problem: CatalogProblem, rules: Rules): boolean {
@@ -307,30 +308,32 @@ export function nextDifficultyForAppend(
   difficultyRatio: Record<Difficulty, number>,
   currentItems: { problem: { difficulty: Difficulty } }[]
 ): Difficulty {
-  const n = currentItems.length;
   const currentCounts: Record<Difficulty, number> = { Easy: 0, Medium: 0, Hard: 0 };
   for (const item of currentItems) {
     currentCounts[item.problem.difficulty]++;
   }
 
-  let bestDiff: Difficulty | null = null;
-  let bestScore = -Infinity;
+  const difficulty = preferredNewDifficulty(difficultyRatio, currentCounts, difficulties);
+  if (!difficulty) throw new PlanningError('INVALID_DIFFICULTY_RATIO', 'No difficulty has positive ratio', 400);
+  return difficulty;
+}
 
-  for (const d of difficulties) {
-    const ratio = difficultyRatio[d];
-    if (ratio <= 0) continue; // Zero ratio difficulties do not participate
-    const score = (n + 1) * (ratio / 100) - currentCounts[d];
-    // Strict > ensures tie break preserves order Easy > Medium > Hard
+/** Largest cumulative deficit among available difficulties; caller order breaks ties. */
+export function preferredNewDifficulty(
+  weights: Record<Difficulty, number>, counts: Record<Difficulty, number>, available: Iterable<Difficulty>
+): Difficulty | undefined {
+  const next = counts.Easy + counts.Medium + counts.Hard + 1;
+  let best: Difficulty | undefined;
+  let bestScore = -Infinity;
+  for (const d of available) {
+    if (weights[d] <= 0) continue;
+    const score = next * (weights[d] / 100) - counts[d];
     if (score > bestScore + 1e-9) {
+      best = d;
       bestScore = score;
-      bestDiff = d;
     }
   }
-
-  if (!bestDiff) {
-    throw new PlanningError('INVALID_DIFFICULTY_RATIO', 'No difficulty has positive ratio', 400);
-  }
-  return bestDiff;
+  return best;
 }
 
 /** Slot plan before any problem is chosen; every selection path fills these slots the same way. */
