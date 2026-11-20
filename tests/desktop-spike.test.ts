@@ -119,6 +119,19 @@ test('A stdio client follows the desktop lease and can use only the opted-in wri
     ] }).then(result => assert.equal(result.structuredContent.error, 'NOTE_CHANGED'));
     assert.equal((await getStatus() as { revision: number }).revision, 2, 'conflicts do not publish activity');
 
+    const goal = (await client.call('tracker_create_goal_list', { name: 'Shared list', frontendIds: ['1'] })).structuredContent;
+    const goalUrl = url('/api/v1/goal-lists/' + goal.id);
+    const visibleList = await fetch(goalUrl, { headers: desktopHeaders });
+    assert.deepEqual(await visibleList.json(), goal);
+    assert.equal((await fetch(goalUrl + '/items', { method: 'PATCH', headers: desktopHeaders,
+      body: JSON.stringify({ expectedVersion: goal.version, edit: { action: 'setCompleted', frontendId: '1', completed: true } }),
+    })).status, 200);
+    const fromMcp = (await client.call('tracker_get_goal_lists', { id: goal.id })).structuredContent.items[0];
+    assert.equal(fromMcp.items[0].completed, true);
+    assert.equal((await client.call('tracker_delete_goal_list', { id: goal.id, expectedVersion: goal.version })).structuredContent.error, 'STALE_GOAL_LIST');
+    assert.equal((await client.call('tracker_delete_goal_list', { id: goal.id, expectedVersion: fromMcp.version })).structuredContent.ok, true);
+    assert.equal((await fetch(goalUrl, { headers: desktopHeaders })).status, 404);
+
     const strategy = await client.call('tracker_save_strategy', {
       name: 'Desktop bridge strategy', weekdays: [0, 1, 2, 3, 4, 5, 6], dailyCount: 1,
       difficultyCounts: { Easy: 1, Medium: 0, Hard: 0 }, review: { mode: 'none' },

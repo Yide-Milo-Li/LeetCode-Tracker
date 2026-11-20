@@ -4,6 +4,7 @@
  * progress snapshot management, Gemini-assisted text formatting, and user preferences.
  */
 import type { RecommendationFeedbackReason } from '../../../packages/contracts/src/recommendations.ts';
+import type { CreateGoalList, UpdateGoalList, EditGoalItem, GoalList } from '../../../packages/contracts/src/goal-lists.ts';
 import type { DesktopAgentStatus } from '../../../packages/contracts/src/desktop-agent.ts';
 import type {
   CatalogProblem,
@@ -345,6 +346,22 @@ const progressApi = {
 // Recommendation Planning & Strategies API
 // ==========================================
 const planningApi = {
+  async getGoalLists(): Promise<GoalList[]> {
+    return (await request<{ items: GoalList[] }>('/goal-lists')).items;
+  },
+  createGoalList(input: CreateGoalList): Promise<GoalList> {
+    return request('/goal-lists', { method: 'POST', body: JSON.stringify(input) });
+  },
+  updateGoalList(id: string, input: UpdateGoalList): Promise<GoalList> {
+    return request(`/goal-lists/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
+  },
+  editGoalItem(id: string, input: EditGoalItem): Promise<GoalList> {
+    return request(`/goal-lists/${id}/items`, { method: 'PATCH', body: JSON.stringify(input) });
+  },
+  deleteGoalList(id: string, expectedVersion: number): Promise<{ ok: boolean }> {
+    return request(`/goal-lists/${id}`, { method: 'DELETE', body: JSON.stringify({ expectedVersion }) });
+  },
+
   async getStrategies(): Promise<Strategy[]> {
     const res = await request<{ items: Strategy[] }>('/strategies');
     return res.items;

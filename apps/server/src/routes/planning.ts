@@ -4,6 +4,14 @@ import { applicationRoute } from './application-route.ts';
 
 export function registerPlanningRoutes(app: FastifyInstance, { application }: RouteContext): void {
   const { planning } = application;
+  const { goalLists } = application;
+  const goalId = (params: unknown) => (params as { id: string }).id;
+  app.get('/api/v1/goal-lists', applicationRoute(() => goalLists.list()));
+  app.get('/api/v1/goal-lists/:id', applicationRoute(async r => (await goalLists.list(goalId(r.params))).items[0]));
+  app.post('/api/v1/goal-lists', applicationRoute(r => goalLists.create(r.body), 201));
+  app.patch('/api/v1/goal-lists/:id', applicationRoute(r => goalLists.update(goalId(r.params), r.body)));
+  app.patch('/api/v1/goal-lists/:id/items', applicationRoute(r => goalLists.editItem(goalId(r.params), r.body)));
+  app.delete('/api/v1/goal-lists/:id', applicationRoute(r => goalLists.delete(goalId(r.params), r.body)));
   app.get('/api/v1/strategies', applicationRoute(() => planning.strategies()));
   app.post('/api/v1/strategies', applicationRoute(r => planning.createStrategy(r.body), 201));
   app.patch('/api/v1/strategies/:id', applicationRoute(r => planning.updateStrategy(r.body, r.params as { id: string })));

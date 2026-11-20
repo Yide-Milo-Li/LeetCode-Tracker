@@ -7,6 +7,10 @@ import { it, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { validateMigrationBundle } from '../packages/database/src/migration-bundle.ts';
 import { CatalogStore } from '../packages/database/src/store.ts';
 import { buildApp } from '../apps/server/src/app.ts';
 import type { StrategyInput, RulePatch } from '../packages/contracts/src/recommendations.ts';
@@ -775,5 +779,72 @@ it('rejects invalid strategy creation atomically at the API boundary', async () 
       assert.ok([400, 409].includes(response.statusCode), response.body);
       assert.equal(snapshot(), before, 'Failed creation must have no persistent side effects');
     }
+  } finally { await app.close(); db.close(); }
+});
+
+it('keeps ordered goal membership, checkmarks and practice history independent across clients and restores', async () => {
+  const { app, db, store } = await createTestApp();
+  try {
+    const base = '/api/v1/goal-lists';
+    const create = async (frontendIds: string[]) => {
+      const response = await app.inject({ method: 'POST', url: base, payload: { name: 'List', frontendIds } });
+      assert.equal(response.statusCode, 201, response.body);
+      return response.json();
+    };
+    const list = await create(['3', '1', '5']);
+    const other = await create(['1']);
+    const url = base + '/' + list.id;
+    const patch = (payload: object) => app.inject({ method: 'PATCH', url, payload });
+    const read = async () => (await app.inject({ method: 'GET', url })).json();
+    const rev = store.getPlanningRevision();
+    const bad = await patch({ expectedVersion: 1, name: 'discard', items: [{ frontendId: '4' }, { frontendId: 'missing' }] });
+    assert.equal(bad.json().error, 'GOAL_UNKNOWN_PROBLEM');
+    assert.equal((await patch({ expectedVersion: 1, items: [{ frontendId: '3' }, { frontendId: '3' }] })).json().error, 'GOAL_DUPLICATE_PROBLEM');
+    assert.equal((await read()).name, 'List');
+    assert.equal(store.getPlanningRevision(), rev);
+    const update = (expectedVersion: number, edit: object) => app.inject({ method: 'PATCH', url: url + '/items', payload: { expectedVersion, edit } });
+    const marked = await update(1, { action: 'setCompleted', frontendId: '1', completed: true });
+    assert.equal(marked.statusCode, 200, marked.body);
+    const reorder = await patch({ expectedVersion: 2, name: 'Ordered', items: ['5', '1', '2', '3'].map(frontendId => ({ frontendId })) });
+    assert.deepEqual(reorder.json().items.map((i: { completed: boolean }) => i.completed), [false, true, false, false]);
+    const concurrent = await Promise.all([
+      update(3, { action: 'add', frontendId: '4', beforeId: '2' }),
+      update(3, { action: 'move', frontendId: '3', beforeId: '5' }),
+    ]);
+    assert.deepEqual(concurrent.map(r => r.statusCode).sort(), [200, 409]);
+    assert.equal(concurrent.find(r => r.statusCode === 409)!.json().error, 'STALE_GOAL_LIST');
+    const expected = await read();
+    assert.equal(expected.version, 4);
+    assert.equal((await app.inject({ method: 'GET', url: base + '/' + other.id })).json().items[0].completed, false);
+    assert.equal(store.queryPracticeRecords().total, 0);
+    assert.deepEqual((await app.inject({ method: 'GET', url: '/api/v1/daily-plans' })).json().items, []);
+
+    const snapshot = store.exportMigrationBundle(5);
+    assert.throws(() => store.exportSnapshotBundle(), /Bundle v5/);
+    const damaged = structuredClone(snapshot);
+    const row = damaged.tables.catalog_meta.find(row => row.key.endsWith(list.id))!;
+    const doc = JSON.parse(row.value);
+    doc.items[0].frontendId = 'missing';
+    row.value = JSON.stringify(doc);
+    assert.throws(() => validateMigrationBundle(damaged), /catalog membership/);
+    const dir = mkdtempSync(join(tmpdir(), 'lct-goals-'));
+    const restoredDb = new DatabaseSync(':memory:');
+    const restored = new CatalogStore(restoredDb, { skipBackup: true, backupDir: dir });
+    const restoredApp = await buildApp({ store: restored, disableStatic: true });
+    try {
+      await restored.importSnapshotBundle(snapshot);
+      assert.deepEqual((await restoredApp.inject({ method: 'GET', url })).json(), expected);
+    } finally {
+      await restoredApp.close();
+      restoredDb.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+    await store.createPracticeRecord({ questionFrontendId: '1', practicedAt: '2026-11-19', completed: true });
+    const empty = await patch({ expectedVersion: 4, items: [] });
+    assert.deepEqual(empty.json().items, []);
+    assert.equal((await app.inject({ method: 'DELETE', url, payload: { expectedVersion: 4 } })).statusCode, 409);
+    assert.equal((await app.inject({ method: 'DELETE', url, payload: { expectedVersion: 5 } })).statusCode, 200);
+    assert.equal((await app.inject({ method: 'GET', url })).statusCode, 404);
+    assert.equal(store.queryPracticeRecords().total, 1);
   } finally { await app.close(); db.close(); }
 });

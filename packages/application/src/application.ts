@@ -5,6 +5,7 @@ import { PlanningService } from './planning.ts';
 import { createCatalogOperations } from './operations/catalog.ts';
 import { createPracticeOperations } from './operations/practice.ts';
 import { createProgressOperations } from './operations/progress.ts';
+import { createGoalListOperations } from './operations/goal-lists.ts';
 import { createPlanningOperations } from './operations/planning.ts';
 import { createNotesOperations } from './operations/notes.ts';
 import { createDashboardOperations } from './operations/dashboard.ts';
@@ -36,6 +37,7 @@ export function createTrackerApplication(dependencies: ApplicationDependencies) 
     catalog: protect(createCatalogOperations(context), gate),
     practice: protect(createPracticeOperations(context), gate),
     progress: protect(createProgressOperations(context), gate),
+    goalLists: protect(createGoalListOperations(context), gate),
     planning: protect(createPlanningOperations(context), gate),
     notes: protect(createNotesOperations(context), gate),
     dashboard: protect(createDashboardOperations(context), gate),

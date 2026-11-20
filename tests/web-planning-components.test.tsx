@@ -7,6 +7,7 @@
 import { afterEach, beforeEach, describe, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
+import type { GoalList } from '../packages/contracts/src/goal-lists.ts';
 import type { DailyPlan, OverridePreview, Strategy } from '../apps/web/src/api.ts';
 
 // Configure virtual DOM environment before React renders
@@ -28,9 +29,7 @@ const { StrategiesView } = await import('../apps/web/src/components/StrategiesVi
 const { PromptOverrideModal } = await import('../apps/web/src/components/PromptOverrideModal.tsx');
 const { translations } = await import('../apps/web/src/i18n.ts');
 
-afterEach(() => {
-  cleanup();
-});
+beforeEach(() => { mock.method(api, 'getGoalLists', async () => []); });
 
 it('background refresh preserves unsaved prompt and does not overlap requests', async () => {
   let tick!: () => void;
@@ -1627,4 +1626,67 @@ it('edits the learner-wide review rhythm in Practice settings and rolls back a f
   await act(async () => { fireEvent.change(select, { target: { value: 'fixed' } }); });
   assert.equal(select.value, 'outcome-v2');
   assert.ok(screen.getByRole('alert'));
+});
+
+
+it('Today renders the entire ordered checklist and restores checked items to their saved positions', async () => {
+  const { TodayGoalLists } = await import('../apps/web/src/components/TodayGoalLists.tsx');
+  const ids = Array.from({ length: 32 }, (_, index) => String(32 - index));
+  let goal: GoalList = { id: crypto.randomUUID(), name: 'Interview', version: 1,
+    items: ids.map(frontendId => ({ frontendId, title: 'Problem ' + frontendId, url: '', completed: false })) };
+  mock.method(api, 'getGoalLists', async () => [goal]);
+  mock.method(api, 'editGoalItem', async (_id: string, { expectedVersion, edit }: Parameters<typeof api.editGoalItem>[1]) => {
+    assert.equal(expectedVersion, 1);
+    assert.deepEqual(edit, { action: 'setCompleted', frontendId: '2', completed: true });
+    goal = { ...goal, version: 2, items: goal.items.map(item => ({ ...item, completed: item.frontendId === '2' })) };
+    return goal;
+  });
+  mock.method(api, 'updateGoalList', async (_id: string, input: Parameters<typeof api.updateGoalList>[1]) => {
+    assert.equal(input.expectedVersion, 2);
+    goal = { ...goal, version: 3, items: input.items!.map(item => ({ ...item, completed: !!item.completed, title: 'Problem ' + item.frontendId, url: '' })) };
+    return goal;
+  });
+  const frame = Object.getOwnPropertyDescriptor(globalThis, 'requestAnimationFrame');
+  Object.defineProperty(globalThis, 'requestAnimationFrame', { configurable: true, value: (fn: FrameRequestCallback) => { fn(0); return 0; } });
+  try {
+    await act(async () => { render(<TodayGoalLists lang="en" />); });
+    const visibleIds = () => Array.from(document.querySelectorAll<HTMLButtonElement>('.goal-pending-items [data-problem]'), el => el.dataset.problem);
+    assert.deepEqual(visibleIds(), ids);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Complete #2 Problem 2' })));
+    assert.deepEqual(visibleIds(), ids.filter(id => id !== '2'));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Interview' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reopen #2' }));
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Save list' })));
+    assert.deepEqual(visibleIds(), ids);
+  } finally {
+    if (frame) Object.defineProperty(globalThis, 'requestAnimationFrame', frame);
+    else Reflect.deleteProperty(globalThis, 'requestAnimationFrame');
+  }
+});
+
+it('selects one full goal list at a time, remembers the choice and falls back when it is deleted elsewhere', async () => {
+  const { TodayGoalLists } = await import('../apps/web/src/components/TodayGoalLists.tsx');
+  const { WorkspaceContext } = await import('../apps/web/src/workspace.tsx');
+  const defaults = { timezone: null, navigate() {}, notifyMutation() {}, openPractice() {} };
+  window.localStorage.removeItem('leetcode_tracker_selected_goal_list');
+  const makeList = (name: string, ids: string[]): GoalList => ({
+    id: crypto.randomUUID(), name, version: 1, items: ids.map(frontendId => ({ frontendId, completed: false, title: name + frontendId, url: '' })),
+  });
+  const first = makeList('Arrays', ['4']), second = makeList('Trees', ['9', '3']);
+  let lists = [first, second];
+  mock.method(api, 'getGoalLists', async () => lists);
+  const view = (revision: number) => <WorkspaceContext.Provider value={{ ...defaults, revision }}><TodayGoalLists lang="en" /></WorkspaceContext.Provider>;
+  let root = render(view(0));
+  const selector = await screen.findByRole('combobox', { name: 'Select list (2)' });
+  fireEvent.change(selector, { target: { value: second.id } });
+  assert.equal(screen.queryByText('#4 Arrays4'), null);
+  assert.deepEqual(Array.from(document.querySelectorAll('.goal-pending-items li'), el => el.textContent), ['#9 Trees9', '#3 Trees3']);
+  root.unmount();
+  await act(async () => { root = render(view(0)); });
+  assert.equal((screen.getByRole('combobox') as HTMLSelectElement).value, second.id);
+  lists = [first];
+  await act(async () => root.rerender(view(1)));
+  assert.equal(screen.queryByRole('combobox'), null);
+  assert.ok(screen.getByText('#4 Arrays4'));
+  window.localStorage.removeItem('leetcode_tracker_selected_goal_list');
 });

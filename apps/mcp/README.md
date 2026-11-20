@@ -120,12 +120,17 @@ Tools that work on several items take one item too; there are no separate single
 | `tracker_search_problems` | read | Search the catalog by keyword, difficulty or tag |
 | `tracker_get_problems` | read | 1 to 50 problems with note state, practice count and recent attempts (with `revision`) |
 | `tracker_catalog_coverage` | read | Catalog size, counts by difficulty and missing frontend ID ranges; works before a profile exists |
-| `tracker_get_today` | read | The stored plan for today or a given date, with its `version` (never generates one) |
+| `tracker_get_today` | read | The stored plan for today or a given date, with its `version`. Today also includes the pending items from each goal list |
 | `tracker_list_practices` | read | Paginated practice records with `revision`, newest or oldest first, optionally for one problem, or specific records by `ids` |
 | `tracker_list_notes` | read | Note summaries (`scope: "practiced"` by default, or `"all"`), filtered by `tag` or `noteState` |
 | `tracker_get_notes` | read | 1 to 20 notes with state and `contentHash`; long notes are read in parts with `offset` |
 | `tracker_get_note_context` | read | Everything for writing one note: problem, all-time counts, latest five attempts, review stage, current note and headings, template, related written notes |
 | `tracker_get_progress` | read | Streaks, difficulty distribution, top tags, active-day trends; `weakTopics: true` adds reinforcement topics, `recentActiveDays: true` adds recent calendar days. Use `weakTopics: "top5"` for a focused review |
+| `tracker_get_goal_lists` | read | Lists in saved problem order with all checkmarks and versions. Supply `id` to read one list. |
+| `tracker_create_goal_list` | write | Create a named checklist from ordered catalog `frontendIds`. An empty list is valid. |
+| `tracker_update_goal_list` | write, overwrites | Rename a list or replace its complete ordered `items`. Omit a retained item's `completed` flag to preserve it. |
+| `tracker_edit_goal_item` | write | Add, move, replace, remove, or set one entry's completion. For add/move, omit `beforeId` to append. |
+| `tracker_delete_goal_list` | write, removes | Delete a list and its checkmarks. Practice history is kept. |
 | `tracker_get_strategies` | read | Study strategies (each with its assigned weekdays) |
 | `tracker_import_catalog` | write | Import a local `.jsonl` catalog file; `dryRun` |
 | `tracker_import_problems` | write | Add or update up to 200 problems sent as data; creates the profile when missing; `dryRun` |

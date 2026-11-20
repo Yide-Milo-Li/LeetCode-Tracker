@@ -100,28 +100,28 @@ export function SetupGate({ children, ...props }: SetupGateProps) {
   const [status, setStatus] = useState<SetupStatus | null>(null);
 
   useEffect(() => {
-    if (phase !== 'checking') return;
+    if (phase === 'done') return;
     let active = true;
-    Promise.all([api.getSettings(), api.getCatalogStats(), api.getStrategies()])
-      .then(([settings, stats, strategies]) => {
+    Promise.all([api.getSettings(), api.getCatalogStats(), api.getStrategies(), api.getGoalLists()])
+      .then(([settings, stats, strategies, goals]) => {
         if (!active) return;
         const next: SetupStatus = {
           timezone: settings.timezone ?? null,
           problemCount: stats.totalProblems,
           hasSchedule: strategies.some((s) => !s.deleted && s.weekdays.length > 0),
         };
-        if (firstOpenStep(next) === 3) {
+        if (goals.length || (phase === 'checking' && firstOpenStep(next) === 3)) {
           // Existing installs (or a restored migration) skip the guide entirely.
           writeDone();
           setPhase('done');
-        } else {
+        } else if (phase === 'checking') {
           setStatus(next);
           setPhase('guide');
         }
       })
       .catch(() => {
         // Never block Today on the check; its own views report load failures.
-        if (active) setPhase('done');
+        if (active && phase === 'checking') setPhase('done');
       });
     return () => {
       active = false;

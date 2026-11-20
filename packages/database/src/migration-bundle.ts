@@ -14,6 +14,7 @@ import {
   type SnapshotBundleV5,
   type AnyMigrationBundle,
 } from '../../contracts/src/migration.ts';
+import { validateGoalLists } from './goal-lists.ts';
 import { assertLegacyRecommendationExport, hasRecommendationFields } from './recommendation-format.ts';
 import { z } from 'zod';
 import { rulesSchema, ruleFieldsSchema, recommendationFeedbackSchema } from '../../contracts/src/recommendations.ts';
@@ -57,6 +58,7 @@ export function validateMigrationBundle(raw: unknown): AnyMigrationBundle {
   const bundle = rawVersion === 5 ? snapshotBundleV5Schema.parse(raw) : rawVersion === 3
     ? snapshotBundleV3Schema.parse(raw)
     : snapshotBundleV2Schema.parse(raw);
+  validateGoalLists(bundle.tables.catalog_meta, bundle.tables.problems, bundle.version);
   for (const table of ['strategies', 'strategy_versions', 'daily_plans', 'daily_plan_versions'] as const) {
     for (const row of bundle.tables[table]) {
       const value = JSON.parse('rules_json' in row ? row.rules_json : row.payload_json);

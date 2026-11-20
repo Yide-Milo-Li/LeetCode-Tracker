@@ -19,6 +19,7 @@ import { practiceView, profileLang, profileZone, summarizePlan, weakTopicsView }
 import { registerWriteTools } from './write-tools.ts';
 import { registerNoteTools } from './note-tools.ts';
 import { registerBatchTools } from './batch-tools.ts';
+import { registerGoalListTools } from './goal-list-tools.ts';
 import { registerCatalogTools } from './catalog-tools.ts';
 
 /** Both transports use the same tool definitions and handlers. */
@@ -26,6 +27,7 @@ export function createTrackerToolRegistry(profile: Pick<TrackerProfile, 'exists'
   const registrar = createRegistrar(profile);
   const server = { registerTool: registrar.register };
   registerWriteTools(registrar);
+  registerGoalListTools(registrar);
   registerNoteTools(registrar);
   registerBatchTools(registrar);
   registerCatalogTools(registrar);
@@ -144,26 +146,22 @@ export function createTrackerToolRegistry(profile: Pick<TrackerProfile, 'exists'
   server.registerTool(
     'tracker_get_today',
     {
-      description: 'Read a stored daily plan with frontend IDs, reasons, completion and version for edits. Generate one with tracker_create_today.',
+      description: 'Read the daily plan and its version. For today, also returns the pending items of ordered manual goal lists.',
       inputSchema: z.object({
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Explicit date in YYYY-MM-DD format (defaults to current date in configured timezone)'),
       }),
     },
     async (application, { date }) => {
 
-      let targetDate = date;
-      if (!targetDate) {
-        const settings = await application.settings.get();
-        const tz = settings.timezone;
-        if (!tz || !isTimeZone(tz)) {
-          return json({
-            hasPlan: false,
-            error: 'TIMEZONE_NOT_CONFIGURED',
-            message: TIMEZONE_HINT,
-          });
-        }
-        targetDate = localDate(Date.now(), tz);
-      }
+      const zone = await profileZone(application);
+      const today = zone ? localDate(Date.now(), zone) : undefined;
+      const targetDate = date ?? today;
+      const lists = !date || date === today ? (await application.goalLists.list()).items : [];
+      const goals = lists.length ? { goalLists: lists.map(list => ({
+        id: list.id, name: list.name, version: list.version, total: list.items.length,
+        pending: list.items.filter(item => !item.completed).map(({ frontendId, title }) => ({ frontendId, title })),
+      })) } : {};
+      if (!targetDate) return json({ hasPlan: false, error: 'TIMEZONE_NOT_CONFIGURED', message: TIMEZONE_HINT, ...goals });
 
       const plansResult = await application.planning.plans({ date: targetDate });
       const plan = plansResult.items[0] ?? null;
@@ -172,11 +170,12 @@ export function createTrackerToolRegistry(profile: Pick<TrackerProfile, 'exists'
         return json({
           hasPlan: false,
           date: targetDate,
+          ...goals,
           message: `No study plan has been generated for date "${targetDate}" yet.`,
         });
       }
 
-      return json(summarizePlan(plan, await profileLang(application)));
+      return json({ ...summarizePlan(plan, await profileLang(application)), ...goals });
     },
   );
 

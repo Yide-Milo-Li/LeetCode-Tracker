@@ -71,6 +71,12 @@ const API_ERROR_MESSAGES: Record<string, BilingualMessage> = {
     en: 'One or more selected weekdays are already assigned to another strategy.',
     zh: '所选星期中已有部分日期分配给其他学习策略。',
   },
+  STALE_GOAL_LIST: {
+    en: 'This list changed elsewhere. Reload the list and reapply your edit.',
+    zh: '题单已在别处更新。请重新打开最新题单，再应用修改。',
+  },
+  GOAL_LIST_NOT_FOUND: { en: 'This list was deleted. Reload your lists.', zh: '题单已被删除，请刷新题单。' },
+  GOAL_LIST_EXISTS: { en: 'This list already exists. Reopen it from Today.', zh: '这份题单已存在，请从今日页重新打开。' },
   STALE_STRATEGY: {
     en: 'This strategy was updated elsewhere. Reload and try again.',
     zh: '学习策略已发生变化，请重新加载后再试。',
@@ -312,6 +318,8 @@ export function localizeApiError(err: unknown, lang: Language, fallback?: string
   const defaultFallback = fallback ?? (lang === 'zh' ? '操作失败，请稍后重试。' : 'Request failed. Please try again.');
 
   if (err instanceof ApiError) {
+    if (err.code === 'GOAL_UNKNOWN_PROBLEM') return lang === 'zh' ? `本地题库中找不到 #${err.message}。` : `Problem #${err.message} was not found in the local catalog.`;
+    if (err.code === 'GOAL_DUPLICATE_PROBLEM') return lang === 'zh' ? `题单中有重复题号 #${err.message}。` : `Duplicate problem #${err.message} in the list.`;
     if (err.code === 'STALE_PLAN') {
       if (/only today can be modified/i.test(err.message)) {
         return lang === 'zh'

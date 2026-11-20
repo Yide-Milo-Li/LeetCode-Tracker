@@ -148,6 +148,7 @@ beforeEach(() => {
   };
   mock.method(globalThis, 'setInterval', () => 1 as any);
   mock.method(globalThis, 'clearInterval', () => {});
+  mock.method(api, 'getGoalLists', async () => []);
   mock.method(api, 'getSettings', async () => preferences);
   mock.method(api, 'updateSettings', async (patch: Partial<typeof preferences>) => {
     preferences = { ...preferences, ...patch };

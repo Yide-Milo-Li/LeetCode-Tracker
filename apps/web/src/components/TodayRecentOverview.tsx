@@ -14,14 +14,12 @@ import { Feedback, InfoPopover } from './ui.tsx';
 
 export interface TodayRecentOverviewProps {
   lang: Language;
-  /** Whether rendered embedded inside the unified command console */
-  embedded?: boolean;
 }
 
 /**
  * Read the same deduplicated activity series used by Statistics; missing data is never inferred.
  */
-export function TodayRecentOverview({ lang, embedded = false }: TodayRecentOverviewProps) {
+export function TodayRecentOverview({ lang }: TodayRecentOverviewProps) {
   const zh = lang === 'zh';
   const workspace = useWorkspace();
   const [retry, setRetry] = useState(0);
@@ -36,8 +34,8 @@ export function TodayRecentOverview({ lang, embedded = false }: TodayRecentOverv
   const weekday = (date: string) =>
     formatCalendarDate(date, lang, { weekday: 'short' });
 
-  const content = (
-    <>
+  return (
+    <section className="recent-overview bento-card" aria-label={zh ? '近 7 天学习节奏' : 'Last 7 days'}>
       <div>
         <div className="bento-card-header">
           <span className="bento-card-title">
@@ -133,20 +131,6 @@ export function TodayRecentOverview({ lang, embedded = false }: TodayRecentOverv
           {error}
         </Feedback>
       )}
-    </>
-  );
-
-  if (embedded) {
-    return (
-      <div className="hub-right recent-overview" aria-label={zh ? '近 7 天学习节奏' : 'Last 7 days'}>
-        {content}
-      </div>
-    );
-  }
-
-  return (
-    <section className="recent-overview bento-card" aria-label={zh ? '近 7 天学习节奏' : 'Last 7 days'}>
-      {content}
     </section>
   );
 }
