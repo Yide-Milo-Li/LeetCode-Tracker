@@ -57,7 +57,13 @@ import type {
 } from '../../../packages/contracts/src/index.ts';
 
 // Re-export all contract types for full backward compatibility across web components
-export * from '../../../packages/contracts/src/index.ts';
+export type * from '../../../packages/contracts/src/index.ts';
+export {
+  NOTE_TEMPLATES,
+  hasMeaningfulNoteContent,
+  formatProblemFilename,
+  formatNotionCard,
+} from '../../../packages/contracts/src/note-content.ts';
 
 // For web client calls, query parameters are optional inputs before server schema defaults apply
 export type CatalogQuery = CatalogQueryInput;
@@ -150,7 +156,10 @@ const catalogApi = {
     return request<CatalogStats>('/catalog/stats');
   },
 
-  getCatalog(query: CatalogQuery = {}): Promise<{ total: number; page: number; limit: number; items: CatalogListProblem[] }> {
+  getCatalog(
+    query: CatalogQuery = {},
+    { signal }: ReadOptions = {},
+  ): Promise<{ total: number; page: number; limit: number; items: CatalogListProblem[] }> {
     const params = new URLSearchParams();
     if (query.page) params.set('page', String(query.page));
     if (query.limit) params.set('limit', String(query.limit));
@@ -161,7 +170,7 @@ const catalogApi = {
     if (query.favoriteScope) params.set('favoriteScope', query.favoriteScope);
 
     const qs = params.toString();
-    return request(`/catalog${qs ? `?${qs}` : ''}`);
+    return request(`/catalog${qs ? `?${qs}` : ''}`, { signal });
   },
 
   getAllTags(): Promise<{ tags: TopicTag[] }> {
@@ -535,7 +544,8 @@ export const notesApi = {
     return request('/notes/format', { method: 'POST', body: JSON.stringify(input) });
   },
   listNotes(
-    query: Partial<ProblemNoteListQuery> = {}
+    query: Partial<ProblemNoteListQuery> = {},
+    { signal }: ReadOptions = {},
   ): Promise<ProblemNoteListResponse> {
     const params = new URLSearchParams();
     if (query.page) params.set('page', String(query.page));
@@ -550,7 +560,7 @@ export const notesApi = {
     if (query.scope) params.set('scope', query.scope);
     if (query.tag) params.set('tag', query.tag);
     const qs = params.toString();
-    return request<ProblemNoteListResponse>(`/notes${qs ? `?${qs}` : ''}`);
+    return request<ProblemNoteListResponse>(`/notes${qs ? `?${qs}` : ''}`, { signal });
   },
 
   getNote(frontendId: string, { signal }: ReadOptions = {}): Promise<{ note: ProblemNote | null; contentHash?: string }> {

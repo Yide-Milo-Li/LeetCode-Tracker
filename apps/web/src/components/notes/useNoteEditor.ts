@@ -476,6 +476,7 @@ export function useNoteEditor({
       return;
     }
 
+    const controller = new AbortController();
     let active = true;
     setLoadedId(null);
     setSaveSuccess(false);
@@ -484,7 +485,7 @@ export function useNoteEditor({
 
     // Fetch note content
     const noteLoad = api
-      .getNote(selectedId)
+      .getNote(selectedId, { signal: controller.signal })
       .then((res) => {
         if (!active) return;
         const content = res.note?.content ?? '';
@@ -503,7 +504,7 @@ export function useNoteEditor({
         }
       })
       .catch(() => {
-        if (active) {
+        if (active && !controller.signal.aborted) {
           setNoteLoadError(true);
         }
       })
@@ -514,13 +515,13 @@ export function useNoteEditor({
     // Fetch practice timeline
     setLoadingPractices(true);
     const practiceLoad = api
-      .getPracticeRecords({ questionFrontendId: selectedId, page: 1, limit: 100 })
+      .getPracticeRecords({ questionFrontendId: selectedId, page: 1, limit: 100 }, { signal: controller.signal })
       .then((res) => {
         if (!active) return;
         setPractices(res.items);
       })
       .catch(() => {
-        if (active) setPractices([]);
+        if (active && !controller.signal.aborted) setPractices([]);
       })
       .finally(() => {
         if (active) setLoadingPractices(false);
@@ -529,6 +530,7 @@ export function useNoteEditor({
 
     return () => {
       active = false;
+      controller.abort();
     };
   }, [selectedId, retryRevision, rememberSaved, replaceNoteContent, setSelectedSummary]);
 
@@ -538,10 +540,11 @@ export function useNoteEditor({
     if (!selectedId) return;
     const session = editorSession.current;
     const writeVersion = session.saveVersion;
+    const controller = new AbortController();
     let active = true;
     // Finish the initial loads first so their responses cannot overwrite a newer refresh.
     const refreshNote = async () => {
-      const { note, contentHash } = await api.getNote(selectedId);
+      const { note, contentHash } = await api.getNote(selectedId, { signal: controller.signal });
       if (!active || !session.active || session.saving || session.saveVersion !== writeVersion) return;
       setNoteLoadError(false);
       const content = note?.content ?? '';
@@ -559,13 +562,16 @@ export function useNoteEditor({
       }
     };
     const refreshPractices = async () => {
-      const result = await api.getPracticeRecords({ questionFrontendId: selectedId, page: 1, limit: 100 });
+      const result = await api.getPracticeRecords({ questionFrontendId: selectedId, page: 1, limit: 100 }, { signal: controller.signal });
       if (active && session.active) setPractices(result.items);
     };
     void initialLoad.current.then(async () => {
       if (active) await Promise.allSettled([refreshNote(), refreshPractices()]);
     });
-    return () => { active = false; };
+    return () => {
+      active = false;
+      controller.abort();
+    };
   }, [externalRevision, selectedId, rememberSaved, replaceNoteContent]);
 
   /** Retry through the cancellable loading effect rather than a separate unguarded request. */

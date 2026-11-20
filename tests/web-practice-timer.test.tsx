@@ -90,3 +90,30 @@ it('shows the global pill with a live clock while timing', async () => {
   assert.ok(screen.getByRole('status', { name: /计时中/ }));
   assert.ok(screen.getByText('01:05'));
 });
+
+it('shares one storage listener across rows and responds to cross-tab switches and clears', async t => {
+  const events = t.mock.method(window, 'addEventListener');
+  const reads = t.mock.method(dom.window.Storage.prototype, 'getItem');
+  const renders = Array<number>(5).fill(0);
+  function Row({ id }: { id: number }) {
+    return <React.Profiler id={String(id)} onRender={() => { renders[id]++; }}>
+      <PracticeTimerButton lang="en" frontendId={String(id)} />
+    </React.Profiler>;
+  }
+  render(<>{renders.map((_, id) => <Row key={id} id={id} />)}</>);
+  assert.equal(events.mock.calls.filter(c => c.arguments[0] === 'storage').length, 1);
+  assert.equal(reads.mock.callCount(), 1);
+  const before = renders[4];
+  await act(async () => { service.startTimer({ frontendId: '1' }); });
+  await act(async () => {
+    dom.window.localStorage.setItem('leetcode-tracker-active-timer', JSON.stringify({ frontendId: '2', startedAt: Date.now() }));
+    window.dispatchEvent(new StorageEvent('storage', { key: 'leetcode-tracker-active-timer' }));
+  });
+  assert.equal(screen.getByRole('button', { name: /Stop timer: 2/ }).getAttribute('aria-pressed'), 'true');
+  await act(async () => {
+    dom.window.localStorage.clear();
+    window.dispatchEvent(new StorageEvent('storage', { key: null }));
+  });
+  assert.equal(screen.queryByRole('button', { name: /Stop timer/ }), null);
+  assert.equal(renders[4], before);
+});

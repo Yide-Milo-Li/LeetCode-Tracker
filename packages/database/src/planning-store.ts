@@ -25,13 +25,9 @@ export class PlanningStore {
     this.catalog = catalog;
   }
 
-  /** Execute a synchronous transaction only after the shared backup succeeds. */
+  /** Commit through the shared write queue. */
   private write<T>(fn: () => T): Promise<T> {
-    return this.catalog.protectedWrite(() => {
-      this.db.exec('BEGIN IMMEDIATE');
-      try { const value = fn(); this.db.exec('COMMIT'); return value; }
-      catch (error) { this.db.exec('ROLLBACK'); throw error; }
-    });
+    return this.catalog.protectedTransaction(fn);
   }
 
   /** Include time-zone/strategy mutations in optimistic concurrency checks. */
@@ -143,8 +139,26 @@ export class PlanningStore {
     return this.analysisContext(zone, now).states;
   }
 
-  /** Read one consistent local snapshot and project review state under the learner-wide policy without mutating caches. */
-  analysisContext(zone: string, now: number, raw = this.catalog.getDashboardRawData()) {
+  private analytics?: {
+    window: ReturnType<CatalogStore['dashboardWindow']>;
+    context: ReturnType<PlanningStore['projectAnalysis']>;
+    mastery?: ReturnType<typeof calculateTagMastery>;
+    profile?: ReturnType<typeof calculateKnowledgeProfile>;
+  };
+
+  private reports(zone: string, now: number) {
+    const window = this.catalog.dashboardWindow(now, zone);
+    if (this.analytics?.window !== window) {
+      this.analytics = { window, context: this.projectAnalysis(zone, now, window.raw) };
+    }
+    return this.analytics;
+  }
+
+  analysisContext(zone: string, now: number) {
+    return this.reports(zone, now).context;
+  }
+
+  private projectAnalysis(zone: string, now: number, raw: ReturnType<CatalogStore['dashboardSnapshot']>) {
     const events:Evidence[]=[
       ...raw.manualRecords.filter(r=>r.status==='active' && r.completed).map(r=>({
         id:'manual:'+r.id,questionId:r.questionId,at:r.practicedAt,precision:r.timePrecision,
@@ -172,14 +186,16 @@ export class PlanningStore {
 
   /** Expose only aggregate insight facts; GET never updates review caches or revisions. */
   masteryReport(zone:string,now:number) {
-    const {raw,states}=this.analysisContext(zone, now, this.catalog.dashboardSnapshot());
-    return calculateTagMastery({...raw,now,userZone:zone,reviewStates:states});
+    const reports = this.reports(zone, now);
+    const { raw, states } = reports.context;
+    return reports.mastery ??= calculateTagMastery({ ...raw, now, userZone: zone, reviewStates: states });
   }
 
   /** Compute multi-signal Knowledge Profile aggregating topic × difficulty evidence. */
   knowledgeProfileReport(zone: string, now: number) {
-    const { raw, states, resolveDate } = this.analysisContext(zone, now, this.catalog.dashboardSnapshot());
-    return calculateKnowledgeProfile({ ...raw, now, userZone: zone, reviewStates: states, revision: this.stamp() }, resolveDate);
+    const reports = this.reports(zone, now);
+    const { raw, states, resolveDate } = reports.context;
+    return reports.profile ??= calculateKnowledgeProfile({ ...raw, now, userZone: zone, reviewStates: states, revision: raw.revision }, resolveDate);
   }
 
   /** Read the evidence for this entire request once, then match only events for each assigned problem. */

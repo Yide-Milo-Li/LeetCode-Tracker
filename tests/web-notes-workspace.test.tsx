@@ -1,3 +1,4 @@
+import { releaseIdleFormatter } from '../apps/web/src/markdown-format-client.ts';
 /**
  * Web UI component tests for Phase 14:
  * - NotesWorkspace master-detail view, search, filters, note saving, practice timeline
@@ -53,6 +54,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  releaseIdleFormatter();
   cleanup();
   mock.restoreAll();
   lastCopiedText = '';
@@ -1933,4 +1935,32 @@ describe('NotesWorkspace markdown input & expanded toolbar', () => {
     });
     assert.equal(textarea.value, 'read [docs](https://example.com/docs) here');
   });
+});
+
+it('reuses a formatter across saves and replaces it after a failure while preserving each source', async () => {
+  const { formatNoteInWorker } = await import('../apps/web/src/markdown-format-client.ts');
+  const previous = globalThis.Worker;
+  let starts = 0;
+  let stops = 0;
+  class WorkerDouble {
+    onmessage?: (event: { data: unknown }) => void;
+    onerror?: () => void;
+    constructor() { starts++; }
+    postMessage(source: string) {
+      queueMicrotask(() => source === 'bad' ? this.onerror?.() : this.onmessage?.({ data: { content: source, status: 'unchanged' } }));
+    }
+    terminate() { stops++; }
+  }
+  Object.assign(globalThis, { Worker: WorkerDouble });
+  try {
+    for (const source of ['first', 'second']) assert.equal((await formatNoteInWorker(source)).content, source);
+    assert.equal(starts, 1);
+    assert.deepEqual(await formatNoteInWorker('bad'), { content: 'bad', status: 'skipped', reason: 'unsafe' });
+    assert.equal(stops, 1);
+    assert.equal((await formatNoteInWorker('next')).content, 'next');
+    assert.equal(starts, 2);
+  } finally {
+    if (previous) Object.assign(globalThis, { Worker: previous });
+    else Reflect.deleteProperty(globalThis, 'Worker');
+  }
 });

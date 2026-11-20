@@ -4,6 +4,9 @@ import { isTauri } from '../platform/index.ts';
 
 type Status = 'starting' | 'ready' | 'error';
 
+export const DESKTOP_STARTING_POLL_MS = 500;
+export const DESKTOP_READY_POLL_MS = 5000;
+
 /** Invoke lifecycle commands without exposing session credentials. */
 function invoke<T>(command: string): Promise<T> {
   return (window as unknown as { __TAURI_INTERNALS__: { invoke: <R>(command: string) => Promise<R> } })
@@ -16,17 +19,53 @@ export function DesktopGate({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!isTauri()) return;
     let active = true;
-    let timer: ReturnType<typeof setTimeout>;
-    /** Schedule the next query only after the current query finishes. */
+    let inFlight = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    function schedule(delayMs: number) {
+      clearTimeout(timer);
+      timer = undefined;
+      if (!active || document.hidden) return;
+      timer = setTimeout(() => void poll(), delayMs);
+    }
+
+    /** Schedule the next query only after the current query finishes; slow down once ready and pause when hidden. */
     async function poll() {
+      if (!active || inFlight || document.hidden) return;
+      inFlight = true;
+      let nextState: Status = 'error';
       try {
         const result = await invoke<{ state: Status }>('get_desktop_status');
-        if (active) setStatus(result.state);
-      } catch { if (active) setStatus('error'); }
-      if (active) timer = setTimeout(() => void poll(), 500);
+        nextState = result.state;
+        if (active) setStatus(nextState);
+      } catch {
+        if (active) setStatus('error');
+      } finally {
+        inFlight = false;
+        if (active) {
+          schedule(nextState === 'ready' ? DESKTOP_READY_POLL_MS : DESKTOP_STARTING_POLL_MS);
+        }
+      }
     }
+
+    function onVisibilityChange() {
+      if (document.hidden) {
+        clearTimeout(timer);
+        timer = undefined;
+      } else {
+        clearTimeout(timer);
+        timer = undefined;
+        void poll();
+      }
+    }
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
     void poll();
-    return () => { active = false; clearTimeout(timer); };
+    return () => {
+      active = false;
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, []);
 
   /** Retry the same profile without reloading the failed window. */

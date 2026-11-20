@@ -26,21 +26,23 @@ export function GoalProblemPicker({
   useEffect(() => {
     let current = true;
     if (!term) return;
+    const controller = new AbortController();
     const timer = setTimeout(() => {
       api
-        .getCatalog({ search: term, limit: 12, page: 1 })
+        .getCatalog({ search: term, limit: 12, page: 1 }, { signal: controller.signal })
         .then((result) => {
           if (!current) return;
           setItems(result.items);
           setStatus(result.items.length ? '' : zh ? '题库中没有匹配题目。' : 'No matching catalog problems.');
         })
         .catch((err) => {
-          if (current) setStatus(localizeApiError(err, lang));
+          if (current && !controller.signal.aborted) setStatus(localizeApiError(err, lang));
         });
     }, 180);
     return () => {
       current = false;
       clearTimeout(timer);
+      controller.abort();
     };
   }, [term, lang, zh]);
   return (

@@ -50,6 +50,25 @@ describe('Fastify Dashboard & Activity API Endpoints', () => {
     return { db, store, app };
   }
 
+  it('retains full daily activity counts while returning at most three distinct previews', async () => {
+    const { db, store, app } = await setupDashboardApp();
+    try {
+      await store.updateSettings({ timezone: 'UTC' });
+      for (const id of ['1', '2', '3', '4', '4']) {
+        await store.createPracticeRecord({ questionFrontendId: id, completed: true,
+          practicedAt: '2026-03-01', timePrecision: 'date', sourceTimezone: 'UTC' });
+      }
+      const response = await app.inject('/api/v1/dashboard?year=2026');
+      assert.equal(response.statusCode, 200);
+      const [day] = response.json<DashboardResponse>().yearlyActivity.days;
+      assert.equal(day.activeProblemCount, 4);
+      assert.equal(day.solvedProblemCount, 4);
+      assert.equal(day.manualCount, 5);
+      assert.equal(day.problemSummaries?.length, 3);
+      assert.equal(new Set(day.problemSummaries.map(p => p.frontendId)).size, 3);
+    } finally { await app.close(); db.close(); }
+  });
+
   it('matches full analytics across DST, offsets, tied page boundaries and duplicate snapshot successes', async (t) => {
     const now = Date.parse('2026-03-10T12:00:00Z');
     t.mock.method(Date, 'now', () => now);

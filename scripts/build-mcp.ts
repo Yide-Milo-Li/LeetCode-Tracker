@@ -6,6 +6,7 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { build } from 'esbuild';
+import { backupWorkerDefine } from './backup-worker-build.ts';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
 const entryPoint = path.join(repoRoot, 'apps/mcp/src/main.ts');
@@ -16,6 +17,7 @@ export async function bundleMcp(desktop = false): Promise<void> {
   const started = Date.now();
   fs.rmSync(outdir, { recursive: true, force: true });
   await build({
+    define: await backupWorkerDefine(),
     entryPoints: [entryPoint],
     bundle: true,
     platform: 'node',

@@ -60,8 +60,8 @@ export function createGoalListOperations({ store, writeLock }: ApplicationContex
     });
   }
 
-  function transaction<T>(fn: () => T) {
-    return writeLock.run(() => store.protectedTransaction(fn));
+  function transaction<T>(fn: () => T, backup: 'scheduled' | 'before' = 'scheduled') {
+    return writeLock.run(() => store.protectedTransaction(fn, backup));
   }
 
   function get(id: string) {
@@ -146,7 +146,7 @@ export function createGoalListOperations({ store, writeLock }: ApplicationContex
           added += additions.length;
         }
         return { items: includeLists ? views(readGoalLists(db)) : [], added };
-      });
+      }, ids.length > 1 ? 'before' : 'scheduled');
     },
     setProblemMembership(input: unknown, includeLists = true) {
       const { frontendId, expectedListIds, listIds, newList } = parse(problemGoalMembershipSchema, input);
@@ -208,7 +208,7 @@ export function createGoalListOperations({ store, writeLock }: ApplicationContex
           items: nextItems.map(item => boundaries.has(item.frontendId) ? { ...item, linkedAfter: boundaries.get(item.frontendId) } : item) });
         if (plan) for (const assignment of assignments) completePlanItem(store, plan, assignment, now);
         return updated;
-      });
+      }, items ? 'before' : 'scheduled');
     },
     editItem(id: string, input: unknown) {
       const { expectedVersion, edit } = parse(editGoalItemSchema, input);
@@ -262,7 +262,7 @@ export function createGoalListOperations({ store, writeLock }: ApplicationContex
         db.prepare('DELETE FROM catalog_meta WHERE key=?').run(GOAL_LIST_PREFIX + id);
         db.exec("UPDATE catalog_meta SET value=CAST(value AS INTEGER)+1 WHERE key='planning_revision'");
         return { ok: true };
-      });
+      }, 'before');
     },
   };
 }

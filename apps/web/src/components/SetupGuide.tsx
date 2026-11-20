@@ -1,62 +1,20 @@
-/**
- * First-run guide: three steps (timezone, problem catalog, study rhythm) before the first daily plan.
- *
- * `SetupGate` wraps the Today view. It shows the guide only while something required is missing and
- * the user has not finished or skipped it; afterwards Today's own empty states take over.
- * Completion is remembered per browser origin in localStorage, so returning users never wait on the check.
- */
-import React, { useEffect, useState, type ReactNode } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Check, CheckCircle2, Sparkles, CalendarDays, Settings2 } from 'lucide-react';
 import { api } from '../api.ts';
 import type { Language } from '../i18n.ts';
 import { localizeApiError } from '../error-i18n.ts';
-import type { ThemePalette } from '../../../../packages/contracts/src/sync.ts';
+import type { SetupGateProps, SetupStatus, Step } from './SetupGate.tsx';
+export { SetupGate, SETUP_DONE_KEY } from './SetupGate.tsx';
 import { strategyInputSchema, type StrategyInput } from '../../../../packages/contracts/src/recommendations.ts';
 import { percentagesForCounts, reviewPercentForCount } from '../strategy-counts.ts';
 import { useWorkspace } from '../workspace.tsx';
-import { paletteForMode, type ThemeMode } from './settings/settings-model.ts';
+import { paletteForMode } from './settings/settings-model.ts';
 import { TimezoneField } from './TimezoneField.tsx';
 import { Feedback } from './ui.tsx';
 
 const CatalogImportWorkspace = React.lazy(() =>
   import('./CatalogImportWorkspace.tsx').then((m) => ({ default: m.CatalogImportWorkspace })),
 );
-
-export const SETUP_DONE_KEY = 'leetcode_tracker_setup_done';
-
-/** Read the persisted completion flag; storage failures count as "not done" so the check still runs. */
-function readDone(): boolean {
-  try {
-    return localStorage.getItem(SETUP_DONE_KEY) === 'true';
-  } catch {
-    return false;
-  }
-}
-
-function writeDone() {
-  try {
-    localStorage.setItem(SETUP_DONE_KEY, 'true');
-  } catch {
-    // Storage is unavailable; the guide simply re-checks on the next mount.
-  }
-}
-
-/** Facts the guide needs; each maps to one step. */
-interface SetupStatus {
-  timezone: string | null;
-  problemCount: number;
-  hasSchedule: boolean;
-}
-
-type Step = 0 | 1 | 2 | 3;
-
-/** Index of the first unfinished step, or the finish screen when everything is in place. */
-function firstOpenStep(status: SetupStatus): Step {
-  if (!status.timezone) return 0;
-  if (status.problemCount === 0) return 1;
-  if (!status.hasSchedule) return 2;
-  return 3;
-}
 
 /** Weekday preset: Monday–Friday, three problems (one Easy, two Medium), one of them a review. */
 export function presetStrategy(lang: Language): StrategyInput {
@@ -78,78 +36,8 @@ export function presetStrategy(lang: Language): StrategyInput {
   };
 }
 
-interface SetupGateProps {
-  lang: Language;
-  theme: ThemeMode;
-  palette: ThemePalette;
-  onLanguageChange: (lang: Language) => void;
-  onThemeChange: (theme: ThemeMode) => void;
-  onPaletteChange: (palette: ThemePalette) => void;
-  onTimezoneSaved: (zone: string | null) => void;
-  /** Called once the guide closes so the daily plan can be generated with the new setup. */
-  onFinish: () => void;
-  /** Close the guide and open the AI tab in Settings. */
-  onOpenAiSettings: () => void;
-  children: ReactNode;
-}
-
-/** Show the guide while setup is incomplete; otherwise render the regular Today view. */
-export function SetupGate({ children, ...props }: SetupGateProps) {
-  const workspace = useWorkspace();
-  const [phase, setPhase] = useState<'checking' | 'guide' | 'done'>(() => (readDone() ? 'done' : 'checking'));
-  const [status, setStatus] = useState<SetupStatus | null>(null);
-
-  useEffect(() => {
-    if (phase === 'done') return;
-    let active = true;
-    Promise.all([api.getSettings(), api.getCatalogStats(), api.getStrategies(), api.getGoalListSummaries(1, { limit: 1 })])
-      .then(([settings, stats, strategies, goals]) => {
-        if (!active) return;
-        const next: SetupStatus = {
-          timezone: settings.timezone ?? null,
-          problemCount: stats.totalProblems,
-          hasSchedule: strategies.some((s) => !s.deleted && s.weekdays.length > 0),
-        };
-        if (goals.items.length || (phase === 'checking' && firstOpenStep(next) === 3)) {
-          // Existing installs (or a restored migration) skip the guide entirely.
-          writeDone();
-          setPhase('done');
-        } else if (phase === 'checking') {
-          setStatus(next);
-          setPhase('guide');
-        }
-      })
-      .catch(() => {
-        // Never block Today on the check; its own views report load failures.
-        if (active && phase === 'checking') setPhase('done');
-      });
-    return () => {
-      active = false;
-    };
-  }, [phase, workspace.revision]);
-
-  if (phase === 'done') return <>{children}</>;
-  if (phase === 'checking' || !status) {
-    return (
-      <div className="setup-loading" role="status">
-        {props.lang === 'zh' ? '正在检查设置…' : 'Checking your setup…'}
-      </div>
-    );
-  }
-  return (
-    <SetupGuide
-      {...props}
-      initialStatus={status}
-      onClose={() => {
-        writeDone();
-        setPhase('done');
-      }}
-    />
-  );
-}
-
 /** The three-step guide itself; only the active step is rendered. */
-function SetupGuide({
+export function SetupGuide({
   lang,
   theme,
   palette,
@@ -160,12 +48,13 @@ function SetupGuide({
   onFinish,
   onOpenAiSettings,
   initialStatus,
+  initialStep,
   onClose,
-}: Omit<SetupGateProps, 'children'> & { initialStatus: SetupStatus; onClose: () => void }) {
+}: Omit<SetupGateProps, 'children'> & { initialStatus: SetupStatus; initialStep: Step; onClose: () => void }) {
   const zh = lang === 'zh';
   const workspace = useWorkspace();
   const [status, setStatus] = useState(initialStatus);
-  const [step, setStep] = useState<Step>(() => firstOpenStep(initialStatus));
+  const [step, setStep] = useState<Step>(initialStep);
   const [importAnother, setImportAnother] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');

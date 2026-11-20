@@ -1,4 +1,4 @@
-import { GOAL_PROBLEM_ID_MAX_LENGTH } from '../../../packages/contracts/src/goal-lists.ts';
+import { GOAL_PROBLEM_ID_MAX_LENGTH } from '../../../packages/contracts/src/goal-list-utils.ts';
 import type { Language } from './i18n.ts';
 
 /** Keep imported string IDs containing separators or a literal "#" lossless in the bulk editor. */

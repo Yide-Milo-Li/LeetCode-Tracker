@@ -63,6 +63,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   });
   app.addHook('onClose', async () => {
     await Promise.all([application.close(), agentApplication?.close()]);
+    await store.flushRoutineBackup();
   });
 
   // Enable CORS restricted to localhost/loopback

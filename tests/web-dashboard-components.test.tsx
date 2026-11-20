@@ -345,6 +345,11 @@ it('keeps Statistics read-only when timezone setup is required', async () => {
   await act(async () => { render(<DashboardView lang="en" />); });
   assert.equal(writes.mock.callCount(), 0);
   assert.equal(ensure.mock.callCount(), 0);
+  const details = document.querySelector<HTMLDetailsElement>('.progress-source-details')!;
+  await act(async () => {
+    details.open = true;
+    fireEvent(details, new window.Event('toggle'));
+  });
   assert.ok(screen.getByText(translations.en.setupTimezoneTitle));
 });
 
@@ -503,8 +508,16 @@ it('refreshes hidden statistics once when next shown, and keeps clean visits cac
   await act(async () => {rendered.rerender(tree(false, 2));});
   await act(async () => {rendered.rerender(tree(true, 2));});
   const refreshed = counts();
-  for (const key of Object.keys(before)) assert.equal(refreshed[key], before[key] + 1);
+  assert.equal(refreshed.practiceStats, 0);
+  for (const key of ['dashboard', 'mastery', 'profile']) assert.equal(refreshed[key], before[key] + 1);
   await act(async () => {rendered.rerender(tree(false, 2));});
   await act(async () => {rendered.rerender(tree(true, 2));});
   assert.deepEqual(counts(), refreshed);
+  const details = document.querySelector<HTMLDetailsElement>('.progress-source-details')!;
+  await act(async () => {
+    details.open = true;
+    fireEvent(details, new window.Event('toggle'));
+  });
+  assert.equal(counts().practiceStats, 1);
+  assert.equal(details.querySelectorAll('tbody tr').length, createMockDashboardData().trend30Days.length);
 });

@@ -1910,3 +1910,29 @@ it('keeps empty goals, rest days and unavailable weekly data distinct from measu
   assert.ok(screen.getByText('Set a timezone to assign daily activity'));
   assert.equal(screen.queryByRole('list'), null);
 });
+
+it('rechecks a rest response that arrived after midnight and then skips same-day polling', async t => {
+  const { useDailyPlan } = await import('../apps/web/src/hooks/useDailyPlan.ts');
+  const visibility = Object.getOwnPropertyDescriptor(document, 'visibilityState');
+  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+  t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: Date.parse('2026-09-08T23:59:59Z') });
+  const rest = { status: 'rest' as const, plan: null };
+  let respond!: (result: typeof rest) => void;
+  const pending = new Promise<typeof rest>(resolve => { respond = resolve; });
+  const ensure = t.mock.method(api, 'ensureDailyPlan', () => pending);
+  function Probe() { useDailyPlan('en', 'UTC'); return null; }
+  try {
+    await act(async () => { render(<Probe />); });
+    t.mock.timers.tick(2000);
+    await act(async () => { respond(rest); });
+    assert.equal(ensure.mock.callCount(), 1);
+    await act(async () => { t.mock.timers.tick(30_000); });
+    assert.equal(ensure.mock.callCount(), 2);
+    await act(async () => { t.mock.timers.tick(90_000); });
+    assert.equal(ensure.mock.callCount(), 2);
+  } finally {
+    cleanup();
+    if (visibility) Object.defineProperty(document, 'visibilityState', visibility);
+    else Reflect.deleteProperty(document, 'visibilityState');
+  }
+});

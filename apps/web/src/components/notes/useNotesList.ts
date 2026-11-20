@@ -13,6 +13,7 @@ export type NotesSortField = 'completed' | 'updated' | 'notes-first';
 
 /** Page size of the problem list. */
 export const NOTES_LIST_LIMIT = 25;
+const NOTES_SEARCH_DEBOUNCE_MS = 180;
 
 interface UseNotesListOptions {
   /** Currently selected problem, owned by the workspace selection guard. */
@@ -34,6 +35,8 @@ export function useNotesList({ selectedId, setSelectedId }: UseNotesListOptions)
   // Filters state
   const [scope, setScope] = useState<NotesScope>('practiced');
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const searchPending = search.trim() !== debouncedSearch;
   const [difficulty, setDifficulty] = useState<NotesDifficultyFilter>('all');
   const [hasNote, setHasNote] = useState<NotesHasNoteFilter>('all');
   const [sortField, setSortField] = useState<NotesSortField>('completed');
@@ -51,9 +54,25 @@ export function useNotesList({ selectedId, setSelectedId }: UseNotesListOptions)
 
   const [selectedSummary, setSelectedSummary] = useState<ProblemNoteSummary | null>(null);
 
+  useEffect(() => {
+    const trimmed = search.trim();
+    if (!visible) {
+      if (trimmed !== debouncedSearch) setDebouncedSearch(trimmed);
+      return;
+    }
+    if (trimmed === debouncedSearch) return;
+    if (!trimmed) {
+      setDebouncedSearch('');
+      return;
+    }
+    const timer = setTimeout(() => setDebouncedSearch(trimmed), NOTES_SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [search, debouncedSearch, visible]);
+
   // Retain selected summary or update from current items if present
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
     if (selectedId) {
       const matched = items.find((it) => it.questionFrontendId === selectedId);
       if (matched) {
@@ -62,7 +81,7 @@ export function useNotesList({ selectedId, setSelectedId }: UseNotesListOptions)
         setSelectedSummary(current => current?.questionFrontendId === selectedId ? current : null);
         // A Today link can target an unpracticed problem outside the filtered list.
         api
-          .listNotes({ frontendId: selectedId, scope: 'all', limit: 1 })
+          .listNotes({ frontendId: selectedId, scope: 'all', limit: 1 }, { signal: controller.signal })
           .then((res) => {
             if (!active) return;
             const found = res.items.find((it) => it.questionFrontendId === selectedId);
@@ -75,25 +94,30 @@ export function useNotesList({ selectedId, setSelectedId }: UseNotesListOptions)
     }
     return () => {
       active = false;
+      controller.abort();
     };
   }, [items, selectedId]);
 
   /** Fetch the current filters and return cancellation for superseded list requests. */
   useEffect(() => {
-    if (!visible) return;
+    if (!visible || searchPending) return;
+    const controller = new AbortController();
     let active = true;
     setLoadingList(true);
     setListFailed(false);
     api
-      .listNotes({
-        scope,
-        search: search.trim() || undefined,
-        difficulty,
-        hasNote,
-        sort,
-        page,
-        limit,
-      })
+      .listNotes(
+        {
+          scope,
+          search: debouncedSearch || undefined,
+          difficulty,
+          hasNote,
+          sort,
+          page,
+          limit,
+        },
+        { signal: controller.signal },
+      )
       .then((res) => {
         if (!active) return;
         setItems(res.items);
@@ -107,7 +131,7 @@ export function useNotesList({ selectedId, setSelectedId }: UseNotesListOptions)
         }
       })
       .catch(() => {
-        if (!active) return;
+        if (!active || controller.signal.aborted) return;
         setItems([]);
         setTotal(0);
         setListFailed(true);
@@ -118,8 +142,9 @@ export function useNotesList({ selectedId, setSelectedId }: UseNotesListOptions)
 
     return () => {
       active = false;
+      controller.abort();
     };
-  }, [scope, search, difficulty, hasNote, sort, page, limit, visible,
+  }, [scope, debouncedSearch, searchPending, difficulty, hasNote, sort, page, limit, visible,
     listRevision, revision, desktopAgentRevision, favoriteRevision, setSelectedId]);
 
   return {

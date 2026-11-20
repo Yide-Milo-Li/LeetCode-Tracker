@@ -1,32 +1,47 @@
 import type { FormatResult } from '../../../packages/markdown/src/index.ts';
 
-/** Resolve every operation, including worker errors and timeouts, without losing the draft. */
+let idleWorker: Worker | undefined;
+let idleTimeout: ReturnType<typeof setTimeout> | undefined;
+
+export function releaseIdleFormatter(): void {
+  clearTimeout(idleTimeout);
+  idleWorker?.terminate();
+  idleWorker = undefined;
+}
+
+/** Lease one worker per in-flight draft, keeping one warm between successive saves. */
 export function formatNoteInWorker(source: string): Promise<FormatResult> {
+  const skipped: FormatResult = { content: source, status: 'skipped', reason: 'unsafe' };
   return new Promise(resolve => {
-    if (typeof Worker === 'undefined') {
-      resolve({ content: source, status: 'skipped', reason: 'unsafe' });
+    let worker: Worker;
+    try {
+      worker = idleWorker ?? new Worker(new URL('./markdown-format.worker.ts', import.meta.url), { type: 'module' });
+    } catch {
+      resolve(skipped);
       return;
     }
-    let worker: Worker;
-    try { worker = new Worker(new URL('./markdown-format.worker.ts', import.meta.url), { type: 'module' }); }
-    catch { resolve({ content: source, status: 'skipped', reason: 'unsafe' }); return; }
-    let settled = false;
-    const finish = (result: FormatResult) => {
-      if (settled) return;
-      settled = true;
+    idleWorker = undefined;
+    clearTimeout(idleTimeout);
+    const timer = setTimeout(() => finish(skipped, false), 5000);
+    const finish = (result: FormatResult, reusable: boolean) => {
       clearTimeout(timer);
-      worker.terminate();
+      worker.onmessage = worker.onerror = worker.onmessageerror = null;
+      if (reusable && !idleWorker) {
+        idleWorker = worker;
+        idleTimeout = setTimeout(releaseIdleFormatter, 30_000);
+      } else {
+        worker.terminate();
+      }
       resolve(result);
     };
-    const timer = setTimeout(() => finish({ content: source, status: 'skipped', reason: 'unsafe' }), 5000);
     worker.onmessage = (event: MessageEvent<FormatResult>) => {
       const result = event.data;
-      if (!result || typeof result.content !== 'string' || !['formatted', 'unchanged', 'skipped'].includes(result.status)) {
-        finish({ content: source, status: 'skipped', reason: 'unsafe' });
-      } else finish(result);
+      if (result && typeof result.content === 'string' && ['formatted', 'unchanged', 'skipped'].includes(result.status)) {
+        finish(result, true);
+      } else finish(skipped, false);
     };
-    worker.onerror = () => finish({ content: source, status: 'skipped', reason: 'unsafe' });
+    worker.onerror = worker.onmessageerror = () => finish(skipped, false);
     try { worker.postMessage(source); }
-    catch { finish({ content: source, status: 'skipped', reason: 'unsafe' }); }
+    catch { finish(skipped, false); }
   });
 }

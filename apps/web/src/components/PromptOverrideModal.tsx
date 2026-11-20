@@ -11,11 +11,8 @@ import { localizeApiError, localizePlanningIssue } from '../error-i18n.ts';
 import { formatDifficulty, translations, type Language } from '../i18n.ts';
 import { Dialog } from './ui.tsx';
 import { TimeBudgetField } from './RecommendationOptions.tsx';
-import {
-  difficulties,
-  type Difficulty,
-  type Rules,
-} from '../../../../packages/contracts/src/recommendations.ts';
+import type { Rules } from '../../../../packages/contracts/src/recommendations.ts';
+import { difficulties, type Difficulty } from '../../../../packages/contracts/src/recommendation-utils.ts';
 import {
   type CountInput,
   type ReviewMode,

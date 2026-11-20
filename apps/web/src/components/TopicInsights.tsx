@@ -1,4 +1,4 @@
-import React, { useId, useState } from 'react';
+import React, { useId, useMemo, useState } from 'react';
 import { ChevronRight, Search, X } from 'lucide-react';
 import type { TagMastery, TagMasteryReport, KnowledgeProfileReport } from '../api.ts';
 import { formatDifficulty, translations, type Language } from '../i18n.ts';
@@ -172,8 +172,7 @@ function DifficultyEvidenceGrid({ topic, lang }: { topic: KnowledgeProfileReport
  * Factual topic metrics as a compact, searchable, sortable table. The default order puts the most
  * recently practiced topics first (knowledge-profile recency, all history, user time zone); topics
  * with no dated practice follow. Each row expands in place to show its 30-day
- * evidence by difficulty. Expanded content stays mounted (collapsed, inert) so the open/close
- * transition can animate and the evidence remains queryable without layout cost.
+ * evidence by difficulty. Evidence mounts on expansion, keeping the disclosure target available to assistive technology.
  * No synthetic ability scores are derived.
  */
 export function TopicInsights({ report, profileReport, lang }: {
@@ -197,8 +196,6 @@ export function TopicInsights({ report, profileReport, lang }: {
         developing: t.developingLevel,
         recently_stable: t.masteredLevel,
     };
-    const matches = (tag: TagMastery, f: TopicFilter) =>
-        f === 'all' ? true : f === 'practiced' ? isPracticed(tag) : tag.level === f;
     const filters: Array<{ key: TopicFilter; label: string }> = [
         { key: 'practiced', label: zh ? '已练过' : 'Practiced' },
         { key: 'needs_practice', label: t.weakLevel },
@@ -206,22 +203,26 @@ export function TopicInsights({ report, profileReport, lang }: {
         { key: 'recently_stable', label: t.masteredLevel },
         { key: 'all', label: zh ? '全部' : 'All' },
     ];
-    const profileMap = new Map(profileReport?.topics.map(tp => [tp.tagSlug, tp]) ?? []);
+    const profileMap = useMemo(() => new Map(profileReport?.topics.map(tp => [tp.tagSlug, tp]) ?? []), [profileReport]);
     const daysSince = (tag: TagMastery) => profileMap.get(tag.tagSlug)?.daysSinceLastPractice ?? null;
-    /** Most recent first; unknown recency sorts last, then recent volume, solves and name break ties. */
-    const byLastPracticed = (a: TagMastery, b: TagMastery) => {
-        const da = daysSince(a);
-        const db = daysSince(b);
-        if (da !== db) {
-            if (da === null) return 1;
-            if (db === null) return -1;
-            return da - db;
+    const { searched, counts } = useMemo(() => {
+        const searched = report.tags.filter(tag => matchesQuery(tag, query));
+        const counts = { all: searched.length, practiced: 0, needs_practice: 0, developing: 0, recently_stable: 0 };
+        for (const tag of searched) {
+            if (isPracticed(tag)) counts.practiced++;
+            if (tag.level !== 'insufficient_data') counts[tag.level]++;
         }
-        return b.recentProblemCount - a.recentProblemCount || b.solvedCount - a.solvedCount || a.tagName.localeCompare(b.tagName);
-    };
-    const comparator = sortKey === 'lastPracticed' ? byLastPracticed : COLUMN_COMPARATORS[sortKey];
-    const searched = report.tags.filter(tag => matchesQuery(tag, query));
-    const filteredTags = searched.filter(tag => matches(tag, filter)).sort(comparator);
+        return { searched, counts };
+    }, [report.tags, query]);
+    const filteredTags = useMemo(() => {
+        const filtered = searched.filter(tag => filter === 'all' || (filter === 'practiced' ? isPracticed(tag) : tag.level === filter));
+        if (sortKey !== 'lastPracticed') return filtered.sort(COLUMN_COMPARATORS[sortKey]);
+        return filtered.sort((a, b) => {
+            const da = profileMap.get(a.tagSlug)?.daysSinceLastPractice ?? Infinity;
+            const db = profileMap.get(b.tagSlug)?.daysSinceLastPractice ?? Infinity;
+            return (da - db) || b.recentProblemCount - a.recentProblemCount || b.solvedCount - a.solvedCount || a.tagName.localeCompare(b.tagName);
+        });
+    }, [searched, filter, sortKey, profileMap]);
     // A search shows every match; otherwise the first page keeps the table short.
     const tagsToRender = expanded || query ? filteredTags : filteredTags.slice(0, PAGE_SIZE);
     const hiddenUnpracticed = filter === 'practiced' && !query ? report.tags.length - filteredTags.length : 0;
@@ -266,7 +267,7 @@ export function TopicInsights({ report, profileReport, lang }: {
                                 setExpanded(false);
                             }}
                         >
-                            {f.label} <span className="num-tabular">({searched.filter(tag => matches(tag, f.key)).length})</span>
+                            {f.label} <span className="num-tabular">({counts[f.key]})</span>
                         </button>
                     ))}
                 </div>
@@ -399,7 +400,7 @@ export function TopicInsights({ report, profileReport, lang }: {
                                         <td colSpan={9}>
                                             <div className="topic-detail-collapse" id={detailId} inert={!open} aria-hidden={!open}>
                                                 <div className="topic-detail-inner">
-                                                    <div className="topic-detail-body">
+                                                    {open && <div className="topic-detail-body">
                                                         <dl className="topic-detail-facts">
                                                             <div><dt>{t.insightTimed}</dt><dd className="num-tabular">{tag.durationSampleCount}</dd></div>
                                                             <div><dt>{t.insightUnknown}</dt><dd className="num-tabular">{tag.unknownDateCount}</dd></div>
@@ -412,7 +413,7 @@ export function TopicInsights({ report, profileReport, lang }: {
                                                                 {zh ? '暂时没有按难度拆分的证据。' : 'No per-difficulty evidence is available yet.'}
                                                             </p>
                                                         )}
-                                                    </div>
+                                                    </div>}
                                                 </div>
                                             </div>
                                         </td>

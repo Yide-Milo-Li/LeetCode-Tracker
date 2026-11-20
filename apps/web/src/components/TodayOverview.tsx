@@ -1,6 +1,6 @@
 import { useState, type CSSProperties } from 'react';
 import { ArrowDownRight, ArrowUpRight } from 'lucide-react';
-import { localDate } from '../../../../packages/contracts/src/time.ts';
+import { localDate } from '../../../../packages/contracts/src/time-utils.ts';
 import type { GoalList } from '../../../../packages/contracts/src/goal-lists.ts';
 import { api, type DailyPlan, type EnsureResult } from '../api.ts';
 import { formatCalendarDate } from '../date-format.ts';

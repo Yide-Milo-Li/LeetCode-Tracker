@@ -19,6 +19,9 @@ export interface StoppedTimer {
   minutes: number;
 }
 
+// Used only when persistence is unavailable. A successful write returns authority to storage.
+let volatileTimer: PracticeTimerState | null | undefined;
+
 const ACTIVE_KEY = 'leetcode-tracker-active-timer';
 const PENDING_PREFIX = 'leetcode-tracker-pending-minutes:';
 export const TIMER_CHANGE_EVENT = 'practice-timer-change';
@@ -86,6 +89,7 @@ export function formatElapsed(totalSeconds: number): string {
 
 /** Read the single active timer; corrupt entries are discarded. */
 export function loadActiveTimer(): PracticeTimerState | null {
+  if (volatileTimer !== undefined) return volatileTimer;
   const store = storage();
   if (!store) return null;
   try {
@@ -119,9 +123,11 @@ export function startTimer(problem: { frontendId: string; title?: string }, now 
     startedAt: now,
   };
   try {
-    storage()?.setItem(ACTIVE_KEY, JSON.stringify(state));
+    const store = storage();
+    store?.setItem(ACTIVE_KEY, JSON.stringify(state));
+    volatileTimer = store ? undefined : state;
   } catch {
-    /* In-memory run still works for this session. */
+    volatileTimer = state;
   }
   notify();
   return state;
@@ -167,17 +173,22 @@ export function clearPendingMinutes(frontendId: string): void {
   notify();
 }
 
+function clearActiveTimer(): void {
+  try {
+    storage()?.removeItem(ACTIVE_KEY);
+    volatileTimer = undefined;
+  } catch {
+    volatileTimer = null;
+  }
+}
+
 /** Stop the active timer, keeping its minutes as pending for the next record. */
 export function stopTimer(now = Date.now()): StoppedTimer | null {
   const timer = loadActiveTimer();
   if (!timer) return null;
   const elapsedSeconds = getElapsedSeconds(timer, now);
   const minutes = toMinutes(elapsedSeconds);
-  try {
-    storage()?.removeItem(ACTIVE_KEY);
-  } catch {
-    /* Active entry already unreadable. */
-  }
+  clearActiveTimer();
   setPendingMinutes(timer.frontendId, minutes);
   return { timer, elapsedSeconds, minutes };
 }
@@ -191,10 +202,6 @@ export function stopTimerFor(frontendId: string, now = Date.now()): StoppedTimer
 
 /** Discard the active timer without keeping minutes. */
 export function cancelTimer(): void {
-  try {
-    storage()?.removeItem(ACTIVE_KEY);
-  } catch {
-    /* Nothing to discard. */
-  }
+  clearActiveTimer();
   notify();
 }

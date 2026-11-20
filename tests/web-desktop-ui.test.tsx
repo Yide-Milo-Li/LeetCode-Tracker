@@ -447,3 +447,35 @@ describe('Minimal Desktop UI - Phase 10', () => {
     assert.ok(recordBtn);
   });
 });
+
+it('slows desktop status checks after startup and pauses them while the window is hidden', async t => {
+  const { DesktopGate } = await import('../apps/web/src/components/DesktopGate.tsx');
+  const hidden = Object.getOwnPropertyDescriptor(document, 'hidden');
+  let background = false;
+  Object.defineProperty(document, 'hidden', { configurable: true, get: () => background });
+  let count = 0;
+  Object.assign(window, { __TAURI_INTERNALS__: { invoke: () => Promise.resolve({ state: ++count === 1 ? 'starting' : 'ready' }) } });
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    await act(async () => { render(<DesktopGate>Ready for practice</DesktopGate>); });
+    await act(async () => { t.mock.timers.tick(500); });
+    assert.equal(count, 2);
+    assert.ok(screen.getByText('Ready for practice'));
+    await act(async () => { t.mock.timers.tick(4999); });
+    assert.equal(count, 2);
+    await act(async () => { t.mock.timers.tick(1); });
+    assert.equal(count, 3);
+    background = true;
+    fireEvent(document, new window.Event('visibilitychange'));
+    await act(async () => { t.mock.timers.tick(30_000); });
+    assert.equal(count, 3);
+    background = false;
+    await act(async () => { fireEvent(document, new window.Event('visibilitychange')); });
+    assert.equal(count, 4);
+  } finally {
+    cleanup();
+    Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
+    if (hidden) Object.defineProperty(document, 'hidden', hidden);
+    else Reflect.deleteProperty(document, 'hidden');
+  }
+});

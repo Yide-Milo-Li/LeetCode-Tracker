@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { goalListSummary, type GoalList, type GoalListSummary } from '../../../../packages/contracts/src/goal-lists.ts';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { GoalList } from '../../../../packages/contracts/src/goal-lists.ts';
+import { goalListSummary, type GoalListSummary } from '../../../../packages/contracts/src/goal-list-utils.ts';
 import { api } from '../api.ts';
 import { localizeApiError } from '../error-i18n.ts';
 import type { Language } from '../i18n.ts';
@@ -70,14 +71,14 @@ export function useTodayGoals(lang: Language, active = true, showSelected = true
     return () => controller.abort();
   }, [active, showSelected, id, version, revision, summaryReady, cached]);
 
-  function selectGoal(id: string | null) {
+  const selectGoal = useCallback((id: string | null) => {
     setSelectedId(id);
     try {
       if (id) window.localStorage.setItem(SELECTED_GOAL_KEY, id);
       else window.localStorage.removeItem(SELECTED_GOAL_KEY);
     } catch { /* The selection remains usable in memory. */ }
-  }
-  function saved(id: string, goal: GoalList | null) {
+  }, []);
+  const saved = useCallback((id: string, goal: GoalList | null) => {
     refresh();
     setLists(previous => {
       if (!goal) return previous.filter(list => list.id !== id);
@@ -87,8 +88,8 @@ export function useTodayGoals(lang: Language, active = true, showSelected = true
     });
     if (goal) setDetail({ list: goal, version: goal.version, revision });
     else setDetail(previous => previous?.list.id === id ? undefined : previous);
-  }
-  function membershipSaved(listIds: string[], update: Awaited<ReturnType<typeof api.setProblemGoalMembership>>) {
+  }, [refresh, revision]);
+  const membershipSaved = useCallback((listIds: string[], update: Awaited<ReturnType<typeof api.setProblemGoalMembership>>) => {
     // Apply the acknowledged change while the chooser closes, so a removed row can restore focus.
     setDetail(previous => {
       const summary = update.changed.find(list => list.id === previous?.list.id);
@@ -99,10 +100,14 @@ export function useTodayGoals(lang: Language, active = true, showSelected = true
       return { ...previous, version: summary.version, list: { ...previous.list, version: summary.version, items } };
     });
     refresh();
-  }
+  }, [refresh]);
   const failure = readError ?? (showSelected && id ? detailError : undefined);
-  return { lists, selected, list: detail?.list.id === id ? detail?.list : undefined, loaded: summaryKey !== undefined, generation,
-    error: error || (failure ? localizeApiError(failure, lang) : ''), setError, selectGoal, saved, membershipSaved, refresh };
+  const list = detail?.list.id === id ? detail?.list : undefined;
+  const loaded = summaryKey !== undefined;
+  const message = error || (failure ? localizeApiError(failure, lang) : '');
+  return useMemo(() => ({ lists, selected, list, loaded, generation, error: message, setError,
+    selectGoal, saved, membershipSaved, refresh }),
+  [lists, selected, list, loaded, generation, message, selectGoal, saved, membershipSaved, refresh]);
 }
 
 export type TodayGoals = ReturnType<typeof useTodayGoals>;

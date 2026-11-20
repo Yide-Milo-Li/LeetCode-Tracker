@@ -97,7 +97,11 @@ function computeTodaySummary(
 /** Create operations over the owning application's shared context. */
 export function createDashboardOperations(context: ApplicationContext) {
   const { store, planningService } = context;
-  /** summary: validates input and preserves existing business rules. */
+  let cached: {
+    window: ReturnType<CatalogStore['dashboardWindow']>;
+    year: number;
+    report: ReturnType<typeof calculateDashboardStats>;
+  } | undefined;
   const summary = async (input: unknown = {}) => {
     const parseRes = dashboardQuerySchema.safeParse(input);
     if (!parseRes.success) {
@@ -107,9 +111,10 @@ export function createDashboardOperations(context: ApplicationContext) {
       });
     }
 
-    const rawData = store.dashboardSnapshot();
-    const userTimezone = rawData.userTimezone;
     const now = Date.now();
+    const window = store.dashboardWindow(now);
+    const rawData = window.raw;
+    const userTimezone = rawData.userTimezone;
 
     // Determine target year from query or current calendar year in user timezone
     const currentYear = (userTimezone && isTimeZone(userTimezone))
@@ -119,12 +124,15 @@ export function createDashboardOperations(context: ApplicationContext) {
 
     const todaySummary = computeTodaySummary(store, planningService, userTimezone, now);
 
+    // Saved plans and their completion evidence are reconciled at the instant of this request.
+    if (cached?.window === window && cached.year === targetYear) return { ...cached.report, todaySummary };
     const dashboard = calculateDashboardStats({
       ...rawData,
       todaySummary,
       targetYear,
       now,
     });
+    cached = { window, year: targetYear, report: dashboard };
     return dashboard;
   };
 

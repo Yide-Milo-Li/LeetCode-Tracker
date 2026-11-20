@@ -160,6 +160,11 @@ interface DailyTrackingEntry {
   problemSummaries: Map<string, YearlyProblemSummary>;
 }
 
+/** Preserve insertion order and the latest evidence for the three tooltip entries. */
+function previewProblem(entry: DailyTrackingEntry, id: string, summary: YearlyProblemSummary) {
+  if (entry.problemSummaries.size < 3 || entry.problemSummaries.has(id)) entry.problemSummaries.set(id, summary);
+}
+
 /**
  * Helper to identify all unique problem IDs that have reached solved status across all sources.
  */
@@ -263,7 +268,7 @@ export function calculateDashboardStats(input: DashboardStatsInput): DashboardRe
       if (r.durationMinutes && r.durationMinutes > 0) {
         entry.totalMinutes += r.durationMinutes;
       }
-      entry.problemSummaries.set(r.questionId, {
+      previewProblem(entry, r.questionId, {
         frontendId: r.questionFrontendId,
         title: r.problemTitle,
         difficulty,
@@ -316,15 +321,16 @@ export function calculateDashboardStats(input: DashboardStatsInput): DashboardRe
     } else {
       activeDates.add(resolved.date);
       const entry = getDailyEntry(resolved.date);
+      const alreadyActive = entry.activeProblemIds.has(s.questionId);
       entry.activeProblemIds.add(s.questionId);
       entry.snapshotCount++;
       const sDiff = (s.difficulty as Difficulty) || 'Medium';
-      if (!entry.problemSummaries.has(s.questionId)) {
+      if (!alreadyActive) {
         if (sDiff === 'Easy') entry.easyCount++;
         else if (sDiff === 'Medium') entry.mediumCount++;
         else if (sDiff === 'Hard') entry.hardCount++;
       }
-      entry.problemSummaries.set(s.questionId, {
+      previewProblem(entry, s.questionId, {
         frontendId: s.questionFrontendId,
         title: s.problemTitle,
         difficulty: sDiff,
@@ -387,15 +393,16 @@ export function calculateDashboardStats(input: DashboardStatsInput): DashboardRe
     } else {
       activeDates.add(resolved.date);
       const entry = getDailyEntry(resolved.date);
+      const alreadyActive = entry.activeProblemIds.has(succ.questionId);
       entry.activeProblemIds.add(succ.questionId);
       entry.solvedProblemIds.add(succ.questionId);
       const succDiff = (succ.difficulty as Difficulty) || 'Medium';
-      if (!entry.problemSummaries.has(succ.questionId)) {
+      if (!alreadyActive) {
         if (succDiff === 'Easy') entry.easyCount++;
         else if (succDiff === 'Medium') entry.mediumCount++;
         else if (succDiff === 'Hard') entry.hardCount++;
       }
-      entry.problemSummaries.set(succ.questionId, {
+      previewProblem(entry, succ.questionId, {
         frontendId: succ.questionFrontendId,
         title: succ.problemTitle,
         difficulty: succDiff,
@@ -461,7 +468,7 @@ export function calculateDashboardStats(input: DashboardStatsInput): DashboardRe
         mediumCount: entry.mediumCount,
         hardCount: entry.hardCount,
         totalMinutes: entry.totalMinutes,
-        problemSummaries: Array.from(entry.problemSummaries.values()).slice(0, 10),
+        problemSummaries: Array.from(entry.problemSummaries.values()),
       });
     }
   }
