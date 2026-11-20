@@ -236,6 +236,8 @@ export function App() {
   }, []);
 
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
+  const openShortcutHelp = useCallback(() => setShowShortcutHelp(true), []);
+  const closeShortcutHelp = useCallback(() => setShowShortcutHelp(false), []);
 
   const focusSearch = useCallback(() => {
     navigate('problems');
@@ -449,7 +451,11 @@ export function App() {
                 <button
                   className="btn-icon"
                   aria-label={zh ? '快捷键速查 (?)' : 'Keyboard shortcuts (?)'}
-                  onClick={() => setShowShortcutHelp(true)}
+                  aria-haspopup="dialog"
+                  onClick={(event) => {
+                    event.currentTarget.focus();
+                    openShortcutHelp();
+                  }}
                 >
                   <Keyboard size={17} />
                 </button>
@@ -627,6 +633,7 @@ export function App() {
                   initialFrontendId={selectedNoteProblem}
                   onClearInitialFrontendId={() => setSelectedNoteProblem(null)}
                   onNeedsSaveChange={setNoteNeedsSave}
+                  onOpenShortcutHelp={openShortcutHelp}
                 />
               </RetainedView>
             )}
@@ -717,7 +724,7 @@ export function App() {
           />
         )}
         {showShortcutHelp && (
-          <ShortcutHelpModal lang={lang} onClose={() => setShowShortcutHelp(false)} />
+          <ShortcutHelpModal lang={lang} onClose={closeShortcutHelp} />
         )}
       </div>
       </GoalListsScope>

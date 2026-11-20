@@ -165,6 +165,38 @@ it('opens keyboard shortcut help modal on key "?"', async () => {
   assert.equal(screen.queryByRole('dialog'), null);
 });
 
+it('opens the shared shortcut dialog from Notes and restores focus to the editor footer', async (t) => {
+  window.location.hash = '#notes';
+  t.mock.method(api, 'listNotes', async () => ({
+    items: [{
+      questionId: '1', questionFrontendId: '1', title: 'Two Sum', titleSlug: 'two-sum',
+      difficulty: 'Easy', tags: [], totalPractices: 1, hasAccepted: true,
+      hasCustomNote: false, customNoteUpdatedAt: null, lastPracticedAt: null,
+      reviewStage: null, latestPracticeNotes: null, url: 'https://example.com/two-sum',
+    }],
+    total: 1,
+  }));
+  t.mock.method(api, 'getNote', async () => ({ note: null }));
+  t.mock.method(api, 'getPracticeRecords', async () => ({ items: [], total: 0, page: 1, limit: 100 }));
+  await act(async () => { render(<App />); });
+  const notesHelp = await screen.findByRole('button', { name: 'Keyboard shortcuts' });
+
+  fireEvent.click(notesHelp);
+  const dialog = screen.getByRole('dialog', { name: 'Keyboard Shortcuts' });
+  const helpText = dialog.textContent ?? '';
+  assert.match(helpText, /Navigate to Problems/);
+  assert.match(helpText, /Save active note/);
+  assert.match(helpText, /Blank line starts a paragraph/);
+
+  fireEvent.keyDown(document, { key: 'Escape' });
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 180)); });
+  assert.equal(screen.queryByRole('dialog'), null);
+  assert.equal(document.activeElement, notesHelp);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Keyboard shortcuts (?)' }));
+  assert.equal(screen.getByRole('dialog', { name: 'Keyboard Shortcuts' }).textContent, helpText);
+});
+
 it('focuses catalog search input on key "/"', async () => {
   await act(async () => {
     render(<App />);

@@ -2,7 +2,7 @@
  * Accessible modal displaying the keyboard shortcuts cheat sheet for desktop power-users.
  */
 import React from 'react';
-import type { Language } from '../i18n.ts';
+import { translations, type Language } from '../i18n.ts';
 import { Dialog } from './ui.tsx';
 
 interface ShortcutHelpModalProps {
@@ -36,6 +36,7 @@ export function ShortcutHelpModal({ lang, onClose }: ShortcutHelpModalProps) {
     },
     {
       category: zh ? '复盘笔记' : 'Notes Workspace',
+      caption: translations[lang].markdownMathSupported,
       items: [
         { key: isMac ? '⌘S' : 'Ctrl+S', desc: zh ? '保存当前笔记' : 'Save active note' },
         { key: isMac ? '⌘\\' : 'Ctrl+\\', desc: zh ? '切换专注模式' : 'Toggle focus mode' },
@@ -68,13 +69,14 @@ export function ShortcutHelpModal({ lang, onClose }: ShortcutHelpModalProps) {
       <div className="shortcut-help-container">
         <p className="shortcut-caption">
           {zh
-            ? '在任何未聚焦输入框的区域直接按下按键即可触发：'
-            : 'Press keys anytime when form inputs are not focused:'}
+            ? '光标离开输入框后，可以使用导航和快捷操作键。'
+            : 'Navigation and quick actions work when the cursor is outside a text field.'}
         </p>
 
         {shortcuts.map((section) => (
           <div key={section.category} className="shortcut-section">
             <h3 className="shortcut-category-title">{section.category}</h3>
+            {section.caption && <p className="shortcut-caption">{section.caption}</p>}
             <ul className="shortcut-list">
               {section.items.map((item) => (
                 <li key={item.key} className="shortcut-item">
