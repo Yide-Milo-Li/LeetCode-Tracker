@@ -138,7 +138,7 @@ export function GoalListEditor({ goal, lang, onClose, onSaved, onRefresh }: {
                 <span className="goal-item-position">{i + 1}.</span>
                 <span className="goal-item-title">#{id} {item?.title} {item?.completed && <small>{zh ? '已完成' : 'Completed'}</small>}</span>
                 <div className="goal-edit-actions">{actions.map(({ label, icon: Icon, disabled, run }) =>
-                  <button type="button" key={label} className="btn-icon" disabled={disabled} aria-label={label} title={label} onClick={run}><Icon size={15} /></button>)}</div>
+                  <button type="button" key={label} className="btn-icon" disabled={disabled} aria-label={label} onClick={run}><Icon size={15} aria-hidden="true" /></button>)}</div>
               </li>;
             })}
           </ol>}

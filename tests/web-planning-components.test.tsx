@@ -1662,6 +1662,7 @@ it('Today renders the entire ordered checklist and restores checked items to the
     assert.deepEqual(visibleIds(), ids.filter(id => id !== '2'));
     assert.equal(document.querySelector('.goal-pending-items li:last-child .goal-item-position')?.textContent, '32.');
     fireEvent.click(screen.getByRole('button', { name: 'Edit Interview' }));
+    assert.equal(screen.getByRole('dialog').querySelector('.tooltip-wrapper, [title]'), null);
     fireEvent.click(screen.getByRole('button', { name: 'Reopen #2' }));
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Save list' })));
     assert.deepEqual(visibleIds(), ids);
