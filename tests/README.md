@@ -1,8 +1,8 @@
 # Testing boundaries
 
-## 1.5.0 candidate
+## 1.5.0 verification
 
-`server-planning-api` verifies ordered goal edits and linked completion after practice corrections and revocations. `server-api` covers favorites, and `mcp-write` exercises guarded membership edits and paged reads through stdio. `server-dashboard-api` covers Today activity against full statistics. `device-sync` covers a delayed upload with a concurrent local write using a simulated Drive server. See [candidate verification](../docs/status.md) for the latest results.
+`server-planning-api` verifies ordered goal edits and linked completion after practice corrections and revocations. `server-api` covers favorites, and `mcp-write` exercises guarded membership edits and paged reads through stdio. `server-dashboard-api` covers Today activity against full statistics. `device-sync` covers a delayed upload with a concurrent local write using a simulated Drive server. See [release verification](../docs/status.md) for the latest results.
 
 ## 1.4.1 verification
 

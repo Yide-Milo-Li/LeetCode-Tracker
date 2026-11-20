@@ -1,8 +1,6 @@
 # Roadmap
 
-Release 1.4.0 adds device sync, AI client access through MCP and signed in-app updates for Windows x64 and Apple Silicon macOS. [Current release notes](releases/1.4.1.md) · [Verification](status.md)
-
-The 1.5.0 candidate adds ordered practice goals, favorite folders, and a Today overview with activity drill-down. The same goal and favorite operations are available to local MCP clients. [Candidate notes](releases/1.5.0.md)
+Release 1.5.0 adds ordered practice goals, favorite folders, and a Today overview with activity drill-down. The same goal and favorite operations are available to local MCP clients. [Release notes](releases/1.5.0.md) · [Verification](status.md)
 
 ## Desktop distribution: implemented and remaining
 

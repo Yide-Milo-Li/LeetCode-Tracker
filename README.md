@@ -16,9 +16,7 @@ A local-first desktop workbench for algorithm practice: bring your own JSONL cat
 
 LeetCode Tracker packages the React interface, Fastify API, SQLite engine (schema v12), and a private Node.js 26.13.0 runtime into native Tauri desktop apps for **Windows 11 x64** and **Apple Silicon macOS 14+** (`aarch64-apple-darwin`) with aligned behavior and a single-file cross-device migration bundle. **End users do not need to install Node.js, npm, Git, or Rust.**
 
-Version 1.4.0 adds device sync, MCP client integration and signed in-app updates. Version 1.4.1 keeps the selected macOS Dock icon after quitting. Upgrading from 1.3.1 requires one manual install. [1.4.1 release notes](docs/releases/1.4.1.md)
-
-The 1.5.0 candidate adds ordered goal lists, a Favorites library, and a new Today overview. The workflows below describe the candidate. [1.5.0 candidate notes](docs/releases/1.5.0.md)
+Version 1.5.0 adds ordered goal lists, a Favorites library, and a new Today overview. Use App updates to upgrade from 1.4.0 or 1.4.1. Upgrading from 1.3.1 requires one manual install. [1.5.0 release notes](docs/releases/1.5.0.md)
 
 ## Download and start
 
@@ -26,8 +24,8 @@ Download the installer for your OS from the [latest release](https://github.com/
 
 | Platform | Download | How to install & open |
 | --- | --- | --- |
-| **Windows 11 x64** | `LeetCode-Tracker_1.4.1_x64-setup.exe` | 1. Run the per-user installer (no administrator rights needed).<br>2. If Windows SmartScreen warns that the installer is unsigned, click **More info → Run anyway**.<br>3. Launch **LeetCode Tracker** from the Start Menu or Desktop shortcut. |
-| **macOS 14+ (Apple Silicon)** | `LeetCode-Tracker_1.4.1_aarch64.dmg` | 1. Open the `.dmg` and drag **LeetCode Tracker.app** into **Applications**.<br>2. Because the bundle is ad-hoc signed and unnotarized, if Gatekeeper warns on first open, go to **System Settings → Privacy & Security → Open Anyway** (or right-click **LeetCode Tracker.app → Open**). If needed, verify checksum and run `xattr -cr "/Applications/LeetCode Tracker.app"`.<br>3. Closing the red window button hides the window while keeping the sidecar ready in the Dock; click the Dock icon to reopen or press `Cmd+Q` to quit cleanly. |
+| **Windows 11 x64** | `LeetCode-Tracker_1.5.0_x64-setup.exe` | 1. Run the per-user installer (no administrator rights needed).<br>2. If Windows SmartScreen warns that the installer is unsigned, click **More info → Run anyway**.<br>3. Launch **LeetCode Tracker** from the Start Menu or Desktop shortcut. |
+| **macOS 14+ (Apple Silicon)** | `LeetCode-Tracker_1.5.0_aarch64.dmg` | 1. Open the `.dmg` and drag **LeetCode Tracker.app** into **Applications**.<br>2. Because the bundle is ad-hoc signed and unnotarized, if Gatekeeper warns on first open, go to **System Settings → Privacy & Security → Open Anyway** (or right-click **LeetCode Tracker.app → Open**). If needed, verify checksum and run `xattr -cr "/Applications/LeetCode Tracker.app"`.<br>3. Closing the red window button hides the window while keeping the sidecar ready in the Dock; click the Dock icon to reopen or press `Cmd+Q` to quit cleanly. |
 
 > [!TIP]
 > **Running from a source checkout instead?** Run `npm run desktop` (works on both Windows and macOS), `start.bat` on Windows, or `npm run desktop:mac` / `./scripts/start-desktop.sh` on macOS (pass `--port 3001` or `PORT=3001` to customize the port). Source mode requires **Node.js >=26.13.0 <27**.
@@ -47,7 +45,7 @@ Download the installer for your OS from the [latest release](https://github.com/
 3. **Review progress & Topic Insights (`Progress`)**: View outcome KPIs, the 365-day activity heatmap, difficulty mastery, topics worth attention, and the searchable, recency-ordered **Topic Insights** table (expand any topic row for 30-day evidence).
 4. **Write notes, export, or switch computers (`Notes` & `Settings`)**: Edit Markdown notes with Split/Edit/Preview modes, local format-on-save (with undo), optional AI formatting, and Notion card copying or Markdown, ZIP, and CSV export. Moving between Windows and macOS? Export one **Snapshot Bundle v5** under **Settings → Data → Export migration file** and import it on the other computer (**Settings → Data → Import migration file**).
 
-The Windows installer is **unsigned** and uses the Evergreen WebView2 runtime (downloading its bootstrapper if missing, which requires internet access). Windows 11 x64 is the primary Windows target; clean-machine installation, Windows 10 compatibility, Apple Developer ID notarization, and non-developer Mac Gatekeeper UX remain outside automated checks. See [installation, data paths, and troubleshooting](docs/desktop.md) and [1.4.1 release notes](docs/releases/1.4.1.md).
+The Windows installer is **unsigned** and uses the Evergreen WebView2 runtime (downloading its bootstrapper if missing, which requires internet access). Windows 11 x64 is the primary Windows target; clean-machine installation, Windows 10 compatibility, Apple Developer ID notarization, and non-developer Mac Gatekeeper UX remain outside automated checks. See [installation, data paths, and troubleshooting](docs/desktop.md) and [1.5.0 release notes](docs/releases/1.5.0.md).
 
 ### Bring your own catalog
 
@@ -84,7 +82,7 @@ Browse a filterable problem list alongside a Markdown editor and CommonMark/GFM 
 
 ### Appearance and keyboard access
 
-Ten palettes, English/Chinese text, and light/dark/system appearance support desktop work, and selecting a palette dynamically tints the window/Dock icon to match. The eight screenshots show the 1.5.0 candidate in English with the default light palette and synthetic catalog and practice data.
+Ten palettes, English/Chinese text, and light/dark/system appearance support desktop work, and selecting a palette dynamically tints the window/Dock icon to match. The eight screenshots show 1.5.0 in English with the default light palette and synthetic catalog and practice data.
 
 | Shortcut | Action |
 | --- | --- |
@@ -156,7 +154,7 @@ CI checks TypeScript, automated tests, the production frontend, documentation, n
 
 ## Documentation
 
-- [Documentation index](docs/README.md) · [Desktop installation](docs/desktop.md) · [1.5.0 candidate notes](docs/releases/1.5.0.md) · [MCP setup](apps/mcp/README.md)
+- [Documentation index](docs/README.md) · [Desktop installation](docs/desktop.md) · [1.5.0 release notes](docs/releases/1.5.0.md) · [MCP setup](apps/mcp/README.md)
 - [Data format](docs/data-format.md) · [Device sync](docs/sync.md) · [AI providers](docs/llm-providers.md) · [Topic insights](docs/topic-practice-insights.md)
 - [Architecture](docs/architecture.md) · [Applications](apps/README.md) · [Shared packages](packages/README.md)
 - [Tests](tests/README.md) · [Scripts](scripts/README.md) · [Roadmap](docs/roadmap.md)

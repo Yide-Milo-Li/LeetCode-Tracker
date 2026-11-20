@@ -36,7 +36,7 @@ Under **Settings → Sync**, turn on **Automatic sync** and save. The setting ap
 
 First publishes, receiving and conflict resolution require confirmation. Use **Check** or **Publish this device** to act immediately, including before switching devices. If you quit with saved edits waiting, the next launch can publish them. An interrupted Drive upload can be resumed from Sync with the original snapshot and its saved upload state.
 
-In the 1.5.0 candidate, publishing captures a snapshot before starting the upload. You can continue recording practice or editing notes during the transfer. New saves stay local until a later publish. With Automatic sync enabled, they are queued for the next eligible check.
+Publishing captures a snapshot before starting the upload. You can continue recording practice or editing notes during the transfer. New saves stay local until a later publish. With Automatic sync enabled, they are queued for the next eligible check.
 
 ### What stays on each device
 
