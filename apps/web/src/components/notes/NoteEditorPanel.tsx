@@ -1,108 +1,300 @@
-/** Long-form note editor: status/actions header, load error, toolbar, edit/preview canvas and footer. */
-import { BookOpen, Check, Save } from 'lucide-react';
-import { useId } from 'react';
-import { NOTE_TEMPLATES, hasMeaningfulNoteContent } from '../../api.ts';
+/** Long-form note editor: conflict/load banners, expanded toolbar, full-height edit/preview canvas and compact footer. */
+import { FileText } from 'lucide-react';
+import { useEffect, useId, useRef, type ClipboardEvent, type KeyboardEvent } from 'react';
+import { NOTE_TEMPLATES } from '../../api.ts';
 import { translations, type Language } from '../../i18n.ts';
-import type { ActionPopover } from '../ui.tsx';
+import { InfoPopover, type ActionPopover } from '../ui.tsx';
 import { NotesMarkdownPreview } from '../NotesMarkdownPreview.tsx';
 import { NoteEditorToolbar, type NotesViewMode } from './NoteEditorToolbar.tsx';
+import {
+  cutCurrentLine,
+  getCurrentLineText,
+  handleEnterKey,
+  handleTabIndent,
+  pasteUrlOverSelection,
+} from './markdownCommands.ts';
 import type { NoteEditorState } from './useNoteEditor.ts';
 
 interface NoteEditorPanelProps {
   lang: Language;
   editor: NoteEditorState;
-  /** Selects the ⌘ or Ctrl shortcut label. */
+  /** Selects the ⌘ or Ctrl shortcut label in the toolbar and footer tips popover. */
   isMac: boolean;
   codeMenu: ActionPopover;
   viewMode: NotesViewMode;
   onViewModeChange: (mode: NotesViewMode) => void;
 }
 
-/** Render the editor for the selected note; all state and actions come from `useNoteEditor`. */
+/** Write plain text to the system clipboard, falling back when navigator.clipboard is unavailable. */
+function writeClipboardText(text: string, restoreTarget?: HTMLTextAreaElement): void {
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    void navigator.clipboard.writeText(text).catch(() => {});
+    return;
+  }
+  if (typeof document !== 'undefined' && typeof document.execCommand === 'function') {
+    const prevStart = restoreTarget?.selectionStart ?? null;
+    const prevEnd = restoreTarget?.selectionEnd ?? null;
+    const helper = document.createElement('textarea');
+    helper.value = text;
+    helper.setAttribute('readonly', '');
+    helper.style.position = 'fixed';
+    helper.style.opacity = '0';
+    document.body.appendChild(helper);
+    helper.select();
+    try {
+      document.execCommand('copy');
+    } catch {
+      // Ignore clipboard unavailability.
+    } finally {
+      helper.remove();
+      if (restoreTarget && prevStart !== null && prevEnd !== null) {
+        restoreTarget.focus();
+        restoreTarget.setSelectionRange(prevStart, prevEnd);
+      }
+    }
+  }
+}
+
+/** Render the editor canvas for the selected note; all state and actions come from `useNoteEditor`. */
 export function NoteEditorPanel({ lang, editor, isMac, codeMenu, viewMode, onViewModeChange }: NoteEditorPanelProps) {
   const t = translations[lang];
   const conflictMessageId = useId();
   const zh = lang === 'zh';
+  const suppressBeforeInputHistoryRef = useRef(false);
   const {
-    noteContent, setNoteContent, textareaRef, wrapTextareaSelection,
-    loadingNote, noteLoadError, handleRetryLoad, savingNote, saveSuccess, saveError, formatNotice,
-    canUndoFormat, handleUndoFormat, isModified, isBlank, canSave, handleSaveNote, openAiReview,
+    noteContent,
+    textareaRef,
+    handleEditorChange,
+    handleCompositionStart,
+    handleCompositionEnd,
+    markHistoryBoundary,
+    applyEditorEdit,
+    handleUndo,
+    handleRedo,
+    toggleInline,
+    toggleLine,
+    insertMarkdownLink,
+    insertCodeBlock,
+    insertTemplate,
+    loadingNote,
+    noteLoadError,
+    handleRetryLoad,
+    savingNote,
+    canUndoFormat,
+    handleUndoFormat,
+    openAiReview,
   } = editor;
+
+  const canInsertTemplate = noteContent.trim().length === 0 && !loadingNote && !noteLoadError;
+  const wordCount = (noteContent.trim().match(/\S+/g) || []).length;
+
+  // Intercept native Edit -> Undo/Redo (e.g. macOS WKWebView menu actions) on the textarea.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const onBeforeInput = (event: Event) => {
+      const inputEvent = event as InputEvent;
+      if (inputEvent.inputType === 'historyUndo') {
+        event.preventDefault();
+        if (suppressBeforeInputHistoryRef.current) {
+          suppressBeforeInputHistoryRef.current = false;
+          return;
+        }
+        handleUndo();
+      } else if (inputEvent.inputType === 'historyRedo') {
+        event.preventDefault();
+        if (suppressBeforeInputHistoryRef.current) {
+          suppressBeforeInputHistoryRef.current = false;
+          return;
+        }
+        handleRedo();
+      }
+    };
+    el.addEventListener('beforeinput', onBeforeInput);
+    return () => el.removeEventListener('beforeinput', onBeforeInput);
+  }, [textareaRef, handleUndo, handleRedo]);
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (loadingNote || noteLoadError || e.nativeEvent.isComposing || e.keyCode === 229) {
+      return;
+    }
+
+    const el = e.currentTarget;
+    const mod = (e.ctrlKey || e.metaKey) && !e.altKey;
+    const key = e.key.toLowerCase();
+
+    if (mod && !e.shiftKey && key === 'z') {
+      e.preventDefault();
+      suppressBeforeInputHistoryRef.current = true;
+      queueMicrotask(() => {
+        suppressBeforeInputHistoryRef.current = false;
+      });
+      handleUndo();
+      return;
+    }
+
+    if ((mod && e.shiftKey && key === 'z') || (!isMac && mod && !e.shiftKey && key === 'y')) {
+      e.preventDefault();
+      suppressBeforeInputHistoryRef.current = true;
+      queueMicrotask(() => {
+        suppressBeforeInputHistoryRef.current = false;
+      });
+      handleRedo();
+      return;
+    }
+
+    if (mod && !e.shiftKey && key === 'b') {
+      e.preventDefault();
+      toggleInline('**');
+      return;
+    }
+
+    if (mod && !e.shiftKey && key === 'i') {
+      e.preventDefault();
+      toggleInline('*');
+      return;
+    }
+
+    if (mod && e.shiftKey && key === 'x') {
+      e.preventDefault();
+      toggleInline('~~');
+      return;
+    }
+
+    if (mod && !e.shiftKey && key === 'e') {
+      e.preventDefault();
+      toggleInline('`');
+      return;
+    }
+
+    if (mod && !e.shiftKey && key === 'k') {
+      e.preventDefault();
+      insertMarkdownLink();
+      return;
+    }
+
+    if (mod && e.shiftKey && key === 'm') {
+      e.preventDefault();
+      toggleInline('$');
+      return;
+    }
+
+    if (mod && e.shiftKey && (e.code === 'Digit7' || e.key === '7' || e.key === '&')) {
+      e.preventDefault();
+      toggleLine('ol');
+      return;
+    }
+
+    if (mod && e.shiftKey && (e.code === 'Digit8' || e.key === '8' || e.key === '*')) {
+      e.preventDefault();
+      toggleLine('ul');
+      return;
+    }
+
+    if (mod && e.shiftKey && (e.code === 'Digit9' || e.key === '9' || e.key === '(')) {
+      e.preventDefault();
+      toggleLine('task');
+      return;
+    }
+
+    if (mod && e.shiftKey && (e.code === 'Period' || e.key === '.' || e.key === '>')) {
+      e.preventDefault();
+      toggleLine('quote');
+      return;
+    }
+
+    if (mod && !e.shiftKey && key === 'c') {
+      if (el.selectionStart === el.selectionEnd) {
+        e.preventDefault();
+        const lineText = getCurrentLineText(el.value, el.selectionStart);
+        if (lineText.length > 0) {
+          writeClipboardText(lineText, el);
+        }
+      }
+      return;
+    }
+
+    if (mod && !e.shiftKey && key === 'x') {
+      if (el.selectionStart === el.selectionEnd) {
+        e.preventDefault();
+        const cut = cutCurrentLine(el.value, el.selectionStart);
+        if (cut) {
+          if (cut.lineText.length > 0) {
+            writeClipboardText(cut.lineText, el);
+          }
+          applyEditorEdit(cut.edit);
+        }
+      }
+      return;
+    }
+
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key === 'Tab') {
+      e.preventDefault();
+      applyEditorEdit(handleTabIndent(el.value, el.selectionStart, el.selectionEnd, e.shiftKey));
+      return;
+    }
+
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key === 'Enter') {
+      const next = handleEnterKey(el.value, el.selectionStart, el.selectionEnd);
+      if (next) {
+        e.preventDefault();
+        applyEditorEdit(next);
+      }
+    }
+  };
+
+  const handleCopy = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const el = e.currentTarget;
+    if (el.selectionStart !== el.selectionEnd) return;
+    const lineText = getCurrentLineText(el.value, el.selectionStart);
+    if (lineText.length > 0 && e.clipboardData) {
+      e.clipboardData.setData('text/plain', lineText);
+      e.preventDefault();
+    }
+  };
+
+  const handleCut = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const el = e.currentTarget;
+    if (el.selectionStart !== el.selectionEnd) {
+      markHistoryBoundary();
+      return;
+    }
+    const cut = cutCurrentLine(el.value, el.selectionStart);
+    if (!cut) return;
+    e.preventDefault();
+    if (cut.lineText.length > 0) {
+      e.clipboardData?.setData('text/plain', cut.lineText);
+    }
+    applyEditorEdit(cut.edit);
+  };
+
+  const handlePaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const el = e.currentTarget;
+    const pasted = e.clipboardData?.getData('text/plain') ?? '';
+    const linkEdit = pasteUrlOverSelection(el.value, el.selectionStart, el.selectionEnd, pasted);
+    if (linkEdit) {
+      e.preventDefault();
+      applyEditorEdit(linkEdit);
+      return;
+    }
+    markHistoryBoundary();
+  };
 
   return (
     <div className="nw-editor">
-      {/* Header row: Title + Actions */}
-      <div className="nw-editor-header">
-        <div className="nw-editor-title">
-          <BookOpen size={15} />
-          <span>{t.solutionReflectionTitle}</span>
-
-          {noteContent.trim().length > 0 && !hasMeaningfulNoteContent(noteContent) && (
-            <span title={t.unfilledTemplateTooltip} className="nw-template-warning">
-              ⚠️ {t.unfilledTemplateNotice}
-            </span>
-          )}
-        </div>
-
-        <div className="nw-editor-actions">
-          {saveSuccess && (
-            <span className="nw-save-success">
-              <Check size={13} />
-              <span>{noteContent.trim().length === 0 ? t.noteClearedSuccess : t.noteSaved}</span>
-            </span>
-          )}
-          {saveError && <span className="nw-save-error" role="alert">{saveError}</span>}
-          {formatNotice && <span role="status" className="nw-format-notice">{formatNotice}</span>}
-          {canUndoFormat && (
-            <button type="button" className="btn btn-secondary btn-sm" onClick={handleUndoFormat}>
-              {t.notesUndoFormat}
-            </button>
-          )}
-
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={() => void openAiReview()}
-            disabled={!noteContent.trim() || loadingNote || noteLoadError || savingNote}
-          >
-            {t.notesAiFormat}
-          </button>
-
-          <button
-            type="button"
-            className="btn btn-primary btn-sm nw-save-btn"
-            onClick={handleSaveNote}
-            disabled={!canSave}
-            title={
-              !canSave
-                ? !isModified
-                  ? t.noChangesToSave
-                  : isBlank
-                  ? t.emptyNoteSaveDisabled
-                  : t.unfilledTemplateNotice
-                : undefined
-            }
-          >
-            <Save size={13} />
-            <span>{savingNote ? t.savingNote : t.saveNote}</span>
-            <span className="nw-shortcut-hint">
-              {isMac ? '(⌘S)' : '(Ctrl+S)'}
-            </span>
-          </button>
-        </div>
-      </div>
-
       {editor.hasConflict && (
         <div className="nw-load-error">
           <span role="status" id={conflictMessageId}>
             {zh ? '已保存的笔记有更新。你的草稿仍在编辑器中。' : 'The saved note changed. Your draft is still in the editor.'}
           </span>
-          <button type="button" className="btn btn-secondary btn-sm" disabled={savingNote || loadingNote} onClick={editor.reloadSavedVersion}>
-            {zh ? '加载已保存版本' : 'Load saved version'}
-          </button>
-          <button type="button" className="btn btn-secondary btn-sm" disabled={!editor.canOverwrite} onClick={editor.keepMyDraft}>
-            {zh ? '用我的草稿覆盖' : 'Overwrite with my draft'}
-          </button>
+          <div className="nw-load-error-actions">
+            <button type="button" className="btn btn-secondary btn-sm" disabled={savingNote || loadingNote} onClick={editor.reloadSavedVersion}>
+              {zh ? '加载已保存版本' : 'Load saved version'}
+            </button>
+            <button type="button" className="btn btn-secondary btn-sm" disabled={!editor.canOverwrite} onClick={editor.keepMyDraft}>
+              {zh ? '用我的草稿覆盖' : 'Overwrite with my draft'}
+            </button>
+          </div>
         </div>
       )}
       {noteLoadError && (
@@ -118,14 +310,20 @@ export function NoteEditorPanel({ lang, editor, isMac, codeMenu, viewMode, onVie
         </div>
       )}
 
-      {/* Phase 31: Markdown Formatting Toolbar */}
+      {/* Markdown Formatting Toolbar + AI Format + View Switch */}
       <NoteEditorToolbar
         lang={lang}
+        isMac={isMac}
         disabled={loadingNote || noteLoadError}
-        canInsertTemplate={noteContent.trim().length === 0}
-        onWrap={wrapTextareaSelection}
-        onInsertTemplate={() => setNoteContent(NOTE_TEMPLATES[lang])}
+        aiDisabled={!noteContent.trim() || loadingNote || noteLoadError || savingNote}
+        onToggleInline={toggleInline}
+        onToggleLine={toggleLine}
+        onInsertLink={insertMarkdownLink}
+        onInsertCodeBlock={insertCodeBlock}
         codeMenu={codeMenu}
+        onOpenAiReview={() => void openAiReview()}
+        canUndoFormat={canUndoFormat}
+        onUndoFormat={handleUndoFormat}
         viewMode={viewMode}
         onViewModeChange={onViewModeChange}
       />
@@ -136,22 +334,61 @@ export function NoteEditorPanel({ lang, editor, isMac, codeMenu, viewMode, onVie
           <textarea
             aria-describedby={editor.hasConflict ? conflictMessageId : undefined}
             ref={textareaRef}
-            rows={16}
             className="nw-editor-textarea"
             disabled={loadingNote || noteLoadError}
             value={noteContent}
-            onChange={(e) => setNoteContent(e.target.value)}
+            onChange={handleEditorChange}
+            onCompositionStart={handleCompositionStart}
+            onCompositionEnd={handleCompositionEnd}
+            onBlur={markHistoryBoundary}
+            onKeyDown={handleKeyDown}
+            onCopy={handleCopy}
+            onCut={handleCut}
+            onPaste={handlePaste}
             placeholder={t.noteEditorPlaceholder}
           />
+          {viewMode === 'edit' && canInsertTemplate && (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm nw-editor-empty-template"
+              onClick={() => insertTemplate(NOTE_TEMPLATES[lang])}
+              title={t.insertTemplateTitle}
+            >
+              <FileText size={13} aria-hidden="true" />
+              <span>{t.insertTemplate}</span>
+            </button>
+          )}
         </div>
 
-        <NotesMarkdownPreview content={noteContent} lang={lang} />
+        <NotesMarkdownPreview
+          content={noteContent}
+          lang={lang}
+          showInsertTemplate={viewMode !== 'edit' && canInsertTemplate}
+          onInsertTemplate={() => insertTemplate(NOTE_TEMPLATES[lang])}
+        />
       </div>
 
-      {/* Footer status line */}
+      {/* Compact status footer */}
       <div className="nw-editor-footer">
-        <span>{t.markdownMathSupported}</span>
-        <span>{t.wordCountChars.replace('{chars}', String(noteContent.length)).replace('{words}', String((noteContent.trim().match(/\S+/g) || []).length))}</span>
+        <span>{t.wordCountChars.replace('{chars}', String(noteContent.length)).replace('{words}', String(wordCount))}</span>
+        <InfoPopover
+          side="top"
+          label={zh ? 'Markdown 语法与快捷键提示' : 'Markdown & shortcut tips'}
+          content={
+            <div className="nw-footer-tips">
+              <p>{t.markdownMathSupported}</p>
+              <p>
+                {isMac
+                  ? (zh
+                    ? '快捷键：⌘S 保存 · ⌘\\ 专注 · ⌘Z/⇧⌘Z 撤销重做 · ⌘B/I/E/K 粗/斜/代码/链接 · ⌘C/X 复制/剪切当前行'
+                    : 'Shortcuts: ⌘S Save · ⌘\\ Zen · ⌘Z/⇧⌘Z Undo/Redo · ⌘B/I/E/K Format · ⌘C/X Line copy/cut')
+                  : (zh
+                    ? '快捷键：Ctrl+S 保存 · Ctrl+\\ 专注 · Ctrl+Z/Y 撤销重做 · Ctrl+B/I/E/K 粗/斜/代码/链接 · Ctrl+C/X 复制/剪切当前行'
+                    : 'Shortcuts: Ctrl+S Save · Ctrl+\\ Zen · Ctrl+Z/Y Undo/Redo · Ctrl+B/I/E/K Format · Ctrl+C/X Line copy/cut')}
+              </p>
+            </div>
+          }
+        />
       </div>
     </div>
   );

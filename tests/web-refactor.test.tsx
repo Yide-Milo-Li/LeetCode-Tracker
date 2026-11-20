@@ -707,7 +707,7 @@ it('creates a folder with the selection spanning Favorites searches and keeps or
   const search = screen.getByRole<HTMLInputElement>('searchbox');
   await act(async () => { fireEvent.change(search, { target: { value: '902' } }); });
   await click(await screen.findByRole('checkbox', { name: 'Select #902 Synthetic Tree' }));
-  assert.equal(screen.queryByRole('checkbox', { name: 'Select #901 ' + problem.title }), null);
+  await waitFor(() => assert.ok(!screen.queryByRole('checkbox', { name: 'Select #901 ' + problem.title })));
 
   const open = async () => {
     await click(screen.getByRole('button', { name: 'Save to new folder' }));
@@ -974,8 +974,12 @@ it('source totals can retry independently while hidden statistics suspends its c
   assert.equal(attempts, 0);
   await act(async () => { view.rerender(<DashboardView lang="en" active />); });
   const details = document.querySelector<HTMLDetailsElement>('.workspace-details')!;
-  details.open = true;
-  assert.ok(screen.getByText('Source totals unavailable'));
+  assert.equal(attempts, 0);
+  await act(async () => {
+    details.open = true;
+    fireEvent(details, new window.Event('toggle'));
+  });
+  assert.ok(await screen.findByText('Source totals unavailable'));
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Retry source totals' })); });
   assert.equal(attempts, 2);
   assert.ok(!screen.queryByText('Source totals unavailable'));

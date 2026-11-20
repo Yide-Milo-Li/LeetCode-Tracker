@@ -233,11 +233,18 @@ it('shows failed requests explicitly and retry recovers without a false empty ca
 it('a delayed old filter response cannot replace the newer search results', async () => {
   overview();
   const old = deferred<ReturnType<typeof results>>();
-  mock.method(api, 'getCatalog', (query: { search?: string }) => query.search ? Promise.resolve(results('New result')) : old.promise);
+  let initialSignal: AbortSignal | undefined;
+  const requests = mock.method(api, 'getCatalog', (query: { search?: string }, options?: { signal?: AbortSignal }) => {
+    if (query.search) return Promise.resolve(results('New result'));
+    initialSignal = options?.signal;
+    return old.promise;
+  });
   await act(async () => { render(<CatalogView lang="en" onNavigateSettings={() => {}} />); });
   await act(async () => { fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'new' } }); });
-  assert.ok(screen.getByRole('button', { name: 'New result' }));
+  assert.equal(initialSignal?.aborted, true);
+  assert.equal(requests.mock.callCount(), 1, 'abort stale results before the debounce sends the next search');
   await act(async () => { old.resolve(results('Old result')); });
+  assert.ok(await screen.findByRole('button', { name: 'New result' }));
   assert.equal(screen.queryByText('Old result'), null);
   assert.ok(screen.getByRole('button', { name: 'New result' }));
 });
@@ -316,6 +323,7 @@ it('builds a goal list in natural ID order from selections across catalog pages 
   assert.ok(screen.getByText('3 selected'), 'Deselecting page two should retain all of page one');
   fireEvent.click(pageBox());
   await act(async () => { fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'overlap' } }); });
+  await screen.findByRole('checkbox', { name: 'Select #100 Title 100' });
   assert.ok(pageBox().checked);
   fireEvent.click(box('100'));
   assert.ok(pageBox().indeterminate);
@@ -366,7 +374,7 @@ it('favorites the selection across catalog filters, keeping it on cancel and all
   const checkbox = (name: string) => screen.getByRole('checkbox', { name }) as HTMLInputElement;
   fireEvent.click(checkbox('Select #002 002'));
   await act(async () => { fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'LCR 01' } }); });
-  fireEvent.click(checkbox('Select #LCR 01 LCR 01'));
+  fireEvent.click(await screen.findByRole('checkbox', { name: 'Select #LCR 01 LCR 01' }));
   await act(async () => { fireEvent.click(button('Favorite')); });
   assert.ok(screen.getByRole('dialog', { name: 'Favorite 2 selected problems' }));
   assert.equal(checkbox('Original').checked, false);

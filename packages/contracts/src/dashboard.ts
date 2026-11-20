@@ -66,6 +66,7 @@ export interface YearlyActivityDay {
   mediumCount?: number;
   hardCount?: number;
   totalMinutes?: number;
+  /** Up to three preview rows. activeProblemCount includes every distinct problem that day. */
   problemSummaries?: YearlyProblemSummary[];
 }
 

@@ -27,8 +27,12 @@ export async function openTrackerRuntime(config: TrackerRuntimeConfig): Promise<
     const ownedDb = db;
     let closing: Promise<void> | undefined;
     return {application, close: () => closing ??= (async () => {
-      await application.close();
-      try { ownedDb.close(); } finally { release(); }
+      try {
+        await application.close();
+        await store.flushRoutineBackup();
+      } finally {
+        try { ownedDb.close(); } finally { release(); }
+      }
     })()};
   } catch (error) {
     try { db?.close(); } finally { release(); }

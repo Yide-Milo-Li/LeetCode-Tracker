@@ -141,7 +141,7 @@ To prevent orphan background processes:
 | WebView Storage | `%LOCALAPPDATA%\com.leetcodetracker.desktop\EBWebView\` | macOS WKWebView application container |
 
 ### 3.2 Backup, Restore, and Credential Protection
-- **Full Database Backups**: Automatic transactional SQLite snapshots are saved to the `backups/` directory before schema migrations and bulk data imports.
+- **Full Database Backups**: Ordinary edits commit immediately. The running server groups them into a verified `backups/latest.sqlite` snapshot after 30 seconds and flushes pending changes on clean shutdown. Imports, bulk replacements and migrations take a recovery snapshot before writing. The first verified rotating snapshot each UTC day is also retained as a daily archive for 14 distinct days.
 - **Portable Snapshot Bundles**: The application supports exporting and importing portable JSON Snapshot Bundles (`.json`). **Settings → Data** provides **Export migration file** / **Import migration file** for moving a profile between Windows and macOS.
   - **Complete v5 migration**: Bundle v5 includes the local problem catalog, tags, practice records and operation history, imported progress history, notes, strategies and versions, weekly assignments, daily plans and versions, review state, statistics inputs, and non-sensitive settings. It replaces the target business profile after a preview and confirmation; it does not merge two profiles.
   - **Cross-platform workflow**: Export v5 on the source device, copy the JSON file to the new device, choose **Import migration file**, review the source/count summary (`Complete migration · v1.4.0 · ...`), and confirm replacement. The same file format works Windows → macOS and macOS → Windows.

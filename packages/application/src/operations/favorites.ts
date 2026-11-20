@@ -12,8 +12,8 @@ function parse<S extends z.ZodType>(schema: S, input: unknown): z.output<S> {
 
 export function createFavoriteOperations({ store, writeLock }: ApplicationContext) {
   const { db } = store;
-  function write<T>(run: () => T) {
-    return writeLock.run(() => store.protectedTransaction(run));
+  function write<T>(run: () => T, backup: 'scheduled' | 'before' = 'scheduled') {
+    return writeLock.run(() => store.protectedTransaction(run, backup));
   }
   function putFolder({ id, name }: FavoriteFolder, expectedName: string | null) {
     const folders = readFavoriteFolders(db);
@@ -53,7 +53,7 @@ export function createFavoriteOperations({ store, writeLock }: ApplicationContex
           .run(id, FAVORITE_PROBLEM_PREFIX + '*', id);
         db.prepare('DELETE FROM catalog_meta WHERE key=?').run(key);
         return { ok: true };
-      });
+      }, 'before');
     },
     saveProblem(input: unknown) {
       const { frontendId, expectedFolderIds, folderIds, newFolder } = parse(saveFavoriteSchema, input);
@@ -97,7 +97,7 @@ export function createFavoriteOperations({ store, writeLock }: ApplicationContex
           }
         }
         return { count: ids.size };
-      });
+      }, frontendIds.length > 1 ? 'before' : 'scheduled');
     },
     removeProblems(input: unknown) {
       const { expected } = parse(removeFavoritesSchema, input);
@@ -117,7 +117,7 @@ export function createFavoriteOperations({ store, writeLock }: ApplicationContex
           removed++;
         }
         return { removed };
-      });
+      }, expected.length > 1 ? 'before' : 'scheduled');
     },
   };
 }

@@ -403,3 +403,85 @@ it('rejects candidate with questionId conflicting with an existing database reco
     assert.equal(store.getProblem('2', 'frontendId'), null);
   } finally { db.close(); }
 });
+
+it('coalesces ordinary writes, reuses the verified daily snapshot and flushes writes arriving during backup', async t => {
+  const directory = scratch(t);
+  const db = new DatabaseSync(join(directory, 'profile.sqlite'));
+  const store = await CatalogStore.open(db, { backupDir: directory });
+  try {
+    const manager = store.backupManager!;
+    const capture = t.mock.method(manager, 'createBackup');
+    await store.importJsonl(line('1'));
+    assert.equal(capture.mock.callCount(), 1, 'the UTC daily archive reuses the verified pre-import file');
+    const daily = readdirSync(directory).find(name => name.startsWith('daily-'))!;
+    const before = readFileSync(join(directory, daily));
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    await store.updateSettings({ theme: 'dark' });
+    await store.updateSettings({ theme: 'light' });
+    assert.equal(capture.mock.callCount(), 1);
+
+    const original = manager.performRoutineBackup.bind(manager);
+    let signalStarted!: () => void;
+    let resume!: () => void;
+    const started = new Promise<void>(resolve => { signalStarted = resolve; });
+    const paused = new Promise<void>(resolve => { resume = resolve; });
+    const routine = t.mock.method(manager, 'performRoutineBackup', async (db: DatabaseSync) => {
+      await original(db);
+      signalStarted();
+      await paused;
+    });
+    t.mock.timers.tick(29_999);
+    assert.equal(routine.mock.callCount(), 0);
+    t.mock.timers.tick(1);
+    await started;
+    const flushing = store.flushRoutineBackup();
+    await store.updateSettings({ theme: 'dark' });
+    resume();
+    await flushing;
+    assert.equal(routine.mock.callCount(), 2);
+    assert.deepEqual(readFileSync(join(directory, daily)), before);
+    assert.deepEqual(readFileSync(join(directory, 'pre-import-latest.sqlite')), before);
+    const saved = new DatabaseSync(join(directory, 'latest.sqlite'), { readOnly: true });
+    try {
+      assert.equal(saved.prepare("SELECT value FROM settings WHERE key='theme'").get()?.value, 'dark');
+    } finally { saved.close(); }
+  } finally { db.close(); }
+});
+
+it('shares statistics across ordinary writes, expiring on evidence, clock changes and same-revision restore', async t => {
+  const directory = scratch(t);
+  const db = new DatabaseSync(':memory:');
+  const store = new CatalogStore(db, { backupDir: directory, skipBackup: true });
+  const now = Date.parse('2026-03-08T14:59:59Z');
+  try {
+    await store.importJsonl(line('1'));
+    await store.updateSettings({ timezone: 'UTC' });
+    const record = await store.createPracticeRecord({ questionFrontendId: '1', completed: true,
+      practicedAt: '2026-03-08T15:00:05Z' });
+    await store.createPracticeRecord({ questionFrontendId: '1', completed: true, practicedAt: '2026-03-09',
+      timePrecision: 'date', sourceTimezone: 'Asia/Tokyo' });
+    const context = store.planning.analysisContext('UTC', now);
+    const mastery = store.planning.masteryReport('UTC', now);
+    const profile = store.planning.knowledgeProfileReport('UTC', now);
+    await store.updateSettings({ theme: 'dark' });
+    store.upsertProblemNote('1', 'A note');
+    assert.equal(store.planning.analysisContext('UTC', now + 10), context);
+    assert.equal(store.planning.masteryReport('UTC', now + 10), mastery);
+    assert.equal(store.planning.knowledgeProfileReport('UTC', now + 10), profile);
+    const tokyoMidnight = store.planning.analysisContext('UTC', now + 1000);
+    assert.notEqual(tokyoMidnight, context);
+    assert.notEqual(store.planning.analysisContext('UTC', now + 6000), tokyoMidnight);
+    assert.notEqual(store.planning.analysisContext('UTC', now), context, 'rewinding the clock rebuilds projections');
+    const tomorrow = store.planning.masteryReport('UTC', now + 86400000);
+    assert.notEqual(tomorrow.asOfDate, mastery.asOfDate);
+    await store.revokePracticeRecord(record.id);
+    assert.notEqual(store.dashboardSnapshot(), context.raw);
+
+    const saved = store.exportMigrationBundle();
+    const prior = store.dashboardSnapshot();
+    saved.tables.problems[0].title = 'Restored title';
+    await store.importSnapshotBundle(saved);
+    assert.deepEqual(store.dashboardSnapshot().revision, prior.revision);
+    assert.equal(store.dashboardSnapshot().problems[0].title, 'Restored title');
+  } finally { db.close(); }
+});

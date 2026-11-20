@@ -101,13 +101,15 @@ it('serializes duplicate intents, rejects changed payloads and preserves indepen
   }
 });
 
-it('rechecks matching and conflicting practice receipts committed during the backup window', async (t) => {
+it('rechecks matching and conflicting batch practice receipts committed during the backup window', async (t) => {
   for (const changedPayload of [false, true]) {
     const db = new DatabaseSync(':memory:');
     try {
       const store = new CatalogStore(db);
       const otherWriter = new CatalogStore(db);
       await seed(store);
+      const existing = { ...input, operationId: 'previously-committed' };
+      await store.createPracticeRecord(existing);
       const revision = store.getPracticeRevision();
       const request = { ...input, operationId: 'backup-window', notes: 'original intent' };
       const competingRequest = {
@@ -124,23 +126,22 @@ it('rechecks matching and conflicting practice receipts committed during the bac
       store.backupManager = backupManager;
 
       if (changedPayload) {
-        await assert.rejects(store.createPracticeRecord(request), (error: unknown) =>
+        await assert.rejects(store.createPracticeRecords([existing, request]), (error: unknown) =>
           error instanceof PracticeConflictError && error.code === 'OPERATION_CONFLICT',
         );
       } else {
-        const replayed = await store.createPracticeRecord(request);
-        const committed = store.queryPracticeRecords().items[0];
-        assert.equal(replayed.id, committed.id);
-        assert.equal(replayed.notes, request.notes);
+        const [, replayed] = await store.createPracticeRecords([existing, request]);
+        assert.equal(replayed.replayed, true);
+        assert.equal(replayed.record.notes, request.notes);
       }
 
-      assert.equal(store.queryPracticeRecords().total, 1);
-      assert.equal(store.queryPracticeRecords().items[0].notes, competingRequest.notes);
+      assert.equal(store.queryPracticeRecords().total, 2);
+      assert.ok(store.queryPracticeRecords().items.some(record => record.notes === competingRequest.notes));
       assert.equal(store.getPracticeRevision(), revision + 1);
       // Both replay and rejection must release the transaction for the next write.
       store.backupManager = undefined;
       await store.createPracticeRecord({ ...input, operationId: 'after-race' });
-      assert.equal(store.queryPracticeRecords().total, 2);
+      assert.equal(store.queryPracticeRecords().total, 3);
       assert.equal(store.getPracticeRevision(), revision + 2);
     } finally {
       db.close();
@@ -254,7 +255,7 @@ it('backs up v7 before upgrade, preserves historical evidence, and replays after
   }
 });
 
-it('blocks new writes on backup failure but permits read-only replay of an existing practice', async () => {
+it('keeps ordinary practice writable on backup failure and blocks batch writes and migrations', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'practice-backup-failure-'));
   const db = new DatabaseSync(':memory:');
   try {
@@ -264,8 +265,10 @@ it('blocks new writes on backup failure but permits read-only replay of an exist
     const obstruction = join(directory, 'blocked');
     writeFileSync(obstruction, 'synthetic obstruction');
     const guarded = await CatalogStore.open(db, { backupDir: obstruction });
-    await assert.rejects(guarded.createPracticeRecord({ ...input, operationId: 'not-written' }));
-    assert.equal(guarded.queryPracticeRecords().total, 1);
+    await guarded.createPracticeRecord({ ...input, operationId: 'ordinary' });
+    await assert.rejects(guarded.flushRoutineBackup());
+    await assert.rejects(guarded.createPracticeRecords([{ ...input, operationId: 'batch-one' }, { ...input, operationId: 'batch-two' }]));
+    assert.equal(guarded.queryPracticeRecords().total, 2);
     assert.equal((await guarded.createPracticeRecord({ ...input, operationId: 'already-written' })).id, original.id);
     db.exec(
       'DROP TABLE practice_operations; ALTER TABLE practice_records DROP COLUMN duration_minutes; ALTER TABLE practice_records DROP COLUMN revision; UPDATE schema_version SET version=7;',

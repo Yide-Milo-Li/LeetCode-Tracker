@@ -7,7 +7,7 @@
  * they deliberately live together: every async result is checked against the visit and draft
  * revision that started it before it may touch state.
  */
-import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type Dispatch, type SetStateAction } from 'react';
 import {
   api,
   ApiError,
@@ -20,6 +20,16 @@ import { translations, type Language } from '../../i18n.ts';
 import { localizeApiError } from '../../error-i18n.ts';
 import { formatNoteInWorker } from '../../markdown-format-client.ts';
 import type { FormatOnSaveSetting } from './useFormatOnSaveSetting.ts';
+import {
+  insertCodeBlock as buildCodeBlockEdit,
+  insertLink as buildLinkEdit,
+  toggleInlineWrap,
+  toggleLinePrefix,
+  type EditResult,
+  type InlineMarker,
+  type LinePrefixKind,
+} from './markdownCommands.ts';
+import { TextHistory } from './textHistory.ts';
 
 /** One visit of one selected problem; `active` turns false when the selection changes or unmounts. */
 export type EditorSession = { active: boolean; saving: boolean; saveVersion: number; frontendId: string | null };
@@ -77,6 +87,9 @@ export function useNoteEditor({
 
   const [noteContent, setNoteContentState] = useState('');
   const draft = useRef({ value: '', revision: 0 });
+  const historyRef = useRef(new TextHistory());
+  const isComposingRef = useRef(false);
+  const pendingSelectionRef = useRef<{ start: number; end: number; scrollTop?: number; focus?: boolean } | null>(null);
   const [formatUndo, setFormatUndo] = useState<{ before: string; revision: number; session: EditorSession } | null>(null);
   const bypassFormatRevision = useRef<number | null>(null);
   /** Increment the draft revision on every editor mutation, including undo and template insertion. */
@@ -86,6 +99,14 @@ export function useNoteEditor({
     setFormatUndo(null);
     setNoteContentState(value);
   }, []);
+  const replaceNoteContent = useCallback((value: string, options?: { resetHistory?: boolean }) => {
+    if (options?.resetHistory) {
+      historyRef.current.reset(value, 0, 0);
+      pendingSelectionRef.current = null;
+      isComposingRef.current = false;
+    }
+    setNoteContent(value);
+  }, [setNoteContent]);
   const [savedContent, setSavedContent] = useState('');
   const savedSnapshot = useRef<NoteSnapshot>({ content: '' });
   // The editor visit may end before a save settles. Its submitted text belongs to the problem.
@@ -114,11 +135,39 @@ export function useNoteEditor({
   const problemSaveChain = useRef<Map<string, Promise<void>>>(new Map());
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  useLayoutEffect(() => {
+    const pending = pendingSelectionRef.current;
+    if (!pending) return;
+    pendingSelectionRef.current = null;
+    const el = textareaRef.current;
+    if (!el || el.disabled) return;
+    if (pending.focus && document.activeElement !== el) {
+      try {
+        el.focus({ preventScroll: true });
+      } catch {
+        el.focus();
+      }
+    }
+    const max = el.value.length;
+    const start = Math.max(0, Math.min(pending.start, max));
+    const end = Math.max(start, Math.min(pending.end, max));
+    try {
+      el.setSelectionRange(start, end);
+    } catch {
+      // Ignore selection restoration if the element is detached or hidden.
+    }
+    if (pending.scrollTop !== undefined) {
+      el.scrollTop = pending.scrollTop;
+    }
+  }, [noteContent]);
+
   useEffect(() => {
     // A -> B -> A creates a new visit too; comparing question IDs alone is insufficient.
     const session = { active: true, saving: false, saveVersion: 0, frontendId: selectedId };
     editorSession.current = session;
     savingRevision.current = null;
+    isComposingRef.current = false;
+    pendingSelectionRef.current = null;
     setSavingNote(false);
     setFormatUndo(null);
     setAiReview(null);
@@ -132,6 +181,19 @@ export function useNoteEditor({
   function handleUndoFormat() {
     if (!formatUndo || formatUndo.session !== editorSession.current || draft.current.revision !== formatUndo.revision) return;
     const before = formatUndo.before;
+    const el = textareaRef.current;
+    const selStart = el?.selectionStart ?? 0;
+    const selEnd = el?.selectionEnd ?? 0;
+    const nextSel = Math.min(selStart, before.length);
+    historyRef.current.recordProgrammatic(
+      { start: selStart, end: selEnd },
+      { value: before, selectionStart: nextSel, selectionEnd: Math.min(Math.max(nextSel, selEnd), before.length) },
+    );
+    pendingSelectionRef.current = {
+      start: nextSel,
+      end: Math.min(Math.max(nextSel, selEnd), before.length),
+      scrollTop: el?.scrollTop,
+    };
     setNoteContent(before);
     bypassFormatRevision.current = draft.current.revision;
     setSaveSuccess(false);
@@ -203,7 +265,18 @@ export function useNoteEditor({
       return;
     }
     const before = draft.current.value;
-    setNoteContent(review.result.content);
+    const nextContent = review.result.content;
+    const el = textareaRef.current;
+    const selStart = el?.selectionStart ?? 0;
+    const selEnd = el?.selectionEnd ?? 0;
+    const nextStart = Math.min(selStart, nextContent.length);
+    const nextEnd = Math.min(Math.max(nextStart, selEnd), nextContent.length);
+    historyRef.current.recordProgrammatic(
+      { start: selStart, end: selEnd },
+      { value: nextContent, selectionStart: nextStart, selectionEnd: nextEnd },
+    );
+    pendingSelectionRef.current = { start: nextStart, end: nextEnd, scrollTop: el?.scrollTop };
+    setNoteContent(nextContent);
     setFormatUndo({ before, revision: draft.current.revision, session: review.session });
     closeAiReview();
   }
@@ -212,25 +285,183 @@ export function useNoteEditor({
   const [practices, setPractices] = useState<PracticeRecord[]>([]);
   const [loadingPractices, setLoadingPractices] = useState(false);
 
-  /** Helper to wrap or insert markdown text at current selection cursor */
-  const wrapTextareaSelection = useCallback(
-    (prefix: string, suffix: string, defaultPlaceholder: string) => {
-      const el = textareaRef.current;
-      if (!el) return;
-      const start = el.selectionStart;
-      const end = el.selectionEnd;
-      const val = el.value;
-      const selected = val.substring(start, end) || defaultPlaceholder;
-      const replacement = `${prefix}${selected}${suffix}`;
-      const nextVal = val.substring(0, start) + replacement + val.substring(end);
-      setNoteContent(nextVal);
-      setTimeout(() => {
-        el.focus();
-        el.selectionStart = start + prefix.length;
-        el.selectionEnd = start + prefix.length + selected.length;
-      }, 0);
+  const markHistoryBoundary = useCallback(() => {
+    historyRef.current.markBoundary();
+  }, []);
+
+  const handleEditorChange = useCallback(
+    (e: ChangeEvent<HTMLTextAreaElement>) => {
+      const el = e.target;
+      const nextValue = el.value;
+      setNoteContent(nextValue);
+      if (!isComposingRef.current) {
+        historyRef.current.recordTyping({
+          value: nextValue,
+          selectionStart: el.selectionStart ?? nextValue.length,
+          selectionEnd: el.selectionEnd ?? nextValue.length,
+        });
+      }
     },
-    []
+    [setNoteContent],
+  );
+
+  const handleCompositionStart = useCallback(() => {
+    isComposingRef.current = true;
+    const el = textareaRef.current;
+    if (el) {
+      historyRef.current.updateCurrentSelection(el.selectionStart ?? 0, el.selectionEnd ?? 0);
+    }
+  }, []);
+
+  const handleCompositionEnd = useCallback(() => {
+    isComposingRef.current = false;
+    historyRef.current.markBoundary();
+    const el = textareaRef.current;
+    if (el && el.value !== historyRef.current.current().value) {
+      historyRef.current.recordTyping({
+        value: el.value,
+        selectionStart: el.selectionStart ?? el.value.length,
+        selectionEnd: el.selectionEnd ?? el.value.length,
+      });
+      historyRef.current.markBoundary();
+    }
+  }, []);
+
+  /** Apply an atomic programmatic edit result and restore focus/selection via layout effect. */
+  const applyEditorEdit = useCallback(
+    (edit: EditResult | null, options?: { focus?: boolean }): boolean => {
+      if (!edit) return false;
+      const el = textareaRef.current;
+      const beforeStart = el?.selectionStart ?? 0;
+      const beforeEnd = el?.selectionEnd ?? 0;
+      const focus = options?.focus ?? true;
+      if (edit.value === draft.current.value) {
+        if (el && !el.disabled) {
+          if (focus && document.activeElement !== el) {
+            try {
+              el.focus({ preventScroll: true });
+            } catch {
+              el.focus();
+            }
+          }
+          try {
+            el.setSelectionRange(edit.selectionStart, edit.selectionEnd);
+          } catch {
+            // Ignore selection errors when detached or hidden.
+          }
+        }
+        return true;
+      }
+      historyRef.current.recordProgrammatic(
+        { start: beforeStart, end: beforeEnd },
+        { value: edit.value, selectionStart: edit.selectionStart, selectionEnd: edit.selectionEnd },
+      );
+      pendingSelectionRef.current = {
+        start: edit.selectionStart,
+        end: edit.selectionEnd,
+        scrollTop: el?.scrollTop,
+        focus,
+      };
+      setNoteContent(edit.value);
+      return true;
+    },
+    [setNoteContent],
+  );
+
+  const handleUndo = useCallback(() => {
+    const snap = historyRef.current.undo();
+    if (!snap) return;
+    const el = textareaRef.current;
+    const shouldBypassFormat = Boolean(
+      formatUndo &&
+        formatUndo.session === editorSession.current &&
+        draft.current.revision === formatUndo.revision &&
+        snap.value === formatUndo.before,
+    );
+    pendingSelectionRef.current = {
+      start: snap.selectionStart,
+      end: snap.selectionEnd,
+      scrollTop: el?.scrollTop,
+      focus: true,
+    };
+    setNoteContent(snap.value);
+    if (shouldBypassFormat) {
+      bypassFormatRevision.current = draft.current.revision;
+      setSaveSuccess(false);
+    }
+  }, [formatUndo, setNoteContent]);
+
+  const handleRedo = useCallback(() => {
+    const snap = historyRef.current.redo();
+    if (!snap) return;
+    const el = textareaRef.current;
+    pendingSelectionRef.current = {
+      start: snap.selectionStart,
+      end: snap.selectionEnd,
+      scrollTop: el?.scrollTop,
+      focus: true,
+    };
+    setNoteContent(snap.value);
+  }, [setNoteContent]);
+
+  const toggleInline = useCallback(
+    (marker: InlineMarker, placeholder?: string) => {
+      const el = textareaRef.current;
+      if (!el || el.disabled) return;
+      applyEditorEdit(
+        toggleInlineWrap(el.value, el.selectionStart ?? 0, el.selectionEnd ?? 0, marker, { placeholder }),
+      );
+    },
+    [applyEditorEdit],
+  );
+
+  const toggleLine = useCallback(
+    (kind: LinePrefixKind, placeholder?: string) => {
+      const el = textareaRef.current;
+      if (!el || el.disabled) return;
+      applyEditorEdit(
+        toggleLinePrefix(el.value, el.selectionStart ?? 0, el.selectionEnd ?? 0, kind, { placeholder }),
+      );
+    },
+    [applyEditorEdit],
+  );
+
+  const insertMarkdownLink = useCallback(
+    (placeholders?: { textPlaceholder?: string; urlPlaceholder?: string }) => {
+      const el = textareaRef.current;
+      if (!el || el.disabled) return;
+      applyEditorEdit(
+        buildLinkEdit(el.value, el.selectionStart ?? 0, el.selectionEnd ?? 0, placeholders),
+      );
+    },
+    [applyEditorEdit],
+  );
+
+  const insertCodeBlock = useCallback(
+    (language: string, placeholder: string) => {
+      const el = textareaRef.current;
+      if (!el || el.disabled) return;
+      applyEditorEdit(
+        buildCodeBlockEdit(el.value, el.selectionStart ?? 0, el.selectionEnd ?? 0, language, placeholder),
+      );
+    },
+    [applyEditorEdit],
+  );
+
+  const insertTemplate = useCallback(
+    (template: string) => {
+      if (draft.current.value === template) return;
+      const el = textareaRef.current;
+      const beforeStart = el?.selectionStart ?? 0;
+      const beforeEnd = el?.selectionEnd ?? 0;
+      historyRef.current.recordProgrammatic(
+        { start: beforeStart, end: beforeEnd },
+        { value: template, selectionStart: 0, selectionEnd: 0 },
+      );
+      pendingSelectionRef.current = { start: 0, end: 0, focus: true };
+      setNoteContent(template);
+    },
+    [setNoteContent],
   );
 
   // Initial loads and retries share cancellation, independently of list and language changes.
@@ -238,13 +469,14 @@ export function useNoteEditor({
     if (!selectedId) {
       setLoadedId(null);
       setSelectedSummary(null);
-      setNoteContent('');
+      replaceNoteContent('', { resetHistory: true });
       rememberSaved('');
       setPractices([]);
       setNoteLoadError(false);
       return;
     }
 
+    const controller = new AbortController();
     let active = true;
     setLoadedId(null);
     setSaveSuccess(false);
@@ -253,26 +485,26 @@ export function useNoteEditor({
 
     // Fetch note content
     const noteLoad = api
-      .getNote(selectedId)
+      .getNote(selectedId, { signal: controller.signal })
       .then((res) => {
         if (!active) return;
         const content = res.note?.content ?? '';
         const submitted = submittedDrafts.current.get(selectedId);
         if (submitted && submitted.content !== content) {
-          setNoteContent(submitted.content);
+          replaceNoteContent(submitted.content, { resetHistory: true });
           rememberSaved(submitted.base.content, submitted.base.hash);
           const changed = content !== submitted.base.content;
           setConflict(changed ? { content, hash: res.contentHash } : undefined);
           if (!changed && submitted.failed) setSaveError(localizeApiError(submitted.failed.error, lang));
         } else {
           submittedDrafts.current.delete(selectedId);
-          setNoteContent(content);
+          replaceNoteContent(content, { resetHistory: true });
           rememberSaved(content, res.contentHash);
           setConflict(undefined);
         }
       })
       .catch(() => {
-        if (active) {
+        if (active && !controller.signal.aborted) {
           setNoteLoadError(true);
         }
       })
@@ -283,13 +515,13 @@ export function useNoteEditor({
     // Fetch practice timeline
     setLoadingPractices(true);
     const practiceLoad = api
-      .getPracticeRecords({ questionFrontendId: selectedId, page: 1, limit: 100 })
+      .getPracticeRecords({ questionFrontendId: selectedId, page: 1, limit: 100 }, { signal: controller.signal })
       .then((res) => {
         if (!active) return;
         setPractices(res.items);
       })
       .catch(() => {
-        if (active) setPractices([]);
+        if (active && !controller.signal.aborted) setPractices([]);
       })
       .finally(() => {
         if (active) setLoadingPractices(false);
@@ -298,8 +530,9 @@ export function useNoteEditor({
 
     return () => {
       active = false;
+      controller.abort();
     };
-  }, [selectedId, retryRevision, rememberSaved, setNoteContent, setSelectedSummary]);
+  }, [selectedId, retryRevision, rememberSaved, replaceNoteContent, setSelectedSummary]);
 
   useEffect(() => {
     if (seenExternalRevision.current === externalRevision) return;
@@ -307,10 +540,11 @@ export function useNoteEditor({
     if (!selectedId) return;
     const session = editorSession.current;
     const writeVersion = session.saveVersion;
+    const controller = new AbortController();
     let active = true;
     // Finish the initial loads first so their responses cannot overwrite a newer refresh.
     const refreshNote = async () => {
-      const { note, contentHash } = await api.getNote(selectedId);
+      const { note, contentHash } = await api.getNote(selectedId, { signal: controller.signal });
       if (!active || !session.active || session.saving || session.saveVersion !== writeVersion) return;
       setNoteLoadError(false);
       const content = note?.content ?? '';
@@ -320,7 +554,7 @@ export function useNoteEditor({
       }
       // A background read may reconcile a clean editor. A draft retains its own base until the user chooses.
       if (draft.current.value === savedSnapshot.current.content || draft.current.value === content) {
-        if (draft.current.value !== content) setNoteContent(content);
+        if (draft.current.value !== content) replaceNoteContent(content, { resetHistory: true });
         rememberSaved(content, contentHash);
         setConflict(undefined);
       } else {
@@ -328,14 +562,17 @@ export function useNoteEditor({
       }
     };
     const refreshPractices = async () => {
-      const result = await api.getPracticeRecords({ questionFrontendId: selectedId, page: 1, limit: 100 });
+      const result = await api.getPracticeRecords({ questionFrontendId: selectedId, page: 1, limit: 100 }, { signal: controller.signal });
       if (active && session.active) setPractices(result.items);
     };
     void initialLoad.current.then(async () => {
       if (active) await Promise.allSettled([refreshNote(), refreshPractices()]);
     });
-    return () => { active = false; };
-  }, [externalRevision, selectedId, rememberSaved, setNoteContent]);
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [externalRevision, selectedId, rememberSaved, replaceNoteContent]);
 
   /** Retry through the cancellable loading effect rather than a separate unguarded request. */
   const handleRetryLoad = useCallback(() => {
@@ -446,6 +683,16 @@ export function useNoteEditor({
         setSaveSuccess(true);
         if (formatted.status === 'skipped') setFormatNotice(t.notesFormatSkipped);
         if (formatted.status === 'formatted' && note.content === formatted.content && draft.current.revision === targetRevision) {
+          const el = textareaRef.current;
+          const selStart = el?.selectionStart ?? 0;
+          const selEnd = el?.selectionEnd ?? 0;
+          const nextStart = Math.min(selStart, note.content.length);
+          const nextEnd = Math.min(Math.max(nextStart, selEnd), note.content.length);
+          historyRef.current.recordProgrammatic(
+            { start: selStart, end: selEnd },
+            { value: note.content, selectionStart: nextStart, selectionEnd: nextEnd },
+          );
+          pendingSelectionRef.current = { start: nextStart, end: nextEnd, scrollTop: el?.scrollTop };
           setNoteContent(note.content);
           setFormatUndo({ before: targetContent, revision: draft.current.revision, session });
         }
@@ -517,7 +764,7 @@ export function useNoteEditor({
       handleRetryLoad();
       return;
     }
-    setNoteContent(conflict.content);
+    replaceNoteContent(conflict.content, { resetHistory: true });
     rememberSaved(conflict.content, conflict.hash);
     setConflict(undefined);
     setSaveError('');
@@ -527,7 +774,18 @@ export function useNoteEditor({
     noteContent,
     setNoteContent,
     textareaRef,
-    wrapTextareaSelection,
+    handleEditorChange,
+    handleCompositionStart,
+    handleCompositionEnd,
+    markHistoryBoundary,
+    applyEditorEdit,
+    handleUndo,
+    handleRedo,
+    toggleInline,
+    toggleLine,
+    insertMarkdownLink,
+    insertCodeBlock,
+    insertTemplate,
     loadingNote,
     noteLoadError,
     handleRetryLoad,

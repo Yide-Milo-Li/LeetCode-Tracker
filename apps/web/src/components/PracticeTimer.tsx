@@ -7,7 +7,6 @@ import React from 'react';
 import { Square, Timer, X } from 'lucide-react';
 import { translations, type Language } from '../i18n.ts';
 import { usePracticeTimer } from '../hooks/usePracticeTimer.ts';
-import { formatElapsed, getElapsedSeconds } from '../timer-service.ts';
 import { Tooltip } from './ui.tsx';
 
 export function PracticeTimerButton({
@@ -25,7 +24,7 @@ export function PracticeTimerButton({
   const t = translations[lang];
   const timer = usePracticeTimer(undefined, frontendId);
   const running = timer.isActiveFor(frontendId);
-  const elapsed = timer.active && running ? formatElapsed(getElapsedSeconds(timer.active)) : '';
+  const elapsed = running ? timer.formatted : '';
 
   return (
     <Tooltip

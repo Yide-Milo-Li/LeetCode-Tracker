@@ -20,7 +20,6 @@ import {
   api,
   type DashboardResponse,
   type RecentActivityItem,
-  type YearlyActivityDay,
   type TagMasteryReport,
   type KnowledgeProfileReport,
 } from '../api.ts';
@@ -31,6 +30,7 @@ import { localizeApiError } from '../error-i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
 import { Feedback } from './ui.tsx';
 import { DashboardKpiGrid, shortDate } from './DashboardKpiGrid.tsx';
+import { DashboardHeatmap } from './DashboardHeatmap.tsx';
 import { DashboardDistributions } from './DashboardDistributions.tsx';
 import { FocusTopicsCard } from './FocusTopicsCard.tsx';
 import { TopicInsights } from './TopicInsights.tsx';
@@ -75,6 +75,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ lang, active = tru
   );
   const [sourceError, setSourceError] = useState<unknown>(null);
   const [sourceRetry, setSourceRetry] = useState(0);
+  const [insightsRetry, setInsightsRetry] = useState(0);
+  const [sourceOpen, setSourceOpen] = useState(false);
   const [masteryError, setMasteryError] = useState(false);
   const [masteryLoading, setMasteryLoading] = useState(true);
   const [masteryReport, setMasteryReport] = useState<TagMasteryReport | null>(null);
@@ -85,7 +87,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ lang, active = tru
 
   useEffect(() => {
     const key = JSON.stringify([workspace.revision, workspace.timezone, sourceRetry]);
-    if (!active || loadedSource.current === key) return;
+    if (!active || !sourceOpen || loadedSource.current === key) return;
     let current = true;
     void api.getPracticeStats().then(value => {
       if (current) {
@@ -98,15 +100,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ lang, active = tru
       if (current) loadedSource.current = key;
     });
     return () => { current = false; };
-  }, [active, workspace.revision, workspace.timezone, sourceRetry]);
+  }, [active, workspace.revision, workspace.timezone, sourceRetry, sourceOpen]);
 
   useEffect(() => {
-    const key = JSON.stringify([workspace.revision, workspace.timezone]);
+    const key = JSON.stringify([workspace.revision, workspace.timezone, insightsRetry]);
     if (!active || loadedInsights.current === key) return;
     loadedInsights.current = null;
     let current = true;
-    setMasteryReport(null);
-    setProfileReport(null);
     setMasteryError(false);
     setMasteryLoading(true);
 
@@ -119,23 +119,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ lang, active = tru
     });
     const profile = api.getKnowledgeProfile().then(report => {
       if (current) setProfileReport(report);
-    }).catch(() => {});
+    }).catch(() => {
+      if (current) setProfileReport(null);
+    });
     void Promise.all([mastery, profile]).then(() => {
       if (current) loadedInsights.current = key;
     });
 
     return () => { current = false; };
-  }, [active, workspace.revision, workspace.timezone]);
-
-  // Keyboard navigation & roving tabIndex for heatmap
-  const [focusedDate, setFocusedDate] = useState<string | null>(null);
-
-  // Active hover/focus tooltip for heatmap cell
-  const [hoveredDay, setHoveredDay] = useState<{
-    day: YearlyActivityDay;
-    x: number;
-    y: number;
-  } | null>(null);
+  }, [active, workspace.revision, workspace.timezone, insightsRetry]);
 
   const requestedDashboard = useRef<string | null>(null);
   const dashboardSeqRef = useRef(0);
@@ -187,105 +179,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ lang, active = tru
     return item ? activityDate(item, workspace.timezone) : null;
   }, [data?.recentActivities, workspace.timezone]);
 
-  // Year choices (current year and past 2 years)
-  const currentCalYear = new Date().getFullYear();
-  const availableYears = [currentCalYear, currentCalYear - 1, currentCalYear - 2];
-
-  // Map yearly activity days by date string (YYYY-MM-DD) for fast lookup in heatmap grid
-  const activityMap = useMemo(() => {
-    const map = new Map<string, YearlyActivityDay>();
-    if (data?.yearlyActivity.days) {
-      for (const d of data.yearlyActivity.days) {
-        map.set(d.date, d);
-      }
-    }
-    return map;
-  }, [data?.yearlyActivity.days]);
-
-  // Generate ISO 8601 calendar matrix (Monday to Sunday) for selected year
-  const calendarWeeks = useMemo(() => {
-    const weeks: Array<Array<{ dateStr: string; inYear: boolean }>> = [];
-    const jan1 = new Date(Date.UTC(selectedYear, 0, 1));
-    const dec31 = new Date(Date.UTC(selectedYear, 11, 31));
-
-    // ISO 8601: Monday = 1, Sunday = 0. Days since Monday: (day + 6) % 7
-    const jan1Day = jan1.getUTCDay();
-    const daysSinceMonday = (jan1Day + 6) % 7;
-    const startDate = new Date(jan1);
-    startDate.setUTCDate(startDate.getUTCDate() - daysSinceMonday);
-
-    const current = new Date(startDate);
-    let currentWeek: Array<{ dateStr: string; inYear: boolean }> = [];
-
-    while (current <= dec31 || currentWeek.length > 0) {
-      const y = current.getUTCFullYear();
-      const m = String(current.getUTCMonth() + 1).padStart(2, '0');
-      const d = String(current.getUTCDate()).padStart(2, '0');
-      const dateStr = `${y}-${m}-${d}`;
-      const inYear = y === selectedYear;
-
-      currentWeek.push({ dateStr, inYear });
-
-      if (currentWeek.length === 7) {
-        weeks.push(currentWeek);
-        currentWeek = [];
-        if (current > dec31) break;
-      }
-
-      current.setUTCDate(current.getUTCDate() + 1);
-    }
-
-    return weeks;
-  }, [selectedYear]);
-
-  // Default focused date for roving tabIndex
-  useEffect(() => {
-    const today = new Date().toISOString().slice(0, 10);
-    if (today.startsWith(`${selectedYear}-`)) {
-      setFocusedDate(today);
-    } else {
-      setFocusedDate(`${selectedYear}-01-01`);
-    }
-  }, [selectedYear]);
-
-  /** A heatmap day opens the Records tab filtered to that date. */
-  const handleCellClick = (dateStr: string) => {
-    setHoveredDay(null);
-    workspace.openRecords?.({ date: dateStr });
-  };
-
-  const handleCellKeyDown = (e: React.KeyboardEvent, dateStr: string, wIdx: number, dIdx: number) => {
-    let targetDateStr: string | null = null;
-    if (e.key === 'ArrowUp') {
-      if (dIdx > 0) {
-        targetDateStr = calendarWeeks[wIdx][dIdx - 1]?.dateStr;
-      }
-    } else if (e.key === 'ArrowDown') {
-      if (dIdx < 6) {
-        targetDateStr = calendarWeeks[wIdx][dIdx + 1]?.dateStr;
-      }
-    } else if (e.key === 'ArrowLeft') {
-      if (wIdx > 0) {
-        targetDateStr = calendarWeeks[wIdx - 1][dIdx]?.dateStr;
-      }
-    } else if (e.key === 'ArrowRight') {
-      if (wIdx < calendarWeeks.length - 1) {
-        targetDateStr = calendarWeeks[wIdx + 1][dIdx]?.dateStr;
-      }
-    } else if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      handleCellClick(dateStr);
-      return;
-    }
-
-    if (targetDateStr && targetDateStr.startsWith(String(selectedYear))) {
-      e.preventDefault();
-      setFocusedDate(targetDateStr);
-      const targetEl = document.querySelector<HTMLElement>(`[data-date="${targetDateStr}"]`);
-      targetEl?.focus();
-    }
-  };
-
   const pendingDateCount = data?.dataStatus.pendingDateCount ?? 0;
 
   return (
@@ -319,164 +212,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ lang, active = tru
       />
 
       {/* Yearly Activity Heatmap */}
-      <section className="heatmap-card" aria-labelledby="heatmap-card-title">
-        <div className="insight-card-head heatmap-card-head">
-          <div>
-            <h2 id="heatmap-card-title">{t.heatmapTitle}</h2>
-            <p>{zh ? '点击某一天，在「记录」中查看当天的练习' : 'Select a day to see its practice in Records'}</p>
-          </div>
-
-          {/* Year selector */}
-          <div className="heatmap-year-select" role="group" aria-label={zh ? '选择年份' : 'Select year'}>
-            {availableYears.map((year) => (
-              <button
-                key={year}
-                type="button"
-                aria-pressed={selectedYear === year}
-                onClick={() => setSelectedYear(year)}
-                className={'topic-filter-tab' + (selectedYear === year ? ' active' : '')}
-              >
-                {year}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Heatmap Grid (Weeks x 7 ISO days: Mon to Sun) */}
-        <div className="heatmap-scroll-area">
-          <div className="heatmap-grid" role="grid" aria-label={t.heatmapTitle}>
-            {calendarWeeks.map((week, wIdx) => (
-              <div key={wIdx} className="heatmap-col" role="row">
-                {week.map(({ dateStr, inYear }, dIdx) => {
-                  const activity = activityMap.get(dateStr);
-                  const activeCount = activity ? activity.activeProblemCount : 0;
-                  const solvedCount = activity ? activity.solvedProblemCount : 0;
-
-                  let levelClass = 'heatmap-cell-0';
-                  if (inYear) {
-                    if (activeCount >= 3) {
-                      levelClass = 'heatmap-cell-3';
-                    } else if (activeCount === 2) {
-                      levelClass = 'heatmap-cell-2';
-                    } else if (activeCount === 1) {
-                      levelClass = 'heatmap-cell-1';
-                    }
-                  }
-
-                  const label = zh
-                    ? `${dateStr}：${activeCount} 题有活动，${solvedCount} 题完成`
-                    : `${dateStr}: ${activeCount} active, ${solvedCount} solved`;
-                  const isCurrentFocused =
-                    inYear && (dateStr === focusedDate || (!focusedDate && wIdx === 0 && dIdx === 0));
-
-                  return (
-                    <button
-                      key={dateStr}
-                      type="button"
-                      data-date={dateStr}
-                      onClick={() => handleCellClick(dateStr)}
-                      onKeyDown={(e) => handleCellKeyDown(e, dateStr, wIdx, dIdx)}
-                      onMouseEnter={(e) => {
-                        if (activity && inYear) {
-                          const rect = e.currentTarget.getBoundingClientRect();
-                          setHoveredDay({
-                            day: activity,
-                            x: rect.left + rect.width / 2,
-                            y: rect.top - 8,
-                          });
-                        }
-                      }}
-                      onMouseLeave={() => setHoveredDay(null)}
-                      onFocus={(e) => {
-                        setFocusedDate(dateStr);
-                        if (activity && inYear) {
-                          const rect = e.currentTarget.getBoundingClientRect();
-                          setHoveredDay({
-                            day: activity,
-                            x: rect.left + rect.width / 2,
-                            y: rect.top - 8,
-                          });
-                        }
-                      }}
-                      onBlur={() => setHoveredDay(null)}
-                      tabIndex={isCurrentFocused ? 0 : -1}
-                      aria-label={label}
-                      className={`heatmap-cell ${levelClass} ${!inYear ? 'out-of-year' : ''}`}
-                    />
-                  );
-                })}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Heatmap Floating Tooltip */}
-        {hoveredDay && (
-          <div className="heatmap-tooltip rich-tooltip" style={{ left: `${hoveredDay.x}px`, top: `${hoveredDay.y}px` }}>
-            <div className="tooltip-header">
-              <span className="tooltip-date">{hoveredDay.day.date}</span>
-              {Boolean(hoveredDay.day.totalMinutes) && (
-                <span className="tooltip-duration">⏱️ {hoveredDay.day.totalMinutes} {zh ? '分钟' : 'min'}</span>
-              )}
-            </div>
-            <div className="tooltip-counts">
-              <span>{hoveredDay.day.activeProblemCount} {t.trendActiveProblems}</span>
-              <span> · </span>
-              <span className="text-emerald">{hoveredDay.day.solvedProblemCount} {t.trendSolvedProblems}</span>
-            </div>
-            {Boolean(hoveredDay.day.easyCount || hoveredDay.day.mediumCount || hoveredDay.day.hardCount) && (
-              <div className="tooltip-diff-breakdown">
-                {Boolean(hoveredDay.day.easyCount) && (
-                  <span className="difficulty easy">{lang === 'zh' ? t.statEasy : 'E'}: {hoveredDay.day.easyCount}</span>
-                )}
-                {Boolean(hoveredDay.day.mediumCount) && (
-                  <span className="difficulty medium">{lang === 'zh' ? t.statMedium : 'M'}: {hoveredDay.day.mediumCount}</span>
-                )}
-                {Boolean(hoveredDay.day.hardCount) && (
-                  <span className="difficulty hard">{lang === 'zh' ? t.statHard : 'H'}: {hoveredDay.day.hardCount}</span>
-                )}
-              </div>
-            )}
-            {hoveredDay.day.problemSummaries && hoveredDay.day.problemSummaries.length > 0 && (
-              <ul className="tooltip-problems-list">
-                {hoveredDay.day.problemSummaries.slice(0, 3).map((prob) => (
-                  <li key={prob.frontendId} className="tooltip-problem-item">
-                    <span className={`diff-dot ${prob.difficulty.toLowerCase()}`} />
-                    <span className="prob-title">#{prob.frontendId} {prob.title}</span>
-                  </li>
-                ))}
-                {hoveredDay.day.problemSummaries.length > 3 && (
-                  <li className="tooltip-more">+{hoveredDay.day.problemSummaries.length - 3} {zh ? '更多' : 'more'}</li>
-                )}
-              </ul>
-            )}
-            <div className="tooltip-hint">{zh ? '点击在「记录」中查看' : 'Click to open in Records'}</div>
-          </div>
-        )}
-
-        {/* Heatmap footer: activity summary (and the quiet 30-day note) beside the legend */}
-        <div className="heatmap-legend">
-          <span className="heatmap-summary">
-            {data && !hasRecentActivity && (
-              <span className="heatmap-quiet">
-                <span className="heatmap-quiet-dot" aria-hidden="true" />
-                {zh ? '近 30 天没有练习记录' : 'No practice in the last 30 days'}
-                {lastActiveDate && (zh ? ` · 最近一次 ${lastActiveDate}` : ` · last active ${lastActiveDate}`)}
-                {' · '}
-              </span>
-            )}
-            {data?.yearlyActivity.days.length ?? 0} {zh ? '天有已知记录' : 'days with known activity'}
-          </span>
-          <div className="heatmap-legend-scale">
-            <span>{t.heatmapLess}</span>
-            <span className="heatmap-legend-box heatmap-cell-0" />
-            <span className="heatmap-legend-box heatmap-cell-1" />
-            <span className="heatmap-legend-box heatmap-cell-2" />
-            <span className="heatmap-legend-box heatmap-cell-3" />
-            <span>{t.heatmapMore}</span>
-          </div>
-        </div>
-      </section>
+      <DashboardHeatmap days={data?.yearlyActivity.days} selectedYear={selectedYear} setSelectedYear={setSelectedYear}
+        openRecords={workspace.openRecords} lang={lang} hasRecentActivity={hasRecentActivity} lastActiveDate={lastActiveDate} />
 
       {/* Difficulty mastery (+ trend when there is recent data) beside the topics worth attention */}
       <div className="progress-insights-grid">
@@ -583,78 +320,80 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ lang, active = tru
         />
       </div>
 
-      {masteryLoading && <p role="status" className="text-muted">{t.insightLoading}</p>}
+      {masteryLoading && !masteryReport && <p role="status" className="text-muted">{t.insightLoading}</p>}
       {masteryError && (
-        <Feedback retry={{ label: t.retry, run: () => setSourceRetry((v) => v + 1) }}>{t.insightLoadError}</Feedback>
+        <Feedback retry={{ label: t.retry, run: () => setInsightsRetry((v) => v + 1) }}>{t.insightLoadError}</Feedback>
       )}
       {masteryReport && <TopicInsights report={masteryReport} profileReport={profileReport} lang={lang} />}
 
-      <details className="workspace-details progress-source-details">
+      <details className="workspace-details progress-source-details" onToggle={event => setSourceOpen(event.currentTarget.open)}>
         <summary>{zh ? '数据来源与统计说明' : 'Data sources and coverage'}</summary>
-        <p className="coverage-note">
-          {zh
-            ? '没有记录不代表没有练习。手动记录和有效导入依据按题目与日期去重；这不是历史任务完成率。标签可重叠，分布之和可能超过已完成题数。'
-            : 'No record does not prove inactivity. Manual records and valid imported evidence are deduplicated by problem and date; this is not a historical task completion rate. Tags overlap, so their totals may exceed solved problems.'}
-        </p>
-        {Boolean(sourceError) && (
-          <Feedback
-            retry={{ label: zh ? '重试来源统计' : 'Retry source totals', run: () => setSourceRetry((value) => value + 1) }}
-          >
-            {localizeApiError(sourceError, lang)}
-          </Feedback>
-        )}
-        <dl className="detail-grid">
-          {sourceStats && (
-            <>
-              <dt>{zh ? '手动练习 / 完成 / 未完成' : 'Manual / completed / not completed'}</dt>
-              <dd>
-                {sourceStats.totalManualPractices} / {sourceStats.completedManualPractices} /{' '}
-                {sourceStats.uncompletedManualPractices}
-              </dd>
-              <dt>{zh ? '有效快照 / 含通过记录' : 'Active snapshots / with Accepted evidence'}</dt>
-              <dd>
-                {sourceStats.totalSnapshots} / {sourceStats.acceptedSnapshots}
-              </dd>
-            </>
+        {sourceOpen && <>
+          <p className="coverage-note">
+            {zh
+              ? '没有记录不代表没有练习。手动记录和有效导入依据按题目与日期去重；这不是历史任务完成率。标签可重叠，分布之和可能超过已完成题数。'
+              : 'No record does not prove inactivity. Manual records and valid imported evidence are deduplicated by problem and date; this is not a historical task completion rate. Tags overlap, so their totals may exceed solved problems.'}
+          </p>
+          {Boolean(sourceError) && (
+            <Feedback
+              retry={{ label: zh ? '重试来源统计' : 'Retry source totals', run: () => setSourceRetry((value) => value + 1) }}
+            >
+              {localizeApiError(sourceError, lang)}
+            </Feedback>
           )}
-          {data?.dataStatus && (
-            <>
-              <dt>{t.catalogLastUpdated}</dt>
-              <dd>
-                {data.dataStatus.catalogUpdatedAt
-                  ? formatInstant(data.dataStatus.catalogUpdatedAt, lang, { timeZone: data.dataStatus.userTimezone || undefined })
-                  : t.never}
-              </dd>
-              <dt>{t.practiceLastUpdated}</dt>
-              <dd>
-                {data.dataStatus.practiceUpdatedAt
-                  ? formatInstant(data.dataStatus.practiceUpdatedAt, lang, { timeZone: data.dataStatus.userTimezone || undefined })
-                  : t.never}
-              </dd>
-              <dt>{t.userTimezoneLabel}</dt>
-              <dd>{data.dataStatus.userTimezone || t.setupTimezoneTitle}</dd>
-            </>
-          )}
-        </dl>
-        <table className="data-table">
-          <caption>{zh ? '最近 30 天活动' : 'Last 30 days of activity'}</caption>
-          <thead>
-            <tr>
-              <th>{zh ? '日期' : 'Date'}</th>
-              <th>{t.trendActiveProblems}</th>
-              <th>{t.trendSolvedProblems}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data?.trend30Days.map((day) => (
-              <tr key={day.date}>
-                <td>{day.date}</td>
-                <td>{day.activeCount}</td>
-                <td>{day.completedCount}</td>
+          <dl className="detail-grid">
+            {sourceStats && (
+              <>
+                <dt>{zh ? '手动练习 / 完成 / 未完成' : 'Manual / completed / not completed'}</dt>
+                <dd>
+                  {sourceStats.totalManualPractices} / {sourceStats.completedManualPractices} /{' '}
+                  {sourceStats.uncompletedManualPractices}
+                </dd>
+                <dt>{zh ? '有效快照 / 含通过记录' : 'Active snapshots / with Accepted evidence'}</dt>
+                <dd>
+                  {sourceStats.totalSnapshots} / {sourceStats.acceptedSnapshots}
+                </dd>
+              </>
+            )}
+            {data?.dataStatus && (
+              <>
+                <dt>{t.catalogLastUpdated}</dt>
+                <dd>
+                  {data.dataStatus.catalogUpdatedAt
+                    ? formatInstant(data.dataStatus.catalogUpdatedAt, lang, { timeZone: data.dataStatus.userTimezone || undefined })
+                    : t.never}
+                </dd>
+                <dt>{t.practiceLastUpdated}</dt>
+                <dd>
+                  {data.dataStatus.practiceUpdatedAt
+                    ? formatInstant(data.dataStatus.practiceUpdatedAt, lang, { timeZone: data.dataStatus.userTimezone || undefined })
+                    : t.never}
+                </dd>
+                <dt>{t.userTimezoneLabel}</dt>
+                <dd>{data.dataStatus.userTimezone || t.setupTimezoneTitle}</dd>
+              </>
+            )}
+          </dl>
+          <table className="data-table">
+            <caption>{zh ? '最近 30 天活动' : 'Last 30 days of activity'}</caption>
+            <thead>
+              <tr>
+                <th>{zh ? '日期' : 'Date'}</th>
+                <th>{t.trendActiveProblems}</th>
+                <th>{t.trendSolvedProblems}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {data?.trend30Days.map((day) => (
+                <tr key={day.date}>
+                  <td>{day.date}</td>
+                  <td>{day.activeCount}</td>
+                  <td>{day.completedCount}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>}
       </details>
       {loading && !data && <p role="status" className="text-muted">{zh ? '加载中…' : 'Loading…'}</p>}
     </div>

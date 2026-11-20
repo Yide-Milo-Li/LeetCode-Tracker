@@ -85,7 +85,7 @@ export function createNotesOperations(context: Pick<ApplicationContext, 'store' 
 
       try {
         const note = await writeLock.run(() =>
-          store.upsertProblemNote(frontendId.trim(), parseRes.data.content, parseRes.data.expectedContentHash)
+          store.protectedWrite(() => store.upsertProblemNote(frontendId.trim(), parseRes.data.content, parseRes.data.expectedContentHash))
         );
         return { note, contentHash: contentHash(note.content) };
       } catch (err) {

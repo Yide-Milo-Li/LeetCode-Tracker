@@ -6,8 +6,21 @@ import { DatabaseSync, backup } from 'node:sqlite';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { Worker } from 'node:worker_threads';
 import { inspectCatalogSchema } from './schema.ts';
 import { acquireDatabaseLease } from './lease.ts';
+
+declare const __LCT_VERIFY_BACKUP_WORKER__: string;
+
+function verifyInBackground(snapshot: string): Promise<void> {
+  const url = typeof __LCT_VERIFY_BACKUP_WORKER__ === 'string'
+    ? new URL(__LCT_VERIFY_BACKUP_WORKER__) : new URL('./verify-backup-worker.ts', import.meta.url);
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(url, { workerData: snapshot, execArgv: [] });
+    worker.once('error', reject);
+    worker.once('exit', code => code === 0 ? resolve() : reject(new Error(`Backup verification exited with code ${code}`)));
+  });
+}
 
 /** Result of backup file validation. */
 export interface BackupVerificationResult {
@@ -56,7 +69,7 @@ export class BackupManager {
    * @param db Active database instance.
    * @param targetPath Destination file path.
    */
-  public async createBackup(db: DatabaseSync, targetPath: string): Promise<void> {
+  public async createBackup(db: DatabaseSync, targetPath: string, backgroundVerification = false): Promise<void> {
     const parentDir = path.dirname(targetPath);
     if (!fs.existsSync(parentDir)) {
       fs.mkdirSync(parentDir, { recursive: true });
@@ -67,9 +80,11 @@ export class BackupManager {
     try {
       await backup(db, tempPath);
       // Verify the generated temp backup before replacing target
-      const verification = this.verifyBackup(tempPath);
-      if (!verification.valid) {
-        throw new Error(`Generated backup failed integrity check: ${verification.error}`);
+      if (backgroundVerification) {
+        await verifyInBackground(tempPath);
+      } else {
+        const verification = this.verifyBackup(tempPath);
+        if (!verification.valid) throw new Error(`Generated backup failed integrity check: ${verification.error}`);
       }
 
       // Replace only a closed snapshot, never an active SQLite database.
@@ -113,22 +128,38 @@ export class BackupManager {
   public async performPreImportBackup(
     db: DatabaseSync,
   ): Promise<{ latestPath: string; dailyPath: string }> {
-    this.ensureDir();
+    return this.saveRotatingSnapshot(db, 'pre-import-latest.sqlite');
+  }
 
-    // 1. Overwrite latest pre-import backup
-    const latestPath = path.join(this.backupDir, 'pre-import-latest.sqlite');
-    await this.createBackup(db, latestPath);
+  /** Save committed ordinary writes without displacing the last pre-import recovery point. */
+  public async performRoutineBackup(db: DatabaseSync): Promise<void> {
+    await this.saveRotatingSnapshot(db, 'latest.sqlite', true);
+  }
 
-    // 2. Daily snapshot
-    const now = new Date();
-    const dateStr = now.toISOString().split('T')[0];
-    const dailyFilename = `daily-${dateStr}.sqlite`;
-    const dailyPath = path.join(this.backupDir, dailyFilename);
-    if (!fs.existsSync(dailyPath)) await this.createBackup(db, dailyPath);
+  private async saveRotatingSnapshot(db: DatabaseSync, filename: string, backgroundVerification = false) {
+    const latestPath = path.join(this.backupDir, filename);
+    await this.createBackup(db, latestPath, backgroundVerification);
 
-    // 3. Prune daily backups beyond 14 days
-    this.pruneDailyBackups(14);
-
+    const date = new Date().toISOString().slice(0, 10);
+    const dailyPath = path.join(this.backupDir, `daily-${date}.sqlite`);
+    if (!fs.existsSync(dailyPath)) {
+      // Replacing latestPath uses rename. An existing daily archive keeps the verified bytes.
+      // Stage a copy for filesystems without hard-link support.
+      try {
+        fs.linkSync(latestPath, dailyPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+          const temporary = `${dailyPath}.tmp-${randomUUID()}`;
+          try {
+            fs.copyFileSync(latestPath, temporary, fs.constants.COPYFILE_FICLONE);
+            fs.renameSync(temporary, dailyPath);
+          } finally {
+            fs.rmSync(temporary, { force: true });
+          }
+        }
+      }
+      this.pruneDailyBackups(14);
+    }
     return { latestPath, dailyPath };
   }
 

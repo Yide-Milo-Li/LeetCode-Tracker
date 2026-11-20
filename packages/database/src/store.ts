@@ -7,6 +7,7 @@
 import { contentHash, NoteContentConflictError } from './note-hash.ts';
 import { withBatchFingerprint } from './operation-fingerprint.ts';
 import { DatabaseSync } from 'node:sqlite';
+import { isTimeZone, localDate } from '../../contracts/src/time.ts';
 import type {
   CatalogProblem,
   CatalogQueryInput,
@@ -72,7 +73,7 @@ export {
   LegacyCrawlerSchemaError,
   UnsupportedSchemaVersionError,
 } from './schema.ts';
-import { CURRENT_SCHEMA_VERSION } from './schema.ts';
+import { CURRENT_SCHEMA_VERSION, inspectCatalogSchema } from './schema.ts';
 import { ensureActivityIndexes, initOrMigrateSchema } from './migrations.ts';
 
 // Catalog import exports
@@ -90,6 +91,7 @@ import {
 // Practice store exports
 export { PracticeConflictError } from './practice-store.ts';
 import {
+  PracticeConflictError,
   getPracticeRevision,
   replayPracticeOperation,
   getPracticeRecord,
@@ -137,6 +139,9 @@ export interface CatalogStoreOptions {
   skipBackup?: boolean;
 }
 
+/** Internal synchronous handoff so `CatalogStore.open` avoids inspecting the schema twice. */
+let openingContext: { db: DatabaseSync; version: number | null } | null = null;
+
 /**
  * Storage manager for managing local LeetCode problem catalog datasets.
  */
@@ -154,19 +159,25 @@ export class CatalogStore {
     this.options = options;
     this.db = db;
     registerNotesFunctions(db);
-    this.initOrMigrateSchema();
+    const preinspected = openingContext?.db === db ? openingContext.version : undefined;
+    initOrMigrateSchema(this.db, this.options.validateVersion, preinspected);
     this.planning = new PlanningStore(db, this);
   }
 
   /** Open production storage only after a consistent pre-migration backup succeeds. */
   public static async open(db: DatabaseSync, options: CatalogStoreOptions = {}): Promise<CatalogStore> {
-    const { inspectCatalogSchema } = await import('./schema.ts');
     const version = inspectCatalogSchema(db, true);
     const manager = options.backupDir && !options.skipBackup ? new BackupManager(options.backupDir) : undefined;
     if (version !== null && version < CURRENT_SCHEMA_VERSION && manager) {
       await manager.performMigrationBackup(db, version, CURRENT_SCHEMA_VERSION);
     }
-    const store = new CatalogStore(db, { ...options, skipBackup: true });
+    let store: CatalogStore;
+    openingContext = { db, version };
+    try {
+      store = new CatalogStore(db, { ...options, skipBackup: true });
+    } finally {
+      openingContext = null;
+    }
     if (version === CURRENT_SCHEMA_VERSION) ensureActivityIndexes(db);
     store.backupManager = manager;
     return store;
@@ -177,20 +188,70 @@ export class CatalogStore {
     initOrMigrateSchema(this.db, this.options.validateVersion);
   }
 
-  /** Serialize a protected write; the callback owns its synchronous transaction. */
-  public protectedWrite<T>(write: () => T): Promise<T> {
+  private backupTimer?: NodeJS.Timeout;
+  private backupDirty = false;
+  private routineBackup?: Promise<void>;
+
+  private scheduleRoutineBackup(): void {
+    if (!this.backupManager) return;
+    this.backupDirty = true;
+    if (this.backupTimer || this.routineBackup) return;
+    this.backupTimer = setTimeout(() => {
+      this.backupTimer = undefined;
+      void this.startRoutineBackup().catch(() => {
+        console.warn('Could not save the scheduled database backup. Retrying in 30 seconds.');
+      });
+    }, 30_000).unref();
+  }
+
+  private startRoutineBackup(): Promise<void> {
+    if (this.routineBackup) return this.routineBackup;
+    if (!this.backupManager || !this.backupDirty) return Promise.resolve();
+    this.backupDirty = false;
+    this.routineBackup = this.backupManager.performRoutineBackup(this.db).catch(error => {
+      this.backupDirty = true;
+      throw error;
+    }).finally(() => {
+      this.routineBackup = undefined;
+      if (this.backupDirty) this.scheduleRoutineBackup();
+    });
+    return this.routineBackup;
+  }
+
+  /** Drain writes and capture the last burst before the owning runtime closes SQLite. */
+  public async flushRoutineBackup(): Promise<void> {
+    await this.writeQueue;
+    try {
+      do {
+        clearTimeout(this.backupTimer);
+        this.backupTimer = undefined;
+        await this.startRoutineBackup();
+      } while (this.routineBackup || (this.backupManager && this.backupDirty));
+    } finally {
+      clearTimeout(this.backupTimer);
+      this.backupTimer = undefined;
+    }
+  }
+
+  /** Commit ordinary writes in order; take the rolling snapshot outside the write queue. */
+  public protectedWrite<T>(write: () => T, backup: 'scheduled' | 'before' = 'scheduled'): Promise<T> {
     const run = this.writeQueue.then(async () => {
-      if (this.backupManager) {
+      if (!this.backupManager) return write();
+      if (backup === 'before') {
         await this.backupManager.performPreImportBackup(this.db);
+        return write();
       }
-      return write();
+      const before = this.dataStamp();
+      const result = write();
+      if (this.dataStamp() !== before) this.scheduleRoutineBackup();
+      return result;
     });
     this.writeQueue = run.then(() => {}, () => {});
     return run;
   }
 
   /** Acquire the store write queue and commit related changes as one SQLite transaction. */
-  public protectedTransaction<T>(write: () => T): Promise<T> {
+  public protectedTransaction<T>(write: () => T, backup: 'scheduled' | 'before' = 'scheduled'): Promise<T> {
     return this.protectedWrite(() => {
       this.db.exec('BEGIN IMMEDIATE');
       try {
@@ -201,7 +262,7 @@ export class CatalogStore {
         this.db.exec('ROLLBACK');
         throw error;
       }
-    });
+    }, backup);
   }
 
   // ==========================================
@@ -402,11 +463,12 @@ export class CatalogStore {
         return replays.map((record) => ({ record: record!, replayed: true }));
       }
 
-      if (this.backupManager) {
+      if (prepared.length > 1 && this.backupManager) {
         await this.backupManager.performPreImportBackup(this.db);
       }
 
       const results = insertPracticeRecordsTransaction(this.db, prepared, this.getSettings().timezone);
+      if (prepared.length === 1) this.scheduleRoutineBackup();
       return results.map(({ id, replayed }) => ({ record: this.getPracticeRecord(id)!, replayed }));
     });
 
@@ -418,54 +480,40 @@ export class CatalogStore {
   public async updatePracticeRecord(id: string, input: UpdatePracticeRecordInput): Promise<PracticeRecord> {
     const validated = updatePracticeRecordSchema.parse(input);
 
-    const run = this.writeQueue.then(async () => {
+    return this.protectedWrite(() => {
       const existing = this.getPracticeRecord(id);
       if (!existing || existing.status === 'revoked') {
         throw new Error(`Practice record '${id}' not found or has been revoked.`);
       }
       if (validated.expectedRevision !== undefined && validated.expectedRevision !== existing.revision) {
-        throw new (await import('./practice-store.ts')).PracticeConflictError(
+        throw new PracticeConflictError(
           'RECORD_REVISION_MISMATCH',
           'This practice record changed. Reload it before saving your correction.'
         );
       }
 
-      if (this.backupManager) {
-        await this.backupManager.performPreImportBackup(this.db);
-      }
-
       updatePracticeRecordTransaction(this.db, id, validated, existing);
       return this.getPracticeRecord(id)!;
     });
-
-    this.writeQueue = run.then(() => {}, () => {});
-    return run;
   }
 
   /** Revoke an active manual practice record with an audit trail. */
   public async revokePracticeRecord(id: string, expectedRevision?: number): Promise<PracticeRecord> {
-    const run = this.writeQueue.then(async () => {
+    return this.protectedWrite(() => {
       const existing = this.getPracticeRecord(id);
       if (!existing || existing.status === 'revoked') {
         throw new Error(`Practice record '${id}' not found or already revoked.`);
       }
       if (expectedRevision !== undefined && expectedRevision !== existing.revision) {
-        throw new (await import('./practice-store.ts')).PracticeConflictError(
+        throw new PracticeConflictError(
           'RECORD_REVISION_MISMATCH',
           'This practice record changed. Reload it before revoking.'
         );
       }
 
-      if (this.backupManager) {
-        await this.backupManager.performPreImportBackup(this.db);
-      }
-
       revokePracticeRecordTransaction(this.db, id, existing.questionId);
       return this.getPracticeRecord(id)!;
     });
-
-    this.writeQueue = run.then(() => {}, () => {});
-    return run;
   }
 
   /** Retrieve a single practice record by ID. */
@@ -505,14 +553,10 @@ export class CatalogStore {
     questionIdOrFrontendId: string,
     input: UpdateProgressSnapshotInput
   ): Promise<ProgressSnapshot> {
-    const existing = this.getProgressSnapshot(questionIdOrFrontendId);
-    if (!existing) {
-      throw new Error(`Progress snapshot for problem '${questionIdOrFrontendId}' not found.`);
-    }
-
-    const run = this.writeQueue.then(async () => {
-      if (this.backupManager) {
-        await this.backupManager.performPreImportBackup(this.db);
+    return this.protectedWrite(() => {
+      const existing = this.getProgressSnapshot(questionIdOrFrontendId);
+      if (!existing) {
+        throw new Error(`Progress snapshot for problem '${questionIdOrFrontendId}' not found.`);
       }
 
       updateProgressSnapshotTransaction(
@@ -527,9 +571,6 @@ export class CatalogStore {
 
       return this.getProgressSnapshot(existing.questionId)!;
     });
-
-    this.writeQueue = run.then(() => {}, () => {});
-    return run;
   }
 
   /** Revoke a progress snapshot with an audit trail. */
@@ -537,14 +578,10 @@ export class CatalogStore {
     questionIdOrFrontendId: string,
     reason = 'manual_revocation'
   ): Promise<ProgressSnapshot> {
-    const existing = this.getProgressSnapshot(questionIdOrFrontendId);
-    if (!existing || existing.status === 'revoked') {
-      throw new Error(`Progress snapshot for problem '${questionIdOrFrontendId}' not found or already revoked.`);
-    }
-
-    const run = this.writeQueue.then(async () => {
-      if (this.backupManager) {
-        await this.backupManager.performPreImportBackup(this.db);
+    return this.protectedWrite(() => {
+      const existing = this.getProgressSnapshot(questionIdOrFrontendId);
+      if (!existing || existing.status === 'revoked') {
+        throw new Error(`Progress snapshot for problem '${questionIdOrFrontendId}' not found or already revoked.`);
       }
 
       revokeProgressSnapshotTransaction(
@@ -556,9 +593,6 @@ export class CatalogStore {
 
       return this.getProgressSnapshot(existing.questionId)!;
     });
-
-    this.writeQueue = run.then(() => {}, () => {});
-    return run;
   }
 
   /** Retrieve audit history of past versions for a progress snapshot. */
@@ -685,12 +719,19 @@ export class CatalogStore {
 
   private analyticsSnapshot?: { stamp: string; raw: ReturnType<typeof getDashboardRawDataRecords> };
 
-  /** Shared by pure dashboard, mastery and knowledge calculations. Date projections stay per request. */
+  /** Business revisions cover local mutations. data_version also detects external SQLite commits. */
   public dashboardSnapshot() {
     if (this.db.isTransaction) return this.getDashboardRawData();
     this.db.exec('BEGIN');
     try {
-      const stamp = this.dataStamp();
+      const { stamp } = this.db.prepare(`
+        SELECT json_array(
+          (SELECT value FROM catalog_meta WHERE key='catalog_revision'),
+          (SELECT value FROM catalog_meta WHERE key='practice_revision'),
+          (SELECT value FROM catalog_meta WHERE key='planning_revision'),
+          (SELECT value FROM settings WHERE key='timezone'), data_version
+        ) AS stamp FROM pragma_data_version
+      `).get() as { stamp: string };
       if (this.analyticsSnapshot?.stamp !== stamp) {
         this.analyticsSnapshot = { stamp, raw: this.getDashboardRawData() };
       }
@@ -698,6 +739,41 @@ export class CatalogStore {
     } finally {
       this.db.exec('COMMIT');
     }
+  }
+
+  private analysisWindow?: {
+    raw: ReturnType<typeof getDashboardRawDataRecords>;
+    zone: string;
+    from: number;
+    until: number;
+    sourceDays: Array<[string, string]>;
+  };
+
+  /** A future instant or a relevant local midnight can change reports without any write. */
+  public dashboardWindow(now: number, requestedZone?: string) {
+    const raw = this.dashboardSnapshot();
+    const zone = requestedZone ?? raw.userTimezone ?? 'UTC';
+    const cached = this.analysisWindow;
+    if (cached && cached.raw === raw && cached.zone === zone && now >= cached.from && now < cached.until &&
+        cached.sourceDays.every(([source, day]) => localDate(now, source) === day)) return cached;
+
+    const zones = new Set([zone]);
+    let until = Infinity;
+    const consider = (at: string, precision: string, source: string | null | undefined) => {
+      if (precision === 'date') {
+        if (source) zones.add(source);
+      } else {
+        const instant = Date.parse(at);
+        if (instant > now && instant < until) until = instant;
+      }
+    };
+    for (const r of raw.manualRecords) consider(r.practicedAt, r.timePrecision, r.sourceTimezone);
+    for (const s of raw.snapshots) consider(s.lastSubmittedAt, s.timePrecision, s.sourceTimezone);
+    for (const s of raw.snapshotSuccesses) consider(s.eventTime, s.precision, s.sourceTimezone);
+    const sourceDays: Array<[string, string]> = [...zones].filter(isTimeZone).map(z => [z, localDate(now, z)]);
+    const window = { raw, zone, from: now, until, sourceDays };
+    if (!this.db.isTransaction) this.analysisWindow = window;
+    return window;
   }
 
   /** Fetch all raw data required for pure dashboard statistical aggregation. */
@@ -746,7 +822,8 @@ export class CatalogStore {
     entries: Array<{ questionFrontendId: string; content: string }>,
     guard?: (current: Map<string, string>) => void
   ): Promise<ProblemNote[]> {
-    return this.protectedWrite(() => upsertProblemNotesTransaction(this.db, entries, guard));
+    return this.protectedWrite(() => upsertProblemNotesTransaction(this.db, entries, guard),
+      entries.length > 1 ? 'before' : 'scheduled');
   }
 
   /** Query problem note summaries with practice activity, difficulty, and tag filters. */
@@ -767,7 +844,12 @@ export class CatalogStore {
   /** Atomically restore database state from a SnapshotBundle with automatic safety backup. */
   public async importSnapshotBundle(bundle: unknown): Promise<BundleRestoreResult> {
     const mgr = this.backupManager ?? new BackupManager(this.options.backupDir ?? './backups');
-    const run = this.writeQueue.then(() => importSnapshotBundle(this.db, mgr, bundle, this.options.backupDir ?? './backups'));
+    const run = this.writeQueue.then(async () => {
+      const result = await importSnapshotBundle(this.db, mgr, bundle, this.options.backupDir ?? './backups');
+      // Restored profiles can carry exactly the same revision numbers as the previous profile.
+      this.analyticsSnapshot = undefined;
+      return result;
+    });
     this.writeQueue = run.then(() => {}, () => {});
     return run;
   }

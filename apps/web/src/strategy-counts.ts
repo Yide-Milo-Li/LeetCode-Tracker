@@ -1,6 +1,7 @@
 /** Count-based editor state over the existing percentage-based strategy contract. */
-import { difficulties, type Difficulty, type ReviewMode, type Rules } from '../../../packages/contracts/src/recommendations.ts';
-import { allocate } from '../../../packages/domain/src/index.ts';
+import type { Rules } from '../../../packages/contracts/src/recommendations.ts';
+import { difficulties, type Difficulty, type ReviewMode } from '../../../packages/contracts/src/recommendation-utils.ts';
+import { allocate } from '../../../packages/domain/src/recommendations.ts';
 
 export type CountInput = number | '';
 export type { ReviewMode };

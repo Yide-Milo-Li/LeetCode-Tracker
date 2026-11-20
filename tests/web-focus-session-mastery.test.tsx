@@ -207,6 +207,8 @@ it('renders Option 1 semantic micro-pills, shared legend, and hoverable segmente
 
     // 1. Verify Chinese rendering
     const zhView = render(<TopicInsights report={masteryReport} profileReport={mockProfileReport} lang="zh" />);
+    assert.equal(document.querySelector('.topic-diff-grid'), null);
+    fireEvent.click(document.querySelector('.topic-row-toggle')!);
     const zhPills = document.querySelectorAll('.topic-micro-pill');
     assert.equal(zhPills.length, 3);
     assert.ok(zhPills[0].classList.contains('pill-stable'));
@@ -246,6 +248,8 @@ it('renders Option 1 semantic micro-pills, shared legend, and hoverable segmente
 
     // 2. Verify English rendering
     render(<TopicInsights report={masteryReport} profileReport={mockProfileReport} lang="en" />);
+    assert.equal(document.querySelector('.topic-diff-grid'), null);
+    fireEvent.click(document.querySelector('.topic-row-toggle')!);
     const enPills = document.querySelectorAll('.topic-micro-pill');
     assert.equal(enPills.length, 3);
     assert.ok(enPills[0].textContent?.includes('Stable'));
@@ -359,6 +363,8 @@ it('renders developing micro-pill and unrecorded segment for imported progress e
 
     // Chinese rendering test
     const zhView = render(<TopicInsights report={masteryReport} profileReport={devProfileReport} lang="zh" />);
+    assert.equal(document.querySelector('.topic-diff-grid'), null);
+    fireEvent.click(document.querySelector('.topic-row-toggle')!);
     const zhPills = document.querySelectorAll('.topic-micro-pill');
     assert.equal(zhPills.length, 3);
     assert.ok(zhPills[0].classList.contains('pill-developing'));
@@ -380,6 +386,8 @@ it('renders developing micro-pill and unrecorded segment for imported progress e
 
     // English rendering test
     render(<TopicInsights report={masteryReport} profileReport={devProfileReport} lang="en" />);
+    assert.equal(document.querySelector('.topic-diff-grid'), null);
+    fireEvent.click(document.querySelector('.topic-row-toggle')!);
     const enPills = document.querySelectorAll('.topic-micro-pill');
     assert.ok(enPills[0].textContent?.includes('Developing'));
     assert.ok(document.querySelector('.topic-shared-legend')?.textContent?.includes('Unrecorded'));

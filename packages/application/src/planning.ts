@@ -247,16 +247,7 @@ export class PlanningService {
       feature.sourceDates.some(([source, day]) => localDate(now, source) !== day)) {
       const context = this.planning.analysisContext(zone, now);
       const { raw, reviewEvents, resolveDate, states } = context;
-      let validUntil = Infinity;
-      const sourceZones = new Set([zone]);
-      const trackBoundary = (at: string, precision: string, sourceZone: string | null) => {
-        if (sourceZone) sourceZones.add(sourceZone);
-        if (precision !== 'datetime') return;
-        const instant = Date.parse(at);
-        if (instant > now && instant < validUntil) validUntil = instant;
-      };
-      for (const event of reviewEvents) trackBoundary(event.at, event.precision, event.zone ?? null);
-      for (const snapshot of raw.snapshots) trackBoundary(snapshot.lastSubmittedAt, snapshot.timePrecision, snapshot.sourceTimezone ?? null);
+      const window = this.store.dashboardWindow(now, zone);
       const days = attemptDays(reviewEvents, zone, now, resolveDate);
       feature = {
         problems: raw.problems,
@@ -264,8 +255,8 @@ export class PlanningService {
         long: longWindowFeatures(raw.problems, reviewEvents, zone, now, days),
         profile: rules.focusWeakTags ? calculateKnowledgeProfile({ ...raw, now, userZone: zone, reviewStates: states }, resolveDate) : undefined,
         computedAt: now,
-        validUntil,
-        sourceDates: [...sourceZones].filter(isTimeZone).map(source => [source, localDate(now, source)]),
+        validUntil: window.until,
+        sourceDates: window.sourceDays,
       };
       this.featureCache.set(key, feature);
     }

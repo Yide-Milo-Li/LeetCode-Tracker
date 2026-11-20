@@ -8,7 +8,8 @@ import { api, type DailyPlan, type EnsureResult, type PlanItem, type PracticeRec
 import type { Language } from '../i18n.ts';
 import { localizeApiError } from '../error-i18n.ts';
 import type { RecommendationFeedbackReason } from '../../../../packages/contracts/src/recommendations.ts';
-import { evidenceAfter } from '../../../../packages/domain/src/index.ts';
+import { isTimeZone, localDate } from '../../../../packages/contracts/src/time-utils.ts';
+import { evidenceAfter } from '../../../../packages/domain/src/recommendations.ts';
 
 export interface UseDailyPlanReturn {
   /** Indicates initial load of today's plan is in progress. */
@@ -59,7 +60,7 @@ interface PlanErrorEntry {
  * Prevents redundant generation calls on tab switches and synchronizes state between
  * retained workspaces and the Today execution view.
  */
-export function useDailyPlan(lang: Language = 'en'): UseDailyPlanReturn {
+export function useDailyPlan(lang: Language = 'en', timezone?: string | null): UseDailyPlanReturn {
   const [loading, setLoading] = useState(true);
   const [ensureResult, setEnsureResult] = useState<EnsureResult | null>(null);
   const [refreshError, setRefreshError] = useState<PlanErrorEntry | null>(null);
@@ -70,6 +71,32 @@ export function useDailyPlan(lang: Language = 'en'): UseDailyPlanReturn {
   const refreshInFlight = useRef(false);
   const queuedRefresh = useRef(false);
   const planMutationPending = useRef(false);
+  const timezoneRef = useRef(timezone ?? null);
+  const settledCheckRef = useRef<{ status: EnsureResult['status']; date: string | null; timezone: string | null } | null>(null);
+
+  const recordSettledCheck = useCallback((result: EnsureResult, checkedAt = Date.now(), checkedZone = timezoneRef.current) => {
+    if (checkedZone !== timezoneRef.current) {
+      settledCheckRef.current = null;
+    } else if (result.status === 'ready' && result.plan && isTimeZone(result.plan.timezone)) {
+      settledCheckRef.current = { status: 'ready', date: result.plan.date, timezone: result.plan.timezone };
+    } else if (result.status === 'rest' && checkedZone && isTimeZone(checkedZone)) {
+      settledCheckRef.current = {
+        status: 'rest',
+        // A pre-midnight request may resolve after midnight. Keep the day it actually checked.
+        date: localDate(checkedAt, checkedZone),
+        timezone: checkedZone,
+      };
+    } else if (result.status === 'setup') {
+      settledCheckRef.current = { status: 'setup', date: null, timezone: timezoneRef.current ?? null };
+    } else {
+      settledCheckRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    timezoneRef.current = timezone ?? null;
+    settledCheckRef.current = null;
+  }, [timezone]);
 
   const isPlanMutationPending = useCallback(() => planMutationPending.current, []);
 
@@ -85,10 +112,13 @@ export function useDailyPlan(lang: Language = 'en'): UseDailyPlanReturn {
     }
     refreshInFlight.current = true;
     const revision = changeRevision.current;
+    const checkedAt = Date.now();
+    const checkedZone = timezoneRef.current;
     setRefreshError(null);
     try {
       const result = await api.ensureDailyPlan();
       if (revision === changeRevision.current) {
+        recordSettledCheck(result, checkedAt, checkedZone);
         setEnsureResult(result);
       }
     } catch (err: unknown) {
@@ -105,7 +135,7 @@ export function useDailyPlan(lang: Language = 'en'): UseDailyPlanReturn {
         void refresh();
       }
     }
-  }, []);
+  }, [recordSettledCheck]);
 
   useEffect(() => {
     refresh();
@@ -120,9 +150,15 @@ export function useDailyPlan(lang: Language = 'en'): UseDailyPlanReturn {
 
     // Periodic check (every 30 seconds) to detect date rollover across midnight
     const intervalId = setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        refresh();
+      if (document.visibilityState !== 'visible') return;
+      const settled = settledCheckRef.current;
+      if (settled?.status === 'setup') return;
+      if (settled?.date && settled.timezone && isTimeZone(settled.timezone)) {
+        if (localDate(Date.now(), settled.timezone) === settled.date) {
+          return;
+        }
       }
+      refresh();
     }, 30000);
 
     return () => {
@@ -144,7 +180,11 @@ export function useDailyPlan(lang: Language = 'en'): UseDailyPlanReturn {
     setMutationError(null);
     try {
       const updated = await save(plan);
-      if (revision === changeRevision.current) setEnsureResult({ status: 'ready', plan: updated });
+      if (revision === changeRevision.current) {
+        const nextResult: EnsureResult = { status: 'ready', plan: updated };
+        recordSettledCheck(nextResult);
+        setEnsureResult(nextResult);
+      }
       else queuedRefresh.current = true;
     } catch (err) {
       if (revision === changeRevision.current) setMutationError({ err, fallback });
@@ -157,7 +197,7 @@ export function useDailyPlan(lang: Language = 'en'): UseDailyPlanReturn {
         void refresh();
       }
     }
-  }, [ensureResult, refresh]);
+  }, [ensureResult, recordSettledCheck, refresh]);
 
   const replaceOne = useCallback((item: PlanItem, feedbackReason?: RecommendationFeedbackReason) =>
     mutatePlan(
@@ -196,8 +236,10 @@ export function useDailyPlan(lang: Language = 'en'): UseDailyPlanReturn {
   const onOverrideCommitted = useCallback((newPlan: DailyPlan) => {
     changeRevision.current++;
     setMutationError(null);
-    setEnsureResult({ status: 'ready', plan: newPlan });
-  }, []);
+    const nextResult: EnsureResult = { status: 'ready', plan: newPlan };
+    recordSettledCheck(nextResult);
+    setEnsureResult(nextResult);
+  }, [recordSettledCheck]);
 
   const onPracticeLogged = useCallback(
     async (record?: PracticeRecord) => {

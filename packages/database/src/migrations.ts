@@ -14,6 +14,9 @@ export function configurePragmas(db: DatabaseSync): void {
   db.exec('PRAGMA foreign_keys = ON;');
   db.exec('PRAGMA journal_mode = WAL;');
   db.exec('PRAGMA synchronous = NORMAL;');
+  db.exec('PRAGMA busy_timeout = 5000;');
+  db.exec('PRAGMA temp_store = MEMORY;');
+  db.exec('PRAGMA cache_size = -16000;');
 }
 
 /** Create the current schema tables and default metadata values. */
@@ -304,6 +307,7 @@ export function migrateV5ToV6(db: DatabaseSync): void {
 export function ensureActivityIndexes(db: DatabaseSync): void {
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_practice_status_time ON practice_records(status, practiced_at);
+    CREATE INDEX IF NOT EXISTS idx_practice_question_status_time ON practice_records(question_id, status, practiced_at DESC);
     CREATE INDEX IF NOT EXISTS idx_practice_completed_question ON practice_records(status, completed, question_id);
     CREATE INDEX IF NOT EXISTS idx_progress_status_time ON progress_snapshots(status, last_submitted_at);
     CREATE INDEX IF NOT EXISTS idx_success_time ON snapshot_successes(event_time, question_id);
@@ -311,8 +315,12 @@ export function ensureActivityIndexes(db: DatabaseSync): void {
 }
 
 /** Verify schema compatibility, initialize if empty, or perform sequential migrations. */
-export function initOrMigrateSchema(db: DatabaseSync, validateVersion?: (version: number | null) => void): void {
-  const version = inspectCatalogSchema(db, true);
+export function initOrMigrateSchema(
+  db: DatabaseSync,
+  validateVersion?: (version: number | null) => void,
+  preinspectedVersion?: number | null,
+): void {
+  const version = preinspectedVersion !== undefined ? preinspectedVersion : inspectCatalogSchema(db, true);
   validateVersion?.(version);
   configurePragmas(db);
   if (version === CURRENT_SCHEMA_VERSION) return;

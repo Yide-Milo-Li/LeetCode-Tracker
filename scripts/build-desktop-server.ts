@@ -8,6 +8,7 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { build } from 'esbuild';
+import { backupWorkerDefine } from './backup-worker-build.ts';
 import { bundleMcp } from './build-mcp.ts';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
@@ -32,7 +33,7 @@ async function bundleDesktopServer(): Promise<void> {
 
   const startTime = Date.now();
   await build({
-    define: { __LCT_BUNDLED_GOOGLE_CLIENT__: JSON.stringify(bundledGoogleClient) ?? 'undefined' },
+    define: { ...await backupWorkerDefine(), __LCT_BUNDLED_GOOGLE_CLIENT__: JSON.stringify(bundledGoogleClient) ?? 'undefined' },
     entryPoints: [entryPoint],
     bundle: true,
     platform: 'node',

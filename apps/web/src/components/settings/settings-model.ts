@@ -8,8 +8,8 @@ import {
   fixedProviderModels,
   supportedGeminiModels,
   supportedOpenaiModels,
-  type ThemePalette,
-} from '../../../../../packages/contracts/src/sync.ts';
+} from '../../../../../packages/contracts/src/llm-models.ts';
+import type { ThemePalette } from '../../../../../packages/contracts/src/sync.ts';
 import { PALETTE_OPTIONS } from '../../palettes.ts';
 
 export type ThemeMode = 'light' | 'dark' | 'system';

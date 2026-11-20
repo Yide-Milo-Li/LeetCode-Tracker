@@ -3,8 +3,9 @@
 ## [1.5.1]
 
 - Bring the catalog, Favorites and Goal lists together in Problems. Search, sort and page through large collections, and keep selections while switching pages or filters.
-- Sort Notes by last solved or last note update in either direction, and group problems by goal list or favorite folder.
+- Sort Notes by last solved or last note update in either direction, and group problems by goal list or favorite folder. The redesigned editor adds Markdown toolbar actions, keyboard shortcuts, and undo and redo.
 - Offer optional practice details for goal-only completions. Reuse an imported Accepted submission when it already completes the same problem in today's strategy.
+- Load Today with less JavaScript, cancel stale catalog and note searches, and reuse statistics between visits. Group routine edits into background SQLite backups while keeping a recovery snapshot before bulk imports.
 
 See the [1.5.1 release notes](docs/releases/1.5.1.md).
 

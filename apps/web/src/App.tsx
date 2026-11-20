@@ -27,7 +27,7 @@ import { PracticeTimerPill } from './components/PracticeTimer.tsx';
 import { DesktopUpdateNotice } from './components/DesktopUpdateNotice.tsx';
 import { ShortcutHelpModal } from './components/ShortcutHelpModal.tsx';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.ts';
-import { SetupGate } from './components/SetupGuide.tsx';
+import { SetupGate } from './components/SetupGate.tsx';
 import { brandIconUrl } from './brand-icons.ts';
 import { isTauri } from './platform/index.ts';
 import type { SettingsSection } from './components/SettingsView.tsx';
@@ -174,7 +174,7 @@ export function App() {
     return [...queue, request];
   }), []);
   const reportPracticeOutcome = useCallback((outcome: PracticeOutcome) => setOutcomes((items) => [...items, outcome]), []);
-  const plan = useDailyPlan(lang);
+  const plan = useDailyPlan(lang, timezone);
   const [desktopAgentRevision, setDesktopAgentRevision] = useState(0);
   const [dismissedActivity, dismissActivity] = useState('');
   const applyAgentChange = useCallback((status: DesktopAgentStatus) => {
@@ -469,7 +469,7 @@ export function App() {
             </div>
           </div>
         </aside>
-        <main id="main-content" className="main-content" tabIndex={-1}>
+        <main id="main-content" className={view === 'notes' ? 'main-content is-notes-workspace' : 'main-content'} tabIndex={-1}>
           {!viewingSync && syncAttention && syncAttention.key !== dismissedSync && (
             <Feedback tone={syncAttention.fork ? 'warning' : 'info'}>
               {syncAttention.fork

@@ -1,10 +1,11 @@
 /** Application preferences grouped into topic tabs; catalog and progress imports live in their own workspaces. */
-import { useEffect, useState } from 'react';
+import { useContext, useEffect, useState } from 'react';
 import type { ThemePalette } from '../../../../packages/contracts/src/sync.ts';
 import type { DesktopAgentStatus } from '../../../../packages/contracts/src/desktop-agent.ts';
 import { api } from '../api.ts';
 import type { Language } from '../i18n.ts';
 import { localizeApiError } from '../error-i18n.ts';
+import { ViewVisible } from '../workspace.tsx';
 import { PageHeader, Feedback } from './ui.tsx';
 import { visibleSections, type SettingsSection, type ThemeMode } from './settings/settings-model.ts';
 import { isTauri } from '../platform/index.ts';
@@ -116,9 +117,10 @@ export function SettingsView({
 
   const [loadError, setLoadError] = useState('');
 
+  const viewVisible = useContext(ViewVisible);
   const ai = useAiProviderSettings(lang);
   const bundle = useBundleRestore(lang);
-  const sync = useDeviceSync(lang, section === 'sync');
+  const sync = useDeviceSync(lang, viewVisible && section === 'sync');
 
   useEffect(() => {
     let active = true;

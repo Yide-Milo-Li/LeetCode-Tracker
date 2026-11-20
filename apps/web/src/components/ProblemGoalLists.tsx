@@ -1,4 +1,4 @@
-import { createContext, useContext, useCallback, useEffect, useId, useMemo, useRef, useState, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from 'react';
+import { createContext, useContext, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from 'react';
 import { Flag, ListPlus } from 'lucide-react';
 import type { GoalList, GoalListSummary } from '../../../../packages/contracts/src/goal-lists.ts';
 import { api, ApiError } from '../api.ts';
@@ -10,15 +10,56 @@ import { Dialog, Feedback, Field, Tooltip } from './ui.tsx';
 import { CollectionChoices } from './CollectionPicker.tsx';
 
 interface ProblemRef { frontendId: string; title: string; fallbackFocusRef?: RefObject<HTMLButtonElement | null> }
-interface GoalControls {
+function createMembershipStore() {
+  let values = new Map<string, string[]>();
+  const listeners = new Map<string, Set<() => void>>();
+  return {
+    get: (id: string) => values.get(id),
+    subscribe(id: string, notify: () => void) {
+      const group = listeners.get(id) ?? new Set();
+      listeners.set(id, group);
+      group.add(notify);
+      return () => {
+        group.delete(notify);
+        if (!group.size) listeners.delete(id);
+      };
+    },
+    replace(next: Map<string, string[]>) {
+      const previous = values;
+      values = next;
+      for (const [id, group] of listeners) {
+        const before = previous.get(id);
+        const after = next.get(id);
+        if (before && after && before.length === after.length && before.every((list, i) => list === after[i])) {
+          next.set(id, before);
+        } else if (before !== after) {
+          for (const notify of group) notify();
+        }
+      }
+    },
+    copy: () => new Map(values),
+  };
+}
+
+type MembershipStore = ReturnType<typeof createMembershipStore>;
+function useMembership(store: MembershipStore | undefined, id: string | undefined) {
+  const subscribe = useCallback((notify: () => void) => id && store ? store.subscribe(id, notify) : () => {}, [store, id]);
+  const read = useCallback(() => id ? store?.get(id) : undefined, [store, id]);
+  return useSyncExternalStore(subscribe, read, read);
+}
+
+interface ButtonControls {
   lang: Language;
-  goals: TodayGoals;
-  memberships: ReadonlyMap<string, string[]>;
+  loaded: boolean;
+  memberships: MembershipStore;
   track(frontendId: string): () => void;
-  updateFlags(frontendIds: string[], listIds: string[], append: boolean): void;
   open(problem: ProblemRef): void;
 }
-const GoalContext = createContext<GoalControls | null>(null);
+const ButtonContext = createContext<ButtonControls | null>(null);
+const GoalContext = createContext<{
+  goals: TodayGoals;
+  updateFlags(frontendIds: string[], listIds: string[], append: boolean): void;
+} | null>(null);
 
 /** Standalone views own a store; the application shares one between all mounted views. */
 export function GoalListsScope(props: { lang: Language; active?: boolean; showSelected?: boolean; onCreated?(): void; children: ReactNode }) {
@@ -57,7 +98,8 @@ function GoalListsOwner({ lang, active = true, showSelected = true, onCreated, c
     if (target) ids.add(target);
     return JSON.stringify([...ids].sort());
   }, [changed, target]);
-  const [memberships, setMemberships] = useState(new Map<string, string[]>());
+  const [memberships] = useState(createMembershipStore);
+  const selectedMembership = useMembership(memberships, target);
   const [lookupError, setLookupError] = useState<unknown>();
   const lookupEpoch = useRef(0);
   useEffect(() => {
@@ -70,29 +112,31 @@ function GoalListsOwner({ lang, active = true, showSelected = true, onCreated, c
       if (controller.signal.aborted || current !== lookupEpoch.current) return;
       const result = new Map(ids.map(id => [id, [] as string[]]));
       for (const item of items) result.set(item.frontendId, item.listIds);
-      setMemberships(result);
+      memberships.replace(result);
       setLookupError(undefined);
     }).catch(error => {
       if (!controller.signal.aborted && current === lookupEpoch.current) setLookupError(error);
     });
     return () => controller.abort();
-  }, [active, idsKey, revision, goals.generation]);
-  function updateFlags(ids: string[], listIds: string[], append: boolean) {
+  }, [active, idsKey, revision, goals.generation, memberships]);
+  const updateFlags = useCallback((ids: string[], listIds: string[], append: boolean) => {
     lookupEpoch.current++;
-    setMemberships(previous => {
-      const updated = new Map(previous);
-      for (const id of ids) {
-        if (previous.has(id)) updated.set(id, append ? [...new Set([...previous.get(id)!, ...listIds])] : listIds);
-      }
-      return updated;
-    });
-  }
+    const updated = memberships.copy();
+    for (const id of ids) {
+      const existing = updated.get(id);
+      if (existing) updated.set(id, append ? [...new Set([...existing, ...listIds])] : listIds);
+    }
+    memberships.replace(updated);
+  }, [memberships]);
+  const goalControls = useMemo(() => ({ goals, updateFlags }), [goals, updateFlags]);
+  const buttonControls = useMemo(() => ({ lang, loaded: goals.loaded, memberships, track, open }),
+    [lang, goals.loaded, memberships, track]);
   const zh = lang === 'zh';
   const close = () => open(null);
-  return <GoalContext.Provider value={{ lang, goals, memberships, track, updateFlags, open }}>
+  return <GoalContext.Provider value={goalControls}><ButtonContext.Provider value={buttonControls}>
     {children}
-    {problem && (goals.loaded && memberships.has(problem.frontendId) ? <ProblemGoalEditor key={problem.frontendId} problem={problem} lang={lang}
-      lists={goals.lists} initialIds={memberships.get(problem.frontendId) ?? []} onRefresh={goals.refresh} onClose={close}
+    {problem && (goals.loaded && selectedMembership ? <ProblemGoalEditor key={problem.frontendId} problem={problem} lang={lang}
+      lists={goals.lists} initialIds={selectedMembership} onRefresh={goals.refresh} onClose={close}
       onSaved={(listIds, update, created) => {
         updateFlags([problem.frontendId], listIds, false);
         goals.membershipSaved(listIds, update);
@@ -102,21 +146,21 @@ function GoalListsOwner({ lang, active = true, showSelected = true, onCreated, c
         {goals.error || lookupError ? <Feedback retry={{ label: zh ? '重试' : 'Retry', run: goals.refresh }}>{goals.error || localizeApiError(lookupError, lang)}</Feedback>
           : <p role="status">{zh ? '正在读取题单…' : 'Loading goal lists…'}</p>}
       </Dialog>)}
-  </GoalContext.Provider>;
+  </ButtonContext.Provider></GoalContext.Provider>;
 }
 
 export function ProblemGoalButton({ frontendId, title, fallbackFocusRef, withText = false, onOpen }: ProblemRef & {
   withText?: boolean; onOpen?(): void;
 }) {
-  const shared = useContext(GoalContext);
+  const shared = useContext(ButtonContext);
   const visible = useContext(ViewVisible);
   const track = shared?.track;
   useEffect(() => { if (visible) return track?.(frontendId); }, [visible, track, frontendId]);
+  const membership = useMembership(shared?.memberships, frontendId);
   if (!shared) return null;
   const zh = shared.lang === 'zh';
-  const membership = shared.memberships.get(frontendId);
   const assigned = Boolean(membership?.length);
-  const action = !shared.goals.loaded || !membership ? (zh ? '选择目标题单' : 'Choose goal lists')
+  const action = !shared.loaded || !membership ? (zh ? '选择目标题单' : 'Choose goal lists')
     : assigned ? (zh ? '管理目标题单' : 'Manage goal lists') : (zh ? '加入目标题单' : 'Add to goal lists');
   const button = <button type="button" className={(withText ? 'btn btn-secondary' : 'btn-icon') + (assigned ? ' is-goal-member' : '')}
     aria-label={`${action} #${frontendId} ${title}`} aria-haspopup="dialog" onClick={() => {

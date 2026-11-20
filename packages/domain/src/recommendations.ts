@@ -6,15 +6,17 @@ import {
   difficulties,
   PlanningError,
   resolveReviewSettings,
-  type Rules,
-  type Difficulty,
-  type Evidence,
-  type Candidate,
-  type PlanItem,
-  type ReviewState,
-  type Bilingual,
+} from '../../contracts/src/recommendation-utils.ts';
+import type {
+  Rules,
+  Difficulty,
+  Evidence,
+  Candidate,
+  PlanItem,
+  ReviewState,
+  Bilingual,
 } from '../../contracts/src/recommendations.ts';
-import { isEventTime, localDate, addDays, isTimeZone } from '../../contracts/src/time.ts';
+import { isEventTime, localDate, addDays, isTimeZone } from '../../contracts/src/time-utils.ts';
 import type { CatalogProblem } from '../../contracts/src/sync.ts';
 import type { AdaptiveSlot } from './adaptive-topics.ts';
 import { selectCandidateSlots } from './selection.ts';

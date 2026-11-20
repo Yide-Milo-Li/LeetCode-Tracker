@@ -1,9 +1,9 @@
 /** Local catalog discovery, filtering, metadata details and contextual manual recording. */
 import { Flag, Folder, FolderPlus, ListPlus, Pencil, RotateCcw, Plus, ExternalLink, Download, Star, StarOff, Upload } from 'lucide-react';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useContext, useEffect, useRef, useState } from 'react';
 import type { CatalogListProblem, FavoriteFolder } from '../../../../packages/contracts/src/favorites.ts';
 import type { GoalList } from '../../../../packages/contracts/src/goal-lists.ts';
-import { compareProblemIds } from '../../../../packages/contracts/src/goal-lists.ts';
+import { compareProblemIds } from '../../../../packages/contracts/src/goal-list-utils.ts';
 import {
   api,
   type CatalogStats,
@@ -14,7 +14,7 @@ import {
 import { formatCount, translations, type Language } from '../i18n.ts';
 import { formatInstant } from '../date-format.ts';
 import { localizeApiError } from '../error-i18n.ts';
-import { useWorkspace } from '../workspace.tsx';
+import { useWorkspace, ViewVisible } from '../workspace.tsx';
 import { Dialog, Feedback, Field, PageHeader, Pagination, IconButton, Tooltip } from './ui.tsx';
 import { PracticeEditor, PracticeHistory } from './PracticeWorkspace.tsx';
 import { PracticeTimerButton } from './PracticeTimer.tsx';
@@ -71,11 +71,14 @@ export function CatalogView(props: CatalogViewProps) {
   return <GoalListsScope lang={props.lang} showSelected={false} onCreated={props.onGoalListCreated}><CatalogWorkspace {...props} /></GoalListsScope>;
 }
 
+const SEARCH_DEBOUNCE_MS = 180;
+
 /** Retain filter state and reject out-of-order responses while catalog/import mutations refresh current data. */
 function CatalogWorkspace({ lang, onNavigateSettings, favoritesOnly = false, favoriteRevision: ownFavoriteRevision,
   onFavoritesChanged, onGoalListCreated }: CatalogViewProps) {
   const t = translations[lang];
   const zh = lang === 'zh';
+  const visible = useContext(ViewVisible);
   const workspace = useWorkspace();
   const favoriteRevision = ownFavoriteRevision ?? workspace.favoriteRevision ?? 0;
   const goals = useSharedGoalLists();
@@ -85,6 +88,9 @@ function CatalogWorkspace({ lang, onNavigateSettings, favoritesOnly = false, fav
   const [items, setItems] = useState<CatalogListProblem[]>([]);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const searchPending = search.trim() !== debouncedSearch;
+  const loadedQueryKey = useRef<string | null>(null);
   const [difficulty, setDifficulty] = useState<CatalogQuery['difficulty']>();
   const [tag, setTag] = useState('');
   const [premium, setPremium] = useState<NonNullable<CatalogQuery['premium']>>('all');
@@ -157,21 +163,55 @@ function CatalogWorkspace({ lang, onNavigateSettings, favoritesOnly = false, fav
     };
   }, [favoritesOnly, workspace.revision, retry]);
   useEffect(() => {
+    const trimmed = search.trim();
+    if (!visible) {
+      if (trimmed !== debouncedSearch) setDebouncedSearch(trimmed);
+      return;
+    }
+    if (trimmed === debouncedSearch) return;
+    if (!trimmed) {
+      setDebouncedSearch('');
+      return;
+    }
+    const timer = setTimeout(() => setDebouncedSearch(trimmed), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [search, debouncedSearch, visible]);
+
+  useEffect(() => {
+    const queryKey = JSON.stringify([
+      debouncedSearch,
+      difficulty ?? '',
+      tag,
+      premium,
+      favoriteScope,
+      page,
+      limit,
+      workspace.revision,
+      favoriteRevision,
+      retry,
+    ]);
+    if (!visible || searchPending || loadedQueryKey.current === queryKey) return;
+    loadedQueryKey.current = null;
+    const controller = new AbortController();
     let active = true;
     setLoading(true);
     setError('');
     api
-      .getCatalog({
-        page,
-        limit,
-        search: search.trim() || undefined,
-        difficulty,
-        tag: tag || undefined,
-        premium,
-        favoriteScope,
-      })
+      .getCatalog(
+        {
+          page,
+          limit,
+          search: debouncedSearch || undefined,
+          difficulty,
+          tag: tag || undefined,
+          premium,
+          favoriteScope,
+        },
+        { signal: controller.signal },
+      )
       .then((data) => {
         if (active) {
+          loadedQueryKey.current = queryKey;
           setItems(data.items);
           setTotal(data.total);
           if (page > Math.max(1, Math.ceil(data.total / limit)))
@@ -179,18 +219,23 @@ function CatalogWorkspace({ lang, onNavigateSettings, favoritesOnly = false, fav
         }
       })
       .catch((err) => {
-        if (active) setError(t.catalogLoadFailed + ': ' + localizeApiError(err, lang));
+        if (active && !controller.signal.aborted) {
+          loadedQueryKey.current = queryKey;
+          setError(t.catalogLoadFailed + ': ' + localizeApiError(err, lang));
+        }
       })
       .finally(() => {
         if (active) setLoading(false);
       });
     return () => {
       active = false;
+      controller.abort();
     };
-  }, [search, difficulty, tag, premium, favoriteScope, page, limit, workspace.revision, favoriteRevision, retry]);
+  }, [debouncedSearch, searchPending, difficulty, tag, premium, favoriteScope, page, limit, workspace.revision, favoriteRevision, retry, visible]);
   /** Reset all query dimensions together, including the current page. */
   function reset() {
     setSearch('');
+    setDebouncedSearch('');
     setDifficulty(undefined);
     setTag('');
     setPremium('all');
