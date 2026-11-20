@@ -1,251 +1,132 @@
-/* Today page: daily target, rhythm chart and problem rows. */
-/* ==========================================================================
-   Today 7-Day Rhythm & Streak Card (Phase 32)
-   ========================================================================== */
-.recent-overview {
-  background: var(--surface);
+/* Today dashboard. Each measure keeps its own denominator and time frame. */
+.today-overview {
+  display: grid;
+  grid-template-columns: minmax(0, .9fr) minmax(0, 1fr) minmax(0, 1.3fr);
+  align-items: stretch;
+  padding: 1.35rem 0;
+  margin-block-end: 1.25rem;
+  background: var(--muted-surface);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg, 12px);
-  padding: 18px 22px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  margin-bottom: 24px;
+  border-radius: var(--radius-lg);
+  font-variant-numeric: tabular-nums;
+}
+.today-metric { min-inline-size: 0; padding-inline: 1.4rem; }
+.today-metric + .today-metric { border-inline-start: 1px solid var(--border-color); }
+.today-metric h2 { margin: 0; font-size: .88rem; line-height: 1.4; font-weight: 650; }
+.today-metric p { margin: 0; }
+.metric-caption, .metric-empty { color: var(--text-muted); font-size: .82rem; line-height: 1.45; }
+.today-metric .metric-empty { margin-block-start: 1rem; }
+.daily-metric-body { display: flex; gap: 1rem; align-items: center; margin-block-start: .9rem; }
+.daily-metric-body .metric-empty { margin: 0; }
+@property --today-plan-fill {
+  syntax: '<percentage>';
+  inherits: false;
+  initial-value: 0%;
+}
+.daily-progress-ring {
   position: relative;
-  transition:
-    transform var(--fast, 140ms) var(--spring-tactile),
-    border-color var(--fast, 140ms) ease,
-    box-shadow var(--fast, 140ms) ease;
+  display: grid;
+  place-items: center;
+  isolation: isolate;
+  inline-size: 5rem;
+  aspect-ratio: 1;
+  flex: none;
+  border-radius: 50%;
+  background: conic-gradient(var(--primary) var(--today-plan-fill), var(--border-color) 0);
 }
-
-.recent-overview:hover {
-  border-color: var(--outline);
-  box-shadow: var(--shadow-md);
-}
-
-.recent-overview .feedback {
-  margin-top: 12px;
-}
-
-.bento-card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-  gap: 12px;
-}
-
-.bento-card-title {
-  font-size: 13px;
-  font-weight: 650;
-  letter-spacing: 0.02em;
-  color: var(--text-muted);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.bento-card-title .info-trigger {
-  width: 24px;
-  height: 24px;
-  min-width: 24px;
-  min-height: 24px;
-}
-
-.streak-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: var(--selected);
-  color: var(--primary);
-  border: 1px solid color-mix(in srgb, var(--primary) 28%, transparent);
-  border-radius: var(--radius, 8px);
-  padding: 3px 8px;
-  font-size: 12px;
-  font-weight: 600;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
-  user-select: none;
-}
-
-.streak-badge strong {
-  font-size: 13.5px;
-  font-weight: 700;
-  color: var(--primary);
-  margin-right: 2px;
-}
-
-.streak-icon {
-  color: var(--primary);
-  display: flex;
-  flex-shrink: 0;
-}
-
-/* 7-Pillar Micro Rhythm Chart */
-.rhythm-chart-wrap {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 10px 4px 6px;
-  margin-bottom: 14px;
-}
-
-.rhythm-day-col {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  flex: 1;
-  min-width: 0;
-  position: relative;
-  cursor: pointer;
-  user-select: none;
-}
-
-.rhythm-day-col:hover .rhythm-tooltip {
-  opacity: 1;
-  transform: translateX(-50%) translateY(0);
-  pointer-events: auto;
-}
-
-.rhythm-count-label {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-muted);
-  line-height: 1;
-  height: 13px;
-}
-
-.rhythm-day-col.is-zero .rhythm-count-label {
-  opacity: 0.6;
-}
-
-.rhythm-day-col.is-today .rhythm-count-label {
-  color: var(--text-main);
-  font-weight: 650;
-}
-
-/* Bars stand on their own: no track box, the column height is the scale. */
-.rhythm-bar-track {
-  width: 100%;
-  height: 52px;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-}
-
-.rhythm-bar-fill {
-  width: 12px;
-  min-height: 2px;
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--primary) 45%, var(--muted-surface));
-  transform-origin: bottom;
-  animation: rhythm-bar-grow 520ms var(--spring-tactile) both;
-  animation-delay: var(--bar-delay, 0ms);
-  transition: height 420ms var(--spring-tactile), background-color var(--fast, 140ms) ease;
-}
-
-.rhythm-day-col.is-zero .rhythm-bar-fill {
-  height: 2px;
-  background: var(--border-color);
-}
-
-.rhythm-day-col:hover .rhythm-bar-fill {
-  background: color-mix(in srgb, var(--primary) 70%, var(--muted-surface));
-}
-
-.rhythm-day-col.is-today .rhythm-bar-fill {
-  background: var(--primary);
-}
-
-@keyframes rhythm-bar-grow {
-  from {
-    transform: scaleY(0);
-  }
-}
-
-.rhythm-date-label {
-  font-size: 12px;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-
-.rhythm-day-col.is-today .rhythm-date-label {
-  color: var(--text-main);
-  font-weight: 650;
-}
-
-.rhythm-summary {
-  font-size: 13px;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-
-/* Floating Tooltip */
-.rhythm-tooltip {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%) translateY(4px);
-  background: var(--surface);
-  color: var(--text-main);
-  border: 1px solid var(--border-color);
-  box-shadow: var(--shadow-md);
-  border-radius: var(--radius-sm, 4px);
-  padding: 5px 9px;
-  font-size: 11.5px;
-  white-space: nowrap;
-  pointer-events: none;
-  opacity: 0;
-  transition: all var(--fast, 140ms) var(--spring-tactile);
-  z-index: 20;
-}
-
-.rhythm-tooltip::after {
+.daily-progress-ring::before {
   content: '';
   position: absolute;
-  top: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  border: 4px solid transparent;
-  border-top-color: var(--border-color);
+  inset: .43rem;
+  border-radius: 50%;
+  background: var(--muted-surface);
+  z-index: -1;
 }
-
-/* Card Footer */
-.rhythm-footer-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding-top: 4px;
-  font-size: 12px;
+.daily-progress-ring > span { font-size: 1.22rem; font-weight: 650; }
+.daily-progress-ring small { font-weight: 500; font-size: .73em; }
+.today-count { font-size: 1.85rem; line-height: 1.15; font-weight: 650; }
+.today-count span { color: var(--text-muted); font-size: 1rem; font-weight: 500; }
+.daily-metric .metric-caption { margin-block-start: .3rem; }
+.goal-metric .metric-goal-name {
+  margin-block: .85rem .55rem;
+  font-size: 1.12rem;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
-
-.rhythm-note-text {
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.rhythm-link-btn {
-  color: var(--primary);
-  text-decoration: none;
-  font-weight: 550;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: none;
-  border: none;
+.goal-order-marks { display: flex; height: .75rem; gap: 2px; }
+.goal-order-marks > span { flex: 1; min-width: 0; border-radius: 2px; background: var(--border-color); }
+.goal-order-marks > [data-complete="true"] { background: var(--goal-fill); }
+.goal-long-progress { display: block; width: 100%; height: .75rem; accent-color: var(--goal-fill); }
+.goal-metric-footer { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: .25rem .5rem; margin-top: .5rem; }
+.next-goal-task { display: inline-flex; align-items: center; gap: .15rem; font-size: .78rem; overflow-wrap: anywhere; }
+.week-title { display: inline-flex; align-items: center; gap: .35rem; }
+.week-title .info-trigger { width: 24px; height: 24px; min-width: 24px; min-height: 24px; }
+.week-heading { display: flex; align-items: center; justify-content: space-between; gap: .5rem; flex-wrap: wrap; }
+.week-statistics { display: inline-flex; align-items: center; gap: .15rem; font-size: .79rem; }
+.week-chart {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  list-style: none;
   padding: 0;
-  font-size: 12px;
-  margin-left: auto;
-  transition: transform var(--fast, 140ms) ease;
+  margin: .25rem 0 0;
 }
-
-.rhythm-link-btn:hover {
-  text-decoration: underline;
-  transform: translateX(2px);
+.week-chart li { min-inline-size: 0; }
+.week-day {
+  display: grid;
+  width: 100%;
+  padding: 1.1rem 0 .1rem;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  text-align: center;
+  font: inherit;
+  border-radius: .35rem;
+}
+button.week-day:hover, button.week-day:focus-visible { background: var(--surface); color: var(--text-main); }
+.week-day time { font-size: .73rem; line-height: 1.5; margin-top: .3rem; }
+.week-track { display: flex; justify-content: center; align-items: flex-end; height: 2.6rem; border-bottom: 1px solid var(--border-color); }
+.week-bar {
+  position: relative;
+  width: min(54%, 1.35rem);
+  min-height: 2px;
+  border-radius: .22rem .22rem 0 0;
+  background: var(--heatmap-2);
+}
+.week-count { position: absolute; left: 50%; width: max-content; transform: translateX(-50%); bottom: calc(100% + .12rem); font-size: .72rem; line-height: 1.1; }
+.is-today .week-bar { background: var(--primary); }
+.week-bar[data-zero="true"] { background: var(--outline); }
+.is-today .week-day { color: var(--text-main); font-weight: 650; }
+.week-metric .week-summary { margin-top: .35rem; font-size: .75rem; }
+@media (prefers-reduced-motion: no-preference) {
+  .daily-progress-ring { transition: --today-plan-fill 260ms ease-out; }
+  .goal-order-marks > span { transition: background-color 180ms ease-out; }
+}
+@media (forced-colors: active) {
+  .daily-progress-ring { forced-color-adjust: none; background: conic-gradient(Highlight var(--today-plan-fill), GrayText 0); color: CanvasText; }
+  .daily-progress-ring::before { background: Canvas; }
+  .goal-order-marks > span { border: 1px solid GrayText; }
+  .goal-order-marks > [data-complete="true"], .week-bar { forced-color-adjust: none; background: Highlight; }
+  .week-count { color: CanvasText; }
+}
+@container today (max-width: 45rem) {
+  .today-overview { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); padding: 1rem; row-gap: 1rem; }
+  .today-metric { padding-inline: 0 .9rem; }
+  .goal-metric { padding-inline: .9rem 0; }
+  .today-overview .week-metric { grid-column: 1 / -1; border-inline-start: 0; border-block-start: 1px solid var(--border-color); padding: .85rem 0 0; }
+}
+@container today (max-width: 32rem) {
+  .daily-metric-body { flex-wrap: wrap; gap: .45rem; }
+  .daily-progress-ring { inline-size: 3.3rem; }
+  .daily-progress-ring::before { inset: .3rem; }
+  .daily-progress-ring > span { font-size: .9rem; }
+  .today-count { font-size: 1.25rem; }
+  .today-count span { font-size: .82rem; }
+  .goal-metric .metric-goal-name { font-size: 1rem; }
 }
 
 .strategy-capsule {
@@ -277,55 +158,6 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-}
-
-/* One segment per planned problem; the fill grows from the left of each segment. */
-.target-meter {
-  display: flex;
-  gap: 5px;
-}
-
-.target-meter-seg {
-  flex: 1;
-  height: 8px;
-  border-radius: 3px;
-  background: var(--border-color);
-  position: relative;
-  overflow: hidden;
-}
-
-.target-meter-seg::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: var(--primary);
-  transform: scaleX(0);
-  transform-origin: left;
-  transition: transform 420ms var(--spring-tactile);
-}
-
-.target-meter-seg.is-filled::after {
-  transform: scaleX(1);
-  animation: target-seg-fill 520ms var(--spring-tactile) both;
-  animation-delay: var(--seg-delay, 0ms);
-}
-
-.target-meter.is-continuous .target-meter-seg::after {
-  transform: scaleX(var(--seg-fill, 0));
-}
-
-@keyframes target-seg-fill {
-  from {
-    transform: scaleX(0);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .target-meter-seg::after,
-  .rhythm-bar-fill {
-    animation: none;
-    transition: none;
-  }
 }
 
 .plan-actions-toolbar {
@@ -693,7 +525,7 @@ progress::-moz-progress-bar {
   margin: 12px 0;
 }
 
-.today-view { container: today / inline-size; }
+.today-view { container: today / inline-size; --goal-fill: color-mix(in oklab, var(--primary) 50%, var(--review)); }
 .today-task-columns {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
@@ -708,11 +540,26 @@ progress::-moz-progress-bar {
   background: var(--surface);
 }
 .today-strategy-tasks { container: strategy-tasks / inline-size; }
-.today-strategy-tasks > h2 { margin: 0; font-size: 1.1rem; line-height: 1.9; }
-.strategy-list-controls { display: grid; gap: .6rem; margin-block: .85rem; }
-.strategy-list-status { display: flex; align-items: center; justify-content: space-between; gap: .5rem; flex-wrap: wrap; }
-.strategy-list-status > span { color: var(--text-muted); font-size: .85rem; }
-.strategy-list-status .strategy-capsule { min-width: 0; max-width: 100%; }
+.today-task-heading, .goal-list-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .65rem;
+}
+.today-task-heading { flex-wrap: wrap; min-block-size: 2rem; }
+.today-task-heading h2, .today-goal-lists > .goal-list-heading h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  margin: 0;
+  font-size: 1.08rem;
+}
+.today-task-heading h2 svg { color: var(--primary); }
+.today-goal-lists > .goal-list-heading h2 svg { color: var(--goal-fill); }
+.today-task-heading .strategy-capsule { min-width: 0; max-width: 100%; }
+.strategy-list-controls, .goal-list-tools { margin-block: .85rem .65rem; min-block-size: 2.25rem; }
+.goal-list-tools h3 { margin: 0; font-size: .95rem; overflow-wrap: anywhere; }
+.goal-list-tools .goal-edit-button { flex: none; }
 .today-strategy-tasks .empty-state { background: none; margin: 0; padding: 1.25rem .5rem; min-height: 10rem; }
 .today-strategy-tasks .today-problems {
   max-block-size: min(32rem, 56dvh);
@@ -732,15 +579,8 @@ progress::-moz-progress-bar {
 .today-strategy-tasks .problem-content h3 { font-size: 1rem; }
 .today-strategy-tasks .problem-actions { grid-template-columns: repeat(3, 32px); gap: .2rem; }
 .today-strategy-tasks .completion-circle { width: 36px; height: 36px; }
-.goal-list-switcher {
-  display: grid;
-  gap: .25rem;
-  margin-top: .85rem;
-  font-size: .85rem;
-  color: var(--text-muted);
-}
+.goal-list-switcher { min-width: 0; flex: 1; }
 .goal-list-switcher select { width: 100%; min-width: 0; max-width: 100%; text-overflow: ellipsis; }
-.goal-list-switcher + .goal-list { border-top: 0; margin-top: .5rem; padding-top: 0; }
 .goal-list-heading, .goal-item-line, .goal-edit-line, .goal-edit-actions, .goal-editor-footer {
   display: flex;
   align-items: center;
@@ -751,8 +591,8 @@ progress::-moz-progress-bar {
 .goal-list-heading h2 { font-size: 1.1rem; }
 .goal-list-heading h3 { font-size: 1rem; }
 .goal-list-heading > :last-child, .goal-editor-footer > .action-row { margin-inline-start: auto; }
-.goal-list { border-top: 1px solid var(--border-color); margin-top: .85rem; padding-top: .85rem; }
-.goal-progress, .goal-items li::marker { color: var(--text-muted); font-variant-numeric: tabular-nums; font-size: .85rem; }
+.goal-pending-items { border-top: 1px solid var(--border-color); }
+.goal-items li::marker { color: var(--text-muted); font-variant-numeric: tabular-nums; font-size: .85rem; }
 .goal-items { padding-inline-start: 2.5rem; margin: .5rem 0 0; overflow-y: auto; max-block-size: min(32rem, 56dvh); }
 .goal-items li + li { border-top: 1px solid var(--border-color); }
 .goal-item-line { min-height: 2.5rem; overflow-wrap: anywhere; }
@@ -786,13 +626,11 @@ progress::-moz-progress-bar {
 }
 
 @container today (max-width: 27rem) {
-  .page-header, .recent-overview .bento-card-header { flex-wrap: wrap; gap: .5rem; }
-  .recent-overview { padding-inline: .75rem; }
-  .rhythm-chart-wrap { gap: .15rem; }
-  .rhythm-day-col:first-child .rhythm-tooltip { left: 0; transform: none; }
-  .rhythm-day-col:last-child .rhythm-tooltip { left: auto; right: 0; transform: none; }
-  .rhythm-day-col:first-child .rhythm-tooltip::after { left: 1rem; }
-  .rhythm-day-col:last-child .rhythm-tooltip::after { left: auto; right: .5rem; }
+  .page-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: .35rem .5rem; margin-block-end: 1rem; }
+  .page-header > div:first-child { display: contents; }
+  .page-header h1 { grid-column: 1; grid-row: 1; }
+  .page-header .action-row { grid-column: 2; grid-row: 1; }
+  .page-header .page-description { grid-column: 1 / -1; margin: 0; }
   .today-strategy-tasks, .today-goal-lists { padding-inline: .75rem; }
 }
 @media (max-width: 36rem) {

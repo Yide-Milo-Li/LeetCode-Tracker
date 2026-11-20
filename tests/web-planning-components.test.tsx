@@ -277,9 +277,9 @@ it('renders active daily plan and triggers single problem item replacement', asy
   assert.ok(document.querySelector('.today-view .page-description')?.textContent);
   assert.ok(screen.getByRole('heading', { name: /70\. Climbing Stairs/ }));
   assert.ok(screen.getByRole('heading', { name: /198\. House Robber/ }));
-  const progress = screen.getByRole('progressbar');
-  assert.equal(progress.getAttribute('aria-valuenow'), '1');
-  assert.equal(progress.getAttribute('aria-valuemax'), '2');
+  const progress = screen.getByRole('progressbar', { name: 'Today completion progress' }) as HTMLProgressElement;
+  assert.equal(progress.value, 1);
+  assert.equal(progress.max, 2);
 
   // Trigger replace on the first (uncompleted) item (default promptSwapFeedback=true opens modal)
   const replaceBtn = screen
@@ -1629,8 +1629,14 @@ it('edits the learner-wide review rhythm in Practice settings and rolls back a f
 });
 
 
+const { TodayGoalLists: GoalListPanel } = await import('../apps/web/src/components/TodayGoalLists.tsx');
+const { useTodayGoals } = await import('../apps/web/src/hooks/useTodayGoals.ts');
+function TodayGoalLists({ lang }: { lang: 'en' | 'zh' }) {
+  const goals = useTodayGoals(lang);
+  return <GoalListPanel lang={lang} goals={goals} />;
+}
+
 it('Today renders the entire ordered checklist and restores checked items to their saved positions', async () => {
-  const { TodayGoalLists } = await import('../apps/web/src/components/TodayGoalLists.tsx');
   const ids = Array.from({ length: 32 }, (_, index) => String(32 - index));
   let goal: GoalList = { id: crypto.randomUUID(), name: 'Interview', version: 1,
     items: ids.map(frontendId => ({ frontendId, title: 'Problem ' + frontendId, url: '', completed: false })) };
@@ -1665,7 +1671,6 @@ it('Today renders the entire ordered checklist and restores checked items to the
 });
 
 it('selects one full goal list at a time, remembers the choice and falls back when it is deleted elsewhere', async () => {
-  const { TodayGoalLists } = await import('../apps/web/src/components/TodayGoalLists.tsx');
   const { WorkspaceContext } = await import('../apps/web/src/workspace.tsx');
   const defaults = { timezone: null, navigate() {}, notifyMutation() {}, openPractice() {} };
   window.localStorage.removeItem('leetcode_tracker_selected_goal_list');
@@ -1692,7 +1697,6 @@ it('selects one full goal list at a time, remembers the choice and falls back wh
 });
 
 it('exposes goal note navigation, a direct problem link, timer and list-scoped removal without strategy replacement', async () => {
-  const { TodayGoalLists } = await import('../apps/web/src/components/TodayGoalLists.tsx');
   const { WorkspaceContext } = await import('../apps/web/src/workspace.tsx');
   const problem = createMockPlan().items[0].problem;
   const frontendId = problem.questionFrontendId;
@@ -1724,4 +1728,67 @@ it('exposes goal note navigation, a direct problem link, timer and list-scoped r
     if (frame) Object.defineProperty(globalThis, 'requestAnimationFrame', frame);
     else Reflect.deleteProperty(globalThis, 'requestAnimationFrame');
   }
+});
+
+it('shares the selected goal between its ordered progress marks and pending rows, with independent daily and weekly counts', async () => {
+  const { WorkspaceContext } = await import('../apps/web/src/workspace.tsx');
+  const makeGoal = (name: string, marks: boolean[]): GoalList => ({
+    id: crypto.randomUUID(), name, version: 1,
+    items: marks.map((completed, i) => ({ frontendId: String(i + 1), completed, title: name + i, url: '' })),
+  });
+  const first = makeGoal('Foundations', [false, true, false]);
+  const long = makeGoal('Review list', Array.from({ length: 80 }, (_, i) => i < 15));
+  const lists = mock.method(api, 'getGoalLists', async () => [first, long]);
+  const plan = createMockPlan();
+  plan.items[0].completed = true;
+  plan.items[1].completed = false;
+  mock.method(api, 'ensureDailyPlan', async () => ({ status: 'ready', plan }));
+  mock.method(api, 'getStrategies', async () => []);
+  mock.method(api, 'getCatalogStats', async () => ({ totalProblems: 100 }));
+  const counts = [0, 1, 3, 0, 2, 4, 1];
+  const dates = counts.map((_, i) => `2026-11-${13 + i}`);
+  const recent = mock.method(api, 'getRecentDashboard', async () => ({
+    timezone: 'America/Los_Angeles',
+    days: counts.map((n, i) => ({ date: dates[i], completedCount: n, activeCount: n + 1 })),
+  }));
+  const openRecords = mock.fn();
+  await act(async () => render(<WorkspaceContext.Provider value={{
+    timezone: 'America/Los_Angeles', revision: 0, openRecords, navigate() {}, openPractice() {}, notifyMutation() {},
+  }}><TodayPlanView lang="en" onNavigateToSettings={() => {}} /></WorkspaceContext.Provider>));
+
+  const daily = screen.getByRole('progressbar', { name: 'Today completion progress' }) as HTMLProgressElement;
+  assert.deepEqual([daily.value, daily.max], [1, 2]);
+  const marks = () => Array.from(document.querySelectorAll<HTMLElement>('.goal-order-marks span'), e => e.dataset.complete);
+  assert.deepEqual(marks(), ['false', 'true', 'false']);
+  assert.deepEqual(Array.from(document.querySelectorAll('.week-count'), e => Number(e.textContent)), counts);
+  fireEvent.click(screen.getByRole('button', { name: 'Next #1' }));
+  assert.equal(document.activeElement, document.querySelector('.goal-pending-items li'));
+  fireEvent.click(screen.getByRole('button', { name: '2026-11-15, 3 completed. View records' }));
+  assert.deepEqual(openRecords.mock.calls[0].arguments, [{ date: '2026-11-15' }]);
+
+  fireEvent.change(screen.getByRole('combobox', { name: 'Select list (2)' }), { target: { value: long.id } });
+  const meter = screen.getByRole('progressbar', { name: 'Goal progress: Review list' }) as HTMLProgressElement;
+  assert.deepEqual([meter.value, meter.max], [15, 80]);
+  assert.deepEqual(marks(), []);
+  assert.equal(document.querySelectorAll('.goal-pending-items li').length, 65);
+  assert.equal(lists.mock.callCount(), 1);
+  assert.equal(recent.mock.callCount(), 1);
+  window.localStorage.removeItem('leetcode_tracker_selected_goal_list');
+});
+
+it('keeps empty goals, rest days and unavailable weekly data distinct from measured zero progress', async () => {
+  const { TodayOverview } = await import('../apps/web/src/components/TodayOverview.tsx');
+  const recent = mock.method(api, 'getRecentDashboard', async () => { throw Error('Offline'); });
+  const goal: GoalList = { id: crypto.randomUUID(), name: 'Empty route', version: 1, items: [] };
+  await act(async () => render(<TodayOverview lang="en" plan={null} planStatus="rest" goal={goal}
+    goalsLoaded goalsError={false} onJumpToGoal={() => {}} />));
+  assert.ok(screen.getByText('Nothing scheduled'));
+  assert.ok(screen.getByText('Empty list'));
+  assert.ok(screen.getByText('Recent records unavailable'));
+  assert.equal(screen.queryByRole('progressbar'), null);
+  assert.equal(document.querySelector('.week-count'), null);
+  recent.mock.mockImplementation(async () => ({ timezone: null, days: [] }));
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Retry' })));
+  assert.ok(screen.getByText('Set a timezone to assign daily activity'));
+  assert.equal(screen.queryByRole('list'), null);
 });

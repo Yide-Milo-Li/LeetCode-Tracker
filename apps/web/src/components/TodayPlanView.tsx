@@ -1,7 +1,8 @@
-import React, { useEffect, useId, useRef, useState, type CSSProperties } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import {
   RefreshCw,
   CalendarDays,
+  ListChecks,
   MoreHorizontal,
   Coffee,
   Globe,
@@ -22,52 +23,11 @@ import { createPractice } from '../practice-service.ts';
 import { clearPendingMinutes, getPendingMinutes, stopTimerFor } from '../timer-service.ts';
 import { Dialog, Feedback, PageHeader, InfoPopover } from './ui.tsx';
 import { TodayGoalLists } from './TodayGoalLists.tsx';
-import { TodayRecentOverview } from './TodayRecentOverview.tsx';
+import { TodayOverview } from './TodayOverview.tsx';
+import { useTodayGoals } from '../hooks/useTodayGoals.ts';
 import { TodayProblemRow } from './TodayProblemRow.tsx';
 import { QuickNoteDrawer } from './QuickNoteDrawer.tsx';
 import type { RecommendationFeedbackReason } from '../../../../packages/contracts/src/recommendations.ts';
-
-/** Above this many planned problems, segments get too thin to read and the meter becomes one bar. */
-const MAX_METER_SEGMENTS = 12;
-
-/**
- * Segmented completion meter: one segment per planned problem, filled left to right so it reads
- * as a count rather than a map of rows. Segments fill in a short stagger on first render only;
- * later changes animate just the segment that changed.
- */
-function TargetMeter({ completed, total, label }: { completed: number; total: number; label: string }) {
-  const mounted = useRef(false);
-  useEffect(() => {
-    mounted.current = true;
-  }, []);
-  const segmented = total > 0 && total <= MAX_METER_SEGMENTS;
-  const segmentCount = segmented ? total : 1;
-  const continuousFill = total > 0 ? completed / total : 0;
-
-  return (
-    <div
-      className={`target-meter${segmented ? '' : ' is-continuous'}`}
-      role="progressbar"
-      aria-label={label}
-      aria-valuemin={0}
-      aria-valuemax={Math.max(1, total)}
-      aria-valuenow={completed}
-    >
-      {Array.from({ length: segmentCount }, (_, index) => (
-        <span
-          key={index}
-          className={`target-meter-seg${segmented && index < completed ? ' is-filled' : ''}`}
-          style={
-            {
-              '--seg-delay': mounted.current ? '0ms' : `${index * 45}ms`,
-              ...(segmented ? {} : { '--seg-fill': continuousFill }),
-            } as CSSProperties
-          }
-        />
-      ))}
-    </div>
-  );
-}
 
 interface TodayPlanViewProps {
   lang: Language;
@@ -231,6 +191,8 @@ function TodayPlanViewInner({
   const zh = lang === 'zh';
   const t = translations[lang];
   const workspace = useWorkspace();
+  const goals = useTodayGoals(lang);
+  const nextGoalRow = useRef<HTMLLIElement>(null);
   const quote = useEncouragement({ timeZone: workspace.timezone, lang });
   const [override, setOverride] = useState(false);
   const [versions, setVersions] = useState<DailyPlan[] | null>(null);
@@ -444,14 +406,7 @@ function TodayPlanViewInner({
     <div className="today-view">
       <PageHeader
         title={zh ? '今日' : 'Today'}
-        description={
-          quote.text ? (
-            <span className="today-quote-editorial">
-              <span className="quote-sparkle-icon" aria-hidden="true">✦</span>
-              <span className="quote-editorial-text">{quote.text}</span>
-            </span>
-          ) : undefined
-        }
+        description={quote.text || undefined}
         actions={
           <button className="btn btn-secondary" onClick={() => workspace.navigate('schedule')}>
             <CalendarDays size={16} />
@@ -459,10 +414,39 @@ function TodayPlanViewInner({
           </button>
         }
       />
-      <TodayRecentOverview lang={lang} />
+      <TodayOverview lang={lang} plan={plan} planStatus={controller.error && !plan ? 'error' : controller.ensureResult?.status}
+        goal={goals.list} goalsLoaded={goals.loaded} goalsError={Boolean(goals.error)} onJumpToGoal={() => {
+          const row = nextGoalRow.current;
+          (row?.querySelector<HTMLAnchorElement>('a.problem-title-link') ?? row)?.focus();
+        }} />
       <div className="today-task-columns">
         <section className="today-strategy-tasks" aria-labelledby="strategy-tasks-title">
-          <h2 id="strategy-tasks-title">{zh ? '策略练习' : 'Strategy tasks'}</h2>
+          <div className="today-task-heading">
+            <h2 id="strategy-tasks-title"><ListChecks size={19} aria-hidden="true" />{zh ? '策略练习' : 'Strategy tasks'}</h2>
+            {plan && (
+              <div className="strategy-capsule">
+                <span className="strategy-capsule-name">
+                  {strategy?.name ?? (zh ? '临时计划' : 'Temporary plan')}
+                  {' · '}
+                  {plan.source === 'local'
+                    ? zh
+                      ? '本地推荐'
+                      : 'Local'
+                    : `${({ gemini: 'Gemini', openai: 'OpenAI', deepseek: 'DeepSeek' })[plan.source] ?? plan.source}`}
+                </span>
+                <InfoPopover
+                  label={zh ? '计划详情' : 'Plan details'}
+                  content={
+                    <dl className="detail-grid">
+                      <dt>{zh ? '时区' : 'Timezone'}</dt><dd>{plan.timezone}</dd>
+                      <dt>{zh ? '计划版本' : 'Plan version'}</dt><dd>v{plan.version}</dd>
+                      <dt>{zh ? '策略版本' : 'Strategy version'}</dt><dd>{plan.strategyVersion ?? '—'}</dd>
+                    </dl>
+                  }
+                />
+              </div>
+            )}
+          </div>
           {(controller.error || localError) && (
             <Feedback
               retry={{
@@ -613,36 +597,6 @@ function TodayPlanViewInner({
                 </div>
               )}
               <div className="strategy-list-controls">
-                <div className="strategy-list-status">
-                  <span className="num-tabular">{zh ? `已完成 ${completed}/${plan.items.length}` : `Completed ${completed}/${plan.items.length}`}</span>
-                  <div className="strategy-capsule">
-                    <span className="strategy-capsule-name">
-                      {strategy?.name ?? (zh ? '临时计划' : 'Temporary plan')}
-                      {' · '}
-                      {plan.source === 'local'
-                        ? zh
-                          ? '本地推荐'
-                          : 'Local'
-                        : `${({ gemini: 'Gemini', openai: 'OpenAI', deepseek: 'DeepSeek' })[plan.source] ?? plan.source}`}
-                    </span>
-                    <InfoPopover
-                      label={zh ? '计划详情' : 'Plan details'}
-                      content={
-                        <dl className="detail-grid">
-                          <dt>{zh ? '时区' : 'Timezone'}</dt><dd>{plan.timezone}</dd>
-                          <dt>{zh ? '计划版本' : 'Plan version'}</dt><dd>v{plan.version}</dd>
-                          <dt>{zh ? '策略版本' : 'Strategy version'}</dt><dd>{plan.strategyVersion ?? '—'}</dd>
-                        </dl>
-                      }
-                    />
-                  </div>
-                </div>
-
-                <TargetMeter
-                  completed={completed}
-                  total={plan.items.length}
-                  label={zh ? '今日完成进度' : 'Today completion progress'}
-                />
                 <div className="plan-actions-toolbar">
                   <button
                     className="btn btn-primary btn-sm"
@@ -779,7 +733,7 @@ function TodayPlanViewInner({
             )
           )}
         </section>
-        <TodayGoalLists lang={lang} />
+        <TodayGoalLists lang={lang} goals={goals} nextTaskRef={nextGoalRow} />
       </div>
       {versions && (
         <Dialog title={t.planVersions} lang={lang} onClose={() => setVersions(null)} drawer>

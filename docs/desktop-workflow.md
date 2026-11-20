@@ -77,7 +77,7 @@ The current snapshot browser and both import histories are collapsed by default 
 
 ## Reading statistics and preferences
 
-Today's seven-day strip includes today in the saved timezone and uses distinct completed problems from both manual and valid imported evidence. Its neighboring streak counts days with known activity, including unfinished practice. No known records and unknown dates are labelled honestly.
+Today compares completed problems with the size of the daily plan in a progress ring. The selected goal has a mark for each problem in saved order, or a continuous bar for lists over 32 problems. **Next** takes you to the first pending problem. The seven-day chart counts distinct completed problems on each local date from manual and imported records. Select a day to open its records, or **Statistics** for the full report.
 
 Statistics shows outcome metrics (unique solved, this week, streak, reviews due today / overdue), the yearly heatmap, difficulty coverage, the topics worth attention and a sortable topic table whose rows expand into 30-day evidence. The thirty-day trend appears only when that window has activity; otherwise a one-line note names the last active date. Source counts and data coverage sit in a collapsed section. Selecting a heatmap date, or the pending-date notice, switches to Records with that filter applied; keyboard arrows move the heatmap focus. Tags overlap and the displayed totals are not a historical task-completion percentage.
 

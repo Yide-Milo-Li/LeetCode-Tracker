@@ -301,29 +301,6 @@
   animation: fade-in 120ms ease-out;
 }
 
-.today-quote-editorial {
-  display: inline-flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  color: var(--text-muted);
-  font-size: 13.5px;
-  line-height: 1.5;
-}
-
-.today-quote-editorial .quote-sparkle-icon {
-  color: var(--primary);
-  font-size: 12px;
-  line-height: 1;
-  opacity: 0.9;
-  flex-shrink: 0;
-}
-
-.today-quote-editorial .quote-editorial-text {
-  color: var(--text-muted);
-  font-weight: 450;
-  letter-spacing: -0.01em;
-}
 .dashboard-view-container { border: 0; padding: 0; background: transparent; box-shadow: none; }
 .today-plan-summary .section-heading:first-child > div:first-child { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .today-plan-summary .section-heading:first-child > div:first-child p { margin: 0; }
