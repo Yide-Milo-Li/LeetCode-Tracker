@@ -142,6 +142,21 @@
   padding-right: 2px;
 }
 
+.nw-list-controls {
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+}
+
+.nw-sort-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.nw-sort-field .nw-sort-direction {
+  width: 32px;
+  height: 32px;
+}
+
 .nw-list-controls label {
   display: block;
   margin-bottom: 3px;

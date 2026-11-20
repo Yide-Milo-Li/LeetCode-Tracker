@@ -9,6 +9,7 @@ import { useWorkspace, ViewVisible } from '../../workspace.tsx';
 export type NotesScope = 'practiced' | 'all';
 export type NotesDifficultyFilter = 'all' | 'Easy' | 'Medium' | 'Hard';
 export type NotesHasNoteFilter = 'all' | 'true' | 'false';
+export type NotesSortField = 'completed' | 'updated' | 'notes-first';
 
 /** Page size of the problem list. */
 export const NOTES_LIST_LIMIT = 25;
@@ -35,7 +36,9 @@ export function useNotesList({ selectedId, setSelectedId }: UseNotesListOptions)
   const [search, setSearch] = useState('');
   const [difficulty, setDifficulty] = useState<NotesDifficultyFilter>('all');
   const [hasNote, setHasNote] = useState<NotesHasNoteFilter>('all');
-  const [sort, setSort] = useState<ProblemNoteListQuery['sort']>('completed-desc');
+  const [sortField, setSortField] = useState<NotesSortField>('completed');
+  const [sortDirection, setSortDirection] = useState<'desc' | 'asc'>('desc');
+  const sort: ProblemNoteListQuery['sort'] = sortField === 'notes-first' ? sortField : `${sortField}-${sortDirection}`;
   const [groupBy, setGroupBy] = useState<ProblemNoteListQuery['groupBy']>('none');
   const [groupId, setGroupId] = useState<string>();
   const [grouping, setGrouping] = useState<ProblemNoteListResponse['grouping']>();
@@ -136,7 +139,10 @@ export function useNotesList({ selectedId, setSelectedId }: UseNotesListOptions)
     hasNote,
     setHasNote,
     sort,
-    setSort,
+    sortField,
+    setSortField,
+    sortDirection,
+    setSortDirection,
     groupBy,
     changeGrouping(mode: ProblemNoteListQuery['groupBy']) {
       setGroupBy(mode);

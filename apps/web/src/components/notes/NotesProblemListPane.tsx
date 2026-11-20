@@ -1,12 +1,12 @@
 /** Master column of the notes workspace: scope tabs, search, filters, problem list and pagination. */
 import { useId, useState } from 'react';
-import { ChevronRight, Search, FileText } from 'lucide-react';
+import { ArrowDownWideNarrow, ArrowUpNarrowWide, ChevronRight, Search, FileText } from 'lucide-react';
 import { translations, type Language } from '../../i18n.ts';
 import type { NoteListGroup, ProblemNoteListQuery, ProblemNoteSummary } from '../../api.ts';
 import { formatCalendarDate, formatInstant } from '../../date-format.ts';
 import { useWorkspace } from '../../workspace.tsx';
-import { Pagination } from '../ui.tsx';
-import type { NotesDifficultyFilter, NotesHasNoteFilter, NotesListState } from './useNotesList.ts';
+import { Pagination, Tooltip } from '../ui.tsx';
+import type { NotesDifficultyFilter, NotesHasNoteFilter, NotesListState, NotesSortField } from './useNotesList.ts';
 
 interface NotesProblemListPaneProps {
   lang: Language;
@@ -61,11 +61,16 @@ export function NotesProblemListPane({ lang, zenMode, list, selectedId, onSelect
   const zh = lang === 'zh';
   const {
     scope, setScope, search, setSearch, difficulty, setDifficulty, hasNote, setHasNote,
-    sort, setSort, groupBy, changeGrouping, grouping, groupId, openGroup,
+    sort, sortField, setSortField, sortDirection, setSortDirection, groupBy, changeGrouping, grouping, groupId, openGroup,
     page, setPage, limit, items, total, loadingList, listFailed,
   } = list;
 
   const controlsId = useId();
+  const newestFirst = sortDirection === 'desc';
+  const DirectionIcon = newestFirst ? ArrowDownWideNarrow : ArrowUpNarrowWide;
+  const directionHint = newestFirst
+    ? (zh ? '当前从新到旧，点击切换为从旧到新' : 'Newest first. Switch to oldest first.')
+    : (zh ? '当前从旧到新，点击切换为从新到旧' : 'Oldest first. Switch to newest first.');
   const { timezone } = useWorkspace();
   const [collapsedId, setCollapsedId] = useState<string | null>(null);
   const openId = grouping?.groups.some(group => group.id === groupId) ? groupId : grouping?.activeId;
@@ -172,20 +177,28 @@ export function NotesProblemListPane({ lang, zenMode, list, selectedId, onSelect
       <div className="nw-filters nw-list-controls">
         <div>
           <label htmlFor={controlsId + '-sort'}>{zh ? '排序方式' : 'Sort by'}</label>
-          <select id={controlsId + '-sort'} className="nw-filter-select" value={sort} onChange={event => {
-            setSort(event.currentTarget.value as ProblemNoteListQuery['sort']);
-            setPage(1);
-          }}>
-            <optgroup label={zh ? '上次完成时间' : 'Last solved'}>
-              <option value="completed-desc">{zh ? '最近完成优先' : 'Newest solve first'}</option>
-              <option value="completed-asc">{zh ? '最早完成优先' : 'Oldest solve first'}</option>
-            </optgroup>
-            <optgroup label={zh ? '笔记更新时间' : 'Note updated'}>
-              <option value="updated-desc">{zh ? '最近更新优先' : 'Newest edit first'}</option>
-              <option value="updated-asc">{zh ? '最早更新优先' : 'Oldest edit first'}</option>
-            </optgroup>
-            <option value="notes-first">{zh ? '有笔记优先' : 'Written notes first'}</option>
-          </select>
+          <div className="nw-sort-field">
+            <select id={controlsId + '-sort'} className="nw-filter-select" value={sortField} onChange={event => {
+              setSortField(event.currentTarget.value as NotesSortField);
+              setPage(1);
+            }}>
+              <option value="completed">{zh ? '完成时间' : 'Last solved'}</option>
+              <option value="updated">{zh ? '笔记更新时间' : 'Note updated'}</option>
+              <option value="notes-first">{zh ? '有笔记优先' : 'Written notes first'}</option>
+            </select>
+            {sortField !== 'notes-first' && (
+              <Tooltip text={directionHint} position="top">
+                <button type="button" className="btn-icon nw-sort-direction"
+                  aria-label={zh ? '从新到旧' : 'Newest first'} aria-pressed={newestFirst}
+                  onClick={() => {
+                    setSortDirection(previous => previous === 'desc' ? 'asc' : 'desc');
+                    setPage(1);
+                  }}>
+                  <DirectionIcon size={16} aria-hidden="true" />
+                </button>
+              </Tooltip>
+            )}
+          </div>
         </div>
         <div>
           <label htmlFor={controlsId + '-group'}>{zh ? '分组方式' : 'Group by'}</label>
