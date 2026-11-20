@@ -922,21 +922,10 @@
 }
 
 @media (pointer: coarse) {
-  .nw-editor-footer .info-trigger {
+  .nw-editor-footer .nw-editor-help {
     min-inline-size: 44px;
     min-block-size: 44px;
   }
-}
-
-.notes-workspace-view .nw-editor-footer .info-trigger svg {
-  width: 14px;
-  height: 14px;
-}
-
-.nw-footer-tips {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
 }
 
 @media (max-width: 1199px) {

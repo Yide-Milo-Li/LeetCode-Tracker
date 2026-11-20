@@ -33,6 +33,7 @@ export interface NotesWorkspaceProps {
   /** Clear external initial frontend ID once consumed to prevent deadlock on subsequent switches. */
   onClearInitialFrontendId?: () => void;
   onNeedsSaveChange?: (needsSave: boolean) => void;
+  onOpenShortcutHelp?: () => void;
 }
 
 /** Browse and edit notes while keeping asynchronous responses owned by their selection visit. */
@@ -42,6 +43,7 @@ export function NotesWorkspace({
   initialFrontendId,
   onClearInitialFrontendId,
   onNeedsSaveChange,
+  onOpenShortcutHelp,
 }: NotesWorkspaceProps) {
   const t = translations[lang];
   const workspace = useWorkspace();
@@ -234,6 +236,7 @@ export function NotesWorkspace({
                 codeMenu={codeMenu}
                 viewMode={viewMode}
                 onViewModeChange={setViewMode}
+                onOpenShortcutHelp={onOpenShortcutHelp}
               />
             </>
           ) : (

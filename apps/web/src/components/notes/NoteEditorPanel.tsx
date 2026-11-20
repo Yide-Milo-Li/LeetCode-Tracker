@@ -1,9 +1,9 @@
 /** Long-form note editor: conflict/load banners, expanded toolbar, full-height edit/preview canvas and compact footer. */
-import { FileText } from 'lucide-react';
+import { FileText, Keyboard } from 'lucide-react';
 import { useEffect, useId, useRef, type ClipboardEvent, type KeyboardEvent } from 'react';
 import { NOTE_TEMPLATES } from '../../api.ts';
 import { translations, type Language } from '../../i18n.ts';
-import { InfoPopover, type ActionPopover } from '../ui.tsx';
+import type { ActionPopover } from '../ui.tsx';
 import { NotesMarkdownPreview } from '../NotesMarkdownPreview.tsx';
 import { NoteEditorToolbar, type NotesViewMode } from './NoteEditorToolbar.tsx';
 import {
@@ -18,11 +18,12 @@ import type { NoteEditorState } from './useNoteEditor.ts';
 interface NoteEditorPanelProps {
   lang: Language;
   editor: NoteEditorState;
-  /** Selects the ⌘ or Ctrl shortcut label in the toolbar and footer tips popover. */
+  /** Selects the ⌘ or Ctrl shortcut label in the toolbar. */
   isMac: boolean;
   codeMenu: ActionPopover;
   viewMode: NotesViewMode;
   onViewModeChange: (mode: NotesViewMode) => void;
+  onOpenShortcutHelp?: () => void;
 }
 
 /** Write plain text to the system clipboard, falling back when navigator.clipboard is unavailable. */
@@ -56,7 +57,7 @@ function writeClipboardText(text: string, restoreTarget?: HTMLTextAreaElement): 
 }
 
 /** Render the editor canvas for the selected note; all state and actions come from `useNoteEditor`. */
-export function NoteEditorPanel({ lang, editor, isMac, codeMenu, viewMode, onViewModeChange }: NoteEditorPanelProps) {
+export function NoteEditorPanel({ lang, editor, isMac, codeMenu, viewMode, onViewModeChange, onOpenShortcutHelp }: NoteEditorPanelProps) {
   const t = translations[lang];
   const conflictMessageId = useId();
   const zh = lang === 'zh';
@@ -371,24 +372,20 @@ export function NoteEditorPanel({ lang, editor, isMac, codeMenu, viewMode, onVie
       {/* Compact status footer */}
       <div className="nw-editor-footer">
         <span>{t.wordCountChars.replace('{chars}', String(noteContent.length)).replace('{words}', String(wordCount))}</span>
-        <InfoPopover
-          side="top"
-          label={zh ? 'Markdown 语法与快捷键提示' : 'Markdown & shortcut tips'}
-          content={
-            <div className="nw-footer-tips">
-              <p>{t.markdownMathSupported}</p>
-              <p>
-                {isMac
-                  ? (zh
-                    ? '快捷键：⌘S 保存 · ⌘\\ 专注 · ⌘Z/⇧⌘Z 撤销重做 · ⌘B/I/E/K 粗/斜/代码/链接 · ⌘C/X 复制/剪切当前行'
-                    : 'Shortcuts: ⌘S Save · ⌘\\ Zen · ⌘Z/⇧⌘Z Undo/Redo · ⌘B/I/E/K Format · ⌘C/X Line copy/cut')
-                  : (zh
-                    ? '快捷键：Ctrl+S 保存 · Ctrl+\\ 专注 · Ctrl+Z/Y 撤销重做 · Ctrl+B/I/E/K 粗/斜/代码/链接 · Ctrl+C/X 复制/剪切当前行'
-                    : 'Shortcuts: Ctrl+S Save · Ctrl+\\ Zen · Ctrl+Z/Y Undo/Redo · Ctrl+B/I/E/K Format · Ctrl+C/X Line copy/cut')}
-              </p>
-            </div>
-          }
-        />
+        {onOpenShortcutHelp && (
+          <button
+            className="btn-icon nw-editor-help"
+            type="button"
+            aria-haspopup="dialog"
+            aria-label={zh ? '快捷键速查' : 'Keyboard shortcuts'}
+            onClick={(event) => {
+              event.currentTarget.focus();
+              onOpenShortcutHelp();
+            }}
+          >
+            <Keyboard size={16} aria-hidden="true" />
+          </button>
+        )}
       </div>
     </div>
   );
