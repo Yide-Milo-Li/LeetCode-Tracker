@@ -64,7 +64,7 @@ These are format examples, not a bundled curriculum. An AI-generated catalog can
 
 ![Today's practice with an active plan](docs/assets/screenshots/01-today-overview.png)
 
-The screenshot shows Today with a generated plan. On a rest day or after the final problem is removed from the plan, the seven-day activity appears in its own card.
+The screenshot shows Today with a generated plan and an active goal list. On a rest day or after the final problem is removed from the plan, the seven-day activity appears in its own card.
 
 The unified Today panel combines plan completion, Add one / Adjust today actions, a built-in practice timer linked to practice records, clickable problem titles, dual-path Note navigation (go to workspace or quick-view slide drawer), and seven-day activity. Define reusable weekly strategies with a review cap (unused review slots become new problems), a new-problem difficulty mix, and topic preferences; review spacing is one learner-wide setting. Add one runs locally without model calls; remove completed items with explicit confirmation and inspect plan versions. Recommendations explain their source. Local code owns candidate membership, uniqueness, quotas, and persistence; optional Gemini, OpenAI, or DeepSeek assistance remains advisory. Routine explanations and encouragement are local; optional semantic selection is bounded and used only for an effective choice. Outcome-based review spacing and duration-shadow calibration (Settings › Practice), per-strategy time budgets and explicit optional feedback preserve hard filters. See [local recommendations](docs/local-recommendations.md) for development-candidate policies and validation limits.
 

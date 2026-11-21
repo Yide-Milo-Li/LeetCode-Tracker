@@ -17,6 +17,8 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { CatalogStore } from '../packages/database/src/store.ts';
+import { saveGoalList } from '../packages/database/src/goal-lists.ts';
+import { FAVORITE_FOLDER_PREFIX, FAVORITE_PROBLEM_PREFIX } from '../packages/database/src/favorites.ts';
 import { buildApp } from '../apps/server/src/app.ts';
 import { createSocialCatalog, socialPracticeIds } from './social-catalog.ts';
 import { localDate } from '../packages/contracts/src/time.ts';
@@ -147,9 +149,10 @@ async function main() {
     }
   }
 
-  // 4. Seed Strategy
+  // 4. Seed Strategy, Goal Lists, and Favorite Folders
+  const zh = language === 'zh';
   const showcaseStrategy = await store.planning.saveStrategy({
-    name: 'Dynamic Programming & System Algorithms',
+    name: zh ? '动态规划与图论专项' : 'Core DP & Graph Routine',
     weekdays: [1, 2, 3, 4, 5],
     rules: {
       dailyCount: 3,
@@ -158,12 +161,14 @@ async function main() {
       premium: false,
       reviewEnabled: true,
       reviewPercent: 33,
-      preference: 'Master bottom-up tabulation and memoization patterns',
+      preference: zh
+        ? '重点巩固自底向上递推与状态转移模板'
+        : 'Master bottom-up tabulation and memoization patterns',
     },
   });
 
   await store.planning.saveStrategy({
-    name: 'Weekend Hard Problem Sprint',
+    name: zh ? '周末困难题冲刺' : 'Weekend Hard Sprint',
     weekdays: [0, 6],
     rules: {
       dailyCount: 2,
@@ -172,15 +177,74 @@ async function main() {
       premium: false,
       reviewEnabled: false,
       reviewPercent: 0,
-      preference: 'Advanced topological sort, union find and hard DP',
+      preference: zh
+        ? '专注拓扑排序、并查集与高难度动态规划'
+        : 'Advanced topological sort, union find and hard DP',
     },
   });
 
+  saveGoalList(db, {
+    id: '11111111-1111-4111-8111-111111111111',
+    name: zh ? '刷题核心 8 题' : 'Core Interview 8',
+    version: 1,
+    items: [
+      { frontendId: '1', completed: true },
+      { frontendId: '206', completed: true },
+      { frontendId: '21', completed: true },
+      { frontendId: '121', completed: true },
+      { frontendId: '200', completed: false },
+      { frontendId: '15', completed: false },
+      { frontendId: '322', completed: false },
+      { frontendId: '146', completed: false },
+    ],
+  });
+
+  saveGoalList(db, {
+    id: '22222222-2222-4222-8222-222222222222',
+    name: zh ? '图论与动态规划冲刺' : 'Graph & DP Sprint',
+    version: 1,
+    items: [
+      { frontendId: '207', completed: true },
+      { frontendId: '210', completed: true },
+      { frontendId: '300', completed: false },
+      { frontendId: '198', completed: false },
+      { frontendId: '102', completed: false },
+    ],
+  });
+
+  const favFolders = [
+    { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: zh ? '考前必刷' : 'Must Review' },
+    { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', name: zh ? '边界易错题' : 'Tricky Edge Cases' },
+  ];
+  for (const folder of favFolders) {
+    db.prepare('INSERT OR REPLACE INTO catalog_meta (key, value) VALUES (?, ?)').run(
+      FAVORITE_FOLDER_PREFIX + folder.id,
+      folder.name,
+    );
+  }
+  const favoriteMemberships: Record<string, string[]> = {
+    '1': [favFolders[0].id],
+    '2': [favFolders[0].id, favFolders[1].id],
+    '3': [favFolders[1].id],
+    '15': [favFolders[0].id],
+    '200': [favFolders[0].id, favFolders[1].id],
+    '322': [favFolders[1].id],
+    '146': [favFolders[0].id],
+  };
+  for (const [frontendId, folderIds] of Object.entries(favoriteMemberships)) {
+    db.prepare('INSERT OR REPLACE INTO catalog_meta (key, value) VALUES (?, ?)').run(
+      FAVORITE_PROBLEM_PREFIX + frontendId,
+      JSON.stringify(folderIds),
+    );
+  }
+
   // 5. Seed Today Plan
   const todayDate = localDate(now, 'America/New_York');
-  const p1 = store.getProblem('1', 'frontendId') || { questionFrontendId: '1', title: 'Two Sum', difficulty: 'Easy', tags: ['Array', 'Hash Table'] };
-  const p70 = store.getProblem('70', 'frontendId') || { questionFrontendId: '70', title: 'Climbing Stairs', difficulty: 'Easy', tags: ['Dynamic Programming', 'Math'] };
-  const p322 = store.getProblem('322', 'frontendId') || { questionFrontendId: '322', title: 'Coin Change', difficulty: 'Medium', tags: ['Dynamic Programming', 'Breadth-First Search'] };
+  const planningRevisionRow = db.prepare("SELECT value FROM catalog_meta WHERE key = 'planning_revision'").get() as { value: string } | undefined;
+  const planningRevision = planningRevisionRow ? Number(planningRevisionRow.value) || 1 : 1;
+  const p1 = store.getProblem('1', 'frontendId') || { questionFrontendId: '1', title: 'Synthetic array exercise 1', difficulty: 'Easy', tags: ['Array'] };
+  const p200 = store.getProblem('200', 'frontendId') || { questionFrontendId: '200', title: 'Synthetic dynamic-programming exercise 200', difficulty: 'Medium', tags: ['Dynamic Programming'] };
+  const p15 = store.getProblem('15', 'frontendId') || { questionFrontendId: '15', title: 'Synthetic tree exercise 15', difficulty: 'Hard', tags: ['Tree'] };
 
   const planPayload = {
     id: 'daily-plan-readme',
@@ -189,7 +253,7 @@ async function main() {
     version: 1,
     strategyId: showcaseStrategy.id,
     strategyVersion: 1,
-    strategyName: 'Dynamic Programming & System Algorithms',
+    strategyName: zh ? '动态规划与图论专项' : 'Core DP & Graph Routine',
     rules: {
       dailyCount: 3,
       difficulty: { Easy: 34, Medium: 33, Hard: 33 },
@@ -197,7 +261,9 @@ async function main() {
       premium: false,
       reviewEnabled: true,
       reviewPercent: 33,
-      preference: 'Master bottom-up tabulation and memoization patterns',
+      preference: zh
+        ? '重点巩固自底向上递推与状态转移模板'
+        : 'Master bottom-up tabulation and memoization patterns',
     },
     items: [
       {
@@ -214,24 +280,24 @@ async function main() {
       },
       {
         id: 'item-2',
-        problem: p70,
+        problem: p200,
         kind: 'review' as const,
         addedAt: now - 3600000,
         reason: {
           en: 'Foundational dynamic programming problem demonstrating overlapping subproblems.',
-          zh: '动态规划入门基石，建立自底向上状态转移递推思维。',
+          zh: '动态规划经典题型，强化状态定义与滚动优化。',
         },
         evidenceIds: [],
         completed: false,
       },
       {
         id: 'item-3',
-        problem: p322,
+        problem: p15,
         kind: 'new' as const,
         addedAt: now,
         reason: {
-          en: 'Classic unbounded knapsack DP pattern with state transition optimization.',
-          zh: '经典完全背包变种，强化最优子结构分析与备忘录求解。',
+          en: 'Challenging tree traversal problem for sharpening recursion invariants.',
+          zh: '树形结构进阶挑战，重点梳理递归边界与返回值约束。',
         },
         evidenceIds: [],
         completed: false,
@@ -246,7 +312,7 @@ async function main() {
     notices: [],
     catalogRevision: store.getCatalogRevision(),
     practiceRevision: store.getPracticeRevision(),
-    planningRevision: 1,
+    planningRevision,
     algorithmVersion: 'phase4-v2',
     createdAt: now,
     updatedAt: now,
@@ -259,14 +325,17 @@ async function main() {
   `).run(planPayload.id, planPayload.date, planPayload.version, JSON.stringify(planPayload));
 
   // 6. Seed Markdown Notes
-  store.upsertProblemNote('1', `# Synthetic exercise 1
+  store.upsertProblemNote(
+    '1',
+    zh
+      ? `# 练习题 #1
 
-### 💡 Optimal Strategy
-Use a single-pass hash map to store seen elements and their corresponding indices. As we iterate through \`nums\`, check if \`target - nums[i]\` exists in the table.
+### 💡 最优思路
+使用单遍哈希表记录遍历过的元素及其下标。每次访问 \`nums[i]\` 时，检查 \`target - nums[i]\` 是否已经出现在哈希表中即可完成配对。
 
-### ⏱️ Complexity
-- **Time Complexity:** $\\mathcal{O}(N)$ - single pass through the array.
-- **Space Complexity:** $\\mathcal{O}(N)$ - to store at most $N$ elements in the hash map.
+### ⏱️ 复杂度分析
+- **时间复杂度：** $O(N)$，数组只需单次线性扫描。
+- **空间复杂度：** $O(N)$，哈希表最多存储 $N$ 个元素。
 
 \`\`\`cpp
 class Solution {
@@ -284,9 +353,47 @@ public:
     }
 };
 \`\`\`
-`);
+`
+      : `# Synthetic exercise 1
 
-  store.upsertProblemNote('322', `# Synthetic exercise 322
+### 💡 Optimal Strategy
+Use a single-pass hash map to store seen elements and their corresponding indices. As we iterate through \`nums\`, check if \`target - nums[i]\` exists in the table.
+
+### ⏱️ Complexity
+- **Time Complexity:** $O(N)$ - single pass through the array.
+- **Space Complexity:** $O(N)$ - to store at most $N$ elements in the hash map.
+
+\`\`\`cpp
+class Solution {
+public:
+    vector<int> twoSum(vector<int>& nums, int target) {
+        unordered_map<int, int> seen;
+        for (int i = 0; i < nums.size(); ++i) {
+            int complement = target - nums[i];
+            if (seen.find(complement) != seen.end()) {
+                return {seen[complement], i};
+            }
+            seen[nums[i]] = i;
+        }
+        return {};
+    }
+};
+\`\`\`
+`,
+  );
+
+  store.upsertProblemNote(
+    '322',
+    zh
+      ? `# 练习题 #322
+
+### 💡 动态规划思路
+自底向上的一维背包 DP：令 \`dp[i]\` 表示凑出金额 \`i\` 所需的最少硬币枚数。初始化 \`dp[0] = 0\`，其余状态设为 \`amount + 1\`。
+
+### 🔄 状态转移方程
+$$dp[i] = \\min(dp[i], dp[i - c] + 1)$$
+`
+      : `# Synthetic exercise 322
 
 ### 💡 Dynamic Programming Approach
 Bottom-up 1D DP tabulation: let \`dp[i]\` represent the minimum number of coins to make up amount \`i\`.
@@ -294,7 +401,8 @@ Initialize \`dp[0] = 0\` and all other values to \`amount + 1\`.
 
 ### 🔄 Recurrence Relation
 $$dp[i] = \\min(dp[i], dp[i - c] + 1) \\quad \\forall c \\in \\text{coins}, i \\ge c$$
-`);
+`,
+  );
 
   // 7. Start Server
   console.log(`  [2/5] Starting Fastify backend on http://${host}:${port}...`);
@@ -416,7 +524,7 @@ $$dp[i] = \\min(dp[i], dp[i - c] + 1) \\quad \\forall c \\in \\text{coins}, i \\
   // Exercise the newly delivered focus control after capturing the normal workspace.
   await cdp.send('Page.navigate', { url: `http://${host}:${port}/#notes` });
   await new Promise((resolve) => setTimeout(resolve, 1000));
-  await cdp.send('Runtime.evaluate', { expression: `Array.from(document.querySelectorAll('button')).find(b => ['Zen', 'Zen Mode', '专注'].includes(b.textContent.trim()))?.click()` });
+  await cdp.send('Runtime.evaluate', { expression: `Array.from(document.querySelectorAll('button')).find(b => ['Zen', 'Zen Mode', '专注'].includes((b.getAttribute('aria-label') || b.textContent || '').trim()))?.click()` });
   await new Promise((resolve) => setTimeout(resolve, 250));
   const focused = await cdp.send('Runtime.evaluate', { expression: `document.querySelector('.notes-master-pane').style.display === 'none'`, returnByValue: true });
   if (!focused.result.value) throw new Error('Notes focus control did not hide the master list');
