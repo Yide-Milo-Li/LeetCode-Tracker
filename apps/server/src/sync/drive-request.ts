@@ -7,6 +7,7 @@ export const DRIVE_BUDGET_MS = 55_000;
 const MAX_RETRIES = 3;
 const TRANSIENT = new Set([408, 429, 500, 502, 503, 504]);
 const RATE_LIMITS = new Set(['userRateLimitExceeded', 'rateLimitExceeded', 'sharingRateLimitExceeded']);
+const TIMEOUT_MESSAGE = 'Google Drive sync timed out. Try again to continue.';
 
 export class DriveRequestError extends SyncTransportError {
   readonly status: number;
@@ -55,7 +56,7 @@ export class DriveRequests {
 
   private remaining(): number {
     const ms = this.deadline - Date.now();
-    if (ms <= 0) throw new SyncTransportError('SYNC_TRANSPORT_FAILED', 'Google Drive sync timed out. Try again to continue.');
+    if (ms <= 0) throw new SyncTransportError('SYNC_TRANSPORT_FAILED', TIMEOUT_MESSAGE);
     return ms;
   }
 
@@ -70,11 +71,11 @@ export class DriveRequests {
     if (remaining <= 0) {
       // The owner of a shared promise may also have timed out.
       void flight.catch(() => {});
-      throw new SyncTransportError('SYNC_TRANSPORT_FAILED', 'Google Drive sync timed out. Try again to continue.');
+      throw new SyncTransportError('SYNC_TRANSPORT_FAILED', TIMEOUT_MESSAGE);
     }
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new SyncTransportError('SYNC_TRANSPORT_FAILED', 'Google Drive sync timed out. Try again to continue.')), remaining);
+      timer = setTimeout(() => reject(new SyncTransportError('SYNC_TRANSPORT_FAILED', TIMEOUT_MESSAGE)), remaining);
     });
     try { return await Promise.race([flight, timeout]); }
     finally { clearTimeout(timer); }
@@ -109,11 +110,12 @@ export class DriveRequests {
         error = new DriveRequestError(response.status, TRANSIENT.has(response.status) || (response.status === 403 && rateLimited(bytes)));
         delay = retryAfter(response.headers.get('retry-after'));
       } catch (cause) {
+        if (cause instanceof SyncTransportError && !(cause instanceof GoogleRefreshError)) throw cause;
+        if (signal.aborted) throw new SyncTransportError('SYNC_TRANSPORT_FAILED', TIMEOUT_MESSAGE);
         if (cause instanceof GoogleRefreshError) {
           error = new DriveRequestError(cause.status, cause.status === 0 || TRANSIENT.has(cause.status));
           delay = retryAfter(cause.retryAfter);
         } else {
-          if (cause instanceof SyncTransportError) throw cause;
           error = new DriveRequestError(0, true);
         }
       }

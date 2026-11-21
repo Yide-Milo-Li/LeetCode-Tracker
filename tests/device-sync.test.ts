@@ -1086,11 +1086,69 @@ test('Drive honors both Retry-After formats across local requests and aborts slo
   const slow: typeof fetch = async (_url, init) => new Response(new ReadableStream({
     start(controller) { init!.signal!.addEventListener('abort', () => controller.error(new Error('aborted'))); },
   }));
+  const slowConnection = requestTestConnection();
   const keepAlive = setTimeout(() => {}, 200);
   try {
-    const client = new DriveRequests(requestTestConnection(), slow, Date.now() + 30);
+    const client = new DriveRequests(slowConnection, slow, Date.now() + 30);
     await assert.rejects(client.send('https://drive.example.test/files'), /timed out/);
+    assert.equal(slowConnection.notBefore, 0);
   } finally { clearTimeout(keepAlive); }
+});
+
+test('Drive reports a timeout without setting cooldown when the request signal aborts before the wall-clock deadline', async (t) => {
+  const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+  t.mock.method(AbortSignal, 'timeout', () => realTimeout(5));
+  const keepAlive = setTimeout(() => {}, 250);
+  try {
+    let attempts = 0;
+    const slowBody: typeof fetch = async (_url, init) => {
+      attempts++;
+      return new Response(new ReadableStream({
+        start(controller) {
+          init!.signal!.addEventListener('abort', () => controller.error(new Error('aborted')), { once: true });
+        },
+      }));
+    };
+
+    const retryConnection = requestTestConnection();
+    const retryClient = new DriveRequests(retryConnection, slowBody, Date.now() + 200);
+    await assert.rejects(retryClient.send('https://drive.example.test/files'), /timed out/);
+    assert.equal(attempts, 1);
+    assert.equal(retryConnection.notBefore, 0);
+
+    const noRetryConnection = requestTestConnection();
+    const noRetryClient = new DriveRequests(noRetryConnection, slowBody, Date.now() + 200);
+    await assert.rejects(noRetryClient.send('https://drive.example.test/files', {}, { retry: false }), /timed out/);
+    assert.equal(noRetryConnection.notBefore, 0);
+
+    const slowTokenFetch: typeof fetch = (_url, init) => new Promise((_resolve, reject) => {
+      if (init?.signal?.aborted) {
+        reject(new Error('aborted'));
+        return;
+      }
+      init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+    });
+    const tokenConnection: DriveConnection = {
+      notBefore: 0,
+      tokens: new GoogleAccessTokenSource(
+        { clientId: 'test' },
+        'refresh-1',
+        {
+          authorize: 'https://auth.example.test/auth',
+          token: 'https://oauth.example.test/token',
+          revoke: 'https://oauth.example.test/revoke',
+          driveApi: 'https://drive.example.test/drive',
+          driveUpload: 'https://upload.example.test/drive',
+        },
+        slowTokenFetch,
+      ),
+    };
+    const tokenClient = new DriveRequests(tokenConnection, slowBody, Date.now() + 200);
+    await assert.rejects(tokenClient.send('https://drive.example.test/files'), /timed out/);
+    assert.equal(tokenConnection.notBefore, 0);
+  } finally {
+    clearTimeout(keepAlive);
+  }
 });
 
 test('Drive safely retries a receive archive and can finish a restore resolution after reopening the profile', async () => {
