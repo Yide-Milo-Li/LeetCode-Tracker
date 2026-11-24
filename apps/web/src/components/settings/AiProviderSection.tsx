@@ -217,7 +217,7 @@ export function AiProviderSection({ lang, ai }: AiProviderSectionProps) {
                   </select>
                 </Field>
 
-                {provider === 'gemini' && (
+                {provider === 'gemini' && currentPresetModels.length > 1 && (
                   <div className="form-field">
                     <span>{t.candidateModelsLabel}</span>
                     <small>{t.candidateModelsDesc}</small>

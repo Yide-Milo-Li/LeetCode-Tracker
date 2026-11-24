@@ -425,13 +425,13 @@ export const updateSettingsInputSchema = z.object({
   data.deepseekReasoningEffort !== undefined, {
   message: 'At least one setting must be provided',
 }).refine(data => !data.geminiModel || !data.geminiModel.trim() || isSupportedGeminiModel(data.geminiModel), {
-  message: 'Unsupported Gemini model. Allowed models: models/gemini-3.8-flash, models/gemini-4-hydrogen',
+  message: 'Unsupported Gemini model. Allowed model: models/gemini-4-hydrogen',
 }).refine(data => !data.geminiFallbackModels || data.geminiFallbackModels.every(m => isSupportedGeminiModel(m)), {
-  message: 'Unsupported Gemini fallback model. Allowed models: models/gemini-3.8-flash, models/gemini-4-hydrogen',
+  message: 'Unsupported Gemini fallback model. Allowed model: models/gemini-4-hydrogen',
 }).refine(data => !data.openaiModel || !data.openaiModel.trim() || isSupportedOpenaiModel(data.openaiModel), {
   message: 'Unsupported OpenAI model. Allowed models: gpt-6-luna, gpt-6.1-terra',
 }).refine(data => !data.geminiReasoningEffort || !data.geminiReasoningEffort.trim() || normalizeReasoningEffort('gemini', data.geminiReasoningEffort, data.geminiModel) !== null, {
-  message: 'Unsupported Gemini thinkingLevel for the selected model',
+  message: 'Unsupported Gemini thinkingLevel. Allowed values: low, medium, high, xhigh',
 }).refine(data => !data.openaiReasoningEffort || !data.openaiReasoningEffort.trim() || normalizeReasoningEffort('openai', data.openaiReasoningEffort) !== null, {
   message: 'Unsupported OpenAI reasoning_effort. Allowed values: none, low, medium, high, xhigh, max',
 }).refine(data => !data.deepseekReasoningEffort || !data.deepseekReasoningEffort.trim() || normalizeReasoningEffort('deepseek', data.deepseekReasoningEffort) !== null, {

@@ -591,12 +591,6 @@ export function updateUserSettingsTransaction(
           ? (normalizeReasoningEffort(prefix, effortInput, effectiveModel) ?? resolveModelReasoningEffort(prefix, effectiveModel, effortInput))
           : null;
         updateStmt.run(`${prefix}_reasoning_effort`, normEffort ?? '', now);
-      } else if (prefix === 'gemini' && modelInput !== undefined && effectiveModel) {
-        const existingEffortRow = db.prepare(`SELECT value FROM settings WHERE key = 'gemini_reasoning_effort'`).get() as { value: string } | undefined;
-        const existingEffort = existingEffortRow?.value?.trim();
-        if (existingEffort && existingEffort.toLowerCase() === 'xhigh' && effectiveModel === 'models/gemini-3.8-flash') {
-          updateStmt.run('gemini_reasoning_effort', resolveModelReasoningEffort('gemini', effectiveModel, existingEffort), now);
-        }
       }
 
       if (fallbacksInput !== undefined) {

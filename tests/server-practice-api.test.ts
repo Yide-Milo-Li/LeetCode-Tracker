@@ -20,8 +20,8 @@ import {
 /** Mock Gemini Assistant for hermetic testing. */
 class MockGeminiAssistant implements IGeminiAssistant {
   public configured: boolean = true;
-  public model: string = 'models/gemini-3.8-flash';
-  public fallbackModels: string[] = ['models/gemini-4-hydrogen'];
+  public model: string = 'models/gemini-4-hydrogen';
+  public fallbackModels: string[] = [];
   public shouldFail: boolean = false;
   public failureCode: string = 'GEMINI_UNAVAILABLE';
   public failureStatus: number = 503;
@@ -266,8 +266,8 @@ describe('Practice & Progress API Endpoints', () => {
       assert.equal(statusRes.statusCode, 200);
       const statusBody = JSON.parse(statusRes.payload);
       assert.equal(statusBody.configured, true);
-      assert.equal(statusBody.model, 'models/gemini-3.8-flash');
-      assert.deepEqual(statusBody.fallbackModels, ['models/gemini-4-hydrogen']);
+      assert.equal(statusBody.model, 'models/gemini-4-hydrogen');
+      assert.deepEqual(statusBody.fallbackModels, []);
 
       // 2. Format raw text
       const formatRes = await app.inject({
@@ -586,7 +586,7 @@ describe('Practice & Progress API Endpoints', () => {
       const calls: string[] = [];
       const assistant = new GeminiAssistant({
         apiKey: 'test-key',
-        model: 'models/gemini-3.8-flash',
+        model: 'models/gemini-4-hydrogen',
         fallbackModels: ['models/gemini-3.7-flash', 'models/gemini-3.6-flash'],
         initialBackoffMs: 0,
         generateContentFn: async ({ model }) => {
@@ -608,10 +608,10 @@ describe('Practice & Progress API Endpoints', () => {
       });
 
       const res = await assistant.formatProgressText('1. Two Sum | Accepted | 2026-01-01');
-      assert.equal(res.model, 'models/gemini-3.8-flash');
+      assert.equal(res.model, 'models/gemini-4-hydrogen');
       assert.equal(res.candidates.length, 1);
       assert.equal(res.candidates[0].frontendId, '1');
-      assert.deepEqual(calls, ['models/gemini-3.8-flash']);
+      assert.deepEqual(calls, ['models/gemini-4-hydrogen']);
     });
 
     it('retries transient 503 error on primary model and recovers successfully', async () => {
@@ -619,7 +619,7 @@ describe('Practice & Progress API Endpoints', () => {
       let attempt = 0;
       const assistant = new GeminiAssistant({
         apiKey: 'test-key',
-        model: 'models/gemini-3.8-flash',
+        model: 'models/gemini-4-hydrogen',
         fallbackModels: ['models/gemini-3.7-flash', 'models/gemini-3.6-flash'],
         maxRetriesPerModel: 2,
         initialBackoffMs: 0,
@@ -648,23 +648,23 @@ describe('Practice & Progress API Endpoints', () => {
       });
 
       const res = await assistant.formatProgressText('1. Two Sum | Accepted');
-      assert.equal(res.model, 'models/gemini-3.8-flash');
+      assert.equal(res.model, 'models/gemini-4-hydrogen');
       assert.equal(res.candidates.length, 1);
       // Confirms 2 attempts on primary model without escalating to fallback
-      assert.deepEqual(calls, ['models/gemini-3.8-flash', 'models/gemini-3.8-flash']);
+      assert.deepEqual(calls, ['models/gemini-4-hydrogen', 'models/gemini-4-hydrogen']);
     });
 
     it('falls back to tier 1 model (models/gemini-3.7-flash) when primary model exhausts retries', async () => {
       const calls: string[] = [];
       const assistant = new GeminiAssistant({
         apiKey: 'test-key',
-        model: 'models/gemini-3.8-flash',
+        model: 'models/gemini-4-hydrogen',
         fallbackModels: ['models/gemini-3.7-flash', 'models/gemini-3.6-flash'],
         maxRetriesPerModel: 1, // 1 retry -> 2 attempts total on primary
         initialBackoffMs: 0,
         generateContentFn: async ({ model }) => {
           calls.push(model);
-          if (model === 'models/gemini-3.8-flash') {
+          if (model === 'models/gemini-4-hydrogen') {
             throw new Error('503 Service Unavailable: overloaded');
           }
           return {
@@ -688,8 +688,8 @@ describe('Practice & Progress API Endpoints', () => {
       assert.equal(res.model, 'models/gemini-3.7-flash');
       assert.equal(res.candidates.length, 1);
       assert.deepEqual(calls, [
-        'models/gemini-3.8-flash',
-        'models/gemini-3.8-flash',
+        'models/gemini-4-hydrogen',
+        'models/gemini-4-hydrogen',
         'models/gemini-3.7-flash',
       ]);
     });
@@ -698,7 +698,7 @@ describe('Practice & Progress API Endpoints', () => {
       const calls: string[] = [];
       const assistant = new GeminiAssistant({
         apiKey: 'test-key',
-        model: 'models/gemini-3.8-flash',
+        model: 'models/gemini-4-hydrogen',
         fallbackModels: ['models/gemini-3.7-flash', 'models/gemini-3.6-flash'],
         maxRetriesPerModel: 1,
         initialBackoffMs: 0,
@@ -727,8 +727,8 @@ describe('Practice & Progress API Endpoints', () => {
       assert.equal(res.model, 'models/gemini-3.6-flash');
       assert.equal(res.candidates.length, 1);
       assert.deepEqual(calls, [
-        'models/gemini-3.8-flash',
-        'models/gemini-3.8-flash',
+        'models/gemini-4-hydrogen',
+        'models/gemini-4-hydrogen',
         'models/gemini-3.7-flash',
         'models/gemini-3.7-flash',
         'models/gemini-3.6-flash',
@@ -764,7 +764,7 @@ describe('Practice & Progress API Endpoints', () => {
       const calls: string[] = [];
       const assistant = new GeminiAssistant({
         apiKey: 'invalid-key',
-        model: 'models/gemini-3.8-flash',
+        model: 'models/gemini-4-hydrogen',
         fallbackModels: ['models/gemini-3.7-flash'],
         maxRetriesPerModel: 2,
         initialBackoffMs: 0,
@@ -783,13 +783,13 @@ describe('Practice & Progress API Endpoints', () => {
         }
       );
       // Auth error is fatal across all models; no retries and no fallbacks attempted
-      assert.deepEqual(calls, ['models/gemini-3.8-flash']);
+      assert.deepEqual(calls, ['models/gemini-4-hydrogen']);
     });
 
     it('exhausts all fallback tiers and retries, throwing classified GEMINI_UNAVAILABLE error', async () => {
       const assistant = new GeminiAssistant({
         apiKey: 'test-key',
-        model: 'models/gemini-3.8-flash',
+        model: 'models/gemini-4-hydrogen',
         fallbackModels: ['models/gemini-3.7-flash', 'models/gemini-3.6-flash'],
         maxRetriesPerModel: 1,
         initialBackoffMs: 0,
@@ -803,7 +803,7 @@ describe('Practice & Progress API Endpoints', () => {
         (err: GeminiFormatError) => {
           assert.equal(err.code, 'GEMINI_UNAVAILABLE');
           assert.equal(err.status, 503);
-          assert.ok(err.message.includes('models/gemini-3.8-flash -> models/gemini-3.7-flash -> models/gemini-3.6-flash'));
+          assert.ok(err.message.includes('models/gemini-4-hydrogen -> models/gemini-3.7-flash -> models/gemini-3.6-flash'));
           return true;
         }
       );
@@ -812,12 +812,12 @@ describe('Practice & Progress API Endpoints', () => {
     it('reports configured status and fallback models chain accurately via getStatus()', () => {
       const assistant = new GeminiAssistant({
         apiKey: 'test-key',
-        model: 'models/gemini-3.8-flash',
+        model: 'models/gemini-4-hydrogen',
         fallbackModels: ['models/gemini-3.7-flash', 'models/gemini-3.6-flash'],
       });
       const status = assistant.getStatus();
       assert.equal(status.configured, true);
-      assert.equal(status.model, 'models/gemini-3.8-flash');
+      assert.equal(status.model, 'models/gemini-4-hydrogen');
       assert.deepEqual(status.fallbackModels, ['models/gemini-3.7-flash', 'models/gemini-3.6-flash']);
     });
 
@@ -825,7 +825,7 @@ describe('Practice & Progress API Endpoints', () => {
       let called = false;
       const assistant = new GeminiAssistant({
         apiKey: 'test-key',
-        model: 'models/gemini-3.8-flash',
+        model: 'models/gemini-4-hydrogen',
         generateContentFn: async () => {
           called = true;
           return { text: '{}' };
@@ -835,7 +835,7 @@ describe('Practice & Progress API Endpoints', () => {
       const res = await assistant.formatProgressText('   \n   ');
       assert.equal(called, false);
       assert.deepEqual(res.candidates, []);
-      assert.equal(res.model, 'models/gemini-3.8-flash');
+      assert.equal(res.model, 'models/gemini-4-hydrogen');
     });
 
     it('rejects inputs larger than 64 KiB with 413 PAYLOAD_TOO_LARGE', async () => {

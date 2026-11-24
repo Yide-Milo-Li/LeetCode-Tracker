@@ -52,7 +52,7 @@ npm run test:live
 
 This dedicated test suite (`tests/live-gemini-verification.test.ts`):
 - Requires an active `GEMINI_API_KEY` (or Google Cloud Application Default Credentials) in the environment.
-- Executes real upstream model calls (`models/gemini-3.8-flash`, `models/gemini-4-hydrogen`).
+- Executes real upstream model calls (`models/gemini-4-hydrogen`).
 - Strictly asserts non-local model execution (`assert.notEqual(result.model, 'local')`), eliminating false positives from local deterministic fallbacks.
 - Verifies structured candidate problem selection with natural-language preferences, bilingual reasoning, bilingual encouragement generation, and natural-language override prompt parsing (`parseOverridePrompt`).
 - Enforces rate-limiting cooldown intervals between calls to comply with free-tier requests-per-minute (RPM) limits.
@@ -105,7 +105,7 @@ The default suite explicitly includes sample-gated topic analytics, fixed/adapti
 
 ## Multi-provider AI audit
 
-`server-settings-ai.test.ts`, `server-settings-llm.test.ts`, and `llm-audit.test.ts` verify independent settings, supported model validation/pinning (Gemini `models/gemini-3.8-flash` / `models/gemini-4-hydrogen`, OpenAI `gpt-6-luna` / `gpt-6.1-terra`, DeepSeek `deepseek-flash`), per-model reasoning effort persistence and upstream payload mapping, real-assistant hot reload, blank key isolation, JSON request contracts, typed failures, fallback chains, empty-chain restart persistence, deadline enforcement and provider provenance. Desktop component coverage includes drafts, remasking, model/effort selection, and explicit empty chains. See [provider configuration](../docs/llm-providers.md) for limitations. Run `node --import tsx scripts/verify-phase17-browser.ts` after building for isolated synthetic Chrome settings acceptance.
+`server-settings-ai.test.ts`, `server-settings-llm.test.ts`, and `llm-audit.test.ts` verify independent settings, supported model validation/pinning (Gemini `models/gemini-4-hydrogen`, OpenAI `gpt-6-luna` / `gpt-6.1-terra`, DeepSeek `deepseek-flash`), per-model reasoning effort persistence and upstream payload mapping, real-assistant hot reload, blank key isolation, JSON request contracts, typed failures, fallback chains, empty-chain restart persistence, deadline enforcement and provider provenance. Desktop component coverage includes drafts, remasking, model/effort selection, and explicit empty chains. See [provider configuration](../docs/llm-providers.md) for limitations. Run `node --import tsx scripts/verify-phase17-browser.ts` after building for isolated synthetic Chrome settings acceptance.
 
 ## Native desktop regression boundaries
 

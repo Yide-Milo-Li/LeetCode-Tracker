@@ -60,15 +60,16 @@ it('offers only supported OpenAI, DeepSeek, and Gemini models even when legacy m
     timezone: 'UTC',
     updatedAt: 1,
     llmProvider: 'gemini',
-    geminiModel: 'models/gemini-3.5-flash',
-    geminiFallbackModels: ['models/gemini-3.7-flash'],
+    geminiModel: 'models/gemini-3.8-flash',
+    geminiFallbackModels: ['models/gemini-3.7-flash', 'models/gemini-4-hydrogen'],
   }));
   await act(async () => { render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} section="ai" />); });
   fireEvent.click(screen.getByRole('button', { name: 'Advanced: model and endpoint' }));
   const geminiSelect = screen.getByLabelText('Preferred Model') as HTMLSelectElement;
-  assert.deepEqual([...geminiSelect.options].map(option => option.value), ['models/gemini-3.8-flash', 'models/gemini-4-hydrogen']);
-  assert.equal(geminiSelect.value, 'models/gemini-3.8-flash');
+  assert.deepEqual([...geminiSelect.options].map(option => option.value), ['models/gemini-4-hydrogen']);
+  assert.equal(geminiSelect.value, 'models/gemini-4-hydrogen');
   assert.equal(screen.queryByLabelText('Custom Model Identifier'), null);
+  assert.equal(screen.queryByRole('group', { name: 'Candidate Fallback Models' }), null);
 });
 
 it('keeps provider drafts independent, remasks switched keys and saves empty fallback chains', async () => {
@@ -668,7 +669,7 @@ it('formats raw text, reviews preview diff with conflict override, and commits i
 
   mock.method(api, 'getProgressImportStatus', async () => ({
     configured: true,
-    model: 'models/gemini-3.8-flash',
+    model: 'models/gemini-4-hydrogen',
   }));
 
   mock.method(api, 'getProgressSnapshots', async () => ({
@@ -689,7 +690,7 @@ it('formats raw text, reviews preview diff with conflict override, and commits i
       },
     ],
     unparsedSnippets: [],
-    model: 'models/gemini-3.8-flash',
+    model: 'models/gemini-4-hydrogen',
   }));
 
   const mockPreview = mock.method(api, 'previewProgressImport', async () => ({
@@ -827,7 +828,7 @@ it('configures Gemini API key with default dots masking, eye icon toggle, and mo
     updatedAt: 2,
   }));
 
-  mock.method(api, 'testGeminiConnection', async () => ({ ok: true, model: 'models/gemini-3.8-flash' }));
+  mock.method(api, 'testGeminiConnection', async () => ({ ok: true, model: 'models/gemini-4-hydrogen' }));
 
   await act(async () => {
     render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} section="ai" />);
@@ -868,50 +869,24 @@ it('configures Gemini API key with default dots masking, eye icon toggle, and mo
   fireEvent.click(advanced);
   assert.equal(advanced.getAttribute('aria-expanded'), 'true');
 
-  // 5. Test Preferred Model dropdown
+  // 5. Test Preferred Model dropdown and Hydrogen reasoning effort options
   const modelSelect = screen.getByLabelText('Preferred Model') as HTMLSelectElement;
   assert.ok(modelSelect);
-  const effortSelect = screen.getByLabelText('Reasoning Effort') as HTMLSelectElement;
-  assert.deepEqual([...effortSelect.options].map(o => o.value), ['low', 'medium', 'high']);
-  assert.equal(effortSelect.value, 'medium');
-
-  await act(async () => {
-    fireEvent.change(modelSelect, { target: { value: 'models/gemini-4-hydrogen' } });
-  });
+  assert.deepEqual([...modelSelect.options].map(o => o.value), ['models/gemini-4-hydrogen']);
   assert.equal(modelSelect.value, 'models/gemini-4-hydrogen');
+  const effortSelect = screen.getByLabelText('Reasoning Effort') as HTMLSelectElement;
   assert.deepEqual([...effortSelect.options].map(o => o.value), ['low', 'medium', 'high', 'xhigh']);
+  assert.equal(effortSelect.value, 'high');
 
   await act(async () => {
     fireEvent.change(effortSelect, { target: { value: 'xhigh' } });
   });
   assert.equal(effortSelect.value, 'xhigh');
 
-  // Verify that switching back to gemini-3.8-flash clamps unsupported xhigh and preserves supported levels
-  await act(async () => {
-    fireEvent.change(modelSelect, { target: { value: 'models/gemini-3.8-flash' } });
-  });
-  assert.equal(effortSelect.value, 'medium');
-  await act(async () => {
-    fireEvent.change(modelSelect, { target: { value: 'models/gemini-4-hydrogen' } });
-  });
-  await act(async () => {
-    fireEvent.change(effortSelect, { target: { value: 'xhigh' } });
-  });
+  // Single-model Gemini hides Candidate Fallback Models UI
+  assert.equal(screen.queryByRole('group', { name: 'Candidate Fallback Models' }), null);
 
-  // Verify that the newly selected primary model is disabled in candidate chips and pruned from fallbacks
-  const chipHydrogen = screen.getByRole('button', { name: 'gemini-4-hydrogen' });
-  assert.equal(chipHydrogen.hasAttribute('disabled'), true);
-
-  // 6. Test Candidate model chip toggle
-  const chipFlash = screen.getByRole('button', { name: 'gemini-3.8-flash' });
-  assert.ok(chipFlash);
-  assert.equal(chipFlash.getAttribute('aria-pressed'), 'false');
-  await act(async () => {
-    fireEvent.click(chipFlash);
-  });
-  assert.equal(chipFlash.getAttribute('aria-pressed'), 'true');
-
-  // 7. Test Save AI settings
+  // 6. Test Save AI settings
   assert.equal(updateCalls.mock.callCount(), 0);
   const saveAiBtn = screen.getByRole('button', { name: 'Save AI settings' });
   await act(async () => {
@@ -922,15 +897,15 @@ it('configures Gemini API key with default dots masking, eye icon toggle, and mo
   assert.equal(sentPayload.geminiApiKey, 'AIzaSyPastedKey456');
   assert.equal(sentPayload.geminiModel, 'models/gemini-4-hydrogen');
   assert.equal(sentPayload.geminiReasoningEffort, 'xhigh');
-  assert.deepEqual(sentPayload.geminiFallbackModels, ['models/gemini-3.8-flash']);
+  assert.deepEqual(sentPayload.geminiFallbackModels, []);
   assert.ok(screen.getByText('AI settings saved'));
 
-  // 8. Test Connection button
+  // 7. Test Connection button
   const testBtn = screen.getByRole('button', { name: 'Test Connection' });
   await act(async () => {
     fireEvent.click(testBtn);
   });
-  assert.ok(screen.getByText('Connection successful (models/gemini-3.8-flash)'));
+  assert.ok(screen.getByText('Connection successful (models/gemini-4-hydrogen)'));
 });
 
 it('renders vendor-specific reasoning effort choices for OpenAI and DeepSeek', async () => {

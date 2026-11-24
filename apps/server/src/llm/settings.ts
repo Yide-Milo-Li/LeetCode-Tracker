@@ -19,6 +19,7 @@ export function resolveAssistantSettings(store: CatalogStore): LLMAssistantOptio
     if (provider === 'gemini') {
       const model = normalizeGeminiModel(settings.geminiModel)
         ?? (hasRow('model') && settings.geminiModel ? defaultGeminiModel : undefined);
+      const effectiveModel = model ?? defaultGeminiModel;
       providers.gemini = {
         apiKey: hasRow('api_key') ? settings.geminiApiKey ?? '' : undefined,
         model,
@@ -26,11 +27,11 @@ export function resolveAssistantSettings(store: CatalogStore): LLMAssistantOptio
           ? [...new Set(
               (settings.geminiFallbackModels ?? [])
                 .map(m => normalizeGeminiModel(m))
-                .filter((m): m is NonNullable<typeof m> => m !== null && m !== model)
+                .filter((m): m is NonNullable<typeof m> => m !== null && m !== effectiveModel)
             )]
           : undefined,
         reasoningEffort: hasRow('reasoning_effort') && settings.geminiReasoningEffort
-          ? resolveModelReasoningEffort('gemini', model, settings.geminiReasoningEffort)
+          ? resolveModelReasoningEffort('gemini', effectiveModel, settings.geminiReasoningEffort)
           : undefined,
         baseUrl: undefined,
       };
