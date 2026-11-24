@@ -200,8 +200,28 @@ const API_ERROR_MESSAGES: Record<string, BilingualMessage> = {
     zh: 'AI 服务商配额或余额不足，请检查账户额度或切换模型。',
   },
   OPENAI_QUOTA_EXCEEDED: {
-    en: 'OpenAI quota or balance exceeded. Check your billing or try another model.',
-    zh: 'OpenAI 配额或余额不足，请检查账户额度或切换模型。',
+    en: 'OpenAI quota or usage limit reached. With a ChatGPT sign-in, review your plan and app limits in ChatGPT settings → Usage; with an API key, check your billing.',
+    zh: 'OpenAI 配额或用量已达上限。使用 ChatGPT 登录时，请在 ChatGPT 设置 → 用量中查看套餐与应用限额；使用 API 密钥时，请检查账户额度。',
+  },
+  OPENAI_NOT_CONFIGURED: {
+    en: 'OpenAI is not ready. Sign in with ChatGPT or add an API key in Settings.',
+    zh: 'OpenAI 尚未就绪。请在设置中使用 ChatGPT 登录或填写 API 密钥。',
+  },
+  OPENAI_OAUTH_RECONNECT_REQUIRED: {
+    en: 'ChatGPT access expired or was revoked. Sign in again in Settings.',
+    zh: 'ChatGPT 授权已过期或被撤销，请在设置中重新登录。',
+  },
+  OPENAI_OAUTH_UNAVAILABLE: {
+    en: 'Could not reach OpenAI to renew ChatGPT access. Try again shortly.',
+    zh: '暂时无法连接 OpenAI 续期 ChatGPT 授权，请稍后重试。',
+  },
+  OPENAI_OAUTH_MODELS_UNAVAILABLE: {
+    en: 'Could not load the models available to this ChatGPT account.',
+    zh: '无法加载此 ChatGPT 账号可用的模型。',
+  },
+  OPENAI_OAUTH_FAILED: {
+    en: 'ChatGPT sign-in could not be completed. Try again.',
+    zh: 'ChatGPT 登录未能完成，请重试。',
   },
   DEEPSEEK_QUOTA_EXCEEDED: {
     en: 'DeepSeek balance is insufficient. Check your provider billing.',

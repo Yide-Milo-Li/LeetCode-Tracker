@@ -52,7 +52,15 @@ pub fn external_url(value: &str) -> Result<Url, String> {
         || !matches!(
             url.host_str(),
             // accounts.google.com hosts the OAuth consent page for Google Drive sync.
-            Some("leetcode.com" | "leetcode.cn" | "github.com" | "accounts.google.com")
+            // auth.openai.com hosts Sign in with ChatGPT; chatgpt.com hosts its usage settings.
+            Some(
+                "leetcode.com"
+                    | "leetcode.cn"
+                    | "github.com"
+                    | "accounts.google.com"
+                    | "auth.openai.com"
+                    | "chatgpt.com"
+            )
         )
     {
         return Err("External URL is not allowed".into());
@@ -128,6 +136,8 @@ mod tests {
             "https://github.com:1234/",
             "https://accounts.google.com.evil.test/",
             "http://accounts.google.com/o/oauth2/v2/auth",
+            "https://auth.openai.com.evil.test/api/accounts/authorize",
+            "https://evil.chatgpt.com/settings/usage",
         ] {
             assert!(external_url(url).is_err(), "{url}");
         }
@@ -137,6 +147,11 @@ mod tests {
             "https://accounts.google.com/o/oauth2/v2/auth?client_id=x&state=y&scope=z"
         )
         .is_ok());
+        assert!(external_url(
+            "https://auth.openai.com/api/accounts/authorize?client_id=x&state=y&scope=z"
+        )
+        .is_ok());
+        assert!(external_url("https://chatgpt.com/settings/usage").is_ok());
         for path in [
             "/api/v1/../../secret",
             "/api/v1/%2e%2e/secret",

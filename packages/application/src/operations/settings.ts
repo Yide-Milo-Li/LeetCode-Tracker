@@ -4,6 +4,7 @@
 import {
   updateSettingsInputSchema,
   fixedProviderModels,
+  isValidDynamicOpenaiModel,
   normalizeGeminiModel,
   normalizeOpenaiModel,
   normalizeReasoningEffort,
@@ -61,6 +62,8 @@ export function createSettingsOperations(context: ApplicationContext) {
       parseRes.data.openaiBaseUrl !== undefined ||
       parseRes.data.openaiFallbackModels !== undefined ||
       parseRes.data.openaiReasoningEffort !== undefined ||
+      parseRes.data.openaiAuthMode !== undefined ||
+      parseRes.data.openaiChatgptModel !== undefined ||
       parseRes.data.deepseekApiKey !== undefined ||
       parseRes.data.deepseekModel !== undefined ||
       parseRes.data.deepseekBaseUrl !== undefined ||
@@ -77,6 +80,7 @@ export function createSettingsOperations(context: ApplicationContext) {
   const test = async (input: unknown = {}) => {
     const parsed = z.object({
       provider: z.enum(['gemini', 'openai', 'deepseek']).optional(),
+      authMode: z.enum(['api_key', 'chatgpt']).optional(),
       apiKey: z.string().max(256).optional(),
       model: z.string().trim().min(1).max(100).optional(),
       baseUrl: z.string().trim().max(256).refine(value => {
@@ -86,8 +90,10 @@ export function createSettingsOperations(context: ApplicationContext) {
       reasoningEffort: z.string().trim().min(1).max(32).optional(),
     }).safeParse(input ?? {});
     if (!parsed.success) return fail(400, { error: 'INVALID_SETTINGS', message: 'Invalid provider connection parameters' });
-    const { provider, apiKey, model, baseUrl, reasoningEffort } = parsed.data;
+    const { provider, authMode, apiKey, model, baseUrl, reasoningEffort } = parsed.data;
     const effectiveProvider = provider ?? gemini.getStatus().provider ?? 'gemini';
+    // Tests the ChatGPT sign-in; the account's model list is dynamic, so only the slug shape is checked.
+    const chatgpt = effectiveProvider === 'openai' && authMode === 'chatgpt';
     let effectiveModel: string | undefined;
     if (effectiveProvider === 'gemini') {
       if (model !== undefined) {
@@ -100,6 +106,11 @@ export function createSettingsOperations(context: ApplicationContext) {
         }
         effectiveModel = normalizedModel;
       }
+    } else if (chatgpt) {
+      if (model !== undefined && !isValidDynamicOpenaiModel(model)) {
+        return fail(400, { error: 'INVALID_SETTINGS', message: 'Invalid ChatGPT model identifier' });
+      }
+      effectiveModel = model ?? store.getSettings().openaiChatgptModel ?? undefined;
     } else if (effectiveProvider === 'openai') {
       if (model !== undefined) {
         const normalizedModel = normalizeOpenaiModel(model);
@@ -130,9 +141,11 @@ export function createSettingsOperations(context: ApplicationContext) {
     if (gemini.testConnection) {
       const res = await gemini.testConnection({
         provider: effectiveProvider,
+        ...(effectiveProvider === 'openai' && authMode ? { authMode } : {}),
         apiKey,
         model: effectiveModel,
-        baseUrl,
+        // ChatGPT plan usage always targets the official API.
+        baseUrl: chatgpt ? undefined : baseUrl,
         ...(normalizedEffort !== undefined ? { reasoningEffort: normalizedEffort } : {}),
       });
       if (!res.ok) {

@@ -54,6 +54,21 @@ export function isSupportedOpenaiModel(model?: string | null): boolean {
   return normalizeOpenaiModel(model) !== null;
 }
 
+/**
+ * How the OpenAI provider authenticates. `api_key` uses a stored key against Chat Completions
+ * (any OpenAI-compatible endpoint); `chatgpt` uses a Sign in with ChatGPT OAuth token against the
+ * official Responses API and bills the user's ChatGPT plan.
+ */
+export type OpenAIAuthMode = 'api_key' | 'chatgpt';
+
+/**
+ * Check the shape of a model slug discovered from the signed-in ChatGPT account's model list.
+ * The list is account-specific, so membership cannot be validated statically.
+ */
+export function isValidDynamicOpenaiModel(model?: string | null): boolean {
+  return typeof model === 'string' && /^[a-z0-9][a-z0-9._:-]{0,99}$/i.test(model.trim());
+}
+
 /** All canonical reasoning effort identifiers across providers. */
 export const reasoningEffortLevels = ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type ReasoningEffort = (typeof reasoningEffortLevels)[number];

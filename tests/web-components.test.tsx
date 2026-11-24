@@ -101,6 +101,91 @@ it('keeps provider drafts independent, remasks switched keys and saves empty fal
   assert.deepEqual(payload.openaiFallbackModels, []);
 });
 
+it('offers ChatGPT sign-in for OpenAI and keeps the API key path intact', async () => {
+  const signedOut = { connected: false, reconnectRequired: false, accountEmail: null as string | null, planScopeGranted: false };
+  const signedIn = { connected: true, reconnectRequired: false, accountEmail: 'user@example.test', planScopeGranted: true };
+  const initial = { language: 'en' as const, theme: 'light' as const, timezone: 'UTC', updatedAt: 1,
+    llmProvider: 'openai' as const, openaiApiKey: 'synthetic-o', openaiAuthMode: 'api_key' as const, openaiOAuth: signedOut };
+  let oauth = signedOut;
+  mock.method(api, 'getSettings', async () => ({ ...initial, openaiOAuth: oauth, openaiChatgptModel: oauth.connected ? 'gpt-synthetic-a' : null }));
+  mock.method(api, 'getOpenAIOAuthStatus', async () => oauth);
+  mock.method(api, 'getOpenAIChatGPTModels', async () => ({ models: [
+    { slug: 'gpt-synthetic-a', displayName: 'Synthetic A' }, { slug: 'gpt-synthetic-b', displayName: 'Synthetic B' },
+  ] }));
+  const connects = mock.method(api, 'connectOpenAIChatGPT', async () => ({ authUrl: 'https://auth.openai.com/api/accounts/authorize?state=synthetic' }));
+  const disconnects = mock.method(api, 'disconnectOpenAIChatGPT', async () => { oauth = signedOut; return { ...signedOut, accountEmail: 'user@example.test', revocationConfirmed: false }; });
+  const writes = mock.method(api, 'updateSettings', async (payload: any) => ({ ...initial, ...payload }));
+  const probes = mock.method(api, 'testLlmConnection', async () => ({ ok: true, model: 'gpt-synthetic-b' }));
+  const opened = mock.method(window, 'open', () => null);
+
+  await act(async () => { render(<SettingsView lang="en" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} section="ai" />); });
+  // An existing API-key setup opens on the key, unchanged.
+  assert.match(screen.getByRole('status').textContent!, /Using OpenAI/);
+  assert.equal((screen.getByLabelText('API Key (OpenAI)') as HTMLInputElement).value, 'synthetic-o');
+
+  fireEvent.click(screen.getByRole('button', { name: 'ChatGPT account' }));
+  assert.equal(screen.queryByLabelText('API Key (OpenAI)'), null);
+  // Nothing to test until a session exists.
+  assert.equal((screen.getByRole('button', { name: 'Test Connection' }) as HTMLButtonElement).disabled, true);
+  const signIn = screen.getByRole('button', { name: 'Continue with ChatGPT' });
+  assert.ok(signIn.hasAttribute('data-oai-siwc-button'));
+
+  // The browser sign-in finishes on the server; the panel picks it up from the status poll.
+  oauth = signedIn;
+  await act(async () => { fireEvent.click(signIn); });
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+  assert.deepEqual(connects.mock.calls[0].arguments[0], { freshRegistration: false });
+  assert.match(String(opened.mock.calls[0].arguments[0]), /^https:\/\/auth\.openai\.com\//);
+  assert.match(screen.getByText(/Connected/).textContent!, /Connected · user@example\.test/);
+  assert.equal(screen.queryByRole('button', { name: 'Continue with ChatGPT' }), null);
+
+  // The account's own models replace the static list, and no endpoint override is offered.
+  fireEvent.click(screen.getByRole('button', { name: 'Advanced: model' }));
+  assert.equal(screen.queryByLabelText('API Base URL (Optional)'), null);
+  const model = screen.getByLabelText('Preferred Model') as HTMLSelectElement;
+  assert.deepEqual([...model.options].map(option => [option.value, option.textContent]), [['gpt-synthetic-a', 'Synthetic A'], ['gpt-synthetic-b', 'Synthetic B']]);
+  assert.equal(model.value, 'gpt-synthetic-a');
+  fireEvent.change(model, { target: { value: 'gpt-synthetic-b' } });
+
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Test Connection' })); });
+  const probe = probes.mock.calls[0].arguments[0]!;
+  assert.equal(probe.authMode, 'chatgpt');
+  assert.equal(probe.model, 'gpt-synthetic-b');
+  assert.equal(probe.apiKey, undefined);
+
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save AI settings' })); });
+  const payload = writes.mock.calls[0].arguments[0];
+  assert.equal(payload.openaiAuthMode, 'chatgpt');
+  assert.equal(payload.openaiChatgptModel, 'gpt-synthetic-b');
+  // The stored key and its static model are saved unchanged, so switching back needs no re-entry.
+  assert.equal(payload.openaiApiKey, 'synthetic-o');
+  assert.equal(payload.openaiModel, 'gpt-6-luna');
+  assert.match(screen.getAllByRole('status')[0].textContent!, /Using ChatGPT plan/);
+  assert.equal(screen.getByRole('link', { name: 'Manage usage' }).getAttribute('href'), 'https://chatgpt.com/settings/usage');
+
+  // Signing out reports an unconfirmed revocation and offers the saved or another account.
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Disconnect' })); });
+  assert.equal(disconnects.mock.callCount(), 1);
+  assert.match(document.body.textContent!, /did not confirm the revocation/);
+  assert.match(screen.getAllByRole('status')[0].textContent!, /Not configured/);
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Use a different account' })); });
+  assert.deepEqual(connects.mock.calls[1].arguments[0], { freshRegistration: true });
+});
+
+it('asks to reconnect when the stored ChatGPT session was rejected', async () => {
+  mock.method(api, 'getSettings', async () => ({ language: 'zh', theme: 'light', timezone: 'UTC', updatedAt: 1,
+    llmProvider: 'openai', openaiAuthMode: 'chatgpt', openaiChatgptModel: 'gpt-synthetic-a',
+    openaiOAuth: { connected: true, reconnectRequired: true, accountEmail: 'user@example.test', planScopeGranted: true } }));
+  const models = mock.method(api, 'getOpenAIChatGPTModels', async () => ({ models: [] }));
+  await act(async () => { render(<SettingsView lang="zh" currentTheme="light" onLanguageChange={() => {}} onThemeChange={() => {}} section="ai" />); });
+  assert.match(screen.getAllByRole('status')[0].textContent!, /未配置/);
+  assert.match(document.body.textContent!, /ChatGPT 授权已失效 · user@example\.test/);
+  assert.ok(screen.getByRole('button', { name: '重新连接 ChatGPT' }));
+  assert.equal((screen.getByRole('button', { name: '测试连接' }) as HTMLButtonElement).disabled, true);
+  // An unusable session must not be used to fetch the model list.
+  assert.equal(models.mock.callCount(), 0);
+});
+
 it('renders progress import history in the configured timezone with a UTC fallback in both languages', async () => {
   const importedAt = Date.parse('2026-09-10T03:00:00Z');
   mock.method(api, 'getProgressImportHistory', async () => ({

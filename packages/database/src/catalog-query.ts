@@ -5,6 +5,13 @@
 import { reconcileGoalEvidence } from './goal-lists.ts';
 import type { DatabaseSync } from 'node:sqlite';
 import { FAVORITE_PROBLEM_PREFIX } from './favorites.ts';
+import {
+  OPENAI_OAUTH_SETTING_KEYS,
+  readOpenAIOAuthSettings,
+  resolveOpenAIAuthMode,
+  summarizeOpenAIOAuth,
+  writeOpenAIOAuthSettings,
+} from './openai-oauth-store.ts';
 import type { CatalogListProblem } from '../../contracts/src/favorites.ts';
 import {
   catalogProblemSchema,
@@ -473,6 +480,7 @@ export function getUserSettings(db: DatabaseSync): UserSettings {
   const geminiReasoningEffort = normalizeReasoningEffort('gemini', rawGeminiEffort, geminiModel);
   const openaiReasoningEffort = normalizeReasoningEffort('openai', rawOpenaiEffort);
   const deepseekReasoningEffort = normalizeReasoningEffort('deepseek', rawDeepseekEffort);
+  const openaiOAuthSettings = readOpenAIOAuthSettings(db);
 
   return {
     language,
@@ -493,6 +501,9 @@ export function getUserSettings(db: DatabaseSync): UserSettings {
     openaiBaseUrl,
     openaiFallbackModels,
     openaiReasoningEffort,
+    openaiAuthMode: resolveOpenAIAuthMode(openaiOAuthSettings, Boolean(openaiApiKey)),
+    openaiChatgptModel: openaiOAuthSettings.model,
+    openaiOAuth: summarizeOpenAIOAuth(openaiOAuthSettings),
     deepseekApiKey,
     deepseekModel,
     deepseekBaseUrl,
@@ -628,6 +639,16 @@ export function updateUserSettingsTransaction(
     persistProviderConfig('gemini', input.geminiApiKey, input.geminiModel, undefined, input.geminiFallbackModels, input.geminiReasoningEffort);
     persistProviderConfig('openai', input.openaiApiKey, input.openaiModel, input.openaiBaseUrl, input.openaiFallbackModels, input.openaiReasoningEffort);
     persistProviderConfig('deepseek', input.deepseekApiKey, input.deepseekModel, input.deepseekBaseUrl, input.deepseekFallbackModels, input.deepseekReasoningEffort);
+
+    // Device-local ChatGPT sign-in choices; the stored API key is left untouched so the user can switch back.
+    if (input.openaiAuthMode !== undefined || input.openaiChatgptModel !== undefined) {
+      writeOpenAIOAuthSettings(db, {
+        ...(input.openaiAuthMode !== undefined ? { [OPENAI_OAUTH_SETTING_KEYS.authMode]: input.openaiAuthMode } : {}),
+        ...(input.openaiChatgptModel !== undefined
+          ? { [OPENAI_OAUTH_SETTING_KEYS.model]: input.openaiChatgptModel?.trim() || null }
+          : {}),
+      });
+    }
 
     db.exec('COMMIT;');
   } catch (err) {

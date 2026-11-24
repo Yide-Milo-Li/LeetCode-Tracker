@@ -6,14 +6,20 @@ export interface LLMUsage {
 const count = (value: unknown): number | null => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
 const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' ? value as Record<string, unknown> : {};
 
-/** Normalize documented Gemini and OpenAI-compatible usage, preserving unknown fields. */
+/**
+ * Normalize documented Gemini and OpenAI-compatible usage, preserving unknown fields.
+ * OpenAI usage is read from Chat Completions names first, then from the Responses API names
+ * (`input_tokens`, `output_tokens`, `*_tokens_details`).
+ */
 export function normalizeUsage(provider: string, value?: unknown): LLMUsage {
-  const raw = object(value), promptDetails = object(raw.prompt_tokens_details), completionDetails = object(raw.completion_tokens_details);
+  const raw = object(value);
+  const promptDetails = object(raw.prompt_tokens_details ?? raw.input_tokens_details);
+  const completionDetails = object(raw.completion_tokens_details ?? raw.output_tokens_details);
   const reasoning = count(provider === 'gemini' ? raw.thoughtsTokenCount : completionDetails.reasoning_tokens);
   const visible = count(raw.candidatesTokenCount);
   const normalized = {
-    inputTokens: count(provider === 'gemini' ? raw.promptTokenCount : raw.prompt_tokens),
-    outputTokens: provider === 'gemini' ? visible === null ? null : count(visible + (reasoning ?? 0)) : count(raw.completion_tokens),
+    inputTokens: count(provider === 'gemini' ? raw.promptTokenCount : raw.prompt_tokens ?? raw.input_tokens),
+    outputTokens: provider === 'gemini' ? visible === null ? null : count(visible + (reasoning ?? 0)) : count(raw.completion_tokens ?? raw.output_tokens),
     cachedInputTokens: count(provider === 'gemini' ? raw.cachedContentTokenCount : promptDetails.cached_tokens ?? raw.prompt_cache_hit_tokens),
     reasoningTokens: reasoning,
     totalTokens: count(provider === 'gemini' ? raw.totalTokenCount : raw.total_tokens),

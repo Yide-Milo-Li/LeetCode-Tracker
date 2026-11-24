@@ -13,7 +13,7 @@ All maintained documentation is English. The app supports Chinese and English ac
 - [Application boundaries](application-boundaries.md): Shared HTTP and MCP operations, write ownership and the desktop bridge.
 - [MCP and LCT setup](../apps/mcp/README.md): Connect an AI client to the local profile and install practice shortcuts in the desktop app.
 - [Device sync](sync.md): Transfer your profile through a sync folder or the Google Drive app data folder. Includes setup for official installers and source runs, fork handling and limits.
-- [AI provider configuration](llm-providers.md): Supported Gemini (`gemini-3.8-flash`, `gemini-4-hydrogen`), OpenAI (`gpt-6-luna`, `gpt-6.1-terra`), and DeepSeek (`deepseek-flash`) models, per-model reasoning effort controls, credential isolation, and fallback policies.
+- [AI provider configuration](llm-providers.md): Supported Gemini (`gemini-3.8-flash`, `gemini-4-hydrogen`), OpenAI (`gpt-6-luna`, `gpt-6.1-terra`), and DeepSeek (`deepseek-flash`) models, Sign in with ChatGPT for OpenAI, per-model reasoning effort controls, credential isolation, and fallback policies.
 
 ## Product & Desktop Workflows
 

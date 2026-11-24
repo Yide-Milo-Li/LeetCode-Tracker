@@ -16,6 +16,8 @@ import { AsyncLock } from './async-lock.ts';
 import { registerMigrationGate } from './migration-gate.ts';
 import { registerAllRoutes } from './routes/index.ts';
 import { GOOGLE_CALLBACK_PATH } from './routes/sync.ts';
+import { OPENAI_CALLBACK_PATH } from './llm/openai-oauth.ts';
+import { OpenAIOAuthService, type OpenAIOAuthServiceOptions } from './llm/openai-oauth-service.ts';
 import { DeviceSyncService, type DeviceSyncOptions } from './sync/sync-service.ts';
 import { reloadModelConfiguration } from './profile-refresh.ts';
 import { DESKTOP_AGENT_HEADER, DESKTOP_AGENT_PATH } from '../../../packages/contracts/src/desktop-agent.ts';
@@ -37,6 +39,8 @@ export interface AppOptions {
   profileDirectory?: string;
   /** Device sync configuration and test seams; defaults use real Google. */
   deviceSync?: Partial<DeviceSyncOptions>;
+  /** Sign in with ChatGPT test seams; defaults use the real OpenAI endpoints. */
+  openAIOAuth?: OpenAIOAuthServiceOptions;
 }
 
 /**
@@ -48,9 +52,14 @@ export interface AppOptions {
 export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const { store } = options;
   const diagnosticSink = options.profileDirectory ? createDiagnosticSink(options.profileDirectory) : undefined;
-  const gemini = options.geminiAssistant ?? new GeminiAssistant({ ...resolveAssistantSettings(store), diagnosticSink });
+  // Created before the assistant: OpenAI `chatgpt` mode reads its access tokens from this service.
+  const openAIOAuth: OpenAIOAuthService = new OpenAIOAuthService(
+    { store, onStateChanged: () => refreshModelConfiguration() },
+    options.openAIOAuth
+  );
+  const gemini = options.geminiAssistant ?? new GeminiAssistant({ ...resolveAssistantSettings(store, openAIOAuth.tokenSource), diagnosticSink });
   const writeLock = new AsyncLock();
-  const refreshModelConfiguration = () => reloadModelConfiguration(store, gemini);
+  const refreshModelConfiguration = () => reloadModelConfiguration(store, gemini, openAIOAuth.tokenSource);
   const application = createTrackerApplication({ store, modelService: gemini, writeLock, diagnosticSink, refreshModelConfiguration });
   // The two transports share business code and commit order. MCP planning uses local rules.
   const agentApplication = options.desktopAgent && options.sessionSecret
@@ -85,9 +94,10 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         if (!request.headers.origin && options.desktopAgent.authenticate(request.headers[DESKTOP_AGENT_HEADER])) return;
         return reply.code(401).send({ error: 'UNAUTHORIZED_AGENT', message: 'Invalid or missing desktop agent token.' });
       }
-      // The system browser delivers the OAuth redirect without the session header; that route
-      // only accepts a single-use state created by an authenticated connect request.
-      if (request.method === 'GET' && request.url.split('?')[0] === GOOGLE_CALLBACK_PATH) return;
+      // The system browser delivers the OAuth redirects without the session header; those routes
+      // only accept a single-use state created by an authenticated connect request.
+      const path = request.url.split('?')[0];
+      if (request.method === 'GET' && (path === GOOGLE_CALLBACK_PATH || path === OPENAI_CALLBACK_PATH)) return;
       const token = request.headers['x-desktop-session-token'];
       if (token !== requiredSecret) {
         return reply.status(401).send({
@@ -136,6 +146,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     { store, writeLock, refreshAfterReplace: () => {
       application.resetTransientState();
       agentApplication?.resetTransientState();
+      // Cached tokens belong to the replaced database handle; stored credentials are re-read lazily.
+      openAIOAuth.reset();
       try { refreshModelConfiguration(); }
       catch { return 'Profile restored; AI settings will be reloaded on the next restart.'; }
     } },
@@ -149,16 +161,19 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     }
   );
   app.addHook('onClose', () => deviceSync.close());
+  app.addHook('onClose', async () => openAIOAuth.close());
   app.addHook('onResponse', async (request, reply) => {
     if (reply.statusCode < 200 || reply.statusCode >= 300 ||
         !['POST', 'PATCH', 'PUT', 'DELETE'].includes(request.method) ||
-        request.url.startsWith('/api/v1/sync/') || request.routeOptions.url === '/api/v1/goal-lists/memberships/lookup') return;
+        request.url.startsWith('/api/v1/sync/') || request.url.startsWith('/api/v1/settings/openai/oauth/') ||
+        request.routeOptions.url === '/api/v1/goal-lists/memberships/lookup') return;
     deviceSync.observeLocalWrite();
   });
   registerAllRoutes(app, {
     application,
     deviceSync,
-    afterBundleRestore: () => agentApplication?.resetTransientState(),
+    openAIOAuth,
+    afterBundleRestore: () => { agentApplication?.resetTransientState(); openAIOAuth.reset(); },
   });
   if (options.desktopAgent && agentApplication) {
     registerDesktopAgentRoutes(app, options.desktopAgent, {

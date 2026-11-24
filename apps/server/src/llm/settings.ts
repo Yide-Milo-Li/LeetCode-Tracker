@@ -8,10 +8,15 @@ import {
   resolveModelReasoningEffort,
 } from '../../../../packages/contracts/src/sync.ts';
 import type { CatalogStore } from '../../../../packages/database/src/store.ts';
-import type { LLMAssistantOptions, LLMProviderType, ProviderConfig } from './types.ts';
+import { OPENAI_RESPONSES_BASE_URL } from './providers/openai-responses.ts';
+import type { LLMAssistantOptions, LLMProviderType, OpenAITokenSource, ProviderConfig } from './types.ts';
 
-/** Explicitly cleared keys disable that provider; missing rows may use environment defaults. */
-export function resolveAssistantSettings(store: CatalogStore): LLMAssistantOptions {
+/**
+ * Explicitly cleared keys disable that provider; missing rows may use environment defaults.
+ *
+ * @param openAIOAuth Sign in with ChatGPT token source; required for OpenAI `chatgpt` mode.
+ */
+export function resolveAssistantSettings(store: CatalogStore, openAIOAuth?: OpenAITokenSource): LLMAssistantOptions {
   const settings = store.getSettings();
   const providers: Partial<Record<LLMProviderType, ProviderConfig>> = {};
   for (const provider of ['gemini', 'openai', 'deepseek'] as const) {
@@ -35,8 +40,13 @@ export function resolveAssistantSettings(store: CatalogStore): LLMAssistantOptio
         baseUrl: undefined,
       };
     } else if (provider === 'openai') {
-      const model = normalizeOpenaiModel(settings.openaiModel)
-        ?? (hasRow('model') && settings.openaiModel ? defaultOpenaiModel : undefined);
+      // ChatGPT mode needs the token source; without one (tests, MCP) the key path stays in use.
+      const chatgpt = settings.openaiAuthMode === 'chatgpt' && Boolean(openAIOAuth);
+      const model = chatgpt
+        // Account-specific slug chosen from the signed-in account's model list.
+        ? settings.openaiChatgptModel ?? defaultOpenaiModel
+        : normalizeOpenaiModel(settings.openaiModel)
+          ?? (hasRow('model') && settings.openaiModel ? defaultOpenaiModel : undefined);
       providers.openai = {
         apiKey: hasRow('api_key') ? settings.openaiApiKey ?? '' : undefined,
         model,
@@ -44,7 +54,10 @@ export function resolveAssistantSettings(store: CatalogStore): LLMAssistantOptio
         reasoningEffort: hasRow('reasoning_effort') && settings.openaiReasoningEffort
           ? resolveModelReasoningEffort('openai', model ?? defaultOpenaiModel, settings.openaiReasoningEffort)
           : undefined,
-        baseUrl: settings.openaiBaseUrl ?? undefined,
+        // ChatGPT plan usage is served only by the official API, never a custom gateway.
+        baseUrl: chatgpt ? OPENAI_RESPONSES_BASE_URL : settings.openaiBaseUrl ?? undefined,
+        authMode: chatgpt ? 'chatgpt' : 'api_key',
+        oauthTokenSource: chatgpt ? openAIOAuth : undefined,
       };
     } else {
       providers.deepseek = {

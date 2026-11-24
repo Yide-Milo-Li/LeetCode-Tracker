@@ -1,23 +1,28 @@
 /**
  * OpenAI provider adapter using Node native global fetch.
- * Implements standard OpenAI Chat Completions API with structured JSON mode.
+ * `api_key` mode uses the Chat Completions API with structured JSON mode on any compatible
+ * endpoint; `chatgpt` mode uses the official Responses API with a Sign in with ChatGPT token.
  * Zero external npm dependencies.
  */
 import {
   defaultOpenaiModel,
   normalizeOpenaiModel,
   resolveModelReasoningEffort,
+  type OpenAIAuthMode,
   type ReasoningEffort,
 } from '../../../../../packages/contracts/src/sync.ts';
 import { BaseLLMProvider, ProviderOutputError } from './base.ts';
 import { normalizeUsage } from '../usage.ts';
-import type {
-  LLMProviderType,
-  GenerateContentParams,
-  GenerateContentOutput,
-  ConnectionTestParams,
-  ConnectionTestResult,
-  CustomGenerateFn,
+import { createResponse, ResponsesApiError, type ResponsesRequest, type ResponsesResult } from './openai-responses.ts';
+import {
+  LLMError,
+  type LLMProviderType,
+  type GenerateContentParams,
+  type GenerateContentOutput,
+  type ConnectionTestParams,
+  type ConnectionTestResult,
+  type CustomGenerateFn,
+  type OpenAITokenSource,
 } from '../types.ts';
 
 export type FetchFn = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -28,8 +33,17 @@ export interface OpenAIProviderOptions {
   defaultModel?: string;
   baseUrl?: string;
   defaultReasoningEffort?: ReasoningEffort;
+  /** OpenAI only; defaults to `api_key`. */
+  authMode?: OpenAIAuthMode;
+  /** Access tokens for `chatgpt` mode. */
+  oauthTokenSource?: OpenAITokenSource;
   fetchFn?: FetchFn;
   customGenerateFn?: CustomGenerateFn;
+}
+
+/** Render the task schema with lowercase JSON Schema type names, as Chat Completions mode does. */
+function schemaInstruction(responseSchema: unknown): string {
+  return `Respond ONLY with valid JSON matching this task schema:\n${JSON.stringify(responseSchema ?? {}, (key, value) => key === 'type' && typeof value === 'string' ? value.toLowerCase() : value)}`;
 }
 
 /** Provider transport isolated from domain decisions and other provider credentials. */
@@ -39,6 +53,8 @@ export class OpenAIProvider extends BaseLLMProvider {
   protected defaultModel: string;
   protected baseUrl: string;
   protected defaultReasoningEffort: ReasoningEffort;
+  protected readonly authMode: OpenAIAuthMode;
+  protected readonly oauthTokenSource?: OpenAITokenSource;
   protected readonly fetchFn: FetchFn;
   protected readonly customGenerateFn?: CustomGenerateFn;
 
@@ -46,6 +62,9 @@ export class OpenAIProvider extends BaseLLMProvider {
   constructor(options: OpenAIProviderOptions = {}) {
     super();
     this.providerId = options.providerId || 'openai';
+    // ChatGPT plan usage exists only for the official OpenAI provider.
+    this.authMode = this.providerId === 'openai' && options.authMode === 'chatgpt' ? 'chatgpt' : 'api_key';
+    this.oauthTokenSource = options.oauthTokenSource;
     this.apiKey = options.apiKey ?? (this.providerId === 'openai' ? process.env.OPENAI_API_KEY : undefined);
     this.defaultModel = options.defaultModel || (this.providerId === 'deepseek' ? (process.env.DEEPSEEK_MODEL || 'deepseek-flash') : (normalizeOpenaiModel(process.env.OPENAI_MODEL) || defaultOpenaiModel));
     this.baseUrl = (options.baseUrl || process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, '');
@@ -86,6 +105,34 @@ export class OpenAIProvider extends BaseLLMProvider {
     }
   }
 
+  /** Whether usable credentials exist for the configured auth mode; makes no network request. */
+  public isConfigured(): boolean {
+    return this.authMode === 'chatgpt'
+      ? Boolean(this.oauthTokenSource?.isConnected())
+      : Boolean(this.apiKey?.trim());
+  }
+
+  /**
+   * Run one Responses request with the ChatGPT sign-in, retrying once with a renewed token after
+   * a 401 so an access token revoked early does not fail the request.
+   *
+   * @throws LLMError `OPENAI_OAUTH_RECONNECT_REQUIRED` when no usable session exists.
+   */
+  private async requestWithChatGPT(request: ResponsesRequest): Promise<ResponsesResult> {
+    const source = this.oauthTokenSource;
+    if (!source?.isConnected()) {
+      throw new LLMError('OPENAI_OAUTH_RECONNECT_REQUIRED', 'ChatGPT is not connected. Sign in again in Settings.', 401, 'openai');
+    }
+    const token = await source.get(request.abortSignal);
+    try {
+      return await createResponse(this.fetchFn, token, request);
+    } catch (error) {
+      if (!(error instanceof ResponsesApiError) || error.status !== 401) throw error;
+      source.invalidate(token);
+      return createResponse(this.fetchFn, await source.get(request.abortSignal), request);
+    }
+  }
+
   /** Send one structured request; reject transport or missing-content failures. */
   public async generateContent(params: GenerateContentParams): Promise<GenerateContentOutput> {
     const effort = resolveModelReasoningEffort(
@@ -111,6 +158,25 @@ export class OpenAIProvider extends BaseLLMProvider {
       return { text: response.text, model: params.model, provider: this.providerId, usage: normalizeUsage(this.providerId, response.usage) };
     }
 
+    if (this.authMode === 'chatgpt') {
+      // `maxOutputTokens` is not forwarded: the ChatGPT plan route rejects `max_output_tokens`.
+      const result = await this.requestWithChatGPT({
+        model: params.model,
+        instructions: params.systemInstruction,
+        // A developer message, not a `system` item (rejected), and it puts "JSON" into `input`.
+        developer: schemaInstruction(params.responseSchema),
+        prompt: params.prompt,
+        reasoningEffort: effort,
+        json: true,
+        abortSignal: params.abortSignal,
+      });
+      if (!result.text.trim()) throw new ProviderOutputError('invalid', result.usage);
+      if (params.purpose !== 'progress_import') {
+        try { JSON.parse(result.text); } catch { throw new ProviderOutputError('invalid', result.usage); }
+      }
+      return { text: result.text, model: result.model, provider: this.providerId, usage: result.usage };
+    }
+
     if (!this.apiKey) {
       throw new Error(`${this.providerId.toUpperCase()} API key is not configured`);
     }
@@ -119,7 +185,7 @@ export class OpenAIProvider extends BaseLLMProvider {
     const requestBody = {
       model: params.model,
       messages: [
-        { role: 'system', content: `${params.systemInstruction}\n\nRespond ONLY with valid JSON matching this task schema:\n${JSON.stringify(params.responseSchema ?? {}, (key, value) => key === 'type' && typeof value === 'string' ? value.toLowerCase() : value)}` },
+        { role: 'system', content: `${params.systemInstruction}\n\n${schemaInstruction(params.responseSchema)}` },
         { role: 'user', content: params.prompt },
       ],
       response_format: { type: 'json_object' },
@@ -184,7 +250,30 @@ export class OpenAIProvider extends BaseLLMProvider {
       params?.reasoningEffort ?? this.defaultReasoningEffort
     );
 
-    if (!testKey) {
+    // An explicit mode tests the visible Settings draft even when another mode is saved.
+    const chatgpt = this.providerId === 'openai' && (params?.authMode ?? this.authMode) === 'chatgpt';
+    if (chatgpt && !this.customGenerateFn) {
+      // A real completed response is the only proof that plan usage is admitted for this account.
+      const abort = new AbortController();
+      const timeoutId = setTimeout(() => abort.abort(), 30000);
+      try {
+        const result = await this.requestWithChatGPT({
+          model: testModel,
+          instructions: 'Respond with pong',
+          prompt: 'ping',
+          reasoningEffort: effort,
+          abortSignal: abort.signal,
+        });
+        return { ok: true, model: testModel, provider: this.providerId, usage: result.usage };
+      } catch (err) {
+        const message = abort.signal.aborted ? 'The ChatGPT connection test timed out.' : err instanceof Error ? err.message : String(err);
+        return { ok: false, model: testModel, message, provider: this.providerId };
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    }
+
+    if (!chatgpt && !testKey) {
       return { ok: false, model: testModel, message: `${this.providerId.toUpperCase()} API key is not configured`, provider: this.providerId };
     }
 
@@ -253,6 +342,8 @@ export class OpenAIProvider extends BaseLLMProvider {
 
   /** Identify credentials or permissions that cannot recover by changing models. */
   public isFatalAuthError(err: Error): boolean {
+    // A lost ChatGPT session needs a new sign-in; no other model can recover it.
+    if (err instanceof LLMError && err.code === 'OPENAI_OAUTH_RECONNECT_REQUIRED') return true;
     const msg = err.message.toLowerCase();
     return (
       msg.includes('401') ||
