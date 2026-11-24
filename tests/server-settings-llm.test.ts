@@ -43,8 +43,8 @@ describe('Multi-Provider LLM Settings & Server Endpoints (/api/v1/settings)', ()
       url: '/api/v1/settings',
       payload: {
         geminiApiKey: 'AIzaSyGeminiKey',
-        geminiModel: 'models/gemini-3.8-flash',
-        geminiFallbackModels: ['models/gemini-4-hydrogen'],
+        geminiModel: 'models/gemini-4-hydrogen',
+        geminiFallbackModels: [],
       },
     });
 
@@ -85,8 +85,8 @@ describe('Multi-Provider LLM Settings & Server Endpoints (/api/v1/settings)', ()
 
     // Gemini intact
     assert.equal(finalBody.geminiApiKey, 'AIzaSyGeminiKey');
-    assert.equal(finalBody.geminiModel, 'models/gemini-3.8-flash');
-    assert.deepEqual(finalBody.geminiFallbackModels, ['models/gemini-4-hydrogen']);
+    assert.equal(finalBody.geminiModel, 'models/gemini-4-hydrogen');
+    assert.deepEqual(finalBody.geminiFallbackModels, []);
 
     // OpenAI intact
     assert.equal(finalBody.openaiApiKey, 'sk-openai-test-key');
@@ -615,7 +615,7 @@ describe('Native HTTP LLM Providers (OpenAI & DeepSeek)', () => {
     assert.equal(planRes.model, 'local');
   });
 
-  it('sends vendor-specific reasoning parameters for OpenAI, DeepSeek, and Gemini with fallback clamping', async () => {
+  it('sends vendor-specific reasoning parameters for OpenAI, DeepSeek, and Gemini', async () => {
     const capturedRequests: Array<{ url: string; body: Record<string, unknown> }> = [];
     const originalFetch = globalThis.fetch;
     try {
@@ -692,15 +692,12 @@ describe('Native HTTP LLM Providers (OpenAI & DeepSeek)', () => {
       provider: 'gemini',
       apiKey: 'AIzaTest',
       model: 'models/gemini-4-hydrogen',
-      fallbackModels: ['models/gemini-3.8-flash'],
+      fallbackModels: [],
       reasoningEffort: 'xhigh',
       maxRetriesPerModel: 0,
       initialBackoffMs: 0,
       generateContentFn: async ({ model, config }) => {
         geminiCalls.push({ model, thinkingLevel: config.thinkingConfig?.thinkingLevel });
-        if (model === 'models/gemini-4-hydrogen') {
-          throw new Error('503 temporary overload');
-        }
         return {
           text: JSON.stringify({ candidates: [], unparsedSnippets: [] }),
         };
@@ -708,13 +705,30 @@ describe('Native HTTP LLM Providers (OpenAI & DeepSeek)', () => {
     });
 
     const formatted = await geminiAssistant.formatProgressText('1. Two Sum | Accepted');
-    assert.equal(formatted.model, 'models/gemini-3.8-flash');
+    assert.equal(formatted.model, 'models/gemini-4-hydrogen');
+
+    const defaultGeminiAssistant = new LLMAssistant({
+      provider: 'gemini',
+      apiKey: 'AIzaTest',
+      model: 'models/gemini-4-hydrogen',
+      fallbackModels: [],
+      maxRetriesPerModel: 0,
+      initialBackoffMs: 0,
+      generateContentFn: async ({ model, config }) => {
+        geminiCalls.push({ model, thinkingLevel: config.thinkingConfig?.thinkingLevel });
+        return {
+          text: JSON.stringify({ candidates: [], unparsedSnippets: [] }),
+        };
+      },
+    });
+
+    await defaultGeminiAssistant.formatProgressText('1. Two Sum | Accepted');
     assert.deepEqual(geminiCalls, [
       { model: 'models/gemini-4-hydrogen', thinkingLevel: 'XHIGH' },
-      { model: 'models/gemini-3.8-flash', thinkingLevel: 'HIGH' },
+      { model: 'models/gemini-4-hydrogen', thinkingLevel: 'HIGH' },
     ]);
 
-    const directGemini = new GeminiProvider({ apiKey: 'AIzaTest', defaultModel: 'models/gemini-3.8-flash' });
+    const directGemini = new GeminiProvider({ apiKey: 'AIzaTest', defaultModel: 'models/gemini-4-hydrogen' });
     assert.ok(directGemini);
   });
 });

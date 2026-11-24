@@ -2,13 +2,13 @@
 
 In the installed Windows app, configure providers in Settings. The host supplies startup paths/session state through a private stream and removes inherited provider API keys; it does not load a checkout `.env`. Environment defaults below describe source mode. AI requests send task-relevant metadata and user instructions or progress text to the configured endpoint.
 
-Settings → AI assistant supports Gemini, OpenAI and DeepSeek; model, fallback, reasoning and base URL controls sit under **Advanced: model and endpoint**. Supported models are:
+Settings → AI assistant supports Gemini, OpenAI and DeepSeek; model, reasoning and base URL controls sit under **Advanced: model and endpoint**. Supported models are:
 
-- **Google Gemini**: `models/gemini-3.8-flash` (default) and `models/gemini-4-hydrogen`, with fallback-chain selection between those two and no custom-model input.
+- **Google Gemini**: `models/gemini-4-hydrogen`, with no custom-model or fallback-model controls.
 - **OpenAI**: `gpt-6-luna` (GPT-6 Luna, default) and `gpt-6.1-terra` (GPT-6.1 Terra), with no custom-model or fallback-model controls.
 - **DeepSeek**: `deepseek-flash` (DeepSeek V4.1 Flash), with no custom-model or fallback-model controls.
 
-Each provider keeps its own settings in SQLite; fallback-model configuration is exposed only for Gemini. OpenAI and DeepSeek also support an optional HTTP(S) API base URL; requests append `/chat/completions`. The provider adapters use no OpenAI SDK; Phase 39 recommendation semantics use a separate schema-12 / Bundle-v5 compatibility fence.
+Each provider keeps its own settings in SQLite; fallback-model controls are not exposed for the currently supported single-model Gemini or OpenAI/DeepSeek configurations. OpenAI and DeepSeek also support an optional HTTP(S) API base URL; requests append `/chat/completions`. The provider adapters use no OpenAI SDK; Phase 39 recommendation semantics use a separate schema-12 / Bundle-v5 compatibility fence.
 
 Choose a provider, edit its configuration and save to activate it. Switching the displayed provider preserves other drafts and remasks keys. Configuration changes apply immediately; in-flight requests retain their original adapter. Save and probe controls remain unavailable until settings load successfully and while a form action is pending.
 
@@ -16,16 +16,13 @@ Keys are stored locally in plaintext, like the existing Gemini configuration. Pr
 
 ## Defaults and reset behavior
 
-Missing settings may use `GEMINI_API_KEY`, `OPENAI_API_KEY` or `DEEPSEEK_API_KEY`, along with the corresponding `*_MODEL` and `*_REASONING_EFFORT` variables. OpenAI and DeepSeek also recognize `OPENAI_BASE_URL` and `DEEPSEEK_BASE_URL`. A saved, explicitly cleared API key disables that provider, including after restart. Clearing a saved model or provider URL returns to its environment or built-in default. Unsupported `GEMINI_MODEL` values or legacy stored Gemini models fall back to `models/gemini-3.8-flash`, and unsupported stored Gemini fallback models are ignored. Unsupported `OPENAI_MODEL` values or legacy stored OpenAI models fall back to `gpt-6-luna`. DeepSeek application requests always use `deepseek-flash`, including after loading old settings or testing a connection. Legacy stored model fields remain readable for compatibility but cannot override supported application choices. An explicitly empty fallback list stays empty after restart.
+Missing settings may use `GEMINI_API_KEY`, `OPENAI_API_KEY` or `DEEPSEEK_API_KEY`, along with the corresponding `*_MODEL` and `*_REASONING_EFFORT` variables. OpenAI and DeepSeek also recognize `OPENAI_BASE_URL` and `DEEPSEEK_BASE_URL`. A saved, explicitly cleared API key disables that provider, including after restart. Clearing a saved model or provider URL returns to its environment or built-in default. Unsupported `GEMINI_MODEL` values or legacy stored Gemini models (including deprecated `models/gemini-3.8-flash`) fall back to `models/gemini-4-hydrogen`, and unsupported or duplicate stored Gemini fallback models are ignored. Unsupported `OPENAI_MODEL` values or legacy stored OpenAI models fall back to `gpt-6-luna`. DeepSeek application requests always use `deepseek-flash`, including after loading old settings or testing a connection. Legacy stored model fields remain readable for compatibility but cannot override supported application choices. An explicitly empty fallback list stays empty after restart.
 
 ## Reasoning effort controls
 
 Each provider exposes its vendor-accurate reasoning effort options in Settings and sends the corresponding upstream parameter:
 
-- **Google Gemini** (`thinkingConfig.thinkingLevel`):
-  - `models/gemini-3.8-flash`: `LOW`, `MEDIUM` (default), `HIGH`
-  - `models/gemini-4-hydrogen`: `LOW`, `MEDIUM`, `HIGH` (default), `XHIGH`
-  - If `gemini-4-hydrogen` is configured with `XHIGH` and falls back at runtime to `gemini-3.8-flash`, the runtime clamps the level to `HIGH`.
+- **Google Gemini** (`models/gemini-4-hydrogen`, `thinkingConfig.thinkingLevel`): `LOW`, `MEDIUM`, `HIGH` (default), `XHIGH`.
 - **OpenAI** (`gpt-6-luna`, `gpt-6.1-terra`, `reasoning_effort` on `/chat/completions`): `none`, `low`, `medium` (default), `high`, `xhigh`, `max`.
 - **DeepSeek** (`deepseek-flash`, `reasoning_effort` + `thinking` on `/chat/completions`): `none` (`thinking: { type: "disabled" }`), `low`, `high` (default), `max` (`thinking: { type: "enabled" }` when not `none`).
 

@@ -200,10 +200,12 @@ try {
       assert.equal(store.getSettings().llmProvider, provider);
       assert.equal(assistant.getStatus().provider, provider);
       if (provider === 'gemini') {
+        assert.equal(assistant.getStatus().model, 'models/gemini-4-hydrogen');
         assert.deepEqual(
           await evaluate("[...document.querySelector('.ai-settings-form select').options].map(o=>o.value)"),
-          ['models/gemini-3.8-flash', 'models/gemini-4-hydrogen'],
+          ['models/gemini-4-hydrogen'],
         );
+        assert.equal(await evaluate("Boolean(document.querySelector('.candidate-chips'))"), false);
       } else if (provider === 'openai') {
         assert.equal(assistant.getStatus().model, 'gpt-6-luna');
         assert.deepEqual(

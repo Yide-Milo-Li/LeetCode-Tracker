@@ -44,7 +44,7 @@ export function createSettingsOperations(context: ApplicationContext) {
       if (normalizeReasoningEffort('gemini', parseRes.data.geminiReasoningEffort, currentGeminiModel) === null) {
         return fail(400, {
           error: 'INVALID_SETTINGS',
-          message: 'Unsupported Gemini thinkingLevel for the selected model',
+          message: 'Unsupported Gemini thinkingLevel. Allowed values: low, medium, high, xhigh',
         });
       }
     }
@@ -95,7 +95,7 @@ export function createSettingsOperations(context: ApplicationContext) {
         if (!normalizedModel) {
           return fail(400, {
             error: 'INVALID_SETTINGS',
-            message: 'Unsupported Gemini model. Allowed models: models/gemini-3.8-flash, models/gemini-4-hydrogen',
+            message: 'Unsupported Gemini model. Allowed model: models/gemini-4-hydrogen',
           });
         }
         effectiveModel = normalizedModel;
@@ -161,7 +161,7 @@ export function createSettingsOperations(context: ApplicationContext) {
       if (!normalizedModel) {
         return fail(400, {
           error: 'INVALID_SETTINGS',
-          message: 'Unsupported Gemini model. Allowed models: models/gemini-3.8-flash, models/gemini-4-hydrogen',
+          message: 'Unsupported Gemini model. Allowed model: models/gemini-4-hydrogen',
         });
       }
       model = normalizedModel;
@@ -173,7 +173,7 @@ export function createSettingsOperations(context: ApplicationContext) {
       if (!candidateEffort) {
         return fail(400, {
           error: 'INVALID_SETTINGS',
-          message: 'Unsupported Gemini thinkingLevel for the selected model',
+          message: 'Unsupported Gemini thinkingLevel. Allowed values: low, medium, high, xhigh',
         });
       }
       normalizedEffort = candidateEffort;

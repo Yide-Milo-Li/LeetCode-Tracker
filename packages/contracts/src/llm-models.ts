@@ -8,12 +8,11 @@ export const fixedProviderModels = { openai: 'gpt-6-luna', deepseek: 'deepseek-f
 
 /** Supported Gemini model identifiers. */
 export const supportedGeminiModels = [
-  'models/gemini-3.8-flash',
   'models/gemini-4-hydrogen',
 ] as const;
 export type SupportedGeminiModel = (typeof supportedGeminiModels)[number];
-export const defaultGeminiModel: SupportedGeminiModel = 'models/gemini-3.8-flash';
-export const defaultGeminiFallbackModels: readonly SupportedGeminiModel[] = ['models/gemini-4-hydrogen'];
+export const defaultGeminiModel: SupportedGeminiModel = 'models/gemini-4-hydrogen';
+export const defaultGeminiFallbackModels: readonly SupportedGeminiModel[] = [];
 
 /** Normalize a Gemini model string to its canonical `models/...` identifier, or null if unsupported. */
 export function normalizeGeminiModel(model?: string | null): SupportedGeminiModel | null {
@@ -58,7 +57,6 @@ export function isSupportedOpenaiModel(model?: string | null): boolean {
 export const reasoningEffortLevels = ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type ReasoningEffort = (typeof reasoningEffortLevels)[number];
 
-export const geminiFlashReasoningEfforts = ['low', 'medium', 'high'] as const;
 export const geminiHydrogenReasoningEfforts = ['low', 'medium', 'high', 'xhigh'] as const;
 export const openaiLunaReasoningEfforts = ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 export const deepseekFlashReasoningEfforts = ['none', 'low', 'high', 'max'] as const;
@@ -66,13 +64,10 @@ export const deepseekFlashReasoningEfforts = ['none', 'low', 'high', 'max'] as c
 /** Return the supported reasoning effort options for a provider and model. */
 export function getSupportedReasoningEfforts(
   provider: LLMProvider,
-  model?: string | null
+  _model?: string | null
 ): readonly ReasoningEffort[] {
   if (provider === 'gemini') {
-    const normalized = normalizeGeminiModel(model) ?? defaultGeminiModel;
-    return normalized === 'models/gemini-4-hydrogen'
-      ? geminiHydrogenReasoningEfforts
-      : geminiFlashReasoningEfforts;
+    return geminiHydrogenReasoningEfforts;
   }
   if (provider === 'openai') {
     return openaiLunaReasoningEfforts;
@@ -83,11 +78,10 @@ export function getSupportedReasoningEfforts(
 /** Return the vendor default reasoning effort for a provider and model. */
 export function getDefaultReasoningEffort(
   provider: LLMProvider,
-  model?: string | null
+  _model?: string | null
 ): ReasoningEffort {
   if (provider === 'gemini') {
-    const normalized = normalizeGeminiModel(model) ?? defaultGeminiModel;
-    return normalized === 'models/gemini-4-hydrogen' ? 'high' : 'medium';
+    return 'high';
   }
   if (provider === 'openai') {
     return 'medium';
@@ -97,7 +91,6 @@ export function getDefaultReasoningEffort(
 
 /**
  * Normalize a reasoning effort string for a provider (and optional model), or null if unsupported.
- * When provider is 'gemini' and model is omitted/null, accepts any effort valid for a supported Gemini model.
  */
 export function normalizeReasoningEffort(
   provider: LLMProvider,
@@ -107,30 +100,17 @@ export function normalizeReasoningEffort(
   if (!effort) return null;
   const trimmed = effort.trim().toLowerCase();
   if (!trimmed) return null;
-  const allowed: readonly string[] =
-    provider === 'gemini' && (!model || !model.trim())
-      ? geminiHydrogenReasoningEfforts
-      : getSupportedReasoningEfforts(provider, model);
+  const allowed: readonly string[] = getSupportedReasoningEfforts(provider, model);
   return allowed.includes(trimmed) ? (trimmed as ReasoningEffort) : null;
 }
 
 /**
  * Resolve the effective reasoning effort for a concrete provider and model at runtime.
- * Clamps Gemini 'xhigh' to 'high' when executing on models/gemini-3.8-flash (e.g. during fallback).
  */
 export function resolveModelReasoningEffort(
   provider: LLMProvider,
   model?: string | null,
   effort?: string | null
 ): ReasoningEffort {
-  const direct = normalizeReasoningEffort(provider, effort, model);
-  if (direct) return direct;
-  if (
-    provider === 'gemini' &&
-    effort?.trim().toLowerCase() === 'xhigh' &&
-    (normalizeGeminiModel(model) ?? defaultGeminiModel) === 'models/gemini-3.8-flash'
-  ) {
-    return 'high';
-  }
-  return getDefaultReasoningEffort(provider, model);
+  return normalizeReasoningEffort(provider, effort, model) ?? getDefaultReasoningEffort(provider, model);
 }
