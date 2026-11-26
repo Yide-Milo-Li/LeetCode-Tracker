@@ -201,6 +201,83 @@ html.dark .chat-panel {
   font-weight: 620;
   line-height: 1.4;
 }
+/* The title names the conversation and opens the list of recent ones. */
+.chat-thread-button {
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: -6px;
+  padding: 1px 4px 1px 6px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-main);
+  font: inherit;
+  cursor: pointer;
+  transition: background var(--fast) ease;
+}
+.chat-thread-button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-thread-button svg {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+.chat-thread-button:hover,
+.chat-thread-button[aria-expanded='true'] {
+  background: var(--muted-surface);
+}
+.chat-thread-menu {
+  width: 320px;
+  max-height: 320px;
+  overflow-y: auto;
+  cursor: default;
+}
+.chat-thread-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.chat-thread-row .notes-dropdown-item {
+  min-width: 0;
+  gap: 12px;
+  font-size: 13px;
+}
+.chat-thread-row .notes-dropdown-item[aria-current='true'] {
+  background: var(--selected);
+}
+.chat-thread-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-thread-time {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.chat-thread-delete {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    background var(--fast) ease,
+    color var(--fast) ease;
+}
+.chat-thread-delete:hover {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
 .chat-heading p {
   margin: 0;
   overflow: hidden;
@@ -385,42 +462,6 @@ html.dark .chat-panel {
   gap: 6px;
   margin-bottom: 8px;
 }
-.chat-chip {
-  max-width: 100%;
-  min-height: 26px;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 2px 10px 2px 8px;
-  border: 1px solid var(--border-color);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 12.5px;
-  line-height: 1.4;
-  transition:
-    background var(--fast) ease,
-    border-color var(--fast) ease,
-    color var(--fast) ease;
-}
-.chat-chip span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.chat-chip svg {
-  flex-shrink: 0;
-}
-.chat-chip:hover {
-  border-color: var(--outline);
-  color: var(--text-main);
-}
-.chat-chip[aria-pressed='true'] {
-  border-color: var(--primary);
-  background: var(--selected);
-  color: var(--text-main);
-}
-
 .chat-input-row {
   display: flex;
   align-items: flex-end;

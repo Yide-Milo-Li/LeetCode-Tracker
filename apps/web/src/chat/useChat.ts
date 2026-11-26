@@ -2,16 +2,18 @@
  * Conversation state for the in-app AI chat.
  *
  * The server keeps no history, so this hook owns the turns and resends the recent ones with each
- * question. The conversation survives closing the panel and reloading the app (device-local
- * `localStorage`); it is not part of the profile, backups or device sync.
+ * question. There is one conversation per problem plus a general one (see `chat-threads.ts`);
+ * the hook shows one of them at a time, and an answer keeps streaming into its own conversation
+ * while another one is shown.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ChatContext, ChatContextSummary, ChatStreamEvent, ChatTurn } from '../../../../packages/contracts/src/chat.ts';
-import { CHAT_MAX_MESSAGES, CHAT_MAX_MESSAGE_CHARS, CHAT_MAX_TOTAL_CHARS } from '../../../../packages/contracts/src/chat-limits.ts';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ChatContextSummary, ChatStreamEvent, ChatTurn } from '../../../../packages/contracts/src/chat.ts';
+import { CHAT_MAX_MESSAGE_CHARS, CHAT_MAX_TOTAL_CHARS } from '../../../../packages/contracts/src/chat-limits.ts';
 import { ApiError } from '../platform/index.ts';
 import type { Language } from '../i18n.ts';
 import { getChatDataAccess } from './chat-settings.ts';
 import { streamChat } from './chat-stream.ts';
+import { loadChatState, pruneThreads, saveChatState, type ChatState, type ChatThread, type ChatThreadRef } from './chat-threads.ts';
 
 export interface ChatEntry {
   id: string;
@@ -35,23 +37,11 @@ export interface ChatHint {
   level: number;
 }
 
-const STORAGE_KEY = 'leetcode_tracker_chat_v1';
-/** Entries kept on disk; older turns scroll out of a long conversation. */
-const STORED_ENTRIES = 80;
-
-function loadEntries(): ChatEntry[] {
-  try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]');
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((entry): entry is ChatEntry =>
-      !!entry && typeof entry === 'object' && typeof entry.id === 'string' && typeof entry.content === 'string'
-      && (entry.role === 'user' || entry.role === 'assistant'))
-      // An answer that was streaming when the app closed can only be a partial one.
-      .map(entry => ({ ...entry, state: entry.state === 'streaming' ? 'stopped' as const : entry.state ?? 'done' }));
-  } catch {
-    return [];
-  }
-}
+/**
+ * Turns sent with a question. A conversation about one problem rarely needs more, older turns
+ * cost tokens on every question, and the model can look tracker data up again.
+ */
+export const CHAT_REQUEST_TURNS = 12;
 
 /**
  * Select the turns to send: newest first until a request limit is reached, never starting with
@@ -60,7 +50,7 @@ function loadEntries(): ChatEntry[] {
 export function requestTurns(entries: ChatEntry[]): ChatTurn[] {
   const turns: ChatTurn[] = [];
   let total = 0;
-  for (let index = entries.length - 1; index >= 0 && turns.length < CHAT_MAX_MESSAGES; index -= 1) {
+  for (let index = entries.length - 1; index >= 0 && turns.length < CHAT_REQUEST_TURNS; index -= 1) {
     const content = entries[index].content.trim().slice(0, CHAT_MAX_MESSAGE_CHARS);
     if (!content) continue;
     if (total + content.length > CHAT_MAX_TOTAL_CHARS) break;
@@ -71,48 +61,77 @@ export function requestTurns(entries: ChatEntry[]): ChatTurn[] {
   return turns;
 }
 
-export interface ChatController {
-  entries: ChatEntry[];
+/** A conversation as the switcher lists it. */
+export interface ChatThreadSummary extends ChatThreadRef {
+  usedAt: number;
   busy: boolean;
+}
+
+export interface ChatController {
+  /** The conversation shown in the panel. */
+  current: ChatThreadRef;
+  entries: ChatEntry[];
+  /** An answer is streaming in the current conversation. */
+  busy: boolean;
+  /** An answer is streaming in any conversation. */
+  anyBusy: boolean;
+  /** Conversations with at least one entry, most recently used first. */
+  threads: ChatThreadSummary[];
+  /** Show another conversation; an answer streaming elsewhere keeps going. */
+  select(thread: ChatThreadRef): void;
   /**
-   * Ask a question; ignored while an answer is streaming or when the text is blank.
+   * Ask a question in the current conversation; ignored while it is answering or when the text
+   * is blank. A problem's conversation always sends that problem's data along.
    *
    * @param hint Marks the question as a rung of the hint ladder, so the next rung can be offered.
    */
-  send(text: string, context: ChatContext, hint?: ChatHint): void;
+  send(text: string, hint?: ChatHint): void;
   /** Ask the last question again, replacing its failed or stopped answer. */
   retry(): void;
   stop(): void;
-  /** Stop any answer and clear the conversation. */
-  reset(): void;
+  /** Stop any answer in a conversation and delete it; defaults to the current one. */
+  clear(key?: string): void;
 }
 
+const NO_ENTRIES: ChatEntry[] = [];
+
 export function useChat(lang: Language): ChatController {
-  const [entries, setEntries] = useState<ChatEntry[]>(loadEntries);
-  const [busy, setBusy] = useState(false);
-  const entriesRef = useRef(entries);
-  entriesRef.current = entries;
-  const controller = useRef<AbortController | null>(null);
-  const lastContext = useRef<ChatContext>({});
+  const [state, setState] = useState<ChatState>(loadChatState);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  /** One request per conversation at most, by conversation key. */
+  const controllers = useRef(new Map<string, AbortController>());
+  const [busyKeys, setBusyKeys] = useState<ReadonlySet<string>>(new Set());
   const langRef = useRef(lang);
   langRef.current = lang;
 
+  // Streaming rewrites an answer many times a second; store once nothing is in flight.
   useEffect(() => {
-    if (busy) return;
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(entries.slice(-STORED_ENTRIES))); }
-    catch { /* Storage is a convenience; the conversation still works without it. */ }
-  }, [entries, busy]);
-  useEffect(() => () => controller.current?.abort(), []);
+    if (busyKeys.size === 0) saveChatState(state);
+  }, [state, busyKeys]);
+  useEffect(() => () => controllers.current.forEach(controller => controller.abort()), []);
 
-  const run = useCallback((history: ChatEntry[], context: ChatContext) => {
+  const run = useCallback((thread: ChatThreadRef, history: ChatEntry[]) => {
+    const { key } = thread;
     const answerId = crypto.randomUUID();
-    const patch = (change: (entry: ChatEntry) => ChatEntry) =>
-      setEntries(current => current.map(entry => entry.id === answerId ? change(entry) : entry));
-    setEntries([...history, { id: answerId, role: 'assistant', content: '', state: 'streaming' }]);
-    setBusy(true);
-    lastContext.current = context;
+    const patch = (change: (entry: ChatEntry) => ChatEntry) => setState(current => {
+      const target = current.threads[key];
+      // The conversation was cleared while its answer was still arriving.
+      if (!target) return current;
+      return { ...current, threads: { ...current.threads, [key]: { ...target, entries: target.entries.map(entry => entry.id === answerId ? change(entry) : entry) } } };
+    });
     const abort = new AbortController();
-    controller.current = abort;
+    controllers.current.set(key, abort);
+    const inFlight = new Set(controllers.current.keys());
+    setState(current => ({
+      ...current,
+      // Asking is also the moment old and surplus conversations are let go.
+      threads: pruneThreads({
+        ...current.threads,
+        [key]: { ...thread, entries: [...history, { id: answerId, role: 'assistant', content: '', state: 'streaming' }], usedAt: Date.now() },
+      }, Date.now(), inFlight),
+    }));
+    setBusyKeys(keys => new Set(keys).add(key));
     let terminal = false;
 
     const onEvent = (event: ChatStreamEvent) => {
@@ -125,8 +144,13 @@ export function useChat(lang: Language): ChatController {
     };
     const fail = (code: string, message: string) => patch(entry => ({ ...entry, state: 'error', error: { code, message } }));
 
-    // Read when the question is sent, so a change in Settings applies to the next one.
-    const request = { messages: requestTurns(history), context, lang: langRef.current, ...(getChatDataAccess() ? {} : { dataAccess: false }) };
+    const request = {
+      messages: requestTurns(history),
+      context: thread.problem ? { frontendId: thread.problem.frontendId } : {},
+      lang: langRef.current,
+      // Read when the question is sent, so a change in Settings applies to the next one.
+      ...(getChatDataAccess() ? {} : { dataAccess: false }),
+    };
     void streamChat(request, onEvent, abort.signal)
       .then(() => {
         // The connection closed without `done` or `error`: the answer is incomplete.
@@ -138,35 +162,64 @@ export function useChat(lang: Language): ChatController {
       })
       .finally(() => {
         if (abort.signal.aborted) patch(entry => entry.state === 'streaming' ? { ...entry, state: 'stopped' } : entry);
-        if (controller.current === abort) {
-          controller.current = null;
-          setBusy(false);
+        if (controllers.current.get(key) === abort) {
+          controllers.current.delete(key);
+          setBusyKeys(keys => { const next = new Set(keys); next.delete(key); return next; });
         }
       });
   }, []);
 
-  const send = useCallback((text: string, context: ChatContext, hint?: ChatHint) => {
+  const select = useCallback((thread: ChatThreadRef) => setState(current => {
+    const stored = current.threads[thread.key];
+    // Keep the title either side knows: a view may know only the number, or learn the title later.
+    const problem = thread.problem && { ...thread.problem, title: thread.problem.title ?? stored?.problem?.title };
+    const next: ChatThreadRef = problem ? { key: thread.key, problem } : { key: thread.key };
+    const threads = stored && problem?.title && stored.problem?.title !== problem.title
+      ? { ...current.threads, [thread.key]: { ...stored, problem } }
+      : current.threads;
+    if (current.current.key === next.key && current.current.problem?.title === next.problem?.title && threads === current.threads) return current;
+    return { threads, current: next };
+  }), []);
+
+  const send = useCallback((text: string, hint?: ChatHint) => {
     const content = text.trim();
-    if (!content || controller.current) return;
-    run([...entriesRef.current, { id: crypto.randomUUID(), role: 'user', content, state: 'done', ...(hint ? { hint } : {}) }], context);
+    const { current, threads } = stateRef.current;
+    if (!content || controllers.current.has(current.key)) return;
+    run(current, [...(threads[current.key]?.entries ?? []), { id: crypto.randomUUID(), role: 'user', content, state: 'done', ...(hint ? { hint } : {}) }]);
   }, [run]);
 
   const retry = useCallback(() => {
-    if (controller.current) return;
-    const current = entriesRef.current;
-    const lastQuestion = current.findLastIndex(entry => entry.role === 'user');
+    const { current, threads } = stateRef.current;
+    if (controllers.current.has(current.key)) return;
+    const entries = threads[current.key]?.entries ?? [];
+    const lastQuestion = entries.findLastIndex(entry => entry.role === 'user');
     if (lastQuestion === -1) return;
-    run(current.slice(0, lastQuestion + 1), lastContext.current);
+    run(current, entries.slice(0, lastQuestion + 1));
   }, [run]);
 
-  const stop = useCallback(() => controller.current?.abort(), []);
+  const stop = useCallback(() => controllers.current.get(stateRef.current.current.key)?.abort(), []);
 
-  const reset = useCallback(() => {
-    controller.current?.abort();
-    controller.current = null;
-    setBusy(false);
-    setEntries([]);
+  const clear = useCallback((key: string = stateRef.current.current.key) => {
+    controllers.current.get(key)?.abort();
+    controllers.current.delete(key);
+    setBusyKeys(keys => { const next = new Set(keys); next.delete(key); return next; });
+    setState(current => {
+      const { [key]: _removed, ...threads } = current.threads;
+      return { ...current, threads };
+    });
   }, []);
 
-  return { entries, busy, send, retry, stop, reset };
+  const threads = useMemo(() => Object.values(state.threads)
+    .filter((thread: ChatThread) => thread.entries.length > 0)
+    .sort((a, b) => b.usedAt - a.usedAt)
+    .map(({ key, problem, usedAt }) => ({ key, ...(problem ? { problem } : {}), usedAt, busy: busyKeys.has(key) })),
+  [state.threads, busyKeys]);
+
+  return {
+    current: state.current,
+    entries: state.threads[state.current.key]?.entries ?? NO_ENTRIES,
+    busy: busyKeys.has(state.current.key),
+    anyBusy: busyKeys.size > 0,
+    threads, select, send, retry, stop, clear,
+  };
 }

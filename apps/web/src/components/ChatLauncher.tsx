@@ -12,7 +12,8 @@ import { flushSync } from 'react-dom';
 import { MessageSquareText } from 'lucide-react';
 import type { Language } from '../i18n.ts';
 import { useChat } from '../chat/useChat.ts';
-import { useChatProblem, type ChatAction, type ChatAskRequest, type ChatProblemRef } from '../chat/chat-context.ts';
+import { useChatProblem, type ChatAction, type ChatAskRequest } from '../chat/chat-context.ts';
+import { problemThread } from '../chat/chat-threads.ts';
 import {
   clampLauncher, clampPanel, dockAt, dockForPanel, launcherPoint, panelPoint, useChatPosition, useDrag, type Point,
 } from '../chat/chat-position.ts';
@@ -42,14 +43,15 @@ export function ChatLauncher({ lang, onOpenAiSettings, ask = null }: ChatLaunche
   const shortcut = isMac ? '⌘J' : 'Ctrl+J';
 
   const viewProblem = useChatProblem();
-  /** Problem of the last preset asked from another view; it stands in while no view shows one. */
-  const [askedProblem, setAskedProblem] = useState<ChatProblemRef | null>(null);
   const [pending, setPending] = useState<ChatAction | null>(null);
-  // Whichever happened last decides: opening another problem's note replaces the asked one.
-  useEffect(() => { if (viewProblem) setAskedProblem(null); }, [viewProblem?.frontendId]);
+  // The conversation follows the problem: the note that was just opened, or the problem a preset
+  // was asked about. With neither, the last conversation stays.
+  useEffect(() => {
+    if (viewProblem) chat.select(problemThread(viewProblem));
+  }, [viewProblem?.frontendId, viewProblem?.title]);
   useEffect(() => {
     if (!ask) return;
-    setAskedProblem(ask.problem);
+    chat.select(problemThread(ask.problem));
     setPending(ask.action);
     setOpen(true);
   }, [ask?.id]);
@@ -124,8 +126,7 @@ export function ChatLauncher({ lang, onOpenAiSettings, ask = null }: ChatLaunche
     return (
       <React.Suspense fallback={null}>
         <ChatPanel lang={lang} chat={chat} shortcut={shortcut} onClose={close}
-          problem={askedProblem ?? viewProblem} pending={pending} onPendingHandled={clearPending}
-          onNewChat={() => { chat.reset(); setAskedProblem(null); }}
+          pending={pending} onPendingHandled={clearPending}
           onOpenAiSettings={() => { close(); onOpenAiSettings(); }}
           position={at} side={position.dock.side} dragging={panelDrag.dragging}
           onDragStart={event => panelDrag.start(event, at)} />
@@ -146,8 +147,8 @@ export function ChatLauncher({ lang, onOpenAiSettings, ask = null }: ChatLaunche
         <button
           ref={launcher}
           type="button"
-          className={'chat-launcher-button' + (chat.busy ? ' is-busy' : '')}
-          aria-label={chat.busy ? (zh ? '问 AI（正在回答）' : 'Ask AI (answering)') : label}
+          className={'chat-launcher-button' + (chat.anyBusy ? ' is-busy' : '')}
+          aria-label={chat.anyBusy ? (zh ? '问 AI（正在回答）' : 'Ask AI (answering)') : label}
           aria-expanded={false}
           onPointerDown={event => launcherDrag.start(event, launcherPoint(position.dock, viewport, false))}
           // Rendered at once: the tooltip is off while tucked and decides on the mouse event that follows.

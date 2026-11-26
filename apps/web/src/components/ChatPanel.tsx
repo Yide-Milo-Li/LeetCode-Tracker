@@ -1,25 +1,28 @@
 /**
- * Non-modal AI chat panel anchored to the bottom-right corner.
+ * Non-modal AI chat panel.
  *
  * The page behind stays usable, so the panel traps no focus and carries no overlay marker; global
  * shortcuts keep working whenever the cursor is outside its text field.
+ *
+ * It shows one conversation at a time: a problem's, or the general one. The title is the only
+ * conversation control, a list of the recent ones.
  */
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowUp, Check, FileText, Lightbulb, Square, SquarePen, X } from 'lucide-react';
+import { ArrowUp, ChevronDown, Eraser, Lightbulb, Square, Trash2, X } from 'lucide-react';
 import { api, type LLMProvider } from '../api.ts';
-import type { ChatContext } from '../../../../packages/contracts/src/chat.ts';
 import { CHAT_MAX_MESSAGE_CHARS } from '../../../../packages/contracts/src/chat-limits.ts';
 import type { Language } from '../i18n.ts';
 import { ApiError } from '../platform/index.ts';
 import { localizeApiError } from '../error-i18n.ts';
-import type { ChatAction, ChatProblemRef } from '../chat/chat-context.ts';
+import type { ChatAction } from '../chat/chat-context.ts';
 import { hintLabel, hintPrompt, nextHintLevel, reviewPrompt } from '../chat/chat-presets.ts';
 import { useChatDataAccess } from '../chat/chat-settings.ts';
 import { toolLabel } from '../chat/chat-tools.ts';
 import type { ChatDock, Point } from '../chat/chat-position.ts';
+import { GENERAL_THREAD, type ChatThreadRef } from '../chat/chat-threads.ts';
 import type { ChatController, ChatEntry } from '../chat/useChat.ts';
 import { RenderedMarkdown } from './NotesMarkdownPreview.tsx';
-import { Feedback, IconButton } from './ui.tsx';
+import { Feedback, IconButton, useActionPopover } from './ui.tsx';
 
 const PROVIDER_NAMES: Record<LLMProvider, string> = { gemini: 'Gemini', openai: 'OpenAI', deepseek: 'DeepSeek' };
 /** Codes for which asking again cannot help until Settings change. */
@@ -28,13 +31,10 @@ const SETTINGS_ERRORS = new Set(['CHAT_NOT_CONFIGURED', 'CHAT_AUTH_ERROR', 'OPEN
 export interface ChatPanelProps {
   lang: Language;
   chat: ChatController;
-  /** The problem offered as context: the one a preset was asked about, otherwise the one in view. */
-  problem: ChatProblemRef | null;
   /** A preset asked for from outside the panel; it runs once the provider status is known. */
   pending: ChatAction | null;
   /** The pending preset was sent or dropped; either way it must not run again. */
   onPendingHandled: () => void;
-  onNewChat: () => void;
   /** Display form of the toggle shortcut, such as `Ctrl+J`. */
   shortcut: string;
   onClose: () => void;
@@ -48,16 +48,22 @@ export interface ChatPanelProps {
   onDragStart: (event: React.PointerEvent) => void;
 }
 
-/** A toggle for one piece of local data; the check mark carries the state besides the tint. */
-function ContextChip({ icon: Icon, label, pressed, onToggle, title }: {
-  icon: typeof FileText; label: string; pressed: boolean; onToggle: () => void; title: string;
-}) {
-  return (
-    <button type="button" className="chat-chip" aria-pressed={pressed} title={title} onClick={onToggle}>
-      {pressed ? <Check size={13} aria-hidden="true" /> : <Icon size={13} aria-hidden="true" />}
-      <span>{label}</span>
-    </button>
-  );
+/** Name of a conversation: its problem, or the general one. */
+function threadName(thread: ChatThreadRef, lang: Language): string {
+  if (!thread.problem) return lang === 'zh' ? '通用对话' : 'General';
+  return `#${thread.problem.frontendId}${thread.problem.title ? ` ${thread.problem.title}` : ''}`;
+}
+
+/** How long ago a conversation was last used, to the coarsest unit that still tells them apart. */
+function lastUsed(usedAt: number, lang: Language, now = Date.now()): string {
+  const zh = lang === 'zh';
+  const minutes = Math.floor((now - usedAt) / 60_000);
+  if (minutes < 1) return zh ? '刚刚' : 'just now';
+  if (minutes < 60) return zh ? `${minutes} 分钟前` : `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return zh ? `${hours} 小时前` : `${hours} h ago`;
+  const days = Math.floor(hours / 24);
+  return zh ? `${days} 天前` : `${days} d ago`;
 }
 
 function Answer({ entry, lang, isLast, busy, onRetry, onOpenAiSettings }: {
@@ -101,13 +107,14 @@ function Answer({ entry, lang, isLast, busy, onRetry, onOpenAiSettings }: {
 }
 
 export function ChatPanel({
-  lang, chat, problem, pending, onPendingHandled, onNewChat, shortcut, onClose, onOpenAiSettings, position, side, dragging, onDragStart,
+  lang, chat, pending, onPendingHandled, shortcut, onClose, onOpenAiSettings, position, side, dragging, onDragStart,
 }: ChatPanelProps) {
   const zh = lang === 'zh';
   const dataAccess = useChatDataAccess();
+  const problem = chat.current.problem ?? null;
+  const switcher = useActionPopover();
   const [status, setStatus] = useState<{ configured: boolean; provider?: LLMProvider; model: string } | null>(null);
   const [draft, setDraft] = useState('');
-  const [useProblem, setUseProblem] = useState(true);
   const panel = useRef<HTMLElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const log = useRef<HTMLDivElement>(null);
@@ -127,6 +134,8 @@ export function ChatPanel({
   useEffect(() => {
     if (ready && document.activeElement === panel.current) input.current?.focus();
   }, [ready]);
+  // Another conversation opens at its latest turn, whatever the scroll position was before.
+  useLayoutEffect(() => { pinned.current = true; }, [chat.current.key]);
   useLayoutEffect(() => {
     if (pinned.current && log.current) log.current.scrollTop = log.current.scrollHeight;
   }, [chat.entries]);
@@ -140,24 +149,21 @@ export function ChatPanel({
   const ask = (text: string) => {
     if (!ready || chat.busy || !text.trim()) return;
     pinned.current = true;
-    chat.send(text, problem && useProblem ? { frontendId: problem.frontendId } : {});
+    chat.send(text);
     setDraft('');
     // A suggestion button disappears once the conversation starts; keep the keyboard in the field.
     input.current?.focus();
   };
-  /** Send a preset about the attached problem; hints climb one rung per request. */
+  /** Send a preset about this conversation's problem; hints climb one rung per request. */
   const runAction = (action: ChatAction) => {
     if (!problem || !ready || chat.busy) return;
-    const attached: ChatContext = { frontendId: problem.frontendId };
     if (action.kind === 'hint') {
       const level = nextHintLevel(chat.entries, problem.frontendId);
       if (!hintLabel(level, lang)) return;
-      chat.send(hintPrompt(level, lang, problem), attached, { frontendId: problem.frontendId, level });
+      chat.send(hintPrompt(level, lang, problem), { frontendId: problem.frontendId, level });
     } else {
-      chat.send(reviewPrompt(lang, problem, action.attempt), attached);
+      chat.send(reviewPrompt(lang, problem, action.attempt));
     }
-    // A preset is about the problem, so it is attached even if the user had left it out before.
-    setUseProblem(true);
     pinned.current = true;
     input.current?.focus();
   };
@@ -168,12 +174,18 @@ export function ChatPanel({
   }, [pending, status]);
 
   const provider = status?.provider ? PROVIDER_NAMES[status.provider] : '';
-  const attachedProblem = problem && useProblem ? problem : null;
-  const nextHint = attachedProblem ? hintLabel(nextHintLevel(chat.entries, attachedProblem.frontendId), lang) : null;
+  const nextHint = problem ? hintLabel(nextHintLevel(chat.entries, problem.frontendId), lang) : null;
+  const title = threadName(chat.current, lang);
+  // The general conversation is always offered, and so is the current one before its first question.
+  const listed: ChatThreadRef[] = [
+    GENERAL_THREAD,
+    ...(problem && !chat.threads.some(thread => thread.key === chat.current.key) ? [chat.current] : []),
+    ...chat.threads.filter(thread => thread.key !== GENERAL_THREAD.key),
+  ];
   const reviewLabel = zh ? '复盘最近一次练习' : 'Review my latest attempt';
   const todayQuestion = zh ? '今天的计划里，我应该先做哪道题？' : "Which problem in today's plan should I start with?";
   const starters = [
-    ...(attachedProblem ? [
+    ...(problem ? [
       { label: zh ? '给我一点这道题的提示，先不要给答案' : 'Give me a hint for this problem without the solution', run: () => runAction({ kind: 'hint' }) },
       { label: reviewLabel, run: () => runAction({ kind: 'review' }) },
     ] : []),
@@ -190,7 +202,8 @@ export function ChatPanel({
       style={{ left: position.left, top: position.top }}
       aria-label={zh ? 'AI 对话' : 'AI chat'}
       onKeyDown={event => {
-        if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
+        // Esc closes the conversation list first when that is open.
+        if (event.key === 'Escape' && !event.nativeEvent.isComposing && !switcher.open) {
           event.stopPropagation();
           onClose();
         }
@@ -199,16 +212,44 @@ export function ChatPanel({
       <header
         className="chat-header"
         title={zh ? '拖动以移动' : 'Drag to move'}
-        onPointerDown={event => { if (!(event.target as Element).closest('button')) onDragStart(event); }}
+        onPointerDown={event => { if (!(event.target as Element).closest('button, .chat-thread-menu')) onDragStart(event); }}
         // Grabbing the header must not take focus from the text field, or Esc would stop closing the panel.
-        onMouseDown={event => { if (!(event.target as Element).closest('button')) event.preventDefault(); }}
+        onMouseDown={event => { if (!(event.target as Element).closest('button, .chat-thread-menu')) event.preventDefault(); }}
       >
         <div className="chat-heading">
-          <h2>{zh ? '问 AI' : 'Ask AI'}</h2>
+          <h2>
+            <button type="button" className="chat-thread-button" title={zh ? '切换对话' : 'Switch conversation'} {...switcher.triggerProps}>
+              <span>{title}</span>
+              <ChevronDown size={14} aria-hidden="true" />
+            </button>
+          </h2>
           {ready && <p>{provider}{status?.model ? ` · ${status.model.replace(/^models\//, '')}` : ''}</p>}
         </div>
-        <IconButton icon={SquarePen} label={zh ? '新对话' : 'New chat'} disabled={chat.entries.length === 0}
-          onClick={() => { onNewChat(); input.current?.focus(); }} tooltipSide="bottom" />
+        {switcher.rendered && (
+          <div {...switcher.panelProps} className="notes-dropdown-menu chat-thread-menu" aria-label={zh ? '对话' : 'Conversations'}>
+            {listed.map(thread => {
+              const name = threadName(thread, lang);
+              const stored = chat.threads.find(candidate => candidate.key === thread.key);
+              return (
+                <div key={thread.key} className="chat-thread-row">
+                  <button type="button" className="notes-dropdown-item" aria-current={thread.key === chat.current.key ? 'true' : undefined}
+                    onClick={() => { switcher.close(); chat.select(thread); input.current?.focus(); }}>
+                    <span className="chat-thread-name">{name}</span>
+                    {stored && <span className="chat-thread-time">{stored.busy ? (zh ? '回答中' : 'answering') : lastUsed(stored.usedAt, lang)}</span>}
+                  </button>
+                  {stored && (
+                    <button type="button" className="chat-thread-delete" aria-label={zh ? `删除对话：${name}` : `Delete conversation: ${name}`}
+                      onClick={() => chat.clear(thread.key)}>
+                      <Trash2 size={14} aria-hidden="true" />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <IconButton icon={Eraser} label={zh ? '清空这个对话' : 'Clear this conversation'} disabled={chat.entries.length === 0}
+          onClick={() => { chat.clear(); input.current?.focus(); }} tooltipSide="bottom" />
         <IconButton icon={X} label={zh ? '关闭' : 'Close'} shortcut={shortcut} onClick={onClose} tooltipSide="bottom" />
       </header>
 
@@ -231,7 +272,13 @@ export function ChatPanel({
         )}
         {ready && chat.entries.length === 0 && (
           <div className="chat-empty">
-            <p>{zh ? '可以问题目思路、你的笔记，或者今天的练习安排。' : 'Ask about a problem, your notes, or what to practise today.'}</p>
+            <p>
+              {problem
+                ? (zh
+                  ? `这是 ${title} 的对话，提问时会附带你在这道题上的练习记录和已保存的笔记。`
+                  : `This conversation is about ${title}. Your practice records and saved note for it go with each question.`)
+                : (zh ? '可以问题目思路、你的笔记，或者今天的练习安排。' : 'Ask about a problem, your notes, or what to practise today.')}
+            </p>
             <ul className="chat-suggestions">
               {starters.map(starter => (
                 <li key={starter.label}>
@@ -246,8 +293,8 @@ export function ChatPanel({
                   : `The AI looks up your catalog, practice records and notes as needed. Your question and what it reads are sent to ${provider}. You can turn this off in Settings, under AI assistant.`)
                 : problem
                   ? (zh
-                    ? `提问内容和下方选中的题目数据会发送给 ${provider}。`
-                    : `Your question and the data of the problem selected below are sent to ${provider}.`)
+                    ? `提问内容和这道题的数据会发送给 ${provider}。`
+                    : `Your question and this problem's data are sent to ${provider}.`)
                   : (zh ? `只有提问内容会发送给 ${provider}。` : `Only your question is sent to ${provider}.`)}
             </p>
           </div>
@@ -259,18 +306,13 @@ export function ChatPanel({
       </div>
 
       <form className="chat-composer" onSubmit={event => { event.preventDefault(); ask(draft); }}>
-        {/* One row at most: the problem in focus and, once a conversation is under way, the next
-            hint. The empty conversation offers the presets as starters instead. */}
-        {problem && (
+        {/* The only thing above the field, and only while a hint ladder is under way. The empty
+            conversation offers the presets as starters instead. */}
+        {chat.entries.length > 0 && nextHint && (
           <div className="chat-context">
-            <ContextChip icon={FileText} pressed={useProblem} onToggle={() => setUseProblem(value => !value)}
-              label={`#${problem.frontendId}${problem.title ? ` ${problem.title}` : ''}`}
-              title={zh ? '附带这道题的练习记录和已保存的笔记' : 'Attach your attempts and saved note for this problem'} />
-            {attachedProblem && chat.entries.length > 0 && nextHint && (
-              <button type="button" className="chat-action" disabled={!ready || chat.busy} onClick={() => runAction({ kind: 'hint' })}>
-                <Lightbulb size={14} aria-hidden="true" />{nextHint}
-              </button>
-            )}
+            <button type="button" className="chat-action" disabled={!ready || chat.busy} onClick={() => runAction({ kind: 'hint' })}>
+              <Lightbulb size={14} aria-hidden="true" />{nextHint}
+            </button>
           </div>
         )}
         <div className="chat-input-row">
