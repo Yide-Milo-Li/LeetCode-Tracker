@@ -46,6 +46,8 @@ import type {
   UpdatePracticeRecordInput,
   UpdateProgressSnapshotInput,
   UpdateSettingsInput,
+  ChatActionReceipt,
+  ChatActionRequest,
   ChatStatus,
   LLMProvider,
   OpenAIAuthMode,
@@ -720,6 +722,15 @@ export const chatApi = {
   /** Whether the active AI provider can answer chat questions. */
   getChatStatus(): Promise<ChatStatus> {
     return request('/chat/status');
+  },
+
+  /**
+   * Apply a change the AI proposed in chat and the user confirmed.
+   *
+   * @throws ApiError with the change's own code, such as `NOTE_CHANGED`, when it was refused.
+   */
+  applyChatAction(input: ChatActionRequest): Promise<ChatActionReceipt> {
+    return request('/chat/actions', { method: 'POST', body: JSON.stringify(input) });
   },
 };
 

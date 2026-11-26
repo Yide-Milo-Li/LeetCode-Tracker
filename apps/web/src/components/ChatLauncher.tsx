@@ -32,11 +32,13 @@ export interface ChatLauncherProps {
   onOpenAiSettings: () => void;
   /** A preset another view asked for; each new `id` opens the panel on that problem and sends it. */
   ask?: ChatAskRequest | null;
+  /** A change confirmed in chat was written to the tracker; the views showing that data should reload. */
+  onDataChanged?: () => void;
 }
 
-export function ChatLauncher({ lang, onOpenAiSettings, ask = null }: ChatLauncherProps) {
+export function ChatLauncher({ lang, onOpenAiSettings, ask = null, onDataChanged }: ChatLauncherProps) {
   const zh = lang === 'zh';
-  const chat = useChat(lang);
+  const chat = useChat(lang, { onDataChanged });
   const [open, setOpen] = useState(false);
   const launcher = useRef<HTMLButtonElement>(null);
   const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform ?? '');
@@ -60,6 +62,9 @@ export function ChatLauncher({ lang, onOpenAiSettings, ask = null }: ChatLaunche
   useEffect(() => { if (!open) setPending(null); }, [open]);
 
   const { position, viewport, save } = useChatPosition();
+  const large = position.large === true;
+  /** The size as stored with a placement; the compact size is the absence of the field. */
+  const size = large ? { large: true } : {};
   /** Live corner of whichever element is being dragged; `null` when both rest at their saved place. */
   const [dragPoint, setDragPoint] = useState<Point | null>(null);
   const [tucked, setTucked] = useState(false);
@@ -89,16 +94,16 @@ export function ChatLauncher({ lang, onOpenAiSettings, ask = null }: ChatLaunche
     onEnd: point => {
       setDragPoint(null);
       // Moving the launcher also moves where the panel opens.
-      save({ dock: dockAt(clampLauncher(point, viewport), viewport) });
+      save({ dock: dockAt(clampLauncher(point, viewport), viewport), ...size });
       rest();
     },
   });
   const panelDrag = useDrag({
-    onMove: point => setDragPoint(clampPanel(point, viewport)),
+    onMove: point => setDragPoint(clampPanel(point, viewport, large)),
     onEnd: point => {
-      const panel = clampPanel(point, viewport);
+      const panel = clampPanel(point, viewport, large);
       setDragPoint(null);
-      save({ dock: dockForPanel(panel, viewport, position.dock), panel });
+      save({ dock: dockForPanel(panel, viewport, position.dock, large), panel, ...size });
     },
   });
 
@@ -129,7 +134,8 @@ export function ChatLauncher({ lang, onOpenAiSettings, ask = null }: ChatLaunche
           pending={pending} onPendingHandled={clearPending}
           onOpenAiSettings={() => { close(); onOpenAiSettings(); }}
           position={at} side={position.dock.side} dragging={panelDrag.dragging}
-          onDragStart={event => panelDrag.start(event, at)} />
+          onDragStart={event => panelDrag.start(event, at)}
+          large={large} onToggleSize={() => { const { large: _large, ...rest } = position; save(large ? rest : { ...rest, large: true }); }} />
       </React.Suspense>
     );
   }

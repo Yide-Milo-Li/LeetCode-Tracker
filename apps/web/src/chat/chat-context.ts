@@ -34,7 +34,11 @@ export type ChatAction =
   /** The next rung of the hint ladder for the problem. */
   | { kind: 'hint' }
   /** `attempt` names one practice in display form, such as its date and result; omitted means the latest. */
-  | { kind: 'review'; attempt?: string };
+  | { kind: 'review'; attempt?: string }
+  /** Problems in the user's catalog that test the same pattern. */
+  | { kind: 'similar' }
+  /** Put the last answer into the problem's note, as a change the user confirms. */
+  | { kind: 'save-note' };
 
 /** What a view hands to the chat when the user asks for a preset from outside the panel. */
 export interface ChatAsk {

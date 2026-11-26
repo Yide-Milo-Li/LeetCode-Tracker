@@ -192,6 +192,13 @@ export function App() {
     void plan.refresh();
   }, [setTimezone, plan.refresh]);
   const desktopAgent = useDesktopAgent(applyAgentChange);
+  /** A change confirmed in the AI chat was written by the local service, outside every view's own state. */
+  const refreshAfterChatChange = useCallback(() => {
+    setRevision(value => value + 1);
+    setDesktopAgentRevision(value => value + 1);
+    refreshFavorites();
+    void plan.refresh();
+  }, [refreshFavorites, plan.refresh]);
   const latestActivity = desktopAgent?.activity[0];
   const activityId = latestActivity ? desktopAgent?.instance + ':' + latestActivity.revision : '';
   const current = useRef(view);
@@ -737,6 +744,7 @@ export function App() {
         <ChatLauncher
           lang={lang}
           ask={chatAsk}
+          onDataChanged={refreshAfterChatChange}
           onOpenAiSettings={() => {
             setSettingsSection('ai');
             navigate('settings');

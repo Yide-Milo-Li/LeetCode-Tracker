@@ -4,9 +4,13 @@
  * `POST /api/v1/chat/stream` answers with Server-Sent Events. Invalid input and a missing
  * provider are rejected with an ordinary JSON error before the stream opens; failures after
  * that arrive as an `error` event on a `200` stream.
+ *
+ * `POST /api/v1/chat/actions` applies one change the user confirmed. It is the only chat route
+ * that writes to the profile; a refused change answers with the change tool's own error code.
  */
 import type { FastifyInstance } from 'fastify';
-import { chatRequestSchema, type ChatStreamEvent } from '../../../../packages/contracts/src/chat.ts';
+import { chatActionRequestSchema, chatRequestSchema, type ChatStreamEvent } from '../../../../packages/contracts/src/chat.ts';
+import { ChatActionError } from '../chat/chat-service.ts';
 import type { RouteContext } from './types.ts';
 
 /** Ample for the capped conversation in any encoding, far below the catalog import limit. */
@@ -47,5 +51,18 @@ export function registerChatRoutes(app: FastifyInstance, { chat }: RouteContext)
     };
     await chat.stream(parsed.data, emit, controller.signal);
     reply.raw.end();
+  });
+
+  app.post('/api/v1/chat/actions', { bodyLimit: CHAT_BODY_LIMIT }, async (request, reply) => {
+    const parsed = chatActionRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'INVALID_CHAT_ACTION', message: 'Expected a change name and its arguments.' });
+    }
+    try {
+      return await chat.apply(parsed.data);
+    } catch (error) {
+      if (!(error instanceof ChatActionError)) throw error;
+      return reply.code(error.status).send({ error: error.code, message: error.message });
+    }
   });
 }

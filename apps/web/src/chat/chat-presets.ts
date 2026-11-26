@@ -81,6 +81,25 @@ export function reviewPrompt(lang: Language, problem: ChatProblemRef, attempt?: 
 }
 
 /**
+ * The message that asks the AI to put its last answer into the problem's note. The AI answers
+ * with a proposed note change, which the user still confirms.
+ */
+export function saveNotePrompt(lang: Language, problem: ChatProblemRef): string {
+  const name = problemName(problem);
+  return lang === 'zh'
+    ? `把你上一条回答里值得留下的内容整理进 ${name} 的笔记：放进合适的小节，写得简洁，笔记里已有的不要重复。`
+    : `Save what is worth keeping from your last answer to my note for ${name}: put it in the section where it fits, keep it brief, and leave out what the note already says.`;
+}
+
+/** The message that asks for problems like this one from the user's own catalog. */
+export function similarPrompt(lang: Language, problem: ChatProblemRef): string {
+  const name = problemName(problem);
+  return lang === 'zh'
+    ? `在我的题库里找几道和 ${name} 考察同一模式的题，按由易到难排，并标出我做过哪些。`
+    : `Find a few problems in my catalog that test the same pattern as ${name}, ordered from easier to harder, and mark the ones I have already practised.`;
+}
+
+/**
  * Describe one practice record so a review can name it: when it happened, how it went and how
  * long it took. Only the latest attempts are attached to a chat request, so the result and
  * duration are spelled out here rather than left for the model to look up.

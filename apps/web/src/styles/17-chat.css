@@ -157,6 +157,11 @@ html.chat-dragging * {
   transform-origin: bottom right;
   animation: chat-panel-in var(--overlay-enter);
 }
+/* Enlarged for code and long answers: wider, and as tall as the window allows. */
+.chat-panel[data-size='large'] {
+  width: min(720px, calc(100vw - 48px));
+  height: calc(100vh - 48px);
+}
 /* Focused by script only, as the fallback target while the text field is unavailable. */
 .chat-panel:focus {
   outline: 0;
@@ -395,6 +400,132 @@ html.dark .chat-panel {
   font-size: 13.5px;
 }
 
+/* Under a finished answer: what can be done with it, then what it was based on. */
+.chat-entry-foot {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  margin: 4px 0 0 -6px;
+}
+.chat-entry-foot .btn-icon,
+.notes-code-copy.btn-icon {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  border-radius: 6px;
+}
+.chat-entry-foot .btn-icon:hover:not(:disabled),
+.notes-code-copy.btn-icon:hover:not(:disabled) {
+  transform: none;
+}
+.chat-entry-foot .chat-entry-note {
+  flex: 1;
+  min-width: 0;
+  margin: 5px 0 0 6px;
+}
+
+/* Copy sits in the corner of a code block and stays out of the way until the block is used.
+   The button's tooltip wrapper is what the corner positions. */
+.notes-code-block > .tooltip-wrapper {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+}
+.notes-code-copy.btn-icon {
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--border-color);
+  opacity: 0;
+  transition:
+    opacity var(--fast) ease,
+    background var(--fast) ease,
+    color var(--fast) ease;
+}
+.notes-code-block:hover .notes-code-copy,
+.notes-code-copy:focus-visible {
+  opacity: 1;
+}
+.notes-code-block:has(.notes-code-copy) .notes-code-language {
+  right: 40px;
+  top: 10px;
+}
+
+/* A change the AI proposed. It reads as a form to sign off, so it is boxed and set apart from
+   the prose around it; once decided it settles into a quiet record. */
+.chat-change {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--outline);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.chat-change[data-state='applied'],
+.chat-change[data-state='dismissed'] {
+  border-color: var(--border-color);
+  background: var(--muted-surface);
+}
+.chat-change h3 {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 620;
+  line-height: 1.4;
+}
+.chat-change > ul {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13.5px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.chat-change[data-state='dismissed'] h3,
+.chat-change[data-state='dismissed'] > ul {
+  color: var(--text-muted);
+}
+/* The text a note change will write, shown in full so it can be read before confirming. */
+.notes-preview-pane.chat-answer.chat-change-body {
+  max-height: 200px;
+  margin-top: 10px;
+  padding: 10px 0 0;
+  overflow-y: auto;
+  border-top: 1px solid var(--border-color);
+  font-size: 13px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-color) transparent;
+}
+.chat-change-body:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.chat-change-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 12px;
+}
+/* Left alone, the text button lines up with the card's text instead of its own padding. */
+.chat-change-actions .btn-ghost:first-child {
+  margin-left: -10px;
+}
+.chat-change-status,
+.chat-change-error {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.chat-change-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+}
+.chat-change[data-state='applied'] .chat-change-status {
+  color: var(--primary);
+}
+.chat-change-error {
+  color: var(--danger);
+  font-size: 13px;
+}
+
 .chat-entry-note,
 .chat-thinking {
   margin: 6px 0 0;
@@ -422,8 +553,7 @@ html.dark .chat-panel {
   border-top: 1px solid var(--border-color);
   background: var(--muted-surface);
 }
-/* The next hint for the attached problem, beside its toggle. Square corners set it apart from
-   the pill: this sends at once, the pill only chooses what is attached. */
+/* A next step on the last answer, such as the next hint. Pressing one sends at once. */
 .chat-action {
   min-height: 26px;
   display: inline-flex;

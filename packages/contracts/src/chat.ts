@@ -7,6 +7,10 @@
  *
  * While answering, the model may read the user's tracker through a fixed set of read tools. Each
  * lookup is reported as a `tool` event, and `dataAccess: false` turns the lookups off.
+ *
+ * The model can also propose a change to the tracker. A proposal arrives as an `action` event and
+ * changes nothing; the client shows it and, once the user confirms, sends it to
+ * `POST /api/v1/chat/actions`, the only chat route that writes.
  */
 import { z } from 'zod';
 import { llmProviderSchema } from './sync.ts';
@@ -53,6 +57,40 @@ export const chatRequestSchema = z.object({
 });
 export type ChatRequest = z.infer<typeof chatRequestSchema>;
 
+/**
+ * A change the model proposed, as the client must send it back to apply it.
+ *
+ * `args` are complete and already validated; the client displays them and never edits them.
+ */
+export interface ChatActionProposal {
+  /** Unique per proposal, for tracking its state in the conversation. */
+  id: string;
+  /** The change tool, such as `tracker_create_practices`. */
+  name: string;
+  args: Record<string, unknown>;
+  /** Display names for the identifiers in `args`, so the card can name what it changes. */
+  labels: {
+    /** Problem titles by frontend ID. */
+    problems: Record<string, string>;
+    /** Favorite folder names by ID. */
+    folders: Record<string, string>;
+    /** Goal list names by ID. */
+    lists: Record<string, string>;
+  };
+}
+
+/** Body of `POST /api/v1/chat/actions`: one confirmed proposal. */
+export const chatActionRequestSchema = z.object({
+  name: z.string().min(1).max(100),
+  args: z.record(z.string(), z.unknown()),
+}).strict();
+export type ChatActionRequest = z.infer<typeof chatActionRequestSchema>;
+
+/** Receipt of an applied change, as the change tool reported it. */
+export interface ChatActionReceipt {
+  result: Record<string, unknown>;
+}
+
 /** What the server attached, so the UI can show which local data the answer could use. */
 export interface ChatContextSummary {
   problem?: { frontendId: string; title: string };
@@ -64,6 +102,8 @@ export type ChatStreamEvent =
   | { type: 'delta'; text: string }
   /** The model is reading tracker data; `name` is the read tool, such as `tracker_list_practices`. */
   | { type: 'tool'; name: string }
+  /** The model proposed a change; nothing is written until the user confirms it. */
+  | { type: 'action'; action: ChatActionProposal }
   | { type: 'done'; provider: z.infer<typeof llmProviderSchema>; model: string }
   /** `error` is a stable code such as `CHAT_QUOTA`; `message` is an English fallback. */
   | { type: 'error'; error: string; message: string };

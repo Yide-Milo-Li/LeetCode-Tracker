@@ -167,8 +167,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     if (reply.statusCode < 200 || reply.statusCode >= 300 ||
         !['POST', 'PATCH', 'PUT', 'DELETE'].includes(request.method) ||
         request.url.startsWith('/api/v1/sync/') || request.url.startsWith('/api/v1/settings/openai/oauth/') ||
-        // A chat request reads the profile and never changes it.
-        request.url.startsWith('/api/v1/chat/') ||
+        // Answering a chat question reads the profile and never changes it.
+        request.routeOptions.url === '/api/v1/chat/stream' ||
         request.routeOptions.url === '/api/v1/goal-lists/memberships/lookup') return;
     deviceSync.observeLocalWrite();
   });
@@ -176,7 +176,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     application,
     deviceSync,
     openAIOAuth,
-    chat: new ChatService({ application, assistant: gemini }),
+    chat: new ChatService({ application, assistant: gemini, writeLock }),
     afterBundleRestore: () => { agentApplication?.resetTransientState(); openAIOAuth.reset(); },
   });
   if (options.desktopAgent && agentApplication) {

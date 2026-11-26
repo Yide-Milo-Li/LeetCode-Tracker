@@ -1,15 +1,35 @@
 /** Render the same CommonMark, GFM and math syntax used by the formatter. */
-import React, { memo, useDeferredValue } from 'react';
+import React, { memo, useDeferredValue, useRef } from 'react';
 import { FileText } from 'lucide-react';
 import Markdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import { translations, type Language } from '../i18n.ts';
+import { CopyButton } from './CopyButton.tsx';
 
 const plugins = [remarkGfm, remarkMath];
 
-/** Render source as React nodes without executing raw HTML or loading images. */
-export const RenderedMarkdown = memo(function RenderedMarkdown({ content, lang }: { content: string; lang: Language }) {
+/** A fenced block with its language label and, when asked for, a button that copies its text. */
+function CodeBlock({ language, copy, lang, children, ...props }: React.ComponentProps<'pre'> & { language?: string; copy: boolean; lang: Language }) {
+  const pre = useRef<HTMLPreElement>(null);
+  return (
+    <div className="notes-code-block">
+      {language && language !== 'math' && <span className="notes-code-language">{language}</span>}
+      <pre {...props} ref={pre}>{children}</pre>
+      {copy && (
+        <CopyButton className="notes-code-copy" text={() => pre.current?.textContent ?? ''}
+          label={lang === 'zh' ? '复制代码' : 'Copy code'} copiedLabel={lang === 'zh' ? '已复制' : 'Copied'} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Render source as React nodes without executing raw HTML or loading images.
+ *
+ * @param copyCode Give every fenced block a copy button.
+ */
+export const RenderedMarkdown = memo(function RenderedMarkdown({ content, lang, copyCode = false }: { content: string; lang: Language; copyCode?: boolean }) {
   return (
     <Markdown
       remarkPlugins={plugins}
@@ -22,7 +42,7 @@ export const RenderedMarkdown = memo(function RenderedMarkdown({ content, lang }
           const child = React.Children.toArray(children).find(item => React.isValidElement<{ className?: string }>(item));
           const className = React.isValidElement<{ className?: string }>(child) ? child.props.className : '';
           const language = /(?:^|\s)language-([^\s]+)/.exec(className ?? '')?.[1];
-          return <div className="notes-code-block">{language && language !== 'math' && <span className="notes-code-language">{language}</span>}<pre {...props}>{children}</pre></div>;
+          return <CodeBlock {...props} language={language} copy={copyCode} lang={lang}>{children}</CodeBlock>;
         },
         a: ({ node: _node, href, children, ...props }) => href
           ? <a {...props} href={href} {...(href.startsWith('#')

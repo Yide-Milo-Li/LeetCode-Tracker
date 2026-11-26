@@ -296,7 +296,7 @@ it('drags the launcher to an edge, remembers it and tucks away when left alone',
   assert.equal((await waitFor(() => screen.getByRole('complementary'))).style.left, `${width - 420 - 8}px`);
 });
 
-const { attemptLabel, hintLabel, hintPrompt, nextHintLevel, reviewPrompt } = await import('../apps/web/src/chat/chat-presets.ts');
+const { attemptLabel, hintLabel, hintPrompt, nextHintLevel, reviewPrompt, saveNotePrompt, similarPrompt } = await import('../apps/web/src/chat/chat-presets.ts');
 const { WorkspaceContext } = await import('../apps/web/src/workspace.tsx');
 const { TodayProblemRow } = await import('../apps/web/src/components/TodayProblemRow.tsx');
 const { PracticeRecordCard } = await import('../apps/web/src/components/PracticeRecordCard.tsx');
@@ -355,7 +355,8 @@ it('offers graded hints for the attached problem, then the solution, and a revie
   setChatProblem({ frontendId: '42', title: 'Trapping Rain Water' });
   await openPanel();
   const lastQuestion = () => requests.at(-1)!.messages.at(-1)!.content;
-  const nextHint = () => document.querySelector('.chat-context .chat-action');
+  // The ladder's own button; other follow-ups share the row.
+  const nextHint = () => [...document.querySelectorAll('.chat-context .chat-action')].find(node => node.textContent !== 'Save to my note')?.textContent ?? null;
   /** Click the next rung once the previous answer has finished. */
   const press = async (name: string, sent: number) => {
     await waitFor(() => assert.equal((screen.getByRole('button', { name }) as HTMLButtonElement).disabled, false));
@@ -670,4 +671,203 @@ it('stores conversations per device, adopts the old single one and lets old ones
   assert.deepEqual(cleaned.current, GENERAL_THREAD);
   localStorage.setItem('leetcode_tracker_chat_threads_v1', '{broken');
   assert.deepEqual(loadChatState(now), { threads: {}, current: GENERAL_THREAD });
+});
+
+const { ApiError } = await import('../apps/web/src/platform/index.ts');
+const { within } = await import('@testing-library/react');
+type Proposal = Extract<ChatStreamEvent, { type: 'action' }>['action'];
+
+const practiceCard: Proposal = {
+  id: 'p1', name: 'tracker_create_practices',
+  args: { operationId: '6f1d2c3b-0a4e-4f5a-9b6c-7d8e9f0a1b2c', dryRun: false, records: [
+    { questionFrontendId: '1', completed: true, outcome: 'independent', durationMinutes: 20, practicedAt: '2026-03-02T09:30:00Z' },
+  ] },
+  labels: { problems: { 1: 'Two Sum' }, folders: {}, lists: {} },
+};
+const noteCard: Proposal = {
+  id: 'n1', name: 'tracker_patch_note',
+  args: { frontendId: '42', heading: 'Pitfalls', mode: 'append', content: 'Track the **right max** too.', expectedContentHash: 'hash-1' },
+  labels: { problems: { 42: 'Trapping Rain Water' }, folders: {}, lists: {} },
+};
+const starCard: Proposal = {
+  id: 's1', name: 'tracker_add_favorites',
+  args: { frontendIds: ['1', '42'], folderIds: ['f1'], newFolder: { id: 'f1', name: 'Review' } },
+  labels: { problems: { 1: 'Two Sum', 42: 'Trapping Rain Water' }, folders: { f1: 'Review' }, lists: {} },
+};
+
+it('shows a proposed change as a card and writes only when it is confirmed', async () => {
+  mock.method(api, 'getChatStatus', async () => ({ configured: true, provider: 'openai', model: 'gpt-6-luna' }));
+  const applied: Array<{ name: string; args: Record<string, unknown> }> = [];
+  let busy = true;
+  mock.method(api, 'applyChatAction', async (input: { name: string; args: Record<string, unknown> }) => {
+    applied.push(input);
+    if (input.name === 'tracker_patch_note') throw new ApiError(409, 'NOTE_CHANGED', 'The note for problem 42 changed since it was read.');
+    if (input.name === 'tracker_add_favorites' && busy) {
+      busy = false;
+      throw new ApiError(409, 'PROFILE_BUSY', 'Wait for active operations to finish, then retry.');
+    }
+    return { result: {} };
+  });
+  const requests = serveChat([
+    { type: 'context', context: {} },
+    { type: 'action', action: practiceCard },
+    { type: 'action', action: noteCard },
+    { type: 'action', action: starCard },
+    { type: 'delta', text: 'Confirm the cards to save these.' },
+    { type: 'done', provider: 'openai', model: 'gpt-6-luna' },
+  ], answer('ok'));
+  const changed = mock.fn();
+  await act(async () => { render(<ChatLauncher lang="en" onOpenAiSettings={() => {}} onDataChanged={changed} />); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Ask AI' })); });
+  await waitFor(() => screen.getByRole('complementary'));
+  // The empty conversation says that changes are possible and always confirmed.
+  assert.match(screen.getByText(/You confirm each change first/).textContent ?? '', /record attempts, add to your notes, star problems/);
+
+  await ask('Log #1, note the pitfall and star both.');
+  await waitFor(() => screen.getByText('Confirm the cards to save these.'));
+  const card = (name: string) => within(screen.getByRole('region', { name }));
+  const press = async (name: string, label: string) => { await act(async () => { fireEvent.click(card(name).getByRole('button', { name: label })); }); };
+
+  // Each card says what it will do, in the user's terms; nothing was written by proposing.
+  assert.match(card('Record an attempt').getByRole('listitem').textContent ?? '', /^#1 Two Sum · solved independently · 20 min · Mar 2, 2026, 9:30/);
+  assert.deepEqual(card('Add to the note').getAllByRole('listitem').map(item => item.textContent), ['#42 Trapping Rain Water', 'Adds to section: Pitfalls']);
+  assert.equal(card('Add to the note').getByText('right max').tagName, 'STRONG');
+  assert.deepEqual(card('Star problems').getAllByRole('listitem').map(item => item.textContent), ['#1 Two Sum, #42 Trapping Rain Water', 'Folders: Review (new)']);
+  assert.equal(applied.length, 0);
+  // An answer whose changes may be applied is not offered for regeneration.
+  assert.equal(screen.queryByRole('button', { name: 'Answer again' }), null);
+
+  await press('Record an attempt', 'Record');
+  await waitFor(() => card('Record an attempt').getByText('Recorded'));
+  assert.deepEqual(applied[0], { name: practiceCard.name, args: practiceCard.args });
+  assert.equal(changed.mock.callCount(), 1);
+  // A decided card has no buttons left.
+  assert.equal(card('Record an attempt').queryByRole('button'), null);
+
+  // A refusal names the way forward and keeps the card open for another try.
+  await press('Star problems', 'Star');
+  await waitFor(() => assert.equal(card('Star problems').getByRole('alert').textContent, 'Wait for active operations to finish, then retry.'));
+  assert.equal(changed.mock.callCount(), 1);
+  await press('Star problems', 'Try again');
+  await waitFor(() => card('Star problems').getByText('Starred'));
+  assert.equal(changed.mock.callCount(), 2);
+
+  // A change built on an older note cannot succeed by retrying, so only dismissing is left.
+  await press('Add to the note', 'Add');
+  await waitFor(() => assert.equal(card('Add to the note').getByRole('alert').textContent, 'The note changed after the AI read it. Ask it to prepare the change again.'));
+  assert.deepEqual(card('Add to the note').getAllByRole('button').map(button => button.textContent), ['Dismiss']);
+  await press('Add to the note', 'Dismiss');
+  assert.ok(card('Add to the note').getByText('Dismissed, nothing changed'));
+  assert.equal(applied.length, 4);
+  assert.equal(changed.mock.callCount(), 2);
+
+  // The next question tells the model what became of each proposal.
+  await ask('Thanks');
+  await waitFor(() => assert.equal(requests.length, 2));
+  assert.equal(requests[1].messages[1].content, [
+    'Confirm the cards to save these.',
+    '',
+    '[Proposed change tracker_create_practices: the user confirmed it and it was applied]',
+    '[Proposed change tracker_patch_note: the user dismissed it; nothing changed]',
+    '[Proposed change tracker_add_favorites: the user confirmed it and it was applied]',
+  ].join('\n'));
+
+  // A confirmation cut off by closing the app is offered again; a malformed proposal is dropped.
+  localStorage.setItem('leetcode_tracker_chat_threads_v1', JSON.stringify({ current: { key: 'general' }, threads: [{ key: 'general', usedAt: Date.now(), entries: [
+    { id: 'q', role: 'user', content: 'Log it', state: 'done' },
+    { id: 'a', role: 'assistant', content: 'Confirm it.', state: 'done', changes: [{ ...practiceCard, state: 'applying' }, { id: 'broken', state: 'pending' }] },
+  ] }] }));
+  const restored = loadChatState().threads.general.entries[1].changes!;
+  assert.deepEqual(restored.map(change => [change.id, change.state]), [['p1', 'pending']]);
+  assert.deepEqual(requestTurns(loadChatState().threads.general.entries).at(-1),
+    { role: 'assistant', content: 'Confirm it.\n\n[Proposed change tracker_create_practices: not confirmed yet; nothing changed]' });
+});
+
+it('copies and regenerates an answer, keeps a draft, recalls the last question and resizes', async () => {
+  mock.method(api, 'getChatStatus', async () => ({ configured: true, provider: 'openai', model: 'gpt-6-luna' }));
+  const copied: string[] = [];
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (text: string) => { copied.push(text); } } });
+  const requests = serveChat([
+    { type: 'context', context: {} },
+    { type: 'delta', text: 'Use a map.\n\n```python\nseen = {}\n```' },
+    { type: 'done', provider: 'openai', model: 'gpt-6-luna' },
+  ], [
+    { type: 'context', context: {} },
+    { type: 'delta', text: 'Second take.' },
+    { type: 'done', provider: 'openai', model: 'gpt-6-luna' },
+  ]);
+  await openPanel();
+  await ask('How?');
+  await waitFor(() => screen.getByText('Use a map.'));
+
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy answer' })); });
+  await waitFor(() => screen.getByRole('button', { name: 'Copied' }));
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy code' })); });
+  assert.deepEqual(copied, ['Use a map.\n\n```python\nseen = {}\n```', 'seen = {}\n']);
+
+  // Asking again replaces the answer with a fresh one to the same question.
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Answer again' })); });
+  await waitFor(() => screen.getByText('Second take.'));
+  assert.deepEqual(requests[1].messages, [{ role: 'user', content: 'How?' }]);
+  assert.equal(screen.queryByText('Use a map.'), null);
+
+  // Text typed but not sent survives closing the panel.
+  const field = () => screen.getByRole('textbox') as HTMLTextAreaElement;
+  await act(async () => { fireEvent.change(field(), { target: { value: 'half a thought' } }); });
+  await act(async () => { fireEvent.keyDown(field(), { key: 'Escape' }); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Ask AI' })); });
+  await waitFor(() => assert.equal(field().value, 'half a thought'));
+  // Up leaves a draft alone and fills an empty field with the last question.
+  await act(async () => { fireEvent.keyDown(field(), { key: 'ArrowUp' }); });
+  assert.equal(field().value, 'half a thought');
+  await act(async () => { fireEvent.change(field(), { target: { value: '' } }); });
+  await act(async () => { fireEvent.keyDown(field(), { key: 'ArrowUp' }); });
+  assert.equal(field().value, 'How?');
+
+  // The enlarged size is remembered with the placement.
+  const position = () => JSON.parse(localStorage.getItem('leetcode_tracker_chat_position_v1') ?? '{}') as { large?: boolean };
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Enlarge panel' })); });
+  assert.equal(screen.getByRole('complementary').getAttribute('data-size'), 'large');
+  assert.equal(position().large, true);
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Restore panel size' })); });
+  assert.equal(screen.getByRole('complementary').hasAttribute('data-size'), false);
+  assert.equal('large' in position(), false);
+  // The enlarged panel fills the window height and still fits a narrow window.
+  assert.deepEqual(panelPoint({ ...DEFAULT_CHAT_POSITION, large: true }, { width: 1440, height: 900 }), { left: 696, top: 24 });
+  assert.deepEqual(panelPoint({ ...DEFAULT_CHAT_POSITION, large: true }, { width: 700, height: 600 }), { left: 24, top: 24 });
+});
+
+it('offers to save a plain answer to the note and to find similar problems', async () => {
+  mock.method(api, 'getChatStatus', async () => ({ configured: true, provider: 'openai', model: 'gpt-6-luna' }));
+  const requests = serveChat(answer('Related: 11 and 407.'), answer('Use two pointers.'), [
+    { type: 'context', context: { problem: rain } },
+    { type: 'action', action: noteCard },
+    { type: 'delta', text: 'Confirm to save it.' },
+    { type: 'done', provider: 'openai', model: 'gpt-6-luna' },
+  ]);
+  setChatProblem(rain);
+  await openPanel();
+  const saveNote = () => screen.queryByRole('button', { name: 'Save to my note' });
+  assert.equal(saveNote(), null);
+
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Find similar problems in my catalog' })); });
+  await waitFor(() => screen.getByText('Related: 11 and 407.'));
+  assert.equal(requests[0].messages[0].content, similarPrompt('en', rain));
+
+  await ask('How do I solve it?');
+  await waitFor(() => screen.getByText('Use two pointers.'));
+  await waitFor(() => assert.equal((saveNote() as HTMLButtonElement).disabled, false));
+  await act(async () => { fireEvent.click(saveNote()!); });
+  await waitFor(() => screen.getByText('Confirm to save it.'));
+  assert.equal(requests[2].messages.at(-1)!.content, saveNotePrompt('en', rain));
+  // The answer that proposes the note change is not itself offered for saving.
+  assert.ok(screen.getByRole('region', { name: 'Add to the note' }));
+  await waitFor(() => screen.getByRole('button', { name: 'Send' }));
+  assert.equal(saveNote(), null);
+
+  // Proposing a change takes data access, so the offers go away with it.
+  await act(async () => { setChatDataAccess(false); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Clear this conversation' })); });
+  assert.equal(screen.queryByRole('button', { name: 'Find similar problems in my catalog' }), null);
+  assert.equal(screen.queryByText(/You confirm each change first/), null);
 });

@@ -6,21 +6,27 @@
  *
  * It shows one conversation at a time: a problem's, or the general one. The title is the only
  * conversation control, a list of the recent ones.
+ *
+ * A change the AI proposes appears under its answer as a card. The card states what will change
+ * and nothing is written until its confirming button is pressed.
  */
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowUp, ChevronDown, Eraser, Lightbulb, Square, Trash2, X } from 'lucide-react';
+import { ArrowUp, Check, ChevronDown, Eraser, Lightbulb, Maximize2, Minimize2, NotebookPen, RefreshCw, Square, Trash2, X } from 'lucide-react';
 import { api, type LLMProvider } from '../api.ts';
 import { CHAT_MAX_MESSAGE_CHARS } from '../../../../packages/contracts/src/chat-limits.ts';
 import type { Language } from '../i18n.ts';
 import { ApiError } from '../platform/index.ts';
 import { localizeApiError } from '../error-i18n.ts';
+import { useWorkspace } from '../workspace.tsx';
+import { describeChange, type ChatChange } from '../chat/chat-changes.ts';
 import type { ChatAction } from '../chat/chat-context.ts';
-import { hintLabel, hintPrompt, nextHintLevel, reviewPrompt } from '../chat/chat-presets.ts';
+import { hintLabel, hintPrompt, nextHintLevel, reviewPrompt, saveNotePrompt, similarPrompt } from '../chat/chat-presets.ts';
 import { useChatDataAccess } from '../chat/chat-settings.ts';
 import { toolLabel } from '../chat/chat-tools.ts';
 import type { ChatDock, Point } from '../chat/chat-position.ts';
 import { GENERAL_THREAD, type ChatThreadRef } from '../chat/chat-threads.ts';
 import type { ChatController, ChatEntry } from '../chat/useChat.ts';
+import { CopyButton } from './CopyButton.tsx';
 import { RenderedMarkdown } from './NotesMarkdownPreview.tsx';
 import { Feedback, IconButton, useActionPopover } from './ui.tsx';
 
@@ -46,6 +52,9 @@ export interface ChatPanelProps {
   dragging: boolean;
   /** Pointer went down on the header outside its buttons. */
   onDragStart: (event: React.PointerEvent) => void;
+  /** The panel is at its enlarged size. */
+  large: boolean;
+  onToggleSize: () => void;
 }
 
 /** Name of a conversation: its problem, or the general one. */
@@ -66,10 +75,64 @@ function lastUsed(usedAt: number, lang: Language, now = Date.now()): string {
   return zh ? `${days} 天前` : `${days} d ago`;
 }
 
-function Answer({ entry, lang, isLast, busy, onRetry, onOpenAiSettings }: {
-  entry: ChatEntry; lang: Language; isLast: boolean; busy: boolean; onRetry: () => void; onOpenAiSettings: () => void;
+/** Why a confirmed change was refused, in terms of what to do next. */
+function changeError(error: { code: string; message: string }, lang: Language): string {
+  if (error.code === 'NOTE_CHANGED') {
+    return lang === 'zh' ? '笔记在 AI 读取之后有了改动。请让它重新准备这次修改。' : 'The note changed after the AI read it. Ask it to prepare the change again.';
+  }
+  return localizeApiError(new ApiError(0, error.code, error.message), lang,
+    lang === 'zh' ? '这次改动没有保存，数据没有变化。' : 'The change was not saved. Nothing changed.');
+}
+
+/** One proposed change: what it will do, and the buttons that decide it. */
+function ChangeCard({ change, lang, onConfirm, onDismiss }: {
+  change: ChatChange; lang: Language; onConfirm: () => void; onDismiss: () => void;
 }) {
   const zh = lang === 'zh';
+  const { timezone } = useWorkspace();
+  const view = describeChange(change, lang, timezone);
+  const applying = change.state === 'applying';
+  const decided = change.state === 'applied' || change.state === 'dismissed';
+  // A change built on an older note fails the same way every time; only a new proposal helps.
+  const retryable = change.error?.code !== 'NOTE_CHANGED';
+  return (
+    <section className="chat-change" data-state={change.state} aria-label={view.title}>
+      <h3>{view.title}</h3>
+      <ul>
+        {view.lines.map((line, index) => <li key={index}>{line}</li>)}
+      </ul>
+      {view.body && !decided && (
+        <div className="notes-preview-pane chat-answer chat-change-body" tabIndex={0} aria-label={zh ? '将写入的内容' : 'Text to be written'}>
+          <RenderedMarkdown content={view.body} lang={lang} />
+        </div>
+      )}
+      {change.state === 'failed' && change.error && <p className="chat-change-error" role="alert">{changeError(change.error, lang)}</p>}
+      {decided ? (
+        <p className="chat-change-status" role="status">
+          {change.state === 'applied' && <Check size={14} aria-hidden="true" />}
+          {change.state === 'applied' ? view.done : (zh ? '已取消，没有改动' : 'Dismissed, nothing changed')}
+        </p>
+      ) : (
+        <div className="chat-change-actions">
+          {(change.state !== 'failed' || retryable) && (
+            <button type="button" className="btn btn-primary btn-sm" disabled={applying} onClick={onConfirm}>
+              {applying ? (zh ? '正在保存…' : 'Saving…') : change.state === 'failed' ? (zh ? '再试一次' : 'Try again') : view.confirm}
+            </button>
+          )}
+          <button type="button" className="btn btn-ghost btn-sm" disabled={applying} onClick={onDismiss}>{zh ? '不用了' : 'Dismiss'}</button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function Answer({ entry, lang, isLast, busy, onRetry, onOpenAiSettings, onConfirmChange, onDismissChange }: {
+  entry: ChatEntry; lang: Language; isLast: boolean; busy: boolean; onRetry: () => void; onOpenAiSettings: () => void;
+  onConfirmChange: (id: string) => void; onDismissChange: (id: string) => void;
+}) {
+  const zh = lang === 'zh';
+  const changes = entry.changes ?? [];
+  const settled = entry.state !== 'streaming';
   const lookups = (entry.tools ?? []).map(name => toolLabel(name, lang));
   const used = [
     entry.context?.problem && `#${entry.context.problem.frontendId} ${entry.context.problem.title}`,
@@ -80,12 +143,16 @@ function Answer({ entry, lang, isLast, busy, onRetry, onOpenAiSettings }: {
   return (
     <div className="chat-entry chat-entry-assistant">
       {entry.content
-        ? <div className="notes-preview-pane chat-answer"><RenderedMarkdown content={entry.content} lang={lang} /></div>
-        : entry.state === 'streaming' && (
+        ? <div className="notes-preview-pane chat-answer"><RenderedMarkdown content={entry.content} lang={lang} copyCode /></div>
+        : !settled && changes.length === 0 && (
           <p className="chat-thinking" role="status">
             {reading ? (zh ? `正在查看${reading}…` : `Reading ${reading}…`) : (zh ? '正在思考…' : 'Thinking…')}
           </p>
         )}
+      {changes.map(change => (
+        <ChangeCard key={change.id} change={change} lang={lang}
+          onConfirm={() => onConfirmChange(change.id)} onDismiss={() => onDismissChange(change.id)} />
+      ))}
       {entry.state === 'stopped' && (
         <p className="chat-entry-note">
           {zh ? '已停止。' : 'Stopped.'}
@@ -101,20 +168,31 @@ function Answer({ entry, lang, isLast, busy, onRetry, onOpenAiSettings }: {
             {localizeApiError(new ApiError(0, entry.error.code, entry.error.message), lang)}
           </Feedback>
       )}
-      {used && entry.content && entry.state !== 'streaming' &&<p className="chat-entry-note">{zh ? '参考了：' : 'Used: '}{used}</p>}
+      {entry.content && settled && (
+        <div className="chat-entry-foot">
+          <CopyButton text={() => entry.content} label={zh ? '复制回答' : 'Copy answer'} copiedLabel={zh ? '已复制' : 'Copied'} />
+          {/* A stopped or failed answer offers its own retry above; an answer whose changes may
+              already be applied is not replaced. */}
+          {isLast && !busy && entry.state === 'done' && changes.length === 0 && (
+            <IconButton icon={RefreshCw} size={14} label={zh ? '重新回答' : 'Answer again'} onClick={onRetry} />
+          )}
+          {used && <p className="chat-entry-note">{zh ? '参考了：' : 'Used: '}{used}</p>}
+        </div>
+      )}
     </div>
   );
 }
 
 export function ChatPanel({
-  lang, chat, pending, onPendingHandled, shortcut, onClose, onOpenAiSettings, position, side, dragging, onDragStart,
+  lang, chat, pending, onPendingHandled, shortcut, onClose, onOpenAiSettings, position, side, dragging, onDragStart, large, onToggleSize,
 }: ChatPanelProps) {
   const zh = lang === 'zh';
   const dataAccess = useChatDataAccess();
   const problem = chat.current.problem ?? null;
   const switcher = useActionPopover();
   const [status, setStatus] = useState<{ configured: boolean; provider?: LLMProvider; model: string } | null>(null);
-  const [draft, setDraft] = useState('');
+  // Held by the controller, so text typed here survives closing the panel or switching conversations.
+  const { draft, setDraft } = chat;
   const panel = useRef<HTMLElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const log = useRef<HTMLDivElement>(null);
@@ -161,8 +239,10 @@ export function ChatPanel({
       const level = nextHintLevel(chat.entries, problem.frontendId);
       if (!hintLabel(level, lang)) return;
       chat.send(hintPrompt(level, lang, problem), { frontendId: problem.frontendId, level });
-    } else {
+    } else if (action.kind === 'review') {
       chat.send(reviewPrompt(lang, problem, action.attempt));
+    } else {
+      chat.send(action.kind === 'similar' ? similarPrompt(lang, problem) : saveNotePrompt(lang, problem));
     }
     pinned.current = true;
     input.current?.focus();
@@ -184,14 +264,22 @@ export function ChatPanel({
   ];
   const reviewLabel = zh ? '复盘最近一次练习' : 'Review my latest attempt';
   const todayQuestion = zh ? '今天的计划里，我应该先做哪道题？' : "Which problem in today's plan should I start with?";
-  const starters = [
-    ...(problem ? [
+  const weakQuestion = zh ? '我最近哪类题最薄弱？接下来该怎么补？' : 'Which topics am I weakest at lately, and how should I work on them?';
+  // Questions that take a lookup are offered only while data access provides one.
+  const starters = problem
+    ? [
       { label: zh ? '给我一点这道题的提示，先不要给答案' : 'Give me a hint for this problem without the solution', run: () => runAction({ kind: 'hint' }) },
       { label: reviewLabel, run: () => runAction({ kind: 'review' }) },
-    ] : []),
-    // Answering this takes a lookup of the plan, which only data access provides.
-    ...(dataAccess ? [{ label: todayQuestion, run: () => ask(todayQuestion) }] : []),
-  ];
+      ...(dataAccess ? [{ label: zh ? '在我的题库里找几道同类型的题' : 'Find similar problems in my catalog', run: () => runAction({ kind: 'similar' }) }] : []),
+    ]
+    : dataAccess
+      ? [{ label: todayQuestion, run: () => ask(todayQuestion) }, { label: weakQuestion, run: () => ask(weakQuestion) }]
+      : [];
+  const lastEntry = chat.entries.at(-1);
+  // Offered after a plain answer about the problem; proposing the note change takes data access.
+  const canSaveNote = Boolean(problem && dataAccess && lastEntry?.role === 'assistant' && lastEntry.state === 'done'
+    && lastEntry.content.trim() && !lastEntry.changes?.length);
+  const followUps = chat.entries.length > 0 && (nextHint || canSaveNote);
 
   return (
     <aside
@@ -199,6 +287,7 @@ export function ChatPanel({
       tabIndex={-1}
       className={'chat-panel' + (dragging ? ' is-dragging' : '')}
       data-side={side}
+      data-size={large ? 'large' : undefined}
       style={{ left: position.left, top: position.top }}
       aria-label={zh ? 'AI 对话' : 'AI chat'}
       onKeyDown={event => {
@@ -248,6 +337,8 @@ export function ChatPanel({
             })}
           </div>
         )}
+        <IconButton icon={large ? Minimize2 : Maximize2} label={large ? (zh ? '还原面板大小' : 'Restore panel size') : (zh ? '放大面板' : 'Enlarge panel')}
+          onClick={onToggleSize} tooltipSide="bottom" />
         <IconButton icon={Eraser} label={zh ? '清空这个对话' : 'Clear this conversation'} disabled={chat.entries.length === 0}
           onClick={() => { chat.clear(); input.current?.focus(); }} tooltipSide="bottom" />
         <IconButton icon={X} label={zh ? '关闭' : 'Close'} shortcut={shortcut} onClick={onClose} tooltipSide="bottom" />
@@ -279,13 +370,22 @@ export function ChatPanel({
                   : `This conversation is about ${title}. Your practice records and saved note for it go with each question.`)
                 : (zh ? '可以问题目思路、你的笔记，或者今天的练习安排。' : 'Ask about a problem, your notes, or what to practise today.')}
             </p>
-            <ul className="chat-suggestions">
-              {starters.map(starter => (
-                <li key={starter.label}>
-                  <button type="button" onClick={starter.run}>{starter.label}</button>
-                </li>
-              ))}
-            </ul>
+            {dataAccess && (
+              <p>
+                {zh
+                  ? '也可以让 AI 记录练习、写笔记、收藏题目或加入题单，每次改动都会先请你确认。'
+                  : 'The AI can also record attempts, add to your notes, star problems and add them to goal lists. You confirm each change first.'}
+              </p>
+            )}
+            {starters.length > 0 && (
+              <ul className="chat-suggestions">
+                {starters.map(starter => (
+                  <li key={starter.label}>
+                    <button type="button" onClick={starter.run}>{starter.label}</button>
+                  </li>
+                ))}
+              </ul>
+            )}
             <p className="chat-entry-note">
               {dataAccess
                 ? (zh
@@ -302,17 +402,25 @@ export function ChatPanel({
         {chat.entries.map((entry, index) => entry.role === 'user'
           ? <div key={entry.id} className="chat-entry chat-entry-user"><p>{entry.content}</p></div>
           : <Answer key={entry.id} entry={entry} lang={lang} isLast={index === chat.entries.length - 1} busy={chat.busy}
-              onRetry={chat.retry} onOpenAiSettings={onOpenAiSettings} />)}
+              onRetry={chat.retry} onOpenAiSettings={onOpenAiSettings}
+              onConfirmChange={chat.confirmChange} onDismissChange={chat.dismissChange} />)}
       </div>
 
       <form className="chat-composer" onSubmit={event => { event.preventDefault(); ask(draft); }}>
-        {/* The only thing above the field, and only while a hint ladder is under way. The empty
-            conversation offers the presets as starters instead. */}
-        {chat.entries.length > 0 && nextHint && (
+        {/* Next steps on what was just answered. The empty conversation offers the presets as
+            starters instead. */}
+        {followUps && (
           <div className="chat-context">
-            <button type="button" className="chat-action" disabled={!ready || chat.busy} onClick={() => runAction({ kind: 'hint' })}>
-              <Lightbulb size={14} aria-hidden="true" />{nextHint}
-            </button>
+            {nextHint && (
+              <button type="button" className="chat-action" disabled={!ready || chat.busy} onClick={() => runAction({ kind: 'hint' })}>
+                <Lightbulb size={14} aria-hidden="true" />{nextHint}
+              </button>
+            )}
+            {canSaveNote && (
+              <button type="button" className="chat-action" disabled={!ready || chat.busy} onClick={() => runAction({ kind: 'save-note' })}>
+                <NotebookPen size={14} aria-hidden="true" />{zh ? '整理进笔记' : 'Save to my note'}
+              </button>
+            )}
           </div>
         )}
         <div className="chat-input-row">
@@ -330,6 +438,14 @@ export function ChatPanel({
               if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) {
                 event.preventDefault();
                 ask(draft);
+              }
+              // In an empty field, Up brings the last question back for editing.
+              if (event.key === 'ArrowUp' && !draft && !event.nativeEvent.isComposing) {
+                const last = chat.entries.findLast(entry => entry.role === 'user');
+                if (last) {
+                  event.preventDefault();
+                  setDraft(last.content);
+                }
               }
             }}
           />

@@ -5,6 +5,7 @@
  * browser's `localStorage` only; they are not part of the profile, backups or device sync. Old
  * and surplus conversations are dropped automatically so storage stays bounded.
  */
+import type { ChatChange } from './chat-changes.ts';
 import type { ChatProblemRef } from './chat-context.ts';
 import type { ChatEntry } from './useChat.ts';
 
@@ -47,7 +48,25 @@ function readEntries(value: unknown): ChatEntry[] {
     !!entry && typeof entry === 'object' && typeof entry.id === 'string' && typeof entry.content === 'string'
     && (entry.role === 'user' || entry.role === 'assistant'))
     // An answer that was streaming when the app closed can only be a partial one.
-    .map(entry => ({ ...entry, state: entry.state === 'streaming' ? 'stopped' as const : entry.state ?? 'done' }));
+    .map(entry => ({
+      ...entry,
+      state: entry.state === 'streaming' ? 'stopped' as const : entry.state ?? 'done',
+      ...(Array.isArray(entry.changes) ? { changes: readChanges(entry.changes) } : {}),
+    }));
+}
+
+/**
+ * Proposals as stored. A confirmation that was in flight when the app closed has an unknown
+ * outcome, so it is offered again; applying twice is safe because the server replays or refuses.
+ */
+function readChanges(value: unknown[]): ChatChange[] {
+  return value.filter((change): change is ChatChange => {
+    const raw = change as Partial<ChatChange> | null;
+    const labels = raw?.labels as Record<string, unknown> | undefined;
+    return !!raw && typeof raw.id === 'string' && typeof raw.name === 'string' && typeof raw.state === 'string'
+      && !!raw.args && typeof raw.args === 'object' && !!labels
+      && ['problems', 'folders', 'lists'].every(kind => !!labels[kind] && typeof labels[kind] === 'object');
+  }).map(change => change.state === 'applying' ? { ...change, state: 'pending' } : change);
 }
 
 function readRef(value: unknown): ChatThreadRef | null {

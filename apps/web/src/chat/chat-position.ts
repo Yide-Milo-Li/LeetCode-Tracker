@@ -11,6 +11,8 @@ export const LAUNCHER_SIZE = 40;
 /** Gap between the revealed launcher and the window edge. */
 const EDGE_GAP = 12;
 export const PANEL_WIDTH = 420;
+/** Width of the enlarged panel, for reading code and long answers. */
+const PANEL_WIDTH_LARGE = 720;
 /** Gap around a panel that opens from the dock; a dragged panel may come closer to the edge. */
 const PANEL_MARGIN = 24;
 const PANEL_MIN_GAP = 8;
@@ -29,15 +31,23 @@ export interface Point { left: number; top: number }
 export type ChatDock =
   | { side: 'left' | 'right'; bottom: number }
   | { side: 'top' | 'bottom'; left: number };
-/** `panel` is set once the user has dragged the panel; without it the panel opens beside the dock. */
-export interface ChatPosition { dock: ChatDock; panel?: Point }
+/**
+ * `panel` is set once the user has dragged the panel; without it the panel opens beside the dock.
+ * `large` is the enlarged panel, which fills the window height.
+ */
+export interface ChatPosition { dock: ChatDock; panel?: Point; large?: boolean }
 
 export const DEFAULT_CHAT_POSITION: ChatPosition = { dock: { side: 'right', bottom: 24 } };
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), Math.max(min, max));
 
 /** Matches the CSS height of `.chat-panel`. */
-export const panelHeight = (viewport: Viewport) => Math.min(620, viewport.height - 2 * PANEL_MARGIN);
+export const panelHeight = (viewport: Viewport, large = false) =>
+  large ? viewport.height - 2 * PANEL_MARGIN : Math.min(620, viewport.height - 2 * PANEL_MARGIN);
+
+/** Matches the CSS width of `.chat-panel`. */
+export const panelWidth = (viewport: Viewport, large = false) =>
+  large ? Math.min(PANEL_WIDTH_LARGE, viewport.width - 2 * PANEL_MARGIN) : PANEL_WIDTH;
 
 /**
  * Where the launcher is drawn. Tucked, it sits flush against its edge, where it is drawn as a thin
@@ -81,24 +91,25 @@ export function dockAt(point: Point, viewport: Viewport): ChatDock {
   };
 }
 
-export const clampPanel = (point: Point, viewport: Viewport): Point => ({
-  left: clamp(point.left, PANEL_MIN_GAP, viewport.width - PANEL_WIDTH - PANEL_MIN_GAP),
-  top: clamp(point.top, PANEL_MIN_GAP, viewport.height - panelHeight(viewport) - PANEL_MIN_GAP),
+export const clampPanel = (point: Point, viewport: Viewport, large = false): Point => ({
+  left: clamp(point.left, PANEL_MIN_GAP, viewport.width - panelWidth(viewport, large) - PANEL_MIN_GAP),
+  top: clamp(point.top, PANEL_MIN_GAP, viewport.height - panelHeight(viewport, large) - PANEL_MIN_GAP),
 });
 
 /** Where the panel opens: the spot it was dragged to, otherwise at the dock's edge, aligned with the launcher. */
 export function panelPoint(position: ChatPosition, viewport: Viewport): Point {
-  if (position.panel) return clampPanel(position.panel, viewport);
-  const height = panelHeight(viewport);
+  if (position.panel) return clampPanel(position.panel, viewport, position.large);
+  const height = panelHeight(viewport, position.large);
+  const width = panelWidth(viewport, position.large);
   const { dock } = position;
   if ('left' in dock) {
     return {
-      left: clamp(dock.left, PANEL_MARGIN, viewport.width - PANEL_WIDTH - PANEL_MARGIN),
+      left: clamp(dock.left, PANEL_MARGIN, viewport.width - width - PANEL_MARGIN),
       top: dock.side === 'top' ? PANEL_MARGIN : Math.max(PANEL_MARGIN, viewport.height - height - PANEL_MARGIN),
     };
   }
   return {
-    left: dock.side === 'left' ? PANEL_MARGIN : viewport.width - PANEL_WIDTH - PANEL_MARGIN,
+    left: dock.side === 'left' ? PANEL_MARGIN : viewport.width - width - PANEL_MARGIN,
     top: clamp(viewport.height - dock.bottom - height, PANEL_MARGIN, viewport.height - height - PANEL_MARGIN),
   };
 }
@@ -110,8 +121,8 @@ export function panelPoint(position: ChatPosition, viewport: Viewport): Point {
  * edge, a side dock follows its bottom edge. The panel fills most of the window height, so its
  * distance to the top and bottom says little about where the user wants the launcher.
  */
-export function dockForPanel(point: Point, viewport: Viewport, current: ChatDock): ChatDock {
-  const height = panelHeight(viewport);
+export function dockForPanel(point: Point, viewport: Viewport, current: ChatDock, large = false): ChatDock {
+  const height = panelHeight(viewport, large);
   if (current.side === 'top' || current.side === 'bottom') {
     return {
       side: point.top + height / 2 < viewport.height / 2 ? 'top' : 'bottom',
@@ -119,7 +130,7 @@ export function dockForPanel(point: Point, viewport: Viewport, current: ChatDock
     };
   }
   return {
-    side: point.left + PANEL_WIDTH / 2 < viewport.width / 2 ? 'left' : 'right',
+    side: point.left + panelWidth(viewport, large) / 2 < viewport.width / 2 ? 'left' : 'right',
     bottom: clamp(viewport.height - point.top - height, EDGE_GAP, viewport.height - LAUNCHER_SIZE - EDGE_GAP),
   };
 }
@@ -139,6 +150,7 @@ function loadPosition(): ChatPosition {
     return {
       dock,
       ...(panel && isNumber(panel.left) && isNumber(panel.top) ? { panel: { left: panel.left, top: panel.top } } : {}),
+      ...(stored?.large === true ? { large: true } : {}),
     };
   } catch {
     return DEFAULT_CHAT_POSITION;

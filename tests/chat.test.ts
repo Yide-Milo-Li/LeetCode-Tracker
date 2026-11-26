@@ -16,7 +16,8 @@ import { DeepSeekProvider } from '../apps/server/src/llm/providers/deepseek.ts';
 import { ProviderOutputError } from '../apps/server/src/llm/providers/base.ts';
 import { sseData } from '../apps/server/src/llm/providers/sse.ts';
 import { LLMError, type ChatMessage, type ChatToolSpec, type ChatToolStep, type ILLMAssistant, type OpenAITokenSource } from '../apps/server/src/llm/types.ts';
-import { CHAT_TOOL_NAMES } from '../apps/server/src/chat/chat-service.ts';
+import { CHAT_ACTION_NAMES, CHAT_TOOL_NAMES } from '../apps/server/src/chat/chat-service.ts';
+import { contentHash } from '../apps/mcp/src/views.ts';
 import { WRITE_TOOL_NAMES } from '../apps/mcp/src/registrar.ts';
 import type { ChatStreamEvent } from '../packages/contracts/src/chat.ts';
 
@@ -483,7 +484,7 @@ test('the model looks tracker data up through read tools and each lookup is repo
   assert.deepEqual(events(response.payload), [
     { type: 'context', context: {} },
     { type: 'delta', text: 'Let me check.' },
-    // Only calls that ran are reported: the write tool and the malformed call never did.
+    // Only calls that ran are reported: the tool that is not offered and the malformed call never did.
     { type: 'tool', name: 'tracker_list_practices' },
     { type: 'tool', name: 'tracker_get_notes' },
     // The answer after a lookup starts a new paragraph.
@@ -491,16 +492,17 @@ test('the model looks tracker data up through read tools and each lookup is repo
     { type: 'done', provider: 'openai', model: 'm' },
   ]);
 
-  // The offer is exactly the read allowlist, with a JSON Schema for each tool's arguments.
+  // The offer is exactly the two allowlists, with a JSON Schema for each tool's arguments.
   const offered = calls[0].tools as ChatToolSpec[];
-  assert.deepEqual(offered.map(tool => tool.name), [...CHAT_TOOL_NAMES]);
-  assert.equal(offered.some(tool => (WRITE_TOOL_NAMES as readonly string[]).includes(tool.name) || tool.name === 'tracker_status'), false);
+  assert.deepEqual(offered.map(tool => tool.name), [...CHAT_TOOL_NAMES, ...CHAT_ACTION_NAMES]);
+  assert.equal(offered.some(tool => tool.name === 'tracker_status'
+    || ((WRITE_TOOL_NAMES as readonly string[]).includes(tool.name) && !(CHAT_ACTION_NAMES as readonly string[]).includes(tool.name))), false);
   const practices = offered.find(tool => tool.name === 'tracker_list_practices')!;
   assert.equal(practices.parameters.type, 'object');
   assert.ok('frontendId' in (practices.parameters.properties as object));
   assert.ok(!('$schema' in practices.parameters));
   assert.match(calls[0].systemInstruction, /read the user's tracker with the tracker tools/);
-  assert.match(calls[0].systemInstruction, /cannot change anything in the tracker/);
+  assert.match(calls[0].systemInstruction, /Calling one of these changes nothing/);
 
   // The second turn carries the model's own turn untouched and one result per call.
   const steps = calls[1].steps as ChatToolStep[];
@@ -554,6 +556,123 @@ test('a long lookup result is cut, endless lookups are stopped and a tool refusa
   assert.equal(quota.calls.length, 1);
   await picky.app.close();
   await quota.app.close();
+});
+
+test('a change the model proposes is shown for confirmation and written only when applied', async () => {
+  const staleHash = contentHash('an older note');
+  const proposals = (hash: string) => [
+    // The model's own operation ID and dry-run flag are replaced by the server's.
+    { id: 'a1', name: 'tracker_create_practices', arguments: JSON.stringify({
+      operationId: 'made-up', dryRun: true, records: [{ questionFrontendId: '1', completed: true, durationMinutes: 20, outcome: 'independent' }],
+    }) },
+    { id: 'a2', name: 'tracker_create_practices', arguments: '{"records":[{"questionFrontendId":"999","completed":true}]}' },
+    { id: 'a3', name: 'tracker_patch_note', arguments: JSON.stringify({ frontendId: '42', heading: 'Idea', mode: 'append', content: 'Stale.', expectedContentHash: staleHash }) },
+    { id: 'a4', name: 'tracker_patch_note', arguments: JSON.stringify({ frontendId: '42', heading: 'Pitfalls', mode: 'append', content: 'Track the right max too.', expectedContentHash: hash }) },
+    { id: 'a5', name: 'tracker_add_favorites', arguments: '{"frontendIds":["42"],"folderIds":[],"newFolder":{"name":"Review"}}' },
+    { id: 'a6', name: 'tracker_add_to_goal_lists', arguments: '{"frontendIds":["1"],"listIds":["0b1f6f0e-6c1d-4a51-9a53-3f1f4d1c2b7a"]}' },
+    { id: 'a7', name: 'tracker_add_to_goal_lists', arguments: '{"frontendIds":["1","42"],"listIds":["LIST"]}' },
+    { id: 'a8', name: 'tracker_add_favorites', arguments: '{"frontendIds":["1"],"folderIds":[]}' },
+    { id: 'a9', name: 'tracker_create_practices', arguments: '{"records":[{"questionFrontendId":"42","completed":true,"outcome":"unsolved"}]}' },
+  ];
+  let script: ReturnType<typeof proposals> = [];
+  const { app, calls } = await chatApp(async params => {
+    if (!params.steps?.length) return toolTurn(script);
+    params.onDelta('Confirm the cards to save these.');
+    return { model: 'm', provider: 'openai', usage };
+  });
+  await seedProfile(app);
+  const list = JSON.parse((await app.inject({ method: 'POST', url: '/api/v1/goal-lists', payload: { name: 'Blind 75', frontendIds: [] } })).payload) as { id: string };
+  const noteOf = async () => (JSON.parse((await app.inject({ method: 'GET', url: '/api/v1/notes/42' })).payload) as { note: { content: string } }).note.content;
+  const practiceCount = async () => (JSON.parse((await app.inject({ method: 'GET', url: '/api/v1/practice-records' })).payload) as { items: unknown[] }).items.length;
+  const before = { note: await noteOf(), practices: await practiceCount() };
+  script = proposals(contentHash(before.note)).map(call => ({ ...call, arguments: call.arguments.replace('LIST', list.id) }));
+
+  const stream = events((await post(app, { messages: [{ role: 'user', content: 'Log #1, note the pitfall, star 42.' }], context: { frontendId: '42' } })).payload);
+  const actions = stream.flatMap(event => event.type === 'action' ? [event.action] : []);
+  // Four proposals reach the user; the unknown problem, the stale note, the unknown list and the
+  // contradictory record are refused to the model, and the fifth valid proposal is over the limit.
+  assert.deepEqual(actions.map(action => action.name),
+    ['tracker_create_practices', 'tracker_patch_note', 'tracker_add_favorites', 'tracker_add_to_goal_lists']);
+  const results = (calls[1].steps as Array<{ role: string; content?: string }>).slice(1).map(step => step.content!);
+  assert.match(results[0], /^AWAITING_CONFIRMATION: .*Nothing has changed yet/);
+  assert.match(results[1], /^PROBLEM_NOT_FOUND: Problem 999/);
+  assert.match(results[2], /^NOTE_CHANGED: /);
+  assert.match(results[3], /^AWAITING_CONFIRMATION/);
+  assert.match(results[5], /^GOAL_LIST_NOT_FOUND: /);
+  assert.match(results[7], /^ACTION_LIMIT: /);
+  assert.match(results[8], /^ACTION_LIMIT: /);
+  assert.equal(stream.at(-1)?.type, 'done');
+
+  // The proposals carry complete arguments and the names a card needs.
+  const [practice, note, favorite, goal] = actions;
+  const record = (practice.args.records as Array<Record<string, unknown>>)[0];
+  assert.match(String(practice.args.operationId), /^[0-9a-f-]{36}$/);
+  assert.notEqual(practice.args.operationId, 'made-up');
+  assert.equal(practice.args.dryRun, false);
+  assert.match(String(record.practicedAt), /^\d{4}-\d{2}-\d{2}T/);
+  assert.deepEqual(practice.labels.problems, { 1: 'Two Sum' });
+  const folderId = (favorite.args.newFolder as { id: string }).id;
+  assert.deepEqual(favorite.args.folderIds, [folderId]);
+  assert.deepEqual(favorite.labels.folders, { [folderId]: 'Review' });
+  assert.deepEqual(goal.labels, { problems: { 1: 'Two Sum', 42: 'Trapping Rain Water' }, folders: {}, lists: { [list.id]: 'Blind 75' } });
+
+  // The model is offered the change tools without the arguments the server sets.
+  const offered = calls[0].tools as ChatToolSpec[];
+  const create = offered.find(tool => tool.name === 'tracker_create_practices')!;
+  assert.deepEqual(Object.keys(create.parameters.properties as object), ['records']);
+  assert.deepEqual(create.parameters.required, ['records']);
+  assert.match(create.description, /nothing is written until they confirm/);
+  const star = offered.find(tool => tool.name === 'tracker_add_favorites')!.parameters.properties as { newFolder: { properties: object } };
+  assert.deepEqual(Object.keys(star.newFolder.properties), ['name']);
+  assert.doesNotMatch(JSON.stringify(offered.filter(tool => (CHAT_ACTION_NAMES as readonly string[]).includes(tool.name))), /0-9a-fA-F|dryRun|operationId/);
+  // The attached note comes with what a note change must start from.
+  assert.match(calls[0].systemInstruction, new RegExp(`"contentHash":"${contentHash(before.note)}"`));
+  assert.match(calls[0].systemInstruction, /"headings":\[\{"level":2,"text":"Idea"\}\]/);
+
+  // Proposing wrote nothing.
+  assert.deepEqual({ note: await noteOf(), practices: await practiceCount() }, before);
+
+  const apply = (payload: unknown) => app.inject({ method: 'POST', url: '/api/v1/chat/actions', payload: payload as object });
+  const applied = await apply({ name: practice.name, args: practice.args });
+  assert.equal(applied.statusCode, 200, applied.payload);
+  assert.equal((JSON.parse(applied.payload) as { result: { created: number } }).result.created, 1);
+  // Confirming the same card again replays the first result instead of adding a second record.
+  assert.equal((JSON.parse((await apply({ name: practice.name, args: practice.args })).payload) as { result: { created: number } }).result.created, 0);
+  assert.equal(await practiceCount(), before.practices + 1);
+
+  assert.equal((await apply({ name: favorite.name, args: favorite.args })).statusCode, 200);
+  const library = JSON.parse((await app.inject({ method: 'GET', url: '/api/v1/favorites' })).payload) as { folders: Array<{ name: string; count: number }> };
+  assert.deepEqual(library.folders.map(folder => [folder.name, folder.count]), [['Review', 1]]);
+  assert.equal((await apply({ name: goal.name, args: goal.args })).statusCode, 200);
+
+  assert.equal((await apply({ name: note.name, args: note.args })).statusCode, 200);
+  const patched = await noteOf();
+  assert.ok(patched.startsWith('## Idea\n\nTwo pointers from both ends.'), patched.slice(0, 80));
+  assert.match(patched, /## Pitfalls\s+Track the right max too\.\s*$/);
+  // The note has moved on, so the same card is now refused with the tool's own code.
+  const stale = await apply({ name: note.name, args: note.args });
+  assert.equal(stale.statusCode, 409);
+  assert.equal((JSON.parse(stale.payload) as { error: string }).error, 'NOTE_CHANGED');
+
+  // Only the proposable changes run, only as writes, and only with valid arguments.
+  const refusals: Array<[unknown, number, string]> = [
+    [{ name: 'tracker_delete_goal_list', args: { id: list.id, expectedVersion: 1 } }, 400, 'CHAT_ACTION_UNKNOWN'],
+    [{ name: 'tracker_list_practices', args: {} }, 400, 'CHAT_ACTION_UNKNOWN'],
+    [{ name: practice.name, args: { ...practice.args, dryRun: true } }, 400, 'INVALID_INPUT'],
+    [{ name: practice.name, args: { records: [] } }, 400, 'INVALID_INPUT'],
+    [{ name: practice.name }, 400, 'INVALID_CHAT_ACTION'],
+  ];
+  for (const [payload, status, code] of refusals) {
+    const refused = await apply(payload);
+    assert.equal(refused.statusCode, status, refused.payload);
+    assert.equal((JSON.parse(refused.payload) as { error: string }).error, code);
+  }
+  assert.equal(await practiceCount(), before.practices + 1);
+
+  // With data access off the model is offered no change either.
+  await post(app, { messages: [{ role: 'user', content: 'hi' }], dataAccess: false });
+  assert.equal('tools' in calls.at(-1)!, false);
+  await app.close();
 });
 
 const lookup: ChatToolSpec = {
