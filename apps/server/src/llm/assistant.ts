@@ -45,6 +45,9 @@ import {
   type ILLMAssistant,
   type ILLMProvider,
   type ChatMessage,
+  type ChatToolCall,
+  type ChatToolSpec,
+  type ChatToolStep,
   type OpenAITokenSource,
   type ProviderConfig,
 } from './types.ts';
@@ -948,9 +951,11 @@ Return ONLY valid JSON conforming to the schema.`;
   public async streamChat(params: {
     systemInstruction: string;
     messages: ChatMessage[];
+    tools?: ChatToolSpec[];
+    steps?: ChatToolStep[];
     onDelta: (text: string) => void;
     abortSignal?: AbortSignal;
-  }): Promise<{ model: string; provider: LLMProviderType; usage: LLMUsage }> {
+  }): Promise<{ model: string; provider: LLMProviderType; usage: LLMUsage; toolCalls?: ChatToolCall[]; replay?: unknown }> {
     const providerType = this.activeProviderType;
     const active = this.providerConfigs[providerType];
     if (!this.isProviderConfigured(providerType)) {
@@ -993,6 +998,8 @@ Return ONLY valid JSON conforming to the schema.`;
             model,
             systemInstruction: params.systemInstruction,
             messages: params.messages,
+            tools: params.tools,
+            steps: params.steps,
             abortSignal: controller.signal,
             reasoningEffort: resolveModelReasoningEffort(providerType, model, config.reasoningEffort),
             onDelta: text => {
@@ -1004,7 +1011,10 @@ Return ONLY valid JSON conforming to the schema.`;
           }), aborted]);
           usage = result.usage ?? usage;
           status = 'ok';
-          return { model: result.model, provider: providerType, usage };
+          return {
+            model: result.model, provider: providerType, usage,
+            ...(result.toolCalls?.length ? { toolCalls: result.toolCalls, replay: result.replay } : {}),
+          };
         } catch (err) {
           if (err instanceof ProviderOutputError) usage = err.usage ?? usage;
           if (timedOut) status = 'timeout';

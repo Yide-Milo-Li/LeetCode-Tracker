@@ -15,7 +15,9 @@ import { OpenAIProvider } from '../apps/server/src/llm/providers/openai.ts';
 import { DeepSeekProvider } from '../apps/server/src/llm/providers/deepseek.ts';
 import { ProviderOutputError } from '../apps/server/src/llm/providers/base.ts';
 import { sseData } from '../apps/server/src/llm/providers/sse.ts';
-import { LLMError, type ChatMessage, type ILLMAssistant, type OpenAITokenSource } from '../apps/server/src/llm/types.ts';
+import { LLMError, type ChatMessage, type ChatToolSpec, type ChatToolStep, type ILLMAssistant, type OpenAITokenSource } from '../apps/server/src/llm/types.ts';
+import { CHAT_TOOL_NAMES } from '../apps/server/src/chat/chat-service.ts';
+import { WRITE_TOOL_NAMES } from '../apps/mcp/src/registrar.ts';
 import type { ChatStreamEvent } from '../packages/contracts/src/chat.ts';
 
 type StreamChat = NonNullable<ILLMAssistant['streamChat']>;
@@ -107,6 +109,7 @@ test('the chat route rejects bad input and a missing provider before opening a s
     { messages: [{ role: 'user', content: 'x'.repeat(24_001) }] },
     { messages: Array.from({ length: 6 }, () => ({ role: 'user', content: 'x'.repeat(24_000) })) },
     { messages: [{ role: 'user', content: 'hi' }], context: { frontendId: '1', tool: 'tracker_save_notes' } },
+    { messages: [{ role: 'user', content: 'hi' }], dataAccess: 'yes' },
   ]) {
     const response = await post(app, payload);
     assert.equal(response.statusCode, 400, JSON.stringify(payload).slice(0, 80));
@@ -143,8 +146,8 @@ test('a failure after the stream opened arrives as an error event and keeps earl
   await broken.app.close();
 });
 
-test('problem and plan context come from the tracker and are sent as reference data', async () => {
-  const { app, calls } = await chatApp(async () => ({ model: 'm', provider: 'openai', usage }));
+/** Give the profile two problems, one failed attempt at #42 and a long note on it. */
+async function seedProfile(app: Awaited<ReturnType<typeof buildApp>>) {
   const catalog = [
     { id: '1', title: 'Two Sum', difficulty: 'Easy', tags: ['Array', 'Hash Table'] },
     { id: '42', title: 'Trapping Rain Water', difficulty: 'Hard', tags: ['Two Pointers'] },
@@ -158,10 +161,14 @@ test('problem and plan context come from the tracker and are sent as reference d
   } })).statusCode, 201);
   const note = `## Idea\n\nTwo pointers from both ends.\n\n${'filler '.repeat(2000)}`;
   assert.equal((await app.inject({ method: 'PUT', url: '/api/v1/notes/42', payload: { content: note } })).statusCode, 200);
+}
 
-  const response = await post(app, { messages: [{ role: 'user', content: 'Why did I fail this?' }], context: { frontendId: '42', today: true } });
+test('the attached problem comes from the tracker and is sent as reference data', async () => {
+  const { app, calls } = await chatApp(async () => ({ model: 'm', provider: 'openai', usage }));
+  await seedProfile(app);
+
+  const response = await post(app, { messages: [{ role: 'user', content: 'Why did I fail this?' }], context: { frontendId: '42' } });
   const [context] = events(response.payload);
-  // No plan exists yet, so the plan is omitted rather than reported as an error.
   assert.deepEqual(context, { type: 'context', context: { problem: { frontendId: '42', title: 'Trapping Rain Water' } } });
   const system = calls[0].systemInstruction;
   assert.match(system, /# Local data/);
@@ -176,7 +183,6 @@ test('problem and plan context come from the tracker and are sent as reference d
   assert.match(system, /"truncated":true/);
   assert.ok(system.length < 12_000, String(system.length));
   assert.doesNotMatch(system, /"template"|relatedNotes/);
-  assert.doesNotMatch(system, /Today's plan/);
 
   // An unknown problem is skipped and the question is still answered.
   const unknown = events((await post(app, { messages: [{ role: 'user', content: 'hi' }], context: { frontendId: '99999' } })).payload);
@@ -451,5 +457,263 @@ test('the assistant stops a cancelled or stalled chat stream', async () => {
     await assert.rejects(new LLMAssistant(options).streamChat({ systemInstruction: 's', messages: turns, abortSignal: abort.signal, onDelta: () => {} }),
       (error: unknown) => error instanceof LLMError && error.code === 'CHAT_CANCELLED');
     assert.equal(requests.length, 0);
+  });
+});
+
+const toolTurn = (calls: Array<{ id: string; name: string; arguments: string }>) =>
+  ({ model: 'm', provider: 'openai' as const, usage, toolCalls: calls, replay: { synthetic: calls.map(call => call.id) } });
+
+test('the model looks tracker data up through read tools and each lookup is reported', async () => {
+  const { app, calls } = await chatApp(async params => {
+    if (!params.steps?.length) {
+      params.onDelta('Let me check.');
+      return toolTurn([
+        { id: 'c1', name: 'tracker_list_practices', arguments: '{"frontendId":"42"}' },
+        { id: 'c2', name: 'tracker_save_notes', arguments: '{"notes":[]}' },
+        { id: 'c3', name: 'tracker_get_today', arguments: '{not json' },
+        { id: 'c4', name: 'tracker_get_notes', arguments: '{"frontendIds":[]}' },
+      ]);
+    }
+    params.onDelta('You forgot the right-max pass.');
+    return { model: 'm', provider: 'openai', usage };
+  });
+  await seedProfile(app);
+
+  const response = await post(app, { messages: [{ role: 'user', content: 'What went wrong on 42?' }] });
+  assert.deepEqual(events(response.payload), [
+    { type: 'context', context: {} },
+    { type: 'delta', text: 'Let me check.' },
+    // Only calls that ran are reported: the write tool and the malformed call never did.
+    { type: 'tool', name: 'tracker_list_practices' },
+    { type: 'tool', name: 'tracker_get_notes' },
+    // The answer after a lookup starts a new paragraph.
+    { type: 'delta', text: '\n\nYou forgot the right-max pass.' },
+    { type: 'done', provider: 'openai', model: 'm' },
+  ]);
+
+  // The offer is exactly the read allowlist, with a JSON Schema for each tool's arguments.
+  const offered = calls[0].tools as ChatToolSpec[];
+  assert.deepEqual(offered.map(tool => tool.name), [...CHAT_TOOL_NAMES]);
+  assert.equal(offered.some(tool => (WRITE_TOOL_NAMES as readonly string[]).includes(tool.name) || tool.name === 'tracker_status'), false);
+  const practices = offered.find(tool => tool.name === 'tracker_list_practices')!;
+  assert.equal(practices.parameters.type, 'object');
+  assert.ok('frontendId' in (practices.parameters.properties as object));
+  assert.ok(!('$schema' in practices.parameters));
+  assert.match(calls[0].systemInstruction, /read the user's tracker with the tracker tools/);
+  assert.match(calls[0].systemInstruction, /cannot change anything in the tracker/);
+
+  // The second turn carries the model's own turn untouched and one result per call.
+  const steps = calls[1].steps as ChatToolStep[];
+  assert.deepEqual(steps[0], { role: 'assistant', toolCalls: (steps[0] as { toolCalls: unknown }).toolCalls, replay: { synthetic: ['c1', 'c2', 'c3', 'c4'] } });
+  const results = steps.slice(1) as Array<{ role: 'tool'; callId: string; name: string; content: string }>;
+  assert.deepEqual(results.map(step => [step.role, step.callId, step.name]),
+    [['tool', 'c1', 'tracker_list_practices'], ['tool', 'c2', 'tracker_save_notes'], ['tool', 'c3', 'tracker_get_today'], ['tool', 'c4', 'tracker_get_notes']]);
+  assert.match(results[0].content, /Forgot the right-max pass/);
+  assert.match(results[1].content, /^UNKNOWN_TOOL: tracker_save_notes is not available\./);
+  assert.match(results[2].content, /^INVALID_INPUT: The arguments were not valid JSON\./);
+  // Input the tool's own schema rejects comes back as its coded error, and the answer goes on.
+  assert.match(results[3].content, /^INVALID_INPUT: /);
+
+  // With data access off nothing is offered and the model is told it cannot look anything up.
+  await post(app, { messages: [{ role: 'user', content: 'hi' }], dataAccess: false });
+  assert.equal('tools' in calls[2], false);
+  assert.match(calls[2].systemInstruction, /You cannot read other tracker data/);
+  assert.doesNotMatch(calls[2].systemInstruction, /tracker tools/);
+  await app.close();
+});
+
+test('a long lookup result is cut, endless lookups are stopped and a tool refusal falls back', async () => {
+  // A provider that never answers gets a fixed number of rounds, then is told to stop.
+  const endless = await chatApp(async params => toolTurn([{ id: `c${params.steps?.length ?? 0}`, name: 'tracker_get_notes', arguments: '{"frontendIds":["42"],"maxChars":20000}' }]));
+  await seedProfile(endless.app);
+  const looped = events((await post(endless.app, { messages: [{ role: 'user', content: 'loop' }] })).payload);
+  assert.deepEqual(looped.at(-1), { type: 'error', error: 'CHAT_UNAVAILABLE', message: 'The AI provider kept requesting data instead of answering. Try again.' });
+  assert.equal(endless.calls.length, 8);
+  assert.equal(looped.filter(event => event.type === 'tool').length, 6);
+  const lastSteps = endless.calls[7].steps as Array<{ role: string; content?: string }>;
+  assert.match(lastSteps.at(-1)!.content!, /^LOOKUP_LIMIT: /);
+  // The 14,000-character note came back cut, with a way to get the rest.
+  const first = lastSteps[1].content!;
+  assert.ok(first.length < 12_200, String(first.length));
+  assert.match(first, /\[Cut at 12000 characters\. Ask for a smaller page or a narrower filter to see the rest\.\]$/);
+  await endless.app.close();
+
+  // A provider or gateway that rejects tool definitions still answers without them.
+  const picky = await chatApp(async params => {
+    if (params.tools) throw new LLMError('CHAT_UNAVAILABLE', 'The AI provider could not answer. Try again.', 503, 'openai');
+    params.onDelta('Plain answer.');
+    return { model: 'm', provider: 'openai', usage };
+  });
+  const plain = events((await post(picky.app, { messages: [{ role: 'user', content: 'hi' }] })).payload);
+  assert.deepEqual(plain.slice(1), [{ type: 'delta', text: 'Plain answer.' }, { type: 'done', provider: 'openai', model: 'm' }]);
+  assert.equal(picky.calls.length, 2);
+  assert.match(picky.calls[1].systemInstruction, /You cannot read other tracker data/);
+  // Other failures, and a failure after text was shown, are not retried.
+  const quota = await chatApp(async () => { throw new LLMError('CHAT_QUOTA', 'AI provider quota was exceeded.', 429, 'openai'); });
+  await post(quota.app, { messages: [{ role: 'user', content: 'hi' }] });
+  assert.equal(quota.calls.length, 1);
+  await picky.app.close();
+  await quota.app.close();
+});
+
+const lookup: ChatToolSpec = {
+  name: 'tracker_list_practices',
+  description: 'List practice records.',
+  parameters: { type: 'object', properties: { frontendId: { type: 'string' } } },
+};
+
+test('Chat Completions assembles streamed tool calls and sends the exchange back', async () => {
+  const requests: Array<Record<string, unknown>> = [];
+  const callChunks = [
+    { choices: [{ delta: { content: 'Checking.' } }] },
+    { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_a', function: { name: 'tracker_list_practices', arguments: '{"front' } }] } }] },
+    { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: 'endId":"42"}' } }, { index: 1, id: 'call_b', function: { name: 'tracker_get_today', arguments: '' } }] } }] },
+    { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+    '[DONE]',
+  ];
+  const provider = (Provider: typeof OpenAIProvider | typeof DeepSeekProvider) => new Provider({
+    apiKey: 'sk-synthetic',
+    fetchFn: async (_url, init) => { requests.push(JSON.parse(String(init!.body))); return sse(callChunks); },
+  });
+  const run = (target: OpenAIProvider, steps?: ChatToolStep[]) => collect(onDelta => target.streamChat({
+    model: 'gpt-synthetic', systemInstruction: 's', messages: turns, tools: [lookup], steps, abortSignal: new AbortController().signal, reasoningEffort: 'high', onDelta,
+  }));
+
+  const first = await run(provider(OpenAIProvider));
+  const turn = first.result as { toolCalls: Array<{ id: string; name: string; arguments: string }>; replay: unknown };
+  assert.deepEqual(first.deltas, ['Checking.']);
+  assert.deepEqual(turn.toolCalls, [
+    { id: 'call_a', name: 'tracker_list_practices', arguments: '{"frontendId":"42"}' },
+    { id: 'call_b', name: 'tracker_get_today', arguments: '' },
+  ]);
+  assert.deepEqual(requests[0].tools, [{ type: 'function', function: lookup }]);
+  assert.equal(requests[0].reasoning_effort, 'high');
+
+  // The follow-up carries the assistant turn with its calls, then one tool message per result.
+  const steps: ChatToolStep[] = [
+    { role: 'assistant', toolCalls: turn.toolCalls, replay: turn.replay },
+    { role: 'tool', callId: 'call_a', name: 'tracker_list_practices', content: '{"items":[]}' },
+    { role: 'tool', callId: 'call_b', name: 'tracker_get_today', content: '{"hasPlan":false}' },
+  ];
+  await run(provider(OpenAIProvider), steps);
+  assert.deepEqual((requests[1].messages as unknown[]).slice(-3), [
+    { role: 'assistant', content: 'Checking.', tool_calls: [
+      { id: 'call_a', type: 'function', function: { name: 'tracker_list_practices', arguments: '{"frontendId":"42"}' } },
+      { id: 'call_b', type: 'function', function: { name: 'tracker_get_today', arguments: '' } },
+    ] },
+    { role: 'tool', tool_call_id: 'call_a', content: '{"items":[]}' },
+    { role: 'tool', tool_call_id: 'call_b', content: '{"hasPlan":false}' },
+  ]);
+
+  // DeepSeek would need every earlier turn's reasoning back, so tools run with thinking off.
+  await run(provider(DeepSeekProvider));
+  assert.deepEqual(requests[2].thinking, { type: 'disabled' });
+  assert.equal(requests[2].reasoning_effort, 'none');
+});
+
+test('ChatGPT mode groups tools in a namespace and replays the tool turn as it arrived', async () => {
+  const source: OpenAITokenSource = { isConnected: () => true, get: async () => 'token', invalidate: () => {} };
+  const requests: Array<Record<string, unknown>> = [];
+  const reasoning = { type: 'reasoning', id: 'rs_1', encrypted_content: 'opaque', summary: [] };
+  const call = { type: 'function_call', id: 'fc_1', call_id: 'call_1', name: 'tracker_list_practices', namespace: 'tracker', arguments: '{"frontendId":"42"}' };
+  const preamble = { type: 'message', id: 'msg_1', content: [{ type: 'output_text', text: 'Checking.' }] };
+  let output: unknown[] = [reasoning, preamble, call];
+  const provider = new OpenAIProvider({
+    authMode: 'chatgpt', oauthTokenSource: source,
+    fetchFn: async (_url, init) => {
+      requests.push(JSON.parse(String(init!.body)));
+      return sse([{ type: 'response.completed', response: { model: 'gpt-plan-2026', output } }]);
+    },
+  });
+  const run = (steps?: ChatToolStep[]) => collect(onDelta => provider.streamChat({
+    model: 'gpt-plan', systemInstruction: 's', messages: turns, tools: [lookup], steps, abortSignal: new AbortController().signal, onDelta,
+  }));
+
+  const first = await run();
+  const turn = first.result as { toolCalls: Array<{ id: string; name: string; arguments: string }>; replay: unknown[] };
+  assert.deepEqual(turn.toolCalls, [{ id: 'call_1', name: 'tracker_list_practices', arguments: '{"frontendId":"42"}' }]);
+  // Encrypted reasoning and the call go back unchanged; the visible text is not replayed.
+  assert.deepEqual(turn.replay, [reasoning, call]);
+  assert.deepEqual(first.deltas, ['Checking.']);
+  assert.deepEqual(requests[0].tools, [{
+    type: 'namespace', name: 'tracker', description: "Read-only lookups in the user's LeetCode Tracker data.",
+    tools: [{ type: 'function', ...lookup }],
+  }]);
+  assert.deepEqual(requests[0].include, ['reasoning.encrypted_content']);
+  for (const field of ['max_tool_calls', 'previous_response_id', 'max_output_tokens']) assert.ok(!(field in requests[0]), field);
+  assert.equal(requests[0].store, false);
+
+  await run([
+    { role: 'assistant', toolCalls: turn.toolCalls, replay: turn.replay },
+    { role: 'tool', callId: 'call_1', name: 'tracker_list_practices', content: '{"items":[]}' },
+  ]);
+  assert.deepEqual(requests[1].input, [...turns, reasoning, call, { type: 'function_call_output', call_id: 'call_1', output: '{"items":[]}' }]);
+
+  // Without encrypted reasoning the call goes back without the id that points at it.
+  output = [{ type: 'reasoning', id: 'rs_2', summary: [] }, call];
+  const bare = (await run()).result as { replay: unknown[] };
+  assert.deepEqual(bare.replay, [{ type: 'function_call', call_id: 'call_1', name: 'tracker_list_practices', namespace: 'tracker', arguments: '{"frontendId":"42"}' }]);
+});
+
+test('Gemini declares tools, returns function calls and replays their parts with the results', async () => {
+  type StreamRequest = Parameters<NonNullable<NonNullable<ConstructorParameters<typeof GeminiProvider>[0]>['streamFn']>>[0];
+  const seen: StreamRequest[] = [];
+  const callParts = [
+    { text: 'Checking. ' },
+    { functionCall: { id: 'fc-1', name: 'tracker_list_practices', args: { frontendId: '42' } }, thoughtSignature: 'sig-1' },
+    { functionCall: { name: 'tracker_get_today' } },
+  ];
+  const provider = new GeminiProvider({
+    streamFn: async params => {
+      seen.push(params);
+      return (async function* () {
+        yield { candidates: [{ content: { parts: callParts.slice(0, 2) } }] };
+        yield { candidates: [{ finishReason: 'STOP', content: { parts: callParts.slice(2) } }] };
+      })();
+    },
+  });
+  const run = (steps?: ChatToolStep[]) => collect(onDelta => provider.streamChat({
+    model: 'models/gemini-4-hydrogen', systemInstruction: 's', messages: turns, tools: [lookup], steps, abortSignal: new AbortController().signal, onDelta,
+  }));
+
+  const first = await run();
+  const turn = first.result as { toolCalls: Array<{ id: string; name: string; arguments: string }>; replay: unknown };
+  assert.deepEqual(first.deltas, ['Checking. ']);
+  assert.deepEqual(turn.toolCalls, [
+    { id: 'fc-1', name: 'tracker_list_practices', arguments: '{"frontendId":"42"}' },
+    { id: 'local-call-2', name: 'tracker_get_today', arguments: '{}' },
+  ]);
+  assert.deepEqual(seen[0].config.tools, [{ functionDeclarations: [
+    { name: lookup.name, description: lookup.description, parametersJsonSchema: lookup.parameters },
+  ] }]);
+
+  await run([
+    { role: 'assistant', toolCalls: turn.toolCalls, replay: turn.replay },
+    { role: 'tool', callId: 'fc-1', name: 'tracker_list_practices', content: '{"items":[]}' },
+    { role: 'tool', callId: 'local-call-2', name: 'tracker_get_today', content: '{"hasPlan":false}' },
+  ]);
+  // The model turn keeps its thought signature, and both results share one user turn; an id
+  // made up locally is not sent back.
+  assert.deepEqual(seen[1].contents.slice(-2), [
+    { role: 'model', parts: callParts },
+    { role: 'user', parts: [
+      { functionResponse: { id: 'fc-1', name: 'tracker_list_practices', response: { output: '{"items":[]}' } } },
+      { functionResponse: { name: 'tracker_get_today', response: { output: '{"hasPlan":false}' } } },
+    ] },
+  ]);
+});
+
+test('the assistant passes tools through and returns the tool calls of the turn', async () => {
+  const stream = async () => sse([
+    { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_a', function: { name: 'tracker_get_today', arguments: '{}' } }] } }] },
+    { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+    '[DONE]',
+  ]);
+  await withFetch(stream, async requests => {
+    const assistant = new LLMAssistant({ provider: 'openai', apiKey: 'sk-synthetic', model: 'gpt-6-luna' });
+    const result = await assistant.streamChat({ systemInstruction: 's', messages: turns, tools: [lookup], onDelta: () => {} });
+    assert.deepEqual(result.toolCalls, [{ id: 'call_a', name: 'tracker_get_today', arguments: '{}' }]);
+    assert.ok(result.replay);
+    assert.deepEqual(requests[0].tools, [{ type: 'function', function: lookup }]);
   });
 });

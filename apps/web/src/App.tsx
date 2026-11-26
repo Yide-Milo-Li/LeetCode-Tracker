@@ -736,7 +736,6 @@ export function App() {
         )}
         <ChatLauncher
           lang={lang}
-          onToday={view === 'today'}
           ask={chatAsk}
           onOpenAiSettings={() => {
             setSettingsSection('ai');

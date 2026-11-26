@@ -345,20 +345,14 @@ html.dark .chat-panel {
   border-top: 1px solid var(--border-color);
   background: var(--muted-surface);
 }
-/* Preset questions about the attached problem. Square corners set them apart from the pill
-   toggles below: these send at once, the pills only choose what is attached. */
-.chat-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 8px;
-}
+/* The next hint for the attached problem, beside its toggle. Square corners set it apart from
+   the pill: this sends at once, the pill only chooses what is attached. */
 .chat-action {
-  min-height: 28px;
+  min-height: 26px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 10px 3px 8px;
+  padding: 2px 10px 2px 8px;
   border: 1px solid var(--border-color);
   border-radius: var(--radius);
   background: var(--surface);

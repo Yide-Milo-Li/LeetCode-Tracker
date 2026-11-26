@@ -91,16 +91,62 @@ export interface ChatMessage {
   content: string;
 }
 
-/** Parameters for one streamed plain-text chat completion. */
+/** A function the model may ask the caller to run during a chat answer. */
+export interface ChatToolSpec {
+  name: string;
+  description: string;
+  /** JSON Schema of the arguments object. */
+  parameters: Record<string, unknown>;
+}
+
+/** One request from the model to run a tool. */
+export interface ChatToolCall {
+  /** Provider-issued id that ties the result back to this call. */
+  id: string;
+  name: string;
+  /** Arguments as the JSON text the model produced; not validated. */
+  arguments: string;
+}
+
+/**
+ * One step of the tool exchange inside a single answer: the model asking for tools, then one
+ * result per call. Steps follow `messages` and never outlive the request that produced them.
+ */
+export type ChatToolStep =
+  | {
+      role: 'assistant';
+      toolCalls: ChatToolCall[];
+      /**
+       * The provider's own form of this turn, returned by the adapter that produced it. Some
+       * providers reject a tool exchange unless their reasoning state is sent back unchanged, so
+       * the adapter replays this instead of rebuilding the turn from `toolCalls`.
+       */
+      replay: unknown;
+    }
+  | { role: 'tool'; callId: string; name: string; content: string };
+
+/** Parameters for one streamed chat completion: a single model turn. */
 export interface StreamChatParams {
   model: string;
   systemInstruction: string;
   /** Whole conversation, oldest first, ending with the user turn to answer. */
   messages: ChatMessage[];
+  /** Tools the model may call. When it does, the turn ends with `toolCalls` instead of an answer. */
+  tools?: ChatToolSpec[];
+  /** Tool calls and results already exchanged for this answer, oldest first. */
+  steps?: ChatToolStep[];
   abortSignal: AbortSignal;
   reasoningEffort?: ReasoningEffort;
   /** Called with each visible text fragment in order; reasoning text is never passed. */
   onDelta: (text: string) => void;
+}
+
+/** Result of one streamed chat turn. */
+export interface StreamChatOutput extends GenerateContentOutput {
+  /** Present and non-empty when the model asked for tools; the answer is then not finished. */
+  toolCalls?: ChatToolCall[];
+  /** This turn in the provider's own form, for {@link ChatToolStep.replay}. */
+  replay?: unknown;
 }
 
 /** Raw result from a provider content generation call. */
@@ -155,10 +201,11 @@ export interface ILLMProvider {
   readonly providerId: LLMProviderType;
   generateContent(params: GenerateContentParams): Promise<GenerateContentOutput>;
   /**
-   * Stream a plain-text answer. Resolves with the full text after the provider reported the end
-   * of the answer; rejects when the stream fails or ends early, even if deltas were delivered.
+   * Stream one model turn. Resolves with the full text, or with `toolCalls` when the model asked
+   * for tools, after the provider reported the end of the turn; rejects when the stream fails or
+   * ends early, even if deltas were delivered.
    */
-  streamChat?(params: StreamChatParams): Promise<GenerateContentOutput>;
+  streamChat?(params: StreamChatParams): Promise<StreamChatOutput>;
   testConnection(params?: ConnectionTestParams): Promise<ConnectionTestResult>;
   /** Whether usable credentials exist. Absent means "has a non-empty API key". */
   isConfigured?(): boolean;
@@ -263,10 +310,20 @@ export interface ILLMAssistant {
   streamChat?(params: {
     systemInstruction: string;
     messages: ChatMessage[];
+    /** Tools offered for this turn; see {@link StreamChatParams.tools}. */
+    tools?: ChatToolSpec[];
+    steps?: ChatToolStep[];
     onDelta: (text: string) => void;
     /** Aborting stops the provider request; the call then rejects with `CHAT_CANCELLED`. */
     abortSignal?: AbortSignal;
-  }): Promise<{ model: string; provider: LLMProviderType; usage: import('./telemetry.ts').LLMUsage }>;
+  }): Promise<{
+    model: string;
+    provider: LLMProviderType;
+    usage: import('./telemetry.ts').LLMUsage;
+    /** Non-empty when the model asked for tools instead of finishing the answer. */
+    toolCalls?: ChatToolCall[];
+    replay?: unknown;
+  }>;
   getStatus(): LLMAssistantStatus;
   updateConfig?(config: {
     provider?: LLMProviderType | null;

@@ -5,7 +5,7 @@
  * shortcuts keep working whenever the cursor is outside its text field.
  */
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowUp, CalendarDays, Check, FileText, Lightbulb, MessageSquareText, Square, SquarePen, X } from 'lucide-react';
+import { ArrowUp, Check, FileText, Lightbulb, Square, SquarePen, X } from 'lucide-react';
 import { api, type LLMProvider } from '../api.ts';
 import type { ChatContext } from '../../../../packages/contracts/src/chat.ts';
 import { CHAT_MAX_MESSAGE_CHARS } from '../../../../packages/contracts/src/chat-limits.ts';
@@ -14,6 +14,8 @@ import { ApiError } from '../platform/index.ts';
 import { localizeApiError } from '../error-i18n.ts';
 import type { ChatAction, ChatProblemRef } from '../chat/chat-context.ts';
 import { hintLabel, hintPrompt, nextHintLevel, reviewPrompt } from '../chat/chat-presets.ts';
+import { useChatDataAccess } from '../chat/chat-settings.ts';
+import { toolLabel } from '../chat/chat-tools.ts';
 import type { ChatDock, Point } from '../chat/chat-position.ts';
 import type { ChatController, ChatEntry } from '../chat/useChat.ts';
 import { RenderedMarkdown } from './NotesMarkdownPreview.tsx';
@@ -33,7 +35,6 @@ export interface ChatPanelProps {
   /** The pending preset was sent or dropped; either way it must not run again. */
   onPendingHandled: () => void;
   onNewChat: () => void;
-  onToday: boolean;
   /** Display form of the toggle shortcut, such as `Ctrl+J`. */
   shortcut: string;
   onClose: () => void;
@@ -63,15 +64,22 @@ function Answer({ entry, lang, isLast, busy, onRetry, onOpenAiSettings }: {
   entry: ChatEntry; lang: Language; isLast: boolean; busy: boolean; onRetry: () => void; onOpenAiSettings: () => void;
 }) {
   const zh = lang === 'zh';
+  const lookups = (entry.tools ?? []).map(name => toolLabel(name, lang));
   const used = [
     entry.context?.problem && `#${entry.context.problem.frontendId} ${entry.context.problem.title}`,
-    entry.context?.today && (zh ? `今日计划（${entry.context.today.totalCount} 题）` : `Today's plan (${entry.context.today.totalCount})`),
+    ...lookups,
   ].filter(Boolean).join(zh ? '、' : ', ');
+  // Before any text arrives, say what is being read instead of a bare "thinking".
+  const reading = lookups.at(-1);
   return (
     <div className="chat-entry chat-entry-assistant">
       {entry.content
         ? <div className="notes-preview-pane chat-answer"><RenderedMarkdown content={entry.content} lang={lang} /></div>
-        : entry.state === 'streaming' && <p className="chat-thinking" role="status">{zh ? '正在思考…' : 'Thinking…'}</p>}
+        : entry.state === 'streaming' && (
+          <p className="chat-thinking" role="status">
+            {reading ? (zh ? `正在查看${reading}…` : `Reading ${reading}…`) : (zh ? '正在思考…' : 'Thinking…')}
+          </p>
+        )}
       {entry.state === 'stopped' && (
         <p className="chat-entry-note">
           {zh ? '已停止。' : 'Stopped.'}
@@ -93,13 +101,13 @@ function Answer({ entry, lang, isLast, busy, onRetry, onOpenAiSettings }: {
 }
 
 export function ChatPanel({
-  lang, chat, problem, pending, onPendingHandled, onNewChat, onToday, shortcut, onClose, onOpenAiSettings, position, side, dragging, onDragStart,
+  lang, chat, problem, pending, onPendingHandled, onNewChat, shortcut, onClose, onOpenAiSettings, position, side, dragging, onDragStart,
 }: ChatPanelProps) {
   const zh = lang === 'zh';
+  const dataAccess = useChatDataAccess();
   const [status, setStatus] = useState<{ configured: boolean; provider?: LLMProvider; model: string } | null>(null);
   const [draft, setDraft] = useState('');
   const [useProblem, setUseProblem] = useState(true);
-  const [useToday, setUseToday] = useState(onToday);
   const panel = useRef<HTMLElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const log = useRef<HTMLDivElement>(null);
@@ -129,14 +137,10 @@ export function ChatPanel({
     field.style.height = `${Math.min(field.scrollHeight, 148)}px`;
   }, [draft]);
 
-  const context = (today = useToday): ChatContext => ({
-    ...(problem && useProblem ? { frontendId: problem.frontendId } : {}),
-    ...(today ? { today: true } : {}),
-  });
-  const ask = (text: string, today = useToday) => {
+  const ask = (text: string) => {
     if (!ready || chat.busy || !text.trim()) return;
     pinned.current = true;
-    chat.send(text, context(today));
+    chat.send(text, problem && useProblem ? { frontendId: problem.frontendId } : {});
     setDraft('');
     // A suggestion button disappears once the conversation starts; keep the keyboard in the field.
     input.current?.focus();
@@ -144,7 +148,7 @@ export function ChatPanel({
   /** Send a preset about the attached problem; hints climb one rung per request. */
   const runAction = (action: ChatAction) => {
     if (!problem || !ready || chat.busy) return;
-    const attached: ChatContext = { frontendId: problem.frontendId, ...(useToday ? { today: true } : {}) };
+    const attached: ChatContext = { frontendId: problem.frontendId };
     if (action.kind === 'hint') {
       const level = nextHintLevel(chat.entries, problem.frontendId);
       if (!hintLabel(level, lang)) return;
@@ -173,7 +177,8 @@ export function ChatPanel({
       { label: zh ? '给我一点这道题的提示，先不要给答案' : 'Give me a hint for this problem without the solution', run: () => runAction({ kind: 'hint' }) },
       { label: reviewLabel, run: () => runAction({ kind: 'review' }) },
     ] : []),
-    { label: todayQuestion, run: () => { setUseToday(true); ask(todayQuestion, true); } },
+    // Answering this takes a lookup of the plan, which only data access provides.
+    ...(dataAccess ? [{ label: todayQuestion, run: () => ask(todayQuestion) }] : []),
   ];
 
   return (
@@ -235,7 +240,15 @@ export function ChatPanel({
               ))}
             </ul>
             <p className="chat-entry-note">
-              {zh ? `提问内容和下方选中的本地数据会发送给 ${provider}。` : `Your question and the local data selected below are sent to ${provider}.`}
+              {dataAccess
+                ? (zh
+                  ? `AI 会按需查看你的题库、练习记录和笔记；提问内容和查到的数据会发送给 ${provider}。可在设置的 AI 助手里关闭。`
+                  : `The AI looks up your catalog, practice records and notes as needed. Your question and what it reads are sent to ${provider}. You can turn this off in Settings, under AI assistant.`)
+                : problem
+                  ? (zh
+                    ? `提问内容和下方选中的题目数据会发送给 ${provider}。`
+                    : `Your question and the data of the problem selected below are sent to ${provider}.`)
+                  : (zh ? `只有提问内容会发送给 ${provider}。` : `Only your question is sent to ${provider}.`)}
             </p>
           </div>
         )}
@@ -246,29 +259,20 @@ export function ChatPanel({
       </div>
 
       <form className="chat-composer" onSubmit={event => { event.preventDefault(); ask(draft); }}>
-        {/* The empty conversation offers the same presets as starters above. */}
-        {attachedProblem && chat.entries.length > 0 && (
-          <div className="chat-actions" role="group" aria-label={zh ? '关于这道题的快捷提问' : 'Quick questions about this problem'}>
-            {nextHint && (
+        {/* One row at most: the problem in focus and, once a conversation is under way, the next
+            hint. The empty conversation offers the presets as starters instead. */}
+        {problem && (
+          <div className="chat-context">
+            <ContextChip icon={FileText} pressed={useProblem} onToggle={() => setUseProblem(value => !value)}
+              label={`#${problem.frontendId}${problem.title ? ` ${problem.title}` : ''}`}
+              title={zh ? '附带这道题的练习记录和已保存的笔记' : 'Attach your attempts and saved note for this problem'} />
+            {attachedProblem && chat.entries.length > 0 && nextHint && (
               <button type="button" className="chat-action" disabled={!ready || chat.busy} onClick={() => runAction({ kind: 'hint' })}>
                 <Lightbulb size={14} aria-hidden="true" />{nextHint}
               </button>
             )}
-            <button type="button" className="chat-action" disabled={!ready || chat.busy} onClick={() => runAction({ kind: 'review' })}>
-              <MessageSquareText size={14} aria-hidden="true" />{reviewLabel}
-            </button>
           </div>
         )}
-        <div className="chat-context" role="group" aria-label={zh ? '附带的本地数据' : 'Local data to attach'}>
-          {problem && (
-            <ContextChip icon={FileText} pressed={useProblem} onToggle={() => setUseProblem(value => !value)}
-              label={`#${problem.frontendId}${problem.title ? ` ${problem.title}` : ''}`}
-              title={zh ? '附带这道题的练习记录和已保存的笔记' : 'Attach your attempts and saved note for this problem'} />
-          )}
-          <ContextChip icon={CalendarDays} pressed={useToday} onToggle={() => setUseToday(value => !value)}
-            label={zh ? '今日计划' : "Today's plan"}
-            title={zh ? '附带今天的练习计划' : "Attach today's practice plan"} />
-        </div>
         <div className="chat-input-row">
           <textarea
             ref={input}

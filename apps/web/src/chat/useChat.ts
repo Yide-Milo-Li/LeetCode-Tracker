@@ -10,6 +10,7 @@ import type { ChatContext, ChatContextSummary, ChatStreamEvent, ChatTurn } from 
 import { CHAT_MAX_MESSAGES, CHAT_MAX_MESSAGE_CHARS, CHAT_MAX_TOTAL_CHARS } from '../../../../packages/contracts/src/chat-limits.ts';
 import { ApiError } from '../platform/index.ts';
 import type { Language } from '../i18n.ts';
+import { getChatDataAccess } from './chat-settings.ts';
 import { streamChat } from './chat-stream.ts';
 
 export interface ChatEntry {
@@ -22,6 +23,8 @@ export interface ChatEntry {
   error?: { code: string; message: string };
   /** Local data the server attached when producing this answer. */
   context?: ChatContextSummary;
+  /** Read tools the model used for this answer, in first-use order, each once. */
+  tools?: string[];
   /** On a question from the hint ladder: the problem and the rung it asked for. */
   hint?: ChatHint;
 }
@@ -116,12 +119,15 @@ export function useChat(lang: Language): ChatController {
       if (abort.signal.aborted) return;
       if (event.type === 'context') patch(entry => ({ ...entry, context: event.context }));
       else if (event.type === 'delta') patch(entry => ({ ...entry, content: entry.content + event.text }));
+      else if (event.type === 'tool') patch(entry => entry.tools?.includes(event.name) ? entry : { ...entry, tools: [...(entry.tools ?? []), event.name] });
       else if (event.type === 'done') { terminal = true; patch(entry => ({ ...entry, state: 'done' })); }
       else { terminal = true; patch(entry => ({ ...entry, state: 'error', error: { code: event.error, message: event.message } })); }
     };
     const fail = (code: string, message: string) => patch(entry => ({ ...entry, state: 'error', error: { code, message } }));
 
-    void streamChat({ messages: requestTurns(history), context, lang: langRef.current }, onEvent, abort.signal)
+    // Read when the question is sent, so a change in Settings applies to the next one.
+    const request = { messages: requestTurns(history), context, lang: langRef.current, ...(getChatDataAccess() ? {} : { dataAccess: false }) };
+    void streamChat(request, onEvent, abort.signal)
       .then(() => {
         // The connection closed without `done` or `error`: the answer is incomplete.
         if (!terminal && !abort.signal.aborted) fail('CHAT_INTERRUPTED', 'The answer was interrupted.');

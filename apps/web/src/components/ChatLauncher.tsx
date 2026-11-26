@@ -28,14 +28,12 @@ export const LAUNCHER_REST_MS = 2500;
 
 export interface ChatLauncherProps {
   lang: Language;
-  /** Whether Today is the visible view; the day's plan is then offered as context by default. */
-  onToday: boolean;
   onOpenAiSettings: () => void;
   /** A preset another view asked for; each new `id` opens the panel on that problem and sends it. */
   ask?: ChatAskRequest | null;
 }
 
-export function ChatLauncher({ lang, onToday, onOpenAiSettings, ask = null }: ChatLauncherProps) {
+export function ChatLauncher({ lang, onOpenAiSettings, ask = null }: ChatLauncherProps) {
   const zh = lang === 'zh';
   const chat = useChat(lang);
   const [open, setOpen] = useState(false);
@@ -125,7 +123,7 @@ export function ChatLauncher({ lang, onToday, onOpenAiSettings, ask = null }: Ch
     const at = panelDrag.dragging && dragPoint ? dragPoint : panelPoint(position, viewport);
     return (
       <React.Suspense fallback={null}>
-        <ChatPanel lang={lang} chat={chat} onToday={onToday} shortcut={shortcut} onClose={close}
+        <ChatPanel lang={lang} chat={chat} shortcut={shortcut} onClose={close}
           problem={askedProblem ?? viewProblem} pending={pending} onPendingHandled={clearPending}
           onNewChat={() => { chat.reset(); setAskedProblem(null); }}
           onOpenAiSettings={() => { close(); onOpenAiSettings(); }}

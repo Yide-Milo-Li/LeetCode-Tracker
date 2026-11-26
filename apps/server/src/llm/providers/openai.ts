@@ -20,6 +20,8 @@ import {
   type LLMProviderType,
   type GenerateContentParams,
   type GenerateContentOutput,
+  type StreamChatOutput,
+  type ChatToolCall,
   type ConnectionTestParams,
   type ConnectionTestResult,
   type CustomGenerateFn,
@@ -242,16 +244,21 @@ export class OpenAIProvider extends BaseLLMProvider {
   }
 
   /**
-   * Stream a plain-text answer: Chat Completions with `stream: true`, or the Responses API in
+   * Stream one model turn: Chat Completions with `stream: true`, or the Responses API in
    * `chatgpt` mode. Reasoning deltas (`reasoning_content`) are not forwarded.
+   *
+   * With `tools`, DeepSeek runs with thinking off: in thinking mode it rejects a request that
+   * carries tools unless the reasoning text of every earlier assistant turn is sent back, and the
+   * conversation keeps only the answers.
    *
    * @throws ProviderOutputError `truncated` when the model hit its output limit, `invalid` when
    * the answer was empty.
    * @throws Error whose message starts with `[status]` for HTTP and in-stream provider errors, and
    * when the stream ends without a finish signal.
    */
-  public async streamChat(params: StreamChatParams): Promise<GenerateContentOutput> {
-    const effort = resolveModelReasoningEffort(
+  public async streamChat(params: StreamChatParams): Promise<StreamChatOutput> {
+    const tools = params.tools?.length ? params.tools : undefined;
+    const effort = this.providerId === 'deepseek' && tools ? 'none' : resolveModelReasoningEffort(
       this.providerId,
       params.model,
       params.reasoningEffort ?? this.defaultReasoningEffort
@@ -263,12 +270,17 @@ export class OpenAIProvider extends BaseLLMProvider {
         model: params.model,
         instructions: params.systemInstruction,
         messages: params.messages,
+        tools,
+        steps: params.steps,
         reasoningEffort: effort,
         abortSignal: params.abortSignal,
         onDelta: text => { streamed = true; params.onDelta(text); },
       });
       // A response may complete with its text only in the final event.
       if (!streamed && result.text) params.onDelta(result.text);
+      if (result.toolCalls?.length) {
+        return { text: result.text, model: result.model, provider: this.providerId, usage: result.usage, toolCalls: result.toolCalls, replay: result.replay };
+      }
       if (!result.text.trim()) throw new ProviderOutputError('invalid', result.usage);
       return { text: result.text, model: result.model, provider: this.providerId, usage: result.usage };
     }
@@ -286,7 +298,15 @@ export class OpenAIProvider extends BaseLLMProvider {
       },
       body: JSON.stringify({
         model: params.model,
-        messages: [{ role: 'system', content: params.systemInstruction }, ...params.messages],
+        messages: [
+          { role: 'system', content: params.systemInstruction },
+          ...params.messages,
+          // The assistant's tool-call turn goes back exactly as it was assembled below.
+          ...(params.steps ?? []).map(step => step.role === 'assistant'
+            ? step.replay
+            : { role: 'tool', tool_call_id: step.callId, content: step.content }),
+        ],
+        ...(tools ? { tools: tools.map(tool => ({ type: 'function', function: tool })) } : {}),
         stream: true,
         reasoning_effort: effort,
         ...(this.providerId === 'deepseek'
@@ -318,13 +338,17 @@ export class OpenAIProvider extends BaseLLMProvider {
     let usage = normalizeUsage(this.providerId);
     let finishReason: string | null = null;
     let done = false;
+    const calls: ChatToolCall[] = [];
     for await (const data of sseData(response.body)) {
       if (data === '[DONE]') { done = true; break; }
       let chunk: {
         error?: { message?: string };
         model?: string;
         usage?: unknown;
-        choices?: Array<{ finish_reason?: string | null; delta?: { content?: string | null } }>;
+        choices?: Array<{ finish_reason?: string | null; delta?: {
+          content?: string | null;
+          tool_calls?: Array<{ index?: number; id?: string; function?: { name?: string; arguments?: string } }>;
+        } }>;
       };
       try { chunk = JSON.parse(data); } catch { continue; }
       if (chunk.error) throw new Error(`[502] ${chunk.error.message ?? 'The provider reported a stream error.'}`);
@@ -335,12 +359,31 @@ export class OpenAIProvider extends BaseLLMProvider {
         text += choice.delta.content;
         params.onDelta(choice.delta.content);
       }
+      // A call arrives in fragments keyed by `index`: the id and name once, the arguments in pieces.
+      for (const fragment of choice?.delta?.tool_calls ?? []) {
+        const index = fragment.index ?? 0;
+        const call = calls[index] ??= { id: '', name: '', arguments: '' };
+        if (fragment.id) call.id = fragment.id;
+        if (fragment.function?.name) call.name += fragment.function.name;
+        if (fragment.function?.arguments) call.arguments += fragment.function.arguments;
+      }
       if (choice?.finish_reason) finishReason = choice.finish_reason;
     }
 
     if (finishReason === 'length') throw new ProviderOutputError('truncated', usage);
     // Without a finish signal the connection dropped mid-answer.
     if (!finishReason && !done) throw new Error('[502] The provider stream ended before completion.');
+    const toolCalls = calls.filter(call => call?.name).map((call, index) => ({ ...call, id: call.id || `call_${index}` }));
+    if (toolCalls.length) {
+      return {
+        text, model, provider: this.providerId, usage, toolCalls,
+        replay: {
+          role: 'assistant',
+          content: text || null,
+          tool_calls: toolCalls.map(call => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.arguments } })),
+        },
+      };
+    }
     if (!text.trim()) throw new ProviderOutputError('invalid', usage);
     return { text, model, provider: this.providerId, usage };
   }

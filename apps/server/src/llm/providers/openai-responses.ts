@@ -6,9 +6,14 @@
  * other fields, so the request body stays minimal. A response counts as successful only after the
  * `response.completed` event.
  *
+ * Function tools must be grouped in a namespace on this route. Because nothing is stored, the
+ * model's tool-call turn is sent back as the output items it arrived as, including the encrypted
+ * reasoning that a reasoning model needs to continue from its own call.
+ *
  * Reference: https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations
  */
 import type { ReasoningEffort } from '../../../../../packages/contracts/src/sync.ts';
+import type { ChatToolCall, ChatToolSpec, ChatToolStep } from '../../../../../packages/application/src/types.ts';
 import { normalizeUsage, type LLMUsage } from '../usage.ts';
 import { ProviderOutputError } from './base.ts';
 import { sseData } from './sse.ts';
@@ -42,6 +47,10 @@ export interface ResponsesRequest {
   prompt?: string;
   /** Whole conversation, oldest first; the route keeps no history (`store: false`). */
   messages?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  /** Function tools the model may call; sent as one namespace. */
+  tools?: ChatToolSpec[];
+  /** Tool calls and results already exchanged for this answer; appended after `messages`. */
+  steps?: ChatToolStep[];
   /** Called with each visible text fragment as it arrives. */
   onDelta?: (text: string) => void;
   reasoningEffort?: ReasoningEffort;
@@ -54,7 +63,17 @@ export interface ResponsesResult {
   text: string;
   model: string;
   usage: LLMUsage;
+  /** Non-empty when the response ended with function calls instead of an answer. */
+  toolCalls?: ChatToolCall[];
+  /** The output items to send back as input before the tool results. */
+  replay?: unknown[];
 }
+
+/** Namespace that groups the function tools, as the plan route requires. */
+const TOOL_NAMESPACE = {
+  name: 'tracker',
+  description: "Read-only lookups in the user's LeetCode Tracker data.",
+};
 
 /**
  * Failure whose message starts with `[status]`, the format the assistant's retry and quota
@@ -80,7 +99,15 @@ export function buildResponsesBody(request: ResponsesRequest): Record<string, un
     input: [
       ...(request.developer ? [{ role: 'developer', content: request.developer }] : []),
       ...(request.messages ?? [{ role: 'user', content: request.prompt ?? '' }]),
+      ...(request.steps ?? []).flatMap(step => step.role === 'assistant'
+        ? step.replay as unknown[]
+        : [{ type: 'function_call_output', call_id: step.callId, output: step.content }]),
     ],
+    ...(request.tools?.length ? {
+      tools: [{ type: 'namespace', ...TOOL_NAMESPACE, tools: request.tools.map(tool => ({ type: 'function', ...tool })) }],
+      // Without stored responses, reasoning can only be continued from its encrypted form.
+      include: ['reasoning.encrypted_content'],
+    } : {}),
     store: false,
     stream: true,
     ...(request.reasoningEffort ? { reasoning: { effort: request.reasoningEffort } } : {}),
@@ -99,6 +126,30 @@ function outputText(output: unknown): string {
     }
   }
   return text;
+}
+
+type OutputItem = Record<string, unknown>;
+
+/**
+ * Split a completed response's output into the function calls to run and the items to send back
+ * with their results.
+ *
+ * Reasoning items are replayed only in encrypted form. Without one, the calls go back without
+ * their ids: an id points at a reasoning item the unstored route can no longer find.
+ */
+function toolTurn(output: OutputItem[]): { toolCalls: ChatToolCall[]; replay: unknown[] } {
+  const calls = output.filter(item => item.type === 'function_call' && typeof item.call_id === 'string' && typeof item.name === 'string');
+  const reasoning = output.filter(item => item.type === 'reasoning' && typeof item.encrypted_content === 'string');
+  return {
+    toolCalls: calls.map(item => ({
+      id: item.call_id as string,
+      name: item.name as string,
+      arguments: typeof item.arguments === 'string' ? item.arguments : '',
+    })),
+    replay: reasoning.length
+      ? output.filter(item => reasoning.includes(item) || calls.includes(item))
+      : calls.map(({ id: _id, ...item }) => item),
+  };
 }
 
 /**
@@ -149,6 +200,8 @@ export async function createResponse(
   if (!response.body) throw new ResponsesApiError(502, null, 'The response had no event stream.');
 
   let text = '';
+  /** Finished output items, kept in case the terminal event carries no `output`. */
+  const items: OutputItem[] = [];
   // Held in an object because the event handler below assigns it from a closure.
   const state: { completed: ResponsesResult | null } = { completed: null };
 
@@ -162,13 +215,20 @@ export async function createResponse(
           request.onDelta?.(event.delta);
         }
         return;
-      case 'response.completed':
+      case 'response.output_item.done':
+        if (event.item && typeof event.item === 'object') items.push(event.item as OutputItem);
+        return;
+      case 'response.completed': {
+        const output = Array.isArray(body.output) && body.output.length ? body.output as OutputItem[] : items;
+        const turn = toolTurn(output);
         state.completed = {
-          text: text || outputText(body.output),
+          text: text || outputText(output),
           model: typeof body.model === 'string' && body.model ? body.model : request.model,
           usage: normalizeUsage('openai', body.usage),
+          ...(turn.toolCalls.length ? turn : {}),
         };
         return;
+      }
       case 'response.incomplete':
         throw new ProviderOutputError('truncated', normalizeUsage('openai', body.usage));
       case 'response.failed': {

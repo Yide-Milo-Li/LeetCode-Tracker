@@ -20,6 +20,7 @@ const { api } = await import('../apps/web/src/api.ts');
 const { createChatEventDecoder } = await import('../apps/web/src/chat/chat-stream.ts');
 const { requestTurns } = await import('../apps/web/src/chat/useChat.ts');
 const { setChatProblem } = await import('../apps/web/src/chat/chat-context.ts');
+const { getChatDataAccess, setChatDataAccess } = await import('../apps/web/src/chat/chat-settings.ts');
 const { ChatLauncher, LAUNCHER_REST_MS } = await import('../apps/web/src/components/ChatLauncher.tsx');
 const { DEFAULT_CHAT_POSITION, dockAt, dockForPanel, launcherPoint, panelPoint } = await import('../apps/web/src/chat/chat-position.ts');
 
@@ -36,7 +37,7 @@ const encode = (events: ChatStreamEvent[]) => new TextEncoder().encode(events.ma
 
 /** Local service stub: records request bodies and answers each call with the next script. */
 function serveChat(...scripts: Array<ChatStreamEvent[] | { status: number; body: unknown }>) {
-  const requests: Array<{ messages: Array<{ role: string; content: string }>; context?: Record<string, unknown>; lang?: string }> = [];
+  const requests: Array<{ messages: Array<{ role: string; content: string }>; context?: Record<string, unknown>; lang?: string; dataAccess?: boolean }> = [];
   globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
     assert.equal(String(url), 'http://localhost/api/v1/chat/stream');
     requests.push(JSON.parse(String(init!.body)));
@@ -54,9 +55,9 @@ function serveChat(...scripts: Array<ChatStreamEvent[] | { status: number; body:
   return requests;
 }
 
-async function openPanel(lang: 'en' | 'zh' = 'en', onToday = false) {
+async function openPanel(lang: 'en' | 'zh' = 'en') {
   const settings = mock.fn();
-  await act(async () => { render(<ChatLauncher lang={lang} onToday={onToday} onOpenAiSettings={settings} />); });
+  await act(async () => { render(<ChatLauncher lang={lang} onOpenAiSettings={settings} />); });
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: lang === 'zh' ? '问 AI' : 'Ask AI' })); });
   await waitFor(() => screen.getByRole('complementary'));
   return settings;
@@ -98,25 +99,30 @@ it('sends the newest turns within the request limits and never starts with an an
   assert.equal(heavy.some(turn => turn.content === 'old'), false);
 });
 
-it('streams an answer, shows the context that was used and keeps the conversation', async () => {
+it('streams an answer, lists what the AI looked up and keeps the conversation', async () => {
   mock.method(api, 'getChatStatus', async () => ({ configured: true, provider: 'openai', model: 'gpt-6-luna' }));
   const requests = serveChat([
-    { type: 'context', context: { today: { date: '2026-11-25', totalCount: 3 } } },
+    { type: 'context', context: {} },
+    { type: 'tool', name: 'tracker_get_today' },
+    { type: 'tool', name: 'tracker_list_practices' },
+    // A repeated lookup is listed once; a tool this build cannot name keeps its name.
+    { type: 'tool', name: 'tracker_get_today' },
+    { type: 'tool', name: 'tracker_future_tool' },
     { type: 'delta', text: 'Start with **Two' },
     { type: 'delta', text: ' Sum**, 先做简单题。' },
     { type: 'done', provider: 'openai', model: 'gpt-6-luna' },
   ]);
-  await openPanel('en', true);
+  await openPanel();
   assert.equal(screen.getByText('OpenAI · gpt-6-luna').tagName, 'P');
-  assert.match(screen.getByText(/are sent to OpenAI/).textContent ?? '', /local data selected below/);
-  // Opened from Today, so the plan is attached by default; no problem is in view.
-  assert.equal(screen.getByRole('button', { name: "Today's plan" }).getAttribute('aria-pressed'), 'true');
+  assert.match(screen.getByText(/are sent to OpenAI/).textContent ?? '', /looks up your catalog, practice records and notes as needed/);
+  // With no problem in view the composer is the text field alone.
+  assert.equal(document.querySelector('.chat-context'), null);
 
   await ask('What first?');
   await waitFor(() => screen.getByText(/先做简单题/));
   assert.equal(screen.getByText('Two Sum').tagName, 'STRONG');
-  assert.equal(screen.getByText("Used: Today's plan (3)").tagName, 'P');
-  assert.deepEqual(requests[0], { messages: [{ role: 'user', content: 'What first?' }], context: { today: true }, lang: 'en' });
+  assert.equal(screen.getByText("Used: today's plan, practice records, tracker_future_tool").tagName, 'P');
+  assert.deepEqual(requests[0], { messages: [{ role: 'user', content: 'What first?' }], context: {}, lang: 'en' });
   assert.equal((screen.getByRole('textbox') as HTMLTextAreaElement).value, '');
 
   // The follow-up carries the earlier turns, because the server keeps none.
@@ -145,7 +151,6 @@ it('attaches the problem in view and lets the user leave it out', async () => {
   assert.equal(screen.getByText('Gemini · gemini-4-hydrogen').tagName, 'P');
   const chip = screen.getByRole('button', { name: '#42 Trapping Rain Water' });
   assert.equal(chip.getAttribute('aria-pressed'), 'true');
-  assert.equal(screen.getByRole('button', { name: '今日计划' }).getAttribute('aria-pressed'), 'false');
 
   // A suggestion sends at once with the problem attached.
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: '给我一点这道题的提示，先不要给答案' })); });
@@ -199,7 +204,7 @@ it('keeps partial text on a failure and retries the same question', async () => 
 it('explains a missing provider and toggles with the keyboard shortcut', async () => {
   mock.method(api, 'getChatStatus', async () => ({ configured: false, model: '' }));
   const requests = serveChat([]);
-  await act(async () => { render(<ChatLauncher lang="en" onToday={false} onOpenAiSettings={() => {}} />); });
+  await act(async () => { render(<ChatLauncher lang="en" onOpenAiSettings={() => {}} />); });
   await act(async () => { fireEvent.keyDown(window, { key: 'j', ctrlKey: true }); });
   await waitFor(() => screen.getByText('Connect an AI provider to ask questions here.'));
   assert.equal((screen.getByRole('textbox') as HTMLTextAreaElement).disabled, true);
@@ -264,7 +269,7 @@ it('docks the launcher beside the nearer edge and opens the panel next to it', (
 it('drags the launcher to an edge, remembers it and tucks away when left alone', async () => {
   mock.method(api, 'getChatStatus', async () => ({ configured: false, model: '' }));
   const stored = () => JSON.parse(localStorage.getItem('leetcode_tracker_chat_position_v1') ?? 'null');
-  const view = await act(async () => render(<ChatLauncher lang="en" onToday={false} onOpenAiSettings={() => {}} />));
+  const view = await act(async () => render(<ChatLauncher lang="en" onOpenAiSettings={() => {}} />));
   const button = screen.getByRole('button', { name: 'Ask AI' });
   const dock = button.closest('.chat-launcher') as HTMLElement;
   const width = window.innerWidth;
@@ -310,7 +315,7 @@ it('drags the launcher to an edge, remembers it and tucks away when left alone',
 
   // A reload restores the placement.
   view.unmount();
-  await act(async () => { render(<ChatLauncher lang="en" onToday={false} onOpenAiSettings={() => {}} />); });
+  await act(async () => { render(<ChatLauncher lang="en" onOpenAiSettings={() => {}} />); });
   await act(async () => { fireEvent.keyDown(window, { key: 'j', ctrlKey: true }); });
   assert.equal((await waitFor(() => screen.getByRole('complementary'))).style.left, `${width - 420 - 8}px`);
 });
@@ -363,7 +368,7 @@ it('climbs the hint ladder one answered rung at a time and describes an attempt'
   assert.match(reviewPrompt('zh', rain, '2026-11-20（未解出）'), /^复盘我做 #42 Trapping Rain Water 的这次练习：2026-11-20（未解出）。/);
 });
 
-it('offers graded hints for the attached problem, then the solution and a review', async () => {
+it('offers graded hints for the attached problem, then the solution, and a review as a starter', async () => {
   mock.method(api, 'getChatStatus', async () => ({ configured: true, provider: 'openai', model: 'gpt-6-luna' }));
   const requests = serveChat(
     answer('Think about what bounds the water.'),
@@ -374,16 +379,16 @@ it('offers graded hints for the attached problem, then the solution and a review
   setChatProblem({ frontendId: '42', title: 'Trapping Rain Water' });
   await openPanel();
   const lastQuestion = () => requests.at(-1)!.messages.at(-1)!.content;
-  const quick = () => screen.queryByRole('group', { name: 'Quick questions about this problem' });
-  /** Click a quick question once the previous answer has finished. */
+  const nextHint = () => document.querySelector('.chat-context .chat-action');
+  /** Click the next rung once the previous answer has finished. */
   const press = async (name: string, sent: number) => {
     await waitFor(() => assert.equal((screen.getByRole('button', { name }) as HTMLButtonElement).disabled, false));
     await act(async () => { fireEvent.click(screen.getByRole('button', { name })); });
     await waitFor(() => assert.equal(requests.length, sent));
   };
 
-  // The empty conversation offers the presets as starters; the compact row appears afterwards.
-  assert.equal(quick(), null);
+  // The empty conversation offers the presets as starters; the next rung appears beside the problem afterwards.
+  assert.equal(nextHint(), null);
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Give me a hint for this problem without the solution' })); });
   await waitFor(() => screen.getByText('Think about what bounds the water.'));
   assert.deepEqual(requests[0], { messages: [{ role: 'user', content: hintPrompt(1, 'en', rain) }], context: { frontendId: '42' }, lang: 'en' });
@@ -400,30 +405,51 @@ it('offers graded hints for the attached problem, then the solution and a review
   assert.equal(lastQuestion(), hintPrompt(3, 'en', rain));
   await press('Show the solution', 5);
   assert.equal(lastQuestion(), hintPrompt(4, 'en', rain));
-  await waitFor(() => assert.equal((screen.getByRole('button', { name: 'Review my latest attempt' }) as HTMLButtonElement).disabled, false));
-  // Nothing is left on the ladder; the review stays available.
-  assert.equal(screen.queryByRole('button', { name: /hint|solution/i }), null);
-  await press('Review my latest attempt', 6);
-  assert.equal(lastQuestion(), reviewPrompt('en', rain));
-  assert.deepEqual(requests[5].context, { frontendId: '42' });
-
-  // Leaving the problem out removes its quick questions.
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '#42 Trapping Rain Water' })); });
-  assert.equal(quick(), null);
-
-  // A new conversation starts the ladder over.
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '#42 Trapping Rain Water' })); });
+  // Nothing is left on the ladder.
   await waitFor(() => screen.getByRole('button', { name: 'Send' }));
+  assert.equal(nextHint(), null);
+
+  // A new conversation starts the ladder over, and offers the review as a starter.
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'New chat' })); });
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Give me a hint for this problem without the solution' })); });
-  await waitFor(() => assert.equal(requests.length, 7));
-  assert.deepEqual(requests[6].messages, [{ role: 'user', content: hintPrompt(1, 'en', rain) }]);
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Review my latest attempt' })); });
+  await waitFor(() => assert.equal(requests.length, 6));
+  assert.deepEqual(requests[5], { messages: [{ role: 'user', content: reviewPrompt('en', rain) }], context: { frontendId: '42' }, lang: 'en' });
+  await press('Give me a hint', 7);
+  assert.equal(lastQuestion(), hintPrompt(1, 'en', rain));
+
+  // Leaving the problem out removes the next hint with it.
+  await waitFor(() => assert.notEqual(nextHint(), null));
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '#42 Trapping Rain Water' })); });
+  assert.equal(nextHint(), null);
+});
+
+it('sends only the attached problem once data access is turned off', async () => {
+  mock.method(api, 'getChatStatus', async () => ({ configured: true, provider: 'openai', model: 'gpt-6-luna' }));
+  const requests = serveChat(answer('ok'));
+  assert.equal(getChatDataAccess(), true);
+  setChatProblem(rain);
+  await openPanel();
+  await act(async () => { setChatDataAccess(false); });
+  // The notice changes with the setting, and the starter that needs a lookup is withdrawn.
+  assert.match(screen.getByText(/are sent to OpenAI/).textContent ?? '', /^Your question and the data of the problem selected below/);
+  assert.equal(screen.queryByRole('button', { name: "Which problem in today's plan should I start with?" }), null);
+  await ask('Why is this hard?');
+  await waitFor(() => assert.equal(requests.length, 1));
+  assert.deepEqual(requests[0], { messages: [{ role: 'user', content: 'Why is this hard?' }], context: { frontendId: '42' }, lang: 'en', dataAccess: false });
+
+  // The choice is kept on this device and applies again from the next question.
+  assert.equal(getChatDataAccess(), false);
+  await act(async () => { setChatDataAccess(true); });
+  await waitFor(() => screen.getByRole('button', { name: 'Send' }));
+  await ask('And now?');
+  await waitFor(() => assert.equal(requests.length, 2));
+  assert.equal('dataAccess' in requests[1], false);
 });
 
 it('opens on the asked problem and sends the preset when another view asks', async () => {
   mock.method(api, 'getChatStatus', async () => ({ configured: true, provider: 'gemini', model: 'models/gemini-4-hydrogen' }));
   const requests = serveChat(answer('ok'));
-  const launcher = (ask?: Parameters<typeof ChatLauncher>[0]['ask']) => <ChatLauncher lang="zh" onToday={false} onOpenAiSettings={() => {}} ask={ask} />;
+  const launcher = (ask?: Parameters<typeof ChatLauncher>[0]['ask']) => <ChatLauncher lang="zh" onOpenAiSettings={() => {}} ask={ask} />;
   let view!: ReturnType<typeof render>;
   await act(async () => { view = render(launcher()); });
   assert.equal(screen.queryByRole('complementary'), null);
@@ -462,7 +488,7 @@ it('opens without sending a preset when no provider is connected', async () => {
   mock.method(api, 'getChatStatus', async () => ({ configured: false, model: '' }));
   const requests = serveChat([]);
   await act(async () => {
-    render(<ChatLauncher lang="en" onToday={false} onOpenAiSettings={() => {}}
+    render(<ChatLauncher lang="en" onOpenAiSettings={() => {}}
       ask={{ id: 1, problem: { frontendId: '15', title: '3Sum' }, action: { kind: 'hint' } }} />);
   });
   await waitFor(() => screen.getByText('Connect an AI provider to ask questions here.'));
@@ -525,7 +551,7 @@ it('drops a preset that was still waiting when the panel closed', async () => {
   const status = mock.method(api, 'getChatStatus', () => new Promise<never>(() => {}));
   const requests = serveChat(answer('ok'));
   await act(async () => {
-    render(<ChatLauncher lang="en" onToday={false} onOpenAiSettings={() => {}} ask={{ id: 1, problem: threeSum, action: { kind: 'hint' } }} />);
+    render(<ChatLauncher lang="en" onOpenAiSettings={() => {}} ask={{ id: 1, problem: threeSum, action: { kind: 'hint' } }} />);
   });
   await waitFor(() => screen.getByRole('complementary'));
   await act(async () => { fireEvent.keyDown(screen.getByRole('complementary'), { key: 'Escape' }); });

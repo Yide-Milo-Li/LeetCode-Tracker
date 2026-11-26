@@ -1,7 +1,7 @@
 /**
  * Google Gemini provider adapter using official @google/genai SDK.
  */
-import { GoogleGenAI, type ThinkingLevel } from '@google/genai';
+import { GoogleGenAI, type Part, type ThinkingLevel } from '@google/genai';
 import {
   defaultGeminiModel,
   normalizeGeminiModel,
@@ -17,14 +17,55 @@ import type {
   ConnectionTestResult,
   GeminiGenerateContentFn,
   StreamChatParams,
+  StreamChatOutput,
+  ChatToolStep,
 } from '../types.ts';
 
 /** Streaming transport; replaceable so tests need no network. */
 export type GeminiStreamFn = (params: {
   model: string;
-  contents: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }>;
-  config: { systemInstruction: string; abortSignal: AbortSignal; thinkingConfig: { thinkingLevel: ThinkingLevel } };
-}) => Promise<AsyncIterable<{ text?: string; usageMetadata?: unknown; candidates?: Array<{ finishReason?: string }> }>>;
+  contents: Array<{ role: 'user' | 'model'; parts: GeminiPart[] }>;
+  config: {
+    systemInstruction: string;
+    abortSignal: AbortSignal;
+    thinkingConfig: { thinkingLevel: ThinkingLevel };
+    tools?: Array<{ functionDeclarations: Array<{ name: string; description: string; parametersJsonSchema: unknown }> }>;
+  };
+}) => Promise<AsyncIterable<{
+  text?: string;
+  usageMetadata?: unknown;
+  candidates?: Array<{ finishReason?: string; content?: { parts?: GeminiPart[] } }>;
+}>>;
+
+/** A content part as the API sends it: text, a function call or response, with any thought signature. */
+type GeminiPart = Part;
+
+/** Prefix of call ids made up here because the API sent none; they are not sent back. */
+const LOCAL_CALL_ID = 'local-call-';
+
+/**
+ * Turn the tool exchange into contents. The model's turn is replayed part for part, because its
+ * function-call parts carry thought signatures the API requires back; all results of one turn go
+ * into a single user content, one response per call.
+ */
+function toolContents(steps: ChatToolStep[]): Array<{ role: 'user' | 'model'; parts: GeminiPart[] }> {
+  const contents: Array<{ role: 'user' | 'model'; parts: GeminiPart[] }> = [];
+  for (const step of steps) {
+    if (step.role === 'assistant') {
+      contents.push({ role: 'model', parts: step.replay as GeminiPart[] });
+      continue;
+    }
+    const part: GeminiPart = { functionResponse: {
+      ...(step.callId.startsWith(LOCAL_CALL_ID) ? {} : { id: step.callId }),
+      name: step.name,
+      response: { output: step.content },
+    } };
+    const last = contents.at(-1);
+    if (last?.role === 'user') last.parts.push(part);
+    else contents.push({ role: 'user', parts: [part] });
+  }
+  return contents;
+}
 
 export interface GeminiProviderOptions {
   apiKey?: string;
@@ -123,14 +164,14 @@ export class GeminiProvider extends BaseLLMProvider {
   }
 
   /**
-   * Stream a plain-text answer with `generateContentStream`. Thought parts are not forwarded.
+   * Stream one model turn with `generateContentStream`. Thought parts are not forwarded.
    *
    * @throws ProviderOutputError `truncated` when the model hit its output limit, `invalid` when
    * the answer was empty (for example a blocked response).
    * @throws Error when the key is missing, the request fails, or the stream ends without a
    * finish reason.
    */
-  public async streamChat(params: StreamChatParams): Promise<GenerateContentOutput> {
+  public async streamChat(params: StreamChatParams): Promise<StreamChatOutput> {
     const effort = resolveModelReasoningEffort('gemini', params.model, params.reasoningEffort ?? this.defaultReasoningEffort);
     if (!this.streamFn && !this.apiKey) {
       throw new Error('Gemini API key is not configured');
@@ -141,31 +182,50 @@ export class GeminiProvider extends BaseLLMProvider {
     const stream = await open({
       model: params.model,
       // Gemini names the assistant role `model`.
-      contents: params.messages.map(message => ({
-        role: message.role === 'assistant' ? 'model' as const : 'user' as const,
-        parts: [{ text: message.content }],
-      })),
+      contents: [
+        ...params.messages.map(message => ({
+          role: message.role === 'assistant' ? 'model' as const : 'user' as const,
+          parts: [{ text: message.content }],
+        })),
+        ...toolContents(params.steps ?? []),
+      ],
       config: {
         systemInstruction: params.systemInstruction,
         abortSignal: params.abortSignal,
         thinkingConfig: { thinkingLevel: effort.toUpperCase() as unknown as ThinkingLevel },
+        ...(params.tools?.length ? { tools: [{ functionDeclarations: params.tools.map(tool => ({
+          name: tool.name, description: tool.description, parametersJsonSchema: tool.parameters,
+        })) }] } : {}),
       },
     });
 
     let text = '';
     let usage = normalizeUsage('gemini');
     let finishReason: string | undefined;
+    const turn: GeminiPart[] = [];
     for await (const chunk of stream) {
       if (chunk.usageMetadata) usage = normalizeUsage('gemini', chunk.usageMetadata);
       finishReason = chunk.candidates?.[0]?.finishReason ?? finishReason;
-      if (chunk.text) {
-        text += chunk.text;
-        params.onDelta(chunk.text);
+      const parts = chunk.candidates?.[0]?.content?.parts;
+      if (parts) turn.push(...parts);
+      // Read the parts directly when present: the SDK's `text` accessor warns on function calls.
+      const piece = parts
+        ? parts.filter(part => typeof part.text === 'string' && !part.thought).map(part => part.text).join('')
+        : chunk.text;
+      if (piece) {
+        text += piece;
+        params.onDelta(piece);
       }
     }
 
     if (finishReason === 'MAX_TOKENS') throw new ProviderOutputError('truncated', usage);
     if (!finishReason) throw new Error('[502] The Gemini stream ended before completion.');
+    const toolCalls = turn.flatMap((part, index) => part.functionCall?.name ? [{
+      id: part.functionCall.id || `${LOCAL_CALL_ID}${index}`,
+      name: part.functionCall.name,
+      arguments: JSON.stringify(part.functionCall.args ?? {}),
+    }] : []);
+    if (toolCalls.length) return { text, model: params.model, provider: 'gemini', usage, toolCalls, replay: turn };
     if (!text.trim()) throw new ProviderOutputError('invalid', usage);
     return { text, model: params.model, provider: 'gemini', usage };
   }

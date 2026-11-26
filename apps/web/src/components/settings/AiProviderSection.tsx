@@ -1,10 +1,13 @@
 /** "AI assistant" Settings tab: provider choice, API key, advanced model options, save and test. */
+import { useId } from 'react';
 import { Eye, EyeOff, ChevronDown, RefreshCw } from 'lucide-react';
 import type { ReasoningEffort } from '../../../../../packages/contracts/src/sync.ts';
 import { translations, type Language } from '../../i18n.ts';
 import { Feedback, Field, InfoPopover } from '../ui.tsx';
 import { OPENAI_MODEL_LABELS, providerName } from './settings-model.ts';
 import type { AiProviderSettings } from './useAiProviderSettings.ts';
+import { SettingSwitch } from './SettingSwitch.tsx';
+import { setChatDataAccess, useChatDataAccess } from '../../chat/chat-settings.ts';
 
 /** Where users review and limit this app's use of their ChatGPT plan. */
 const CHATGPT_USAGE_URL = 'https://chatgpt.com/settings/usage';
@@ -73,6 +76,10 @@ export function AiProviderSection({ lang, ai }: AiProviderSectionProps) {
   const chatgptNeedsAttention = Boolean(openaiOAuth?.connected && !chatgptUsable);
   /** The saved configuration (not the draft) runs on the ChatGPT plan. */
   const activeOnChatgptPlan = activeProvider === 'openai' && openaiAuthMode === 'chatgpt' && chatgptUsable;
+
+  const dataAccess = useChatDataAccess();
+  const dataAccessDescId = useId();
+  const dataAccessLabel = zh ? '允许 AI 查看我的数据' : 'Let the AI read my data';
 
   return (
     <div role="tabpanel" id="settings-panel-ai" aria-labelledby="settings-tab-ai" className="settings-panel">
@@ -436,6 +443,18 @@ export function AiProviderSection({ lang, ai }: AiProviderSectionProps) {
             )}
           </fieldset>
         </form>
+      </section>
+
+      <section className="preference-row">
+        <div className="preference-label">
+          <h2>{dataAccessLabel}</h2>
+          <p id={dataAccessDescId}>
+            {zh
+              ? '回答“问 AI”里的问题时，AI 可以按需查看今日计划、题库、练习记录、进度、笔记、策略、题单和收藏，查到的内容会发送给所选的 AI 服务商，每条回答都会列出查看了什么。关闭后只发送你在对话里附带的那道题。AI 不能修改任何数据。此设置只保存在这台设备上。'
+              : 'While answering in Ask AI, the AI can look up your plan for today, catalog, practice records, progress, notes, strategies, goal lists and favorites as needed. What it reads is sent to the selected AI provider, and every answer lists what was read. When off, only the problem you attach in the conversation is sent. The AI cannot change any data. This setting is kept on this device only.'}
+          </p>
+        </div>
+        <SettingSwitch lang={lang} checked={dataAccess} onChange={setChatDataAccess} label={dataAccessLabel} describedBy={dataAccessDescId} />
       </section>
     </div>
   );
