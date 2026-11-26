@@ -5,9 +5,8 @@
  * provider are rejected with an ordinary JSON error before the stream opens; failures after
  * that arrive as an `error` event on a `200` stream.
  *
- * `POST /api/v1/chat/actions` applies one change the user confirmed, and
- * `POST /api/v1/chat/actions/undo` takes one back. They are the only chat routes that write to the
- * profile; a refusal answers with a stable error code and leaves the profile unchanged.
+ * The stream can apply changes with full access. `POST /api/v1/chat/actions` applies one change
+ * the user confirmed, and `POST /api/v1/chat/actions/undo` can take either kind of change back.
  */
 import type { FastifyInstance } from 'fastify';
 import { chatActionRequestSchema, chatRequestSchema, chatUndoSchema, type ChatStreamEvent } from '../../../../packages/contracts/src/chat.ts';

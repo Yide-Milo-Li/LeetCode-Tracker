@@ -192,7 +192,7 @@ export function App() {
     void plan.refresh();
   }, [setTimezone, plan.refresh]);
   const desktopAgent = useDesktopAgent(applyAgentChange);
-  /** A change confirmed in the AI chat was written by the local service, outside every view's own state. */
+  /** An AI chat change was written by the local service, outside every view's own state. */
   const refreshAfterChatChange = useCallback(() => {
     setRevision(value => value + 1);
     setDesktopAgentRevision(value => value + 1);

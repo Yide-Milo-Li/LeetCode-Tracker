@@ -450,8 +450,8 @@ export function AiProviderSection({ lang, ai }: AiProviderSectionProps) {
           <h2>{dataAccessLabel}</h2>
           <p id={dataAccessDescId}>
             {zh
-              ? '回答“问 AI”里的问题时，AI 可以按需查看今日计划、题库、练习记录、进度、笔记、策略、题单和收藏，查到的内容会发送给所选的 AI 服务商，每条回答都会列出查看了什么。它还可以提议记录练习、写笔记、收藏题目或加入题单，每次改动都要你在对话里确认后才会保存。关闭后只发送你在对话里附带的那道题，AI 也不再提议改动。此设置只保存在这台设备上。'
-              : 'While answering in Ask AI, the AI can look up your plan for today, catalog, practice records, progress, notes, strategies, goal lists and favorites as needed. What it reads is sent to the selected AI provider, and every answer lists what was read. It can also propose recording attempts, adding to notes, starring problems and adding them to goal lists; nothing is saved until you confirm the change in the conversation. When off, only the problem you attach in the conversation is sent and the AI proposes no changes. This setting is kept on this device only.'}
+              ? '回答“问 AI”里的问题时，AI 可以按需查看今日计划、题库、练习记录、进度、笔记、策略、题单和收藏。查到的内容会发送给所选的 AI 服务商，每条回答都会列出查看了什么。修改数据时遵循对话里的访问权限。关闭后，AI 只会收到对话中附带的题目数据，写入工具也会停用。此设置只保存在这台设备上。'
+              : 'While answering in Ask AI, the AI can look up your plan for today, catalog, practice records, progress, notes, strategies, goal lists and favorites. The selected provider receives the results, and each answer lists what was read. Changes follow the access permissions shown in chat. Turning this off limits tracker data to the problem attached to the conversation and disables write tools. This setting is kept on this device only.'}
           </p>
         </div>
         <SettingSwitch lang={lang} checked={dataAccess} onChange={setChatDataAccess} label={dataAccessLabel} describedBy={dataAccessDescId} />

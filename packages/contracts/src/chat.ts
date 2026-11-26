@@ -8,10 +8,8 @@
  * While answering, the model may read the user's tracker through a fixed set of read tools. Each
  * lookup is reported as a `tool` event, and `dataAccess: false` turns the lookups off.
  *
- * The model can also propose a change to the tracker. A proposal arrives as an `action` event and
- * changes nothing; the client shows it and, once the user confirms, sends it to
- * `POST /api/v1/chat/actions`. That route and `POST /api/v1/chat/actions/undo`, which takes an
- * applied change back, are the only chat routes that write.
+ * When the model requests a change, the stream reports a proposal to confirm or a change already
+ * applied under full access. The client uses the action routes to confirm proposals and undo writes.
  */
 import { z } from 'zod';
 import { llmProviderSchema } from './sync.ts';
@@ -36,6 +34,9 @@ export const chatContextSchema = z.object({
 }).strict();
 export type ChatContext = z.infer<typeof chatContextSchema>;
 
+const chatWritePermissionSchema = z.enum(['confirm', 'full']);
+export type ChatWritePermission = z.infer<typeof chatWritePermissionSchema>;
+
 export const chatRequestSchema = z.object({
   messages: z.array(chatMessageSchema).min(1).max(CHAT_MAX_MESSAGES),
   context: chatContextSchema.optional(),
@@ -46,6 +47,8 @@ export const chatRequestSchema = z.object({
    * Omitted means allowed.
    */
   dataAccess: z.boolean().optional(),
+  /** Omitted means confirm each change. Ignored when data access is off. */
+  writePermission: chatWritePermissionSchema.optional(),
   /**
    * The provider the user was told the question goes to. When another one is active, or the
    * active one changes while answering, the answer ends with `CHAT_PROVIDER_CHANGED` before
@@ -148,6 +151,8 @@ export type ChatStreamEvent =
   | { type: 'tool'; name: string }
   /** The model proposed a change; nothing is written until the user confirms it. */
   | { type: 'action'; action: ChatActionProposal }
+  /** A change was applied while answering with full access. */
+  | { type: 'action-applied'; action: ChatActionProposal; undo?: ChatUndo }
   | { type: 'done'; provider: z.infer<typeof llmProviderSchema>; model: string }
   /** `error` is a stable code such as `CHAT_QUOTA`; `message` is an English fallback. */
   | { type: 'error'; error: string; message: string };

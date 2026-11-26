@@ -161,7 +161,7 @@ html.chat-dragging * {
 }
 
 .chat-panel {
-  width: 420px;
+  width: min(420px, calc(100vw - 48px));
   height: min(620px, calc(100vh - 48px));
   display: flex;
   flex-direction: column;
@@ -705,6 +705,28 @@ html.dark .chat-panel {
   padding: 10px 12px 12px;
   border-top: 1px solid var(--border-color);
   background: var(--muted-surface);
+}
+.chat-permissions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  margin-top: 8px;
+  font-size: 13px;
+}
+.chat-permissions select {
+  min-height: 30px;
+  padding: 3px 26px 3px 8px;
+  background-position: right 7px center;
+  font-size: inherit;
+}
+.chat-permissions select:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+.chat-permissions .chat-entry-note {
+  flex-basis: 100%;
+  margin: 0;
 }
 /* A next step on the last answer, such as the next hint. Pressing one sends at once. */
 .chat-action {

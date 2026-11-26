@@ -95,10 +95,7 @@ export function reviewPrompt(lang: Language, problem: ChatProblemRef, attempt?: 
   return `${attempt ? `Review this attempt of mine at ${name}: ${attempt}.` : `Review my latest attempt at ${name}.`} Using my practice records and note, tell me what went well, where I got stuck, which pattern the problem tests, and what to watch for next time.`;
 }
 
-/**
- * The message that asks the AI to put its last answer into the problem's note. The AI answers
- * with a proposed note change, which the user still confirms.
- */
+/** The message that asks the AI to put its last answer into the problem's note. */
 export function saveNotePrompt(lang: Language, problem: ChatProblemRef): string {
   const name = problemName(problem);
   return lang === 'zh'

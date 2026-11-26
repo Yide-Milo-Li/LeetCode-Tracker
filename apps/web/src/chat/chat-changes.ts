@@ -19,6 +19,8 @@ export interface ChatChange extends ChatActionProposal {
   error?: { code: string; message: string };
   /** The user changed the proposed values before confirming. */
   edited?: boolean;
+  /** The server applied this change under full access. */
+  automatic?: boolean;
   /**
    * What takes the applied change back. Held for this session only: it can carry a whole note,
    * and the longer ago a change was made the less likely an undo still applies cleanly.
@@ -177,6 +179,10 @@ export function describeChange(change: ChatActionProposal, lang: Language, zone:
  * it, so it never has to guess whether the user confirmed.
  */
 export function changeStatusNote(change: ChatChange): string {
+  if (change.automatic) {
+    const outcome = change.state === 'undone' ? 'applied automatically, then undone by the user' : 'applied automatically';
+    return `[Change ${change.name}: ${outcome}]`;
+  }
   const outcome = change.state === 'applied' || change.state === 'undoing'
     ? `the user ${change.edited ? 'edited its values, then confirmed it' : 'confirmed it'} and it was applied`
     : change.state === 'undone' ? 'the user confirmed it, then undid it; nothing changed'

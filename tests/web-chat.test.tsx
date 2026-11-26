@@ -6,7 +6,7 @@
 import { afterEach, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import type { ChatStreamEvent } from '../packages/contracts/src/chat.ts';
+import type { ChatRequest, ChatStreamEvent } from '../packages/contracts/src/chat.ts';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/', pretendToBeVisual: true });
 Object.assign(globalThis, {
@@ -38,7 +38,7 @@ const encode = (events: ChatStreamEvent[]) => new TextEncoder().encode(events.ma
 
 /** Local service stub: records request bodies and answers each call with the next script. */
 function serveChat(...scripts: Array<ChatStreamEvent[] | { status: number; body: unknown }>) {
-  const requests: Array<{ messages: Array<{ role: string; content: string }>; context?: Record<string, unknown>; lang?: string; dataAccess?: boolean; provider?: string }> = [];
+  const requests: ChatRequest[] = [];
   globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
     assert.equal(String(url), 'http://localhost/api/v1/chat/stream');
     requests.push(JSON.parse(String(init!.body)));
@@ -306,6 +306,7 @@ it('docks the launcher beside the nearer edge and opens the panel next to it', (
   // A dragged panel is kept where it was dropped, and pulled back inside a smaller window.
   assert.deepEqual(panelPoint({ dock: DEFAULT_CHAT_POSITION.dock, panel: { left: 300, top: 60 } }, viewport), { left: 300, top: 60 });
   assert.deepEqual(panelPoint({ dock: DEFAULT_CHAT_POSITION.dock, panel: { left: 900, top: 400 } }, { width: 1024, height: 700 }), { left: 596, top: 72 });
+  assert.deepEqual(panelPoint(DEFAULT_CHAT_POSITION, { width: 390, height: 844 }), { left: 24, top: 200 });
   assert.deepEqual(dockForPanel({ left: 100, top: 60 }, viewport, DEFAULT_CHAT_POSITION.dock), { side: 'left', bottom: 120 });
 
   // The top and bottom edges dock too: the nearest edge wins and the horizontal spot is kept.
@@ -822,6 +823,69 @@ const starCard: Proposal = {
   labels: { problems: { 1: 'Two Sum', 42: 'Trapping Rain Water' }, folders: { f1: 'Review' }, lists: {} },
 };
 
+it('sends the selected permission, shows automatic writes and lets the user undo them', async () => {
+  mock.method(api, 'getChatStatus', async () => ({ configured: true, provider: 'openai', model: 'gpt-6-luna' }));
+  const confirm = mock.method(api, 'applyChatAction', async () => ({ result: {} }));
+  const undo = mock.method(api, 'undoChatAction', async () => ({ ok: true as const }));
+  const changed = mock.fn();
+  const undoDetails = { kind: 'practices' as const, records: [{ id: 'practice-1', revision: 1 }] };
+  const requests = serveChat(
+    [{ type: 'action', action: starCard }, ...answer('Review this change.')],
+    [{ type: 'action-applied', action: practiceCard, undo: undoDetails }, { type: 'error', error: 'CHAT_TIMEOUT', message: 'Late timeout.' }],
+    answer('OK'),
+    answer('OK'),
+  );
+  await act(async () => { render(<ChatLauncher lang="en" onOpenAiSettings={() => {}} onDataChanged={changed} />); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Ask AI' })); });
+  const permission = await screen.findByRole('combobox', { name: 'Access permissions' }) as HTMLSelectElement;
+  assert.equal(permission.value, 'confirm');
+  await ask('Star both problems.');
+  await waitFor(() => screen.getByText('Review this change.'));
+  assert.equal(requests[0].writePermission, undefined);
+
+  await act(async () => { fireEvent.change(permission, { target: { value: 'full' } }); });
+  assert.equal(permission.value, 'full');
+  // Previously proposed changes still require a decision.
+  assert.ok(within(screen.getByRole('region', { name: 'Star problems' })).getByRole('button', { name: 'Star' }));
+  await ask('Record a solved attempt for #1.');
+  await waitFor(() => screen.getByText('Recorded'));
+  assert.equal(requests[1].writePermission, 'full');
+  assert.equal(confirm.mock.callCount(), 0);
+  assert.equal(changed.mock.callCount(), 1);
+  assert.equal(screen.queryByRole('button', { name: 'Try again' }), null);
+  const record = within(screen.getByRole('region', { name: 'Record an attempt' }));
+  assert.deepEqual(record.getAllByRole('button').map(button => button.textContent), ['Undo']);
+  await act(async () => { fireEvent.click(record.getByRole('button', { name: 'Undo' })); });
+  await waitFor(() => record.getByText('Undone. The data is as it was before.'));
+  assert.deepEqual(undo.mock.calls[0].arguments, [undoDetails]);
+  assert.equal(changed.mock.callCount(), 2);
+
+  await act(async () => { setChatDataAccess(false); });
+  assert.equal(permission.disabled, true);
+  await ask('How does a stack work?');
+  assert.equal(requests[2].dataAccess, false);
+  assert.equal(requests[2].writePermission, undefined);
+  assert.match(requests[2].messages.map(turn => turn.content).join('\n'), /applied automatically, then undone by the user/);
+
+  await act(async () => { setChatDataAccess(true); });
+  assert.equal(permission.value, 'full');
+  await act(async () => { fireEvent.change(permission, { target: { value: 'confirm' } }); });
+  await ask('What is a deque?');
+  assert.equal(requests[3].writePermission, undefined);
+});
+
+it('does not offer to repeat a full-access answer whose stream ended without a receipt', async () => {
+  mock.method(api, 'getChatStatus', async () => ({ configured: true, provider: 'openai', model: 'gpt-6-luna' }));
+  const requests = serveChat([{ type: 'context', context: {} }]);
+  await openPanel();
+  const permission = screen.getByRole('combobox', { name: 'Access permissions' });
+  await act(async () => { fireEvent.change(permission, { target: { value: 'full' } }); });
+  await ask('Record a solved attempt for #1.');
+  await waitFor(() => screen.getByText('A change may already have been saved. Check the tracker before asking again.'));
+  assert.equal(requests[0].writePermission, 'full');
+  assert.equal(screen.queryByRole('button', { name: 'Try again' }), null);
+});
+
 it('shows a proposed change as a card and writes only when it is confirmed', async () => {
   mock.method(api, 'getChatStatus', async () => ({ configured: true, provider: 'openai', model: 'gpt-6-luna' }));
   const applied: Array<{ name: string; args: Record<string, unknown> }> = [];
@@ -1123,7 +1187,7 @@ it('lets a proposal be adjusted before confirming and an applied change be taken
   assert.equal(card('Record an attempt').queryByRole('button'), null);
   // A change the data has moved past stays applied, says why, and stops offering the undo.
   await press('Add to the note', 'Undo');
-  await waitFor(() => assert.match(card('Add to the note').getByRole('alert').textContent ?? '', /^This data changed after you confirmed, so it was not undone\./));
+  await waitFor(() => assert.match(card('Add to the note').getByRole('alert').textContent ?? '', /^This data changed after it was saved, so it was not undone\./));
   assert.ok(card('Add to the note').getByText('Saved to the note'));
   assert.equal(card('Add to the note').queryByRole('button'), null);
   assert.equal(changed.mock.callCount(), 3);

@@ -47,7 +47,7 @@ export const panelHeight = (viewport: Viewport, large = false) =>
 
 /** Matches the CSS width of `.chat-panel`. */
 export const panelWidth = (viewport: Viewport, large = false) =>
-  large ? Math.min(PANEL_WIDTH_LARGE, viewport.width - 2 * PANEL_MARGIN) : PANEL_WIDTH;
+  Math.min(large ? PANEL_WIDTH_LARGE : PANEL_WIDTH, viewport.width - 2 * PANEL_MARGIN);
 
 /**
  * Where the launcher is drawn. Tucked, it sits flush against its edge, where it is drawn as a thin

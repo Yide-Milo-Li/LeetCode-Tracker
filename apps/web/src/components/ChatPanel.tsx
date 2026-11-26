@@ -7,10 +7,9 @@
  * It shows one conversation at a time: a problem's, or the general one. History lists recent
  * conversations for switching and deletion.
  *
- * A change the AI proposes appears under its answer as a card. The card states what will change
- * and nothing is written until its confirming button is pressed.
+ * Change cards show what the AI proposed for confirmation or already saved with full access.
  */
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { ArrowUp, Check, History, Lightbulb, Maximize2, Minimize2, NotebookPen, RefreshCw, Square, Trash2, X } from 'lucide-react';
 import { api, type LLMProvider } from '../api.ts';
 import { CHAT_MAX_MESSAGE_CHARS } from '../../../../packages/contracts/src/chat-limits.ts';
@@ -23,11 +22,11 @@ import { useAsyncResource } from '../hooks/useAsyncResource.ts';
 import { applyDraft, describeChange, draftOf, isDecided, type AttemptDraft, type ChangeDraft, type ChatChange } from '../chat/chat-changes.ts';
 import type { ChatAction, ChatAsk, ChatProblemRef } from '../chat/chat-context.ts';
 import { hintLabel, hintPrompt, nextHintLevel, presetLabel, reviewPrompt, saveNotePrompt, similarPrompt } from '../chat/chat-presets.ts';
-import { useChatDataAccess } from '../chat/chat-settings.ts';
+import { setChatWritePermission, useChatDataAccess, useChatWritePermission } from '../chat/chat-settings.ts';
 import { toolLabel } from '../chat/chat-tools.ts';
 import type { ChatDock, Point } from '../chat/chat-position.ts';
 import { GENERAL_THREAD, problemThread, type ChatThreadRef } from '../chat/chat-threads.ts';
-import type { ChatController, ChatEntry } from '../chat/useChat.ts';
+import { canRetryChatAnswer, type ChatController, type ChatEntry } from '../chat/useChat.ts';
 import { CopyButton } from './CopyButton.tsx';
 import { RenderedMarkdown } from './NotesMarkdownPreview.tsx';
 import { Feedback, IconButton, useActionPopover } from './ui.tsx';
@@ -88,8 +87,8 @@ function changeError(error: { code: string; message: string }, lang: Language, u
   }
   if (error.code === 'CHAT_UNDO_STALE') {
     return zh
-      ? '这项数据在确认之后又有改动，所以没有自动撤销。仍想改回去的话，请到对应页面手动处理。'
-      : 'This data changed after you confirmed, so it was not undone. To change it back, edit it where it lives.';
+      ? '这项数据在保存之后又有改动，所以没有自动撤销。仍想改回去的话，请到对应页面手动处理。'
+      : 'This data changed after it was saved, so it was not undone. To change it back, edit it where it lives.';
   }
   return localizeApiError(new ApiError(0, error.code, error.message), lang, undoing
     ? (zh ? '没有撤销成功，这项改动仍然有效。' : 'The undo did not go through. The change is still in place.')
@@ -230,6 +229,7 @@ function Answer({ entry, lang, isLast, busy, onRetry, onSaveNote, onOpenAiSettin
   const zh = lang === 'zh';
   const changes = entry.changes ?? [];
   const settled = entry.state !== 'streaming';
+  const canRetry = isLast && !busy && canRetryChatAnswer(entry);
   const lookups = (entry.tools ?? []).map(name => toolLabel(name, lang));
   const used = [
     entry.context?.problem && `#${entry.context.problem.frontendId} ${entry.context.problem.title}`,
@@ -257,7 +257,7 @@ function Answer({ entry, lang, isLast, busy, onRetry, onSaveNote, onOpenAiSettin
       {entry.state === 'stopped' && (
         <p className="chat-entry-note">
           {zh ? '已停止。' : 'Stopped.'}
-          {isLast && !busy && <button type="button" className="text-link" onClick={onRetry}>{zh ? '重新回答' : 'Ask again'}</button>}
+          {canRetry && <button type="button" className="text-link" onClick={onRetry}>{zh ? '重新回答' : 'Ask again'}</button>}
         </p>
       )}
       {entry.state === 'error' && entry.error && (
@@ -265,15 +265,19 @@ function Answer({ entry, lang, isLast, busy, onRetry, onSaveNote, onOpenAiSettin
           ? <Feedback retry={{ label: zh ? '打开 AI 设置' : 'Open AI settings', run: onOpenAiSettings }}>
             {localizeApiError(new ApiError(0, entry.error.code, entry.error.message), lang)}
           </Feedback>
-          : <Feedback retry={isLast && !busy ? { label: zh ? '重试' : 'Try again', run: onRetry } : undefined}>
+          : <Feedback retry={canRetry ? { label: zh ? '重试' : 'Try again', run: onRetry } : undefined}>
             {localizeApiError(new ApiError(0, entry.error.code, entry.error.message), lang)}
           </Feedback>
+      )}
+      {settled && entry.writeOutcomeUnknown && (
+        <p className="chat-entry-note">{zh ? '部分改动可能已经保存。再次提问前，请先查看对应数据。'
+          : 'A change may already have been saved. Check the tracker before asking again.'}</p>
       )}
       {entry.content && settled && (
         <div className="chat-entry-foot">
           <CopyButton text={() => entry.content} label={zh ? '复制回答' : 'Copy answer'} copiedLabel={zh ? '已复制' : 'Copied'} />
           {/* An answer with a change can carry the only receipt or undo for that write. */}
-          {isLast && !busy && entry.state === 'done' && changes.length === 0 && (
+          {canRetry && entry.state === 'done' && changes.length === 0 && (
             <IconButton icon={RefreshCw} size={14} label={zh ? '重新回答' : 'Answer again'} onClick={onRetry} />
           )}
           {onSaveNote && <button type="button" className="chat-action" onClick={onSaveNote}>
@@ -291,6 +295,9 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const zh = lang === 'zh';
   const dataAccess = useChatDataAccess();
+  const writePermission = useChatWritePermission();
+  const permissionId = useId();
+  const permissionHelpId = useId();
   const problem = chat.current.problem ?? null;
   const switcher = useActionPopover({ align: 'end' });
   const { revision } = useWorkspace();
@@ -604,6 +611,20 @@ export function ChatPanel({
           {chat.busy
             ? <button type="button" className="chat-send" aria-label={zh ? '停止回答' : 'Stop answering'} onClick={chat.stop}><Square size={14} aria-hidden="true" /></button>
             : <button type="submit" className="chat-send" aria-label={zh ? '发送' : 'Send'} disabled={!ready || !draft.trim()}><ArrowUp size={16} aria-hidden="true" /></button>}
+        </div>
+        <div className="chat-permissions">
+          <label htmlFor={permissionId}>{zh ? '访问权限' : 'Access permissions'}</label>
+          <select id={permissionId} aria-describedby={permissionHelpId} value={writePermission} disabled={!dataAccess}
+            onChange={event => setChatWritePermission(event.target.value === 'full' ? 'full' : 'confirm')}>
+            <option value="confirm">{zh ? '需要我确认' : 'Ask for confirmation'}</option>
+            <option value="full">{zh ? '完全访问权限' : 'Full access'}</option>
+          </select>
+          <p id={permissionHelpId} className="chat-entry-note">
+            {dataAccess
+              ? (zh ? '完全访问会自动保存支持的改动。权限更改适用于新消息。'
+                : 'Full access saves supported changes without asking. Applies to new messages.')
+              : (zh ? '在 AI 助手设置中允许 AI 查看数据后可用。' : 'Enable AI data access in Settings to use write permissions.')}
+          </p>
         </div>
       </form>
     </aside>

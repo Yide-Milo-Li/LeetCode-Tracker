@@ -6,8 +6,7 @@
  * the hook shows one of them at a time, and an answer keeps streaming into its own conversation
  * while another one is shown.
  *
- * An answer may carry changes the AI proposed. They stay proposals until the user confirms one
- * here, which is the only point where the chat writes to the tracker.
+ * An answer may carry proposals for the user to confirm or changes already saved with full access.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatContextSummary, ChatRequest, ChatStreamEvent, ChatTurn } from '../../../../packages/contracts/src/chat.ts';
@@ -16,7 +15,7 @@ import { api } from '../api.ts';
 import { ApiError } from '../platform/index.ts';
 import type { Language } from '../i18n.ts';
 import { changeStatusNote, type ChatChange } from './chat-changes.ts';
-import { getChatDataAccess } from './chat-settings.ts';
+import { getChatDataAccess, getChatWritePermission } from './chat-settings.ts';
 import { streamChat } from './chat-stream.ts';
 import {
   CHAT_STORAGE_KEY, loadChatState, mergeChatThreads, pruneThreads, readStoredThreads, saveChatState, type ChatState, type ChatThread, type ChatThreadRef,
@@ -36,8 +35,10 @@ export interface ChatEntry {
   tools?: string[];
   /** While streaming: the read tool whose lookup is under way; cleared when text follows. */
   reading?: string;
-  /** Changes the AI proposed in this answer, in the order it proposed them. */
+  /** Changes the AI proposed or applied, in tool-call order. */
   changes?: ChatChange[];
+  /** The full-access stream has yet to report whether it finished. */
+  writeOutcomeUnknown?: boolean;
   /** On a question from the hint ladder: the problem and the rung it asked for. */
   hint?: ChatHint;
   /** A preset with a short display label. The full question stays in content. */
@@ -137,6 +138,11 @@ export interface ChatSendOptions {
 const hasActedChanges = (entry: ChatEntry | undefined) => Boolean(entry?.changes?.some(change =>
   change.state === 'applying' || change.state === 'applied' || change.state === 'undoing' || change.state === 'undone'));
 
+/** Re-asking could repeat a write applied during this answer, including one whose receipt was lost. */
+export function canRetryChatAnswer(entry: ChatEntry | undefined): boolean {
+  return !entry?.writeOutcomeUnknown && !entry?.changes?.some(change => change.automatic);
+}
+
 /** A conversation as the switcher lists it. */
 export interface ChatThreadSummary extends ChatThreadRef {
   usedAt: number;
@@ -190,7 +196,7 @@ export interface ChatController {
 }
 
 export interface ChatOptions {
-  /** A confirmed change was written to the tracker; views showing that data should reload. */
+  /** Chat wrote to the tracker; views showing that data should reload. */
   onDataChanged?: () => void;
 }
 
@@ -263,6 +269,12 @@ export function useChat(lang: Language, options: ChatOptions = {}): ChatControll
   const run = useCallback((thread: ChatThreadRef, history: ChatEntry[], provider?: ChatProvider) => {
     const { key } = thread;
     const answerId = crypto.randomUUID();
+    const dataAccess = getChatDataAccess();
+    const fullAccess = dataAccess && getChatWritePermission() === 'full';
+    const answer: ChatEntry = {
+      id: answerId, role: 'assistant', content: '', state: 'streaming',
+      ...(fullAccess ? { writeOutcomeUnknown: true } : {}),
+    };
     const patch = (change: (entry: ChatEntry) => ChatEntry) => setState(current => updateThread(current, key, target => {
       const index = target.entries.findIndex(entry => entry.id === answerId);
       if (index === -1) return target;
@@ -280,7 +292,7 @@ export function useChat(lang: Language, options: ChatOptions = {}): ChatControll
       // Asking is also the moment old and surplus conversations are let go.
       threads: pruneThreads({
         ...current.threads,
-        [key]: { ...thread, entries: [...history, { id: answerId, role: 'assistant', content: '', state: 'streaming' }], usedAt: Date.now() },
+        [key]: { ...thread, entries: [...history, answer], usedAt: Date.now() },
       }, Date.now(), inFlight),
     }));
     setBusyKeys(keys => new Set(keys).add(key));
@@ -311,17 +323,26 @@ export function useChat(lang: Language, options: ChatOptions = {}): ChatControll
       if (event.type === 'context') patch(entry => ({ ...entry, context: event.context }));
       else if (event.type === 'tool') patch(entry => ({ ...entry, reading: event.name, tools: entry.tools?.includes(event.name) ? entry.tools : [...(entry.tools ?? []), event.name] }));
       else if (event.type === 'action') patch(entry => ({ ...entry, changes: [...(entry.changes ?? []), { ...event.action, state: 'pending' }] }));
-      else if (event.type === 'done') { terminal = true; settle(entry => ({ ...entry, state: 'done' })); }
-      else { terminal = true; settle(entry => ({ ...entry, state: 'error', error: { code: event.error, message: event.message } })); }
+      else if (event.type === 'action-applied') {
+        const change: ChatChange = { ...event.action, state: 'applied', automatic: true, ...(event.undo ? { undo: event.undo } : {}) };
+        settle(entry => ({ ...entry, changes: [...(entry.changes ?? []), change] }));
+        onDataChanged.current?.();
+      } else {
+        terminal = true;
+        settle(({ writeOutcomeUnknown: _writeOutcomeUnknown, ...entry }) => event.type === 'done'
+          ? { ...entry, state: 'done' }
+          : { ...entry, state: 'error', error: { code: event.error, message: event.message } });
+      }
     };
     const fail = (code: string, message: string) => settle(entry => ({ ...entry, state: 'error', error: { code, message } }));
 
-    const request = {
+    const request: ChatRequest = {
       messages: requestTurns(history),
       context: thread.problem ? { frontendId: thread.problem.frontendId } : {},
       lang: langRef.current,
       // Read when the question is sent, so a change in Settings applies to the next one.
-      ...(getChatDataAccess() ? {} : { dataAccess: false }),
+      ...(dataAccess ? {} : { dataAccess: false }),
+      ...(fullAccess ? { writePermission: 'full' } : {}),
       ...(provider ? { provider } : {}),
     };
     void streamChat(request, onEvent, abort.signal)
@@ -337,6 +358,7 @@ export function useChat(lang: Language, options: ChatOptions = {}): ChatControll
         // Text that arrived before a stop is kept.
         flush();
         if (abort.signal.aborted) settle(entry => entry.state === 'streaming' ? { ...entry, state: 'stopped' } : entry);
+        if (fullAccess && !terminal) onDataChanged.current?.();
         if (controllers.current.get(key) === abort) {
           controllers.current.delete(key);
           setBusyKeys(keys => { const next = new Set(keys); next.delete(key); return next; });
@@ -377,7 +399,9 @@ export function useChat(lang: Language, options: ChatOptions = {}): ChatControll
     const lastQuestion = entries.findLastIndex(entry => entry.role === 'user');
     if (lastQuestion === -1) return;
     const question = entries[lastQuestion];
-    if (hasActedChanges(entries[lastQuestion + 1])) {
+    const answer = entries[lastQuestion + 1];
+    if (!canRetryChatAnswer(answer)) return;
+    if (hasActedChanges(answer)) {
       // The answer and its cards stay; the model sees them, with what became of each change.
       run(current, [...entries, { ...question, id: crypto.randomUUID() }], provider);
     } else {

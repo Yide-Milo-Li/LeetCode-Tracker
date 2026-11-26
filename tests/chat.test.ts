@@ -111,6 +111,7 @@ test('the chat route rejects bad input and a missing provider before opening a s
     { messages: Array.from({ length: 6 }, () => ({ role: 'user', content: 'x'.repeat(24_000) })) },
     { messages: [{ role: 'user', content: 'hi' }], context: { frontendId: '1', tool: 'tracker_save_notes' } },
     { messages: [{ role: 'user', content: 'hi' }], dataAccess: 'yes' },
+    { messages: [{ role: 'user', content: 'hi' }], writePermission: 'always' },
   ]) {
     const response = await post(app, payload);
     assert.equal(response.statusCode, 400, JSON.stringify(payload).slice(0, 80));
@@ -504,7 +505,7 @@ test('the model looks tracker data up through read tools and each lookup is repo
   // Schema boilerplate that costs tokens on every turn is left out.
   assert.doesNotMatch(JSON.stringify(offered), /0-9a-fA-F|9007199254740991/);
   assert.match(calls[0].systemInstruction, /read the user's tracker with the tracker tools/);
-  assert.match(calls[0].systemInstruction, /Calling one of these changes nothing/);
+  assert.match(calls[0].systemInstruction, /writes only if the user confirms it/);
 
   // The second turn carries the model's own turn untouched and one result per call.
   const steps = calls[1].steps as ChatToolStep[];
@@ -690,6 +691,49 @@ test('a change the model proposes is shown for confirmation and written only whe
   await app.close();
 });
 
+test('full access applies supported changes in the stream and returns an undo', async () => {
+  const { app, calls } = await chatApp(async params => {
+    if (calls.length === 1) return toolTurn([
+      { id: 'unknown', name: 'tracker_delete_goal_list', arguments: '{}' },
+      { id: 'stale', name: 'tracker_patch_note', arguments: JSON.stringify({
+        frontendId: '42', heading: 'Idea', mode: 'append', content: 'Stale.', expectedContentHash: contentHash('older note'),
+      }) },
+      { id: 'practice', name: 'tracker_create_practices', arguments: '{"records":[{"questionFrontendId":"1","completed":true}]}' },
+    ]);
+    params.onDelta('The tool results are ready.');
+    return { model: 'm', provider: 'openai', usage };
+  });
+  await seedProfile(app);
+  const count = async () => {
+    const response = await app.inject('/api/v1/practice-records');
+    return (JSON.parse(response.payload) as { items: unknown[] }).items.length;
+  };
+  const before = await count();
+  const request = { messages: [{ role: 'user', content: 'Record my solved attempt for #1.' }], writePermission: 'full' };
+  const response = events((await post(app, request)).payload);
+  assert.deepEqual(response.map(event => event.type), ['context', 'action-applied', 'delta', 'done']);
+  const applied = response.find(event => event.type === 'action-applied');
+  assert.equal(applied?.action.name, 'tracker_create_practices');
+  assert.deepEqual(applied?.action.labels.problems, { 1: 'Two Sum' });
+  assert.equal(applied?.undo?.kind, 'practices');
+  assert.equal(await count(), before + 1);
+  assert.match(calls[0].systemInstruction, /Full access is on/);
+  assert.match(calls[0].tools?.find(tool => tool.name === 'tracker_create_practices')?.description ?? '', /saved immediately/);
+  const results = calls[1].steps?.filter(step => step.role === 'tool').map(step => step.content) ?? [];
+  assert.deepEqual(results.map(result => result.split(':')[0]), ['UNKNOWN_TOOL', 'NOTE_CHANGED', 'ACTION_APPLIED']);
+
+  const undone = await app.inject({ method: 'POST', url: '/api/v1/chat/actions/undo', payload: applied?.undo });
+  assert.equal(undone.statusCode, 200, undone.payload);
+  assert.equal(await count(), before);
+
+  calls.length = 0;
+  const disabled = events((await post(app, { ...request, dataAccess: false })).payload);
+  assert.equal(calls[0].tools, undefined);
+  assert.deepEqual(disabled.map(event => event.type), ['context', 'delta', 'done']);
+  assert.equal(await count(), before);
+  await app.close();
+});
+
 test('an applied change can be taken back, unless the data has changed again since', async () => {
   const { app } = await chatApp(async () => ({ model: 'm', provider: 'openai', usage }));
   await seedProfile(app);
@@ -826,13 +870,14 @@ test('every model turn of an answer goes to the provider the question was asked 
   const active = { provider: 'openai' as 'openai' | 'deepseek', baseUrl: 'https://api.openai.com/v1' };
   const calls: Array<Parameters<StreamChat>[0] & { provider: string }> = [];
   let onCall: (round: number) => void = () => {};
+  let firstTool = { id: 'c1', name: 'tracker_get_favorite_folders', arguments: '{}' };
   const assistant: ILLMAssistant = {
     getStatus: () => ({ configured: true, provider: active.provider, model: 'm', baseUrl: active.baseUrl }),
     formatProgressText: async () => ({ candidates: [], unparsedSnippets: [], model: 'm' }),
     streamChat: async params => {
       calls.push({ ...params, provider: active.provider });
       onCall(calls.length);
-      if (!params.steps?.length) return toolTurn([{ id: 'c1', name: 'tracker_get_favorite_folders', arguments: '{}' }]);
+      if (!params.steps?.length) return toolTurn([firstTool]);
       params.onDelta('Answer.');
       return { model: 'm', provider: active.provider, usage };
     },
@@ -869,6 +914,16 @@ test('every model turn of an answer goes to the provider the question was asked 
   assert.deepEqual(done.at(-1), { type: 'done', provider: 'openai', model: 'm' });
   assert.equal(calls.length, 2);
   assert.equal((await post(app, { messages: [{ role: 'user', content: 'hi' }], provider: 'claude' })).statusCode, 400);
+
+  // A tool call from an answer whose provider changed cannot commit a full-access write.
+  const practicesBefore = await app.inject('/api/v1/practice-records');
+  firstTool = { id: 'c1', name: 'tracker_create_practices', arguments: '{"records":[{"questionFrontendId":"1","completed":true}]}' };
+  calls.length = 0;
+  onCall = round => { if (round === 1) active.provider = 'deepseek'; };
+  const write = await ask({ provider: 'openai', writePermission: 'full' });
+  assert.deepEqual(write.map(event => event.type), ['context', 'error']);
+  assert.deepEqual(write.at(-1), changed);
+  assert.deepEqual(JSON.parse((await app.inject('/api/v1/practice-records')).payload), JSON.parse(practicesBefore.payload));
   await app.close();
 });
 

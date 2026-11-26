@@ -34,7 +34,7 @@ export interface ChatLauncherProps {
   onOpenAiSettings: () => void;
   /** What another view asked for; each new `id` opens the panel on that problem and sends its preset, if it has one. */
   ask?: ChatAskRequest | null;
-  /** A change confirmed in chat was written to the tracker; the views showing that data should reload. */
+  /** Chat wrote to the tracker; the views showing that data should reload. */
   onDataChanged?: () => void;
 }
 
