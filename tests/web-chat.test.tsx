@@ -18,7 +18,7 @@ const React = await import('react');
 const { render, fireEvent, screen, act, cleanup, waitFor } = await import('@testing-library/react');
 const { api } = await import('../apps/web/src/api.ts');
 const { createChatEventDecoder } = await import('../apps/web/src/chat/chat-stream.ts');
-const { requestTurns } = await import('../apps/web/src/chat/useChat.ts');
+const { CHAT_CLEAR_UNDO_MS, requestTurns } = await import('../apps/web/src/chat/useChat.ts');
 const { GENERAL_THREAD, MAX_THREADS, THREAD_IDLE_MS, loadChatState, problemThread, pruneThreads, saveChatState } = await import('../apps/web/src/chat/chat-threads.ts');
 const { setChatProblem } = await import('../apps/web/src/chat/chat-context.ts');
 const { getChatDataAccess, setChatDataAccess } = await import('../apps/web/src/chat/chat-settings.ts');
@@ -38,7 +38,7 @@ const encode = (events: ChatStreamEvent[]) => new TextEncoder().encode(events.ma
 
 /** Local service stub: records request bodies and answers each call with the next script. */
 function serveChat(...scripts: Array<ChatStreamEvent[] | { status: number; body: unknown }>) {
-  const requests: Array<{ messages: Array<{ role: string; content: string }>; context?: Record<string, unknown>; lang?: string; dataAccess?: boolean }> = [];
+  const requests: Array<{ messages: Array<{ role: string; content: string }>; context?: Record<string, unknown>; lang?: string; dataAccess?: boolean; provider?: string }> = [];
   globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
     assert.equal(String(url), 'http://localhost/api/v1/chat/stream');
     requests.push(JSON.parse(String(init!.body)));
@@ -69,6 +69,11 @@ const ask = async (text: string) => {
   await act(async () => { fireEvent.change(field, { target: { value: text } }); });
   await act(async () => { fireEvent.keyDown(field, { key: 'Enter' }); });
 };
+
+async function clearConversation(name: string) {
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name })); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: `Clear conversation: ${name}` })); });
+}
 
 it('decodes chat events across arbitrary chunk boundaries and skips malformed blocks', () => {
   const seen: ChatStreamEvent[] = [];
@@ -116,7 +121,11 @@ it('streams an answer, lists what the AI looked up and keeps the conversation', 
   ]);
   await openPanel();
   assert.equal(screen.getByText('OpenAI · gpt-6-luna').tagName, 'P');
-  assert.match(screen.getByText(/are sent to OpenAI/).textContent ?? '', /looks up your catalog, practice records and notes as needed/);
+  const privacy = screen.getByText('What goes to OpenAI');
+  assert.equal(privacy.closest('details')?.open, false);
+  await act(async () => { fireEvent.click(privacy); });
+  assert.equal(privacy.closest('details')?.open, true);
+  assert.match(privacy.closest('details')?.textContent ?? '', /look up and send data from your catalog/);
   // With no problem in view the composer is the text field alone.
   assert.equal(document.querySelector('.chat-context'), null);
 
@@ -124,7 +133,7 @@ it('streams an answer, lists what the AI looked up and keeps the conversation', 
   await waitFor(() => screen.getByText(/先做简单题/));
   assert.equal(screen.getByText('Two Sum').tagName, 'STRONG');
   assert.equal(screen.getByText("Used: today's plan, practice records, tracker_future_tool").tagName, 'P');
-  assert.deepEqual(requests[0], { messages: [{ role: 'user', content: 'What first?' }], context: {}, lang: 'en' });
+  assert.deepEqual(requests[0], { messages: [{ role: 'user', content: 'What first?' }], context: {}, lang: 'en', provider: 'openai' });
   assert.equal((screen.getByRole('textbox') as HTMLTextAreaElement).value, '');
 
   // The follow-up carries the earlier turns, because the server keeps none.
@@ -141,9 +150,16 @@ it('streams an answer, lists what the AI looked up and keeps the conversation', 
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Ask AI' })); });
   await waitFor(() => screen.getByText('What first?'));
 
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Clear this conversation' })); });
+  assert.equal(screen.queryByRole('button', { name: /clear conversation/i }), null);
+  await act(async () => { fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Unsaved follow-up' } }); });
+  await clearConversation('General');
   assert.equal(screen.queryByText('What first?'), null);
+  assert.equal((screen.getByRole('textbox') as HTMLTextAreaElement).value, '');
   await waitFor(() => assert.deepEqual(stored().threads, []));
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Undo clear' })); });
+  assert.ok(screen.getByText('What first?'));
+  assert.equal((screen.getByRole('textbox') as HTMLTextAreaElement).value, 'Unsaved follow-up');
+  await waitFor(() => assert.deepEqual(stored().threads.map(thread => [thread.key, thread.entries.length]), [['general', 4]]));
 });
 
 it('keeps partial text on a failure and retries the same question', async () => {
@@ -183,6 +199,8 @@ it('explains a missing provider and toggles with the keyboard shortcut', async (
   await act(async () => { render(<ChatLauncher lang="en" onOpenAiSettings={() => {}} />); });
   await act(async () => { fireEvent.keyDown(window, { key: 'j', ctrlKey: true }); });
   await waitFor(() => screen.getByText('Connect an AI provider to ask questions here.'));
+  assert.equal(screen.queryByRole('button', { name: 'Retry connection' }), null);
+  assert.ok(screen.getByRole('button', { name: 'Open AI settings' }));
   assert.equal((screen.getByRole('textbox') as HTMLTextAreaElement).disabled, true);
   assert.equal((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled, true);
   assert.equal(requests.length, 0);
@@ -196,6 +214,59 @@ it('explains a missing provider and toggles with the keyboard shortcut', async (
   await act(async () => { fireEvent.keyDown(window, { key: 'j', ctrlKey: true }); });
   assert.equal(screen.queryByRole('complementary'), null);
   overlay.remove();
+});
+
+it('retries a failed connection check in the panel and preserves the draft', async () => {
+  let available = true;
+  const status = mock.method(api, 'getChatStatus', async () => {
+    if (!available) throw new Error('Local service unavailable');
+    return { configured: true, provider: 'openai', model: 'gpt-6-luna' };
+  });
+  const requests = serveChat(answer('Recovered.'));
+  const settings = await openPanel();
+  const field = screen.getByRole('textbox') as HTMLTextAreaElement;
+  await act(async () => { fireEvent.change(field, { target: { value: 'My pending question' } }); });
+  available = false;
+  await act(async () => { fireEvent.focus(window); });
+  const retry = await screen.findByRole('button', { name: 'Retry connection' });
+  assert.match(screen.getByRole('alert').textContent ?? '', /Could not check the AI connection/);
+  assert.equal(screen.queryByRole('button', { name: 'Open AI settings' }), null);
+  assert.equal(field.disabled, true);
+  assert.equal(field.value, 'My pending question');
+  available = true;
+  await act(async () => { fireEvent.click(retry); });
+  await waitFor(() => assert.equal(field.disabled, false));
+  assert.equal(document.activeElement, field);
+  assert.equal(field.value, 'My pending question');
+  assert.equal(status.mock.callCount(), 3);
+  assert.equal(settings.mock.callCount(), 0);
+  assert.equal(requests.length, 0);
+  await ask(field.value);
+  await screen.findByText('Recovered.');
+});
+
+it('expires clear undo and keeps a new draft if the conversation is restored', async t => {
+  mock.method(api, 'getChatStatus', async () => ({ configured: true, provider: 'openai', model: 'gpt-6-luna' }));
+  serveChat(answer('Done.'));
+  await openPanel();
+  await ask('Original question');
+  await screen.findByText('Done.');
+  const field = screen.getByRole('textbox') as HTMLTextAreaElement;
+  await act(async () => { fireEvent.change(field, { target: { value: 'Original draft' } }); });
+  await clearConversation('General');
+  await act(async () => { fireEvent.change(field, { target: { value: 'New draft' } }); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Undo clear' })); });
+  assert.equal(field.value, 'New draft');
+  assert.ok(screen.getByText('Original question'));
+
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: Date.now() });
+  await clearConversation('General');
+  await act(async () => { t.mock.timers.tick(CHAT_CLEAR_UNDO_MS - 1); });
+  assert.ok(screen.getByRole('button', { name: 'Undo clear' }));
+  await act(async () => { t.mock.timers.tick(1); });
+  assert.equal(screen.queryByRole('button', { name: 'Undo clear' }), null);
+  assert.equal(screen.queryByText('Original question'), null);
+  assert.equal(loadChatState().threads.general, undefined);
 });
 
 it('does not send while an IME candidate is being confirmed', async () => {
@@ -271,11 +342,9 @@ it('drags the launcher to an edge, remembers it and tucks away when left alone',
   assert.deepEqual(stored(), { dock: { side: 'left', bottom: height - 216 - 40 } });
   assert.equal(dock.style.transform, `translate3d(12px, 216px, 0)`);
 
-  await waitFor(() => assert.equal(dock.classList.contains('is-tucked'), true), { timeout: LAUNCHER_REST_MS + 1500 });
-  assert.equal(dock.style.transform, 'translate3d(0px, 216px, 0)');
-  assert.equal(dock.getAttribute('data-side'), 'left');
-  await act(async () => { fireEvent.pointerEnter(button); });
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, LAUNCHER_REST_MS + 50)); });
   assert.equal(dock.classList.contains('is-tucked'), false);
+  assert.equal(button.textContent, 'Ask AI');
 
   // The panel opens on the launcher's side; dragging its header moves it and the dock with it.
   await act(async () => { fireEvent.click(button); });
@@ -292,6 +361,13 @@ it('drags the launcher to an edge, remembers it and tucks away when left alone',
   // A reload restores the placement.
   view.unmount();
   await act(async () => { render(<ChatLauncher lang="en" onOpenAiSettings={() => {}} />); });
+  const returningButton = screen.getByRole('button', { name: 'Ask AI' });
+  const returningDock = returningButton.closest('.chat-launcher') as HTMLElement;
+  assert.equal(returningButton.textContent, '');
+  await waitFor(() => assert.equal(returningDock.classList.contains('is-tucked'), true), { timeout: LAUNCHER_REST_MS + 1500 });
+  assert.equal(returningDock.getAttribute('data-side'), 'right');
+  await act(async () => { fireEvent.pointerEnter(returningButton); });
+  assert.equal(returningDock.classList.contains('is-tucked'), false);
   await act(async () => { fireEvent.keyDown(window, { key: 'j', ctrlKey: true }); });
   assert.equal((await waitFor(() => screen.getByRole('complementary'))).style.left, `${width - 420 - 8}px`);
 });
@@ -346,6 +422,7 @@ it('climbs the hint ladder one answered rung at a time and describes an attempt'
 
 it('offers graded hints for the attached problem, then the solution, and a review as a starter', async () => {
   mock.method(api, 'getChatStatus', async () => ({ configured: true, provider: 'openai', model: 'gpt-6-luna' }));
+  const practice = mock.method(api, 'getPracticeRecords', async () => ({ total: 1, page: 1, limit: 1, items: [] }));
   const requests = serveChat(
     answer('Think about what bounds the water.'),
     // The second rung fails before any text arrives.
@@ -355,8 +432,7 @@ it('offers graded hints for the attached problem, then the solution, and a revie
   setChatProblem({ frontendId: '42', title: 'Trapping Rain Water' });
   await openPanel();
   const lastQuestion = () => requests.at(-1)!.messages.at(-1)!.content;
-  // The ladder's own button; other follow-ups share the row.
-  const nextHint = () => [...document.querySelectorAll('.chat-context .chat-action')].find(node => node.textContent !== 'Save to my note')?.textContent ?? null;
+  const nextHint = () => document.querySelector('.chat-context .chat-action')?.textContent ?? null;
   /** Click the next rung once the previous answer has finished. */
   const press = async (name: string, sent: number) => {
     await waitFor(() => assert.equal((screen.getByRole('button', { name }) as HTMLButtonElement).disabled, false));
@@ -366,10 +442,16 @@ it('offers graded hints for the attached problem, then the solution, and a revie
 
   // The empty conversation offers the presets as starters; the next rung appears beside the problem afterwards.
   assert.equal(nextHint(), null);
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Give me a hint for this problem without the solution' })); });
+  assert.ok(await screen.findByRole('button', { name: 'Review practice' }));
+  assert.deepEqual(practice.mock.calls[0].arguments[0], { questionFrontendId: '42', limit: 1, status: 'active' });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Give me a hint' })); });
   await waitFor(() => screen.getByText('Think about what bounds the water.'));
-  assert.deepEqual(requests[0], { messages: [{ role: 'user', content: hintPrompt(1, 'en', rain) }], context: { frontendId: '42' }, lang: 'en' });
-  // The preset is shown as the user's own message, word for word.
+  assert.deepEqual(requests[0], { messages: [{ role: 'user', content: hintPrompt(1, 'en', rain) }], context: { frontendId: '42' }, lang: 'en', provider: 'openai' });
+  // The short label expands to the exact prompt sent to the model.
+  const hint = screen.getByText('Hint 1/3 · Give me a direction');
+  assert.equal(hint.closest('details')?.open, false);
+  await act(async () => { fireEvent.click(hint); });
+  assert.equal(hint.closest('details')?.open, true);
   assert.equal(screen.getByText(hintPrompt(1, 'en', rain)).tagName, 'P');
 
   await press('Next hint (2/3)', 2);
@@ -387,10 +469,11 @@ it('offers graded hints for the attached problem, then the solution, and a revie
   assert.equal(nextHint(), null);
 
   // Clearing the conversation starts the ladder over, and offers the review as a starter.
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Clear this conversation' })); });
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Review my latest attempt' })); });
+  await clearConversation('#42 Trapping Rain Water');
+  const review = await screen.findByRole('button', { name: 'Review practice' });
+  await act(async () => { fireEvent.click(review); });
   await waitFor(() => assert.equal(requests.length, 6));
-  assert.deepEqual(requests[5], { messages: [{ role: 'user', content: reviewPrompt('en', rain) }], context: { frontendId: '42' }, lang: 'en' });
+  assert.deepEqual(requests[5], { messages: [{ role: 'user', content: reviewPrompt('en', rain) }], context: { frontendId: '42' }, lang: 'en', provider: 'openai' });
   await press('Give me a hint', 7);
   assert.equal(lastQuestion(), hintPrompt(1, 'en', rain));
 });
@@ -403,11 +486,12 @@ it('sends only the attached problem once data access is turned off', async () =>
   await openPanel();
   await act(async () => { setChatDataAccess(false); });
   // The notice changes with the setting, and the starter that needs a lookup is withdrawn.
-  assert.match(screen.getByText(/are sent to OpenAI/).textContent ?? '', /^Your question and this problem's data are sent/);
+  assert.match(screen.getByText('What goes to OpenAI').closest('details')?.textContent ?? '', /recent attempts and your saved note/);
+  assert.equal(screen.queryByText(/look up and send data/), null);
   assert.equal(screen.queryByRole('button', { name: "Which problem in today's plan should I start with?" }), null);
   await ask('Why is this hard?');
   await waitFor(() => assert.equal(requests.length, 1));
-  assert.deepEqual(requests[0], { messages: [{ role: 'user', content: 'Why is this hard?' }], context: { frontendId: '42' }, lang: 'en', dataAccess: false });
+  assert.deepEqual(requests[0], { messages: [{ role: 'user', content: 'Why is this hard?' }], context: { frontendId: '42' }, lang: 'en', dataAccess: false, provider: 'openai' });
 
   // The choice is kept on this device and applies again from the next question.
   assert.equal(getChatDataAccess(), false);
@@ -428,7 +512,7 @@ it('opens on the asked problem and sends the preset when another view asks', asy
 
   await act(async () => { view.rerender(launcher({ id: 1, problem: { frontendId: '15', title: '3Sum' }, action: { kind: 'hint' } })); });
   await waitFor(() => assert.equal(requests.length, 1));
-  assert.deepEqual(requests[0], { messages: [{ role: 'user', content: hintPrompt(1, 'zh', threeSum) }], context: { frontendId: '15' }, lang: 'zh' });
+  assert.deepEqual(requests[0], { messages: [{ role: 'user', content: hintPrompt(1, 'zh', threeSum) }], context: { frontendId: '15' }, lang: 'zh', provider: 'gemini' });
   assert.equal(screen.getByRole('heading', { name: '#15 3Sum' }).tagName, 'H2');
 
   // A later request continues that problem's conversation, here with a review of one named attempt.
@@ -531,7 +615,7 @@ it('drops a preset that was still waiting when the panel closed', async () => {
   status.mock.mockImplementation(async () => ({ configured: true, provider: 'openai', model: 'gpt-6-luna' }) as never);
   await act(async () => { fireEvent.keyDown(window, { key: 'j', ctrlKey: true }); });
   // The problem is still offered, but asking is left to the user.
-  await waitFor(() => screen.getByRole('button', { name: 'Give me a hint for this problem without the solution' }));
+  await waitFor(() => screen.getByRole('button', { name: 'Give me a hint' }));
   assert.equal(screen.getByRole('heading', { name: '#15 3Sum' }).tagName, 'H2');
   assert.equal(requests.length, 0);
 });
@@ -543,10 +627,10 @@ it('keeps one conversation per problem and a general one, switched from the titl
   await openPanel('zh');
   // A note in view opens that problem's conversation; nothing sits above the text field.
   assert.equal(screen.getByRole('heading', { name: '#42 Trapping Rain Water' }).tagName, 'H2');
-  assert.match(screen.getByText(/这是 #42 Trapping Rain Water 的对话/).textContent ?? '', /练习记录和已保存的笔记/);
+  assert.ok(screen.getByText('发送给 Gemini 的数据'));
   assert.equal(document.querySelector('.chat-context'), null);
 
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '给我一点这道题的提示，先不要给答案' })); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '给个提示' })); });
   await waitFor(() => assert.equal(requests.length, 1));
   assert.deepEqual(requests[0].context, { frontendId: '42' });
   assert.equal(requests[0].lang, 'zh');
@@ -566,7 +650,7 @@ it('keeps one conversation per problem and a general one, switched from the titl
   assert.equal(screen.queryByText('ok'), null);
   await ask('动态规划怎么入门？');
   await waitFor(() => assert.equal(requests.length, 2));
-  assert.deepEqual(requests[1], { messages: [{ role: 'user', content: '动态规划怎么入门？' }], context: {}, lang: 'zh' });
+  assert.deepEqual(requests[1], { messages: [{ role: 'user', content: '动态规划怎么入门？' }], context: {}, lang: 'zh', provider: 'gemini' });
   await waitFor(() => screen.getByRole('button', { name: '发送' }));
 
   // Back in the problem's conversation the hint ladder is where it was left.
@@ -576,13 +660,16 @@ it('keeps one conversation per problem and a general one, switched from the titl
   assert.equal(screen.getByRole('button', { name: '下一个提示（2/3）' }).tagName, 'BUTTON');
   assert.equal(screen.queryByText('动态规划怎么入门？'), null);
 
-  // Deleting from the list removes only that conversation.
+  // Clearing from the list removes only that conversation. Undo keeps the problem in view.
   await openList();
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '删除对话：通用对话' })); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '清空对话：通用对话' })); });
   await waitFor(() => assert.deepEqual(
     (JSON.parse(localStorage.getItem('leetcode_tracker_chat_threads_v1')!) as { threads: Array<{ key: string }>; current: { key: string } }).threads.map(thread => thread.key),
     ['problem:42']));
   assert.equal(JSON.parse(localStorage.getItem('leetcode_tracker_chat_threads_v1')!).current.key, 'problem:42');
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '撤销清空' })); });
+  assert.equal(loadChatState().threads.general.entries[0].content, '动态规划怎么入门？');
+  assert.ok(screen.getByRole('heading', { name: '#42 Trapping Rain Water' }));
 });
 
 it('lets an answer finish in its own conversation while another one is shown', async () => {
@@ -720,9 +807,6 @@ it('shows a proposed change as a card and writes only when it is confirmed', asy
   await act(async () => { render(<ChatLauncher lang="en" onOpenAiSettings={() => {}} onDataChanged={changed} />); });
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Ask AI' })); });
   await waitFor(() => screen.getByRole('complementary'));
-  // The empty conversation says that changes are possible and always confirmed.
-  assert.match(screen.getByText(/You confirm each change first/).textContent ?? '', /record attempts, add to your notes, star problems/);
-
   await ask('Log #1, note the pitfall and star both.');
   await waitFor(() => screen.getByText('Confirm the cards to save these.'));
   const card = (name: string) => within(screen.getByRole('region', { name }));
@@ -839,6 +923,7 @@ it('copies and regenerates an answer, keeps a draft, recalls the last question a
 
 it('offers to save a plain answer to the note and to find similar problems', async () => {
   mock.method(api, 'getChatStatus', async () => ({ configured: true, provider: 'openai', model: 'gpt-6-luna' }));
+  mock.method(api, 'getPracticeRecords', async () => ({ total: 0, page: 1, limit: 1, items: [] }));
   const requests = serveChat(answer('Related: 11 and 407.'), answer('Use two pointers.'), [
     { type: 'context', context: { problem: rain } },
     { type: 'action', action: noteCard },
@@ -849,14 +934,16 @@ it('offers to save a plain answer to the note and to find similar problems', asy
   await openPanel();
   const saveNote = () => screen.queryByRole('button', { name: 'Save to my note' });
   assert.equal(saveNote(), null);
+  assert.equal(screen.queryByRole('button', { name: 'Review practice' }), null);
 
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Find similar problems in my catalog' })); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Find similar problems' })); });
   await waitFor(() => screen.getByText('Related: 11 and 407.'));
   assert.equal(requests[0].messages[0].content, similarPrompt('en', rain));
 
   await ask('How do I solve it?');
   await waitFor(() => screen.getByText('Use two pointers.'));
   await waitFor(() => assert.equal((saveNote() as HTMLButtonElement).disabled, false));
+  assert.equal(saveNote()?.closest('.chat-entry-assistant'), screen.getByText('Use two pointers.').closest('.chat-entry-assistant'));
   await act(async () => { fireEvent.click(saveNote()!); });
   await waitFor(() => screen.getByText('Confirm to save it.'));
   assert.equal(requests[2].messages.at(-1)!.content, saveNotePrompt('en', rain));
@@ -867,8 +954,8 @@ it('offers to save a plain answer to the note and to find similar problems', asy
 
   // Proposing a change takes data access, so the offers go away with it.
   await act(async () => { setChatDataAccess(false); });
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Clear this conversation' })); });
-  assert.equal(screen.queryByRole('button', { name: 'Find similar problems in my catalog' }), null);
+  await clearConversation('#42 Trapping Rain Water');
+  assert.equal(screen.queryByRole('button', { name: 'Find similar problems' }), null);
   assert.equal(screen.queryByText(/You confirm each change first/), null);
 });
 
@@ -1046,7 +1133,7 @@ it('opens a problem conversation from a row and follows the problem a timer star
   await act(async () => { chat = render(launcher()); });
   await act(async () => { chat.rerender(launcher({ id: 1, problem: threeSum })); });
   await waitFor(() => screen.getByRole('heading', { name: '#15 3Sum' }));
-  await waitFor(() => screen.getByRole('button', { name: 'Give me a hint for this problem without the solution' }));
+  await waitFor(() => screen.getByRole('button', { name: 'Give me a hint' }));
   assert.equal(requests.length, 0);
 
   // Starting a timer on another problem brings that problem's conversation up.
@@ -1060,4 +1147,157 @@ it('opens a problem conversation from a row and follows the problem a timer star
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'General' })); });
   await act(async () => { window.dispatchEvent(new dom.window.CustomEvent(TIMER_CHANGE_EVENT)); });
   assert.ok(screen.getByRole('heading', { name: 'General' }));
+});
+
+const { applyDraft, draftOf } = await import('../apps/web/src/chat/chat-changes.ts');
+const { mergeChatThreads, readStoredThreads } = await import('../apps/web/src/chat/chat-threads.ts');
+const STORAGE = 'leetcode_tracker_chat_threads_v1';
+
+it('names the provider in use after Settings change, and sends each question to the one it names', async () => {
+  const status = mock.method(api, 'getChatStatus', async () => ({ configured: true, provider: 'openai', model: 'gpt-6-luna' }));
+  const requests = serveChat(
+    [{ type: 'context', context: {} }, { type: 'error', error: 'CHAT_PROVIDER_CHANGED', message: 'The AI provider settings changed. Ask again to use the current provider.' }],
+    answer('ok'),
+  );
+  const workspace = (revision: number) => ({ revision, timezone: 'UTC', navigate() {}, notifyMutation() {}, openPractice() {} });
+  const launcher = (revision: number) => (
+    <WorkspaceContext.Provider value={workspace(revision)}><ChatLauncher lang="en" onOpenAiSettings={() => {}} /></WorkspaceContext.Provider>
+  );
+  let view!: ReturnType<typeof render>;
+  await act(async () => { view = render(launcher(0)); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Ask AI' })); });
+  await waitFor(() => screen.getByText('OpenAI · gpt-6-luna'));
+
+  // Saving AI settings while the panel stays open bumps the workspace revision.
+  status.mock.mockImplementation(async () => ({ configured: true, provider: 'deepseek', model: 'deepseek-flash' }) as never);
+  await act(async () => { view.rerender(launcher(1)); });
+  await waitFor(() => screen.getByText('DeepSeek · deepseek-flash'));
+  assert.ok(screen.getByText('What goes to DeepSeek'));
+
+  // Changed elsewhere without the panel noticing: the server refuses, and the panel reads it again.
+  status.mock.mockImplementation(async () => ({ configured: true, provider: 'gemini', model: 'models/gemini-4-hydrogen' }) as never);
+  await ask('Explain');
+  await waitFor(() => screen.getByRole('alert'));
+  assert.equal(requests[0].provider, 'deepseek');
+  assert.match(screen.getByRole('alert').textContent ?? '', /provider in Settings changed/);
+  await waitFor(() => screen.getByText('Gemini · gemini-4-hydrogen'));
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Try again' })); });
+  await waitFor(() => screen.getByText('ok'));
+  assert.equal(requests[1].provider, 'gemini');
+
+  // Coming back to the window reads it again too.
+  status.mock.mockImplementation(async () => ({ configured: true, provider: 'openai', model: 'gpt-6-luna' }) as never);
+  await act(async () => { fireEvent.focus(window); });
+  await waitFor(() => screen.getByText('OpenAI · gpt-6-luna'));
+});
+
+it('sends a preset about the problem it was asked about, even once another one is shown', async () => {
+  let resolveStatus!: (value: unknown) => void;
+  mock.method(api, 'getChatStatus', () => new Promise(resolve => { resolveStatus = resolve; }));
+  const requests = serveChat(answer('ok'));
+  await act(async () => {
+    render(<ChatLauncher lang="en" onOpenAiSettings={() => {}} ask={{ id: 1, problem: threeSum, action: { kind: 'hint' } }} />);
+  });
+  await waitFor(() => screen.getByRole('heading', { name: '#15 3Sum' }));
+  // The user opens another note before the provider status arrives.
+  await act(async () => { setChatProblem(rain); });
+  await waitFor(() => screen.getByRole('heading', { name: '#42 Trapping Rain Water' }));
+  await act(async () => { resolveStatus({ configured: true, provider: 'openai', model: 'gpt-6-luna' }); });
+
+  await waitFor(() => assert.equal(requests.length, 1));
+  assert.deepEqual(requests[0], { messages: [{ role: 'user', content: hintPrompt(1, 'en', threeSum) }], context: { frontendId: '15' }, lang: 'en', provider: 'openai' });
+  // The answer lands in the conversation of #15; the one in view stays the one the user chose.
+  assert.ok(screen.getByRole('heading', { name: '#42 Trapping Rain Water' }));
+  assert.equal(screen.queryByText(hintPrompt(1, 'en', threeSum)), null);
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '#42 Trapping Rain Water' })); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^#15 3Sum/ })); });
+  await waitFor(() => screen.getByText('ok'));
+  assert.equal(screen.getByText(hintPrompt(1, 'en', threeSum)).tagName, 'P');
+});
+
+it('keeps a confirmed change and its undo when an interrupted answer is asked again', async () => {
+  mock.method(api, 'getChatStatus', async () => ({ configured: true, provider: 'openai', model: 'gpt-6-luna' }));
+  const practiceUndo = { kind: 'practices' as const, records: [{ id: 'r1', revision: 1 }] };
+  mock.method(api, 'applyChatAction', async () => ({ result: {}, undo: practiceUndo }));
+  const requests = serveChat(
+    [
+      { type: 'context', context: {} },
+      { type: 'action', action: practiceCard },
+      { type: 'delta', text: 'Recording that.' },
+      { type: 'error', error: 'CHAT_INTERRUPTED', message: 'The answer was interrupted.' },
+    ],
+    [{ type: 'context', context: {} }, { type: 'delta', text: 'It is recorded.' }, { type: 'done', provider: 'openai', model: 'gpt-6-luna' }],
+  );
+  await openPanel();
+  await ask('Log #1');
+  await waitFor(() => screen.getByRole('alert'));
+  const card = () => within(screen.getByRole('region', { name: 'Record an attempt' }));
+  await act(async () => { fireEvent.click(card().getByRole('button', { name: 'Record' })); });
+  await waitFor(() => card().getByText('Recorded'));
+
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Try again' })); });
+  await waitFor(() => screen.getByText('It is recorded.'));
+  // The interrupted answer stays with its card, which still offers the undo.
+  assert.equal(screen.getByText('Recording that.').tagName, 'P');
+  assert.ok(card().getByRole('button', { name: 'Undo' }));
+  // The model hears that the change was applied, then the same question again.
+  assert.deepEqual(requests[1].messages.map(message => message.role), ['user', 'assistant', 'user']);
+  assert.match(requests[1].messages[1].content, /tracker_create_practices: the user confirmed it and it was applied/);
+  assert.equal(requests[1].messages[2].content, 'Log #1');
+});
+
+it('changes only the values the user adjusted on a practice card', () => {
+  const card = { ...practiceCard, args: { ...practiceCard.args, records: [{ questionFrontendId: '1', completed: true, durationMinutes: 20 }] } };
+  const draft = draftOf(card);
+  assert.ok(draft?.kind === 'practices');
+  // A solved attempt with no stated outcome is shown as solved independently.
+  assert.equal(draft.attempts[0].outcome, 'independent');
+  const records = (attempt: Partial<(typeof draft.attempts)[number]>) =>
+    applyDraft(card, { kind: 'practices', attempts: [{ ...draft.attempts[0], ...attempt }] })?.records;
+  // Changing the minutes alone does not state an outcome the user never chose.
+  assert.deepEqual(records({ minutes: '25' }), [{ questionFrontendId: '1', completed: true, durationMinutes: 25 }]);
+  assert.deepEqual(records({}), card.args.records);
+  assert.deepEqual(records({ outcome: 'assisted' }), [{ questionFrontendId: '1', completed: true, outcome: 'assisted', durationMinutes: 20 }]);
+  assert.deepEqual(records({ outcome: 'unsolved', minutes: '' }), [{ questionFrontendId: '1', completed: false, outcome: 'unsolved', durationMinutes: null }]);
+});
+
+it('keeps conversations another tab stored, both when storing and while open', async () => {
+  const now = Date.now();
+  const entry = (content: string) => ({ id: content, role: 'user' as const, content, state: 'done' as const });
+  const thread = (frontendId: string, content: string) => ({ ...problemThread({ frontendId }), entries: [entry(content)], usedAt: now });
+
+  // Two tabs start from the same stored state and each asks about another problem.
+  saveChatState({ threads: { general: { ...GENERAL_THREAD, entries: [entry('shared')], usedAt: now - 10 } }, current: GENERAL_THREAD });
+  const tabA = loadChatState(now);
+  const tabB = loadChatState(now);
+  const a: typeof tabA = { ...tabA, threads: { ...tabA.threads, 'problem:1': thread('1', 'about one') } };
+  saveChatState(a, tabA.threads);
+  saveChatState({ ...tabB, threads: { ...tabB.threads, 'problem:42': thread('42', 'about forty-two') } }, tabB.threads);
+  assert.deepEqual(Object.keys(loadChatState(now).threads).sort(), ['general', 'problem:1', 'problem:42']);
+  // A conversation one tab deleted stays deleted, and the other tab's stays.
+  const { general: _general, ...withoutGeneral } = a.threads;
+  saveChatState({ ...a, threads: withoutGeneral }, a.threads);
+  assert.deepEqual(Object.keys(loadChatState(now).threads).sort(), ['problem:1', 'problem:42']);
+
+  // An unchanged copy of this tab's own conversation is not adopted, so an undo held only in memory survives.
+  const practiceUndo = { kind: 'practices' as const, records: [{ id: 'r1', revision: 1 }] };
+  const applied = { ...thread('1', 'Log it'), entries: [
+    { id: 'r', role: 'assistant' as const, content: 'Done.', state: 'done' as const, changes: [{ ...practiceCard, state: 'applied' as const, undo: practiceUndo }] },
+  ] };
+  const mine = { 'problem:1': applied };
+  saveChatState({ threads: mine, current: GENERAL_THREAD });
+  assert.equal(mergeChatThreads(mine, mine, readStoredThreads()!), mine);
+
+  // An open panel picks up what another tab stores, and its own next write keeps it.
+  localStorage.clear();
+  mock.method(api, 'getChatStatus', async () => ({ configured: true, provider: 'openai', model: 'gpt-6-luna' }));
+  serveChat(answer('ok'));
+  await openPanel();
+  localStorage.setItem(STORAGE, JSON.stringify({ current: GENERAL_THREAD, threads: [thread('42', 'from the other tab')] }));
+  await act(async () => { window.dispatchEvent(new dom.window.StorageEvent('storage', { key: STORAGE })); });
+  await ask('Mine');
+  await waitFor(() => screen.getByText('ok'));
+  await waitFor(() => assert.deepEqual(Object.keys(loadChatState().threads).sort(), ['general', 'problem:42']));
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'General' })); });
+  assert.ok(screen.getByRole('button', { name: /^#42/ }));
 });

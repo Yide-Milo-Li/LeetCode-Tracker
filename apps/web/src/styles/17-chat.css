@@ -51,6 +51,20 @@
     opacity 180ms ease,
     transform 260ms cubic-bezier(0.16, 1, 0.3, 1);
 }
+.chat-launcher[data-label-side] .chat-launcher-face {
+  display: flex;
+  gap: 8px;
+  width: max-content;
+  padding: 0 12px;
+  border-radius: var(--radius-lg);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+.chat-launcher[data-label-side='left'] .chat-launcher-face {
+  flex-direction: row-reverse;
+  left: auto;
+}
 .chat-launcher-button:hover .chat-launcher-face,
 .chat-launcher-button:focus-visible .chat-launcher-face,
 .chat-launcher-button.is-busy .chat-launcher-face,
@@ -295,6 +309,28 @@ html.dark .chat-panel {
   white-space: nowrap;
 }
 
+.chat-clear-feedback > p {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-clear-feedback[data-visible] {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 12px 4px 16px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--muted-surface);
+  font-size: 13px;
+}
+.chat-clear-feedback .text-link {
+  flex-shrink: 0;
+  min-height: 28px;
+}
+
 .chat-log {
   flex: 1;
   min-height: 0;
@@ -323,6 +359,13 @@ html.dark .chat-panel {
   margin: 0;
   font-size: 14px;
   line-height: 1.6;
+}
+.chat-data-note summary,
+.chat-preset summary {
+  cursor: pointer;
+}
+.chat-data-note p {
+  margin: 6px 0 0;
 }
 .chat-suggestions {
   width: 100%;
@@ -368,6 +411,14 @@ html.dark .chat-panel {
   line-height: 1.55;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+.chat-preset summary {
+  font-size: 14px;
+  line-height: 1.55;
+}
+.chat-preset p {
+  margin-top: 6px;
+  color: var(--text-muted);
 }
 
 /* Reuse the notes Markdown rendering without its pane chrome. */
@@ -425,6 +476,16 @@ html.dark .chat-panel {
   flex: 1;
   min-width: 0;
   margin: 5px 0 0 6px;
+}
+.chat-entry-foot:has(.chat-action) {
+  flex-wrap: wrap;
+}
+.chat-entry-foot:has(.chat-action) .chat-entry-note {
+  flex-basis: 100%;
+  margin-top: 2px;
+}
+.chat-entry-foot .chat-action {
+  margin-left: 4px;
 }
 
 /* Copy sits in the corner of a code block and stays out of the way until the block is used.

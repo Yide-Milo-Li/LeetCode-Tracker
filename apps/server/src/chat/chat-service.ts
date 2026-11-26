@@ -218,10 +218,23 @@ export class ChatService {
    * `CHAT_CANCELLED`, which the caller may be unable to deliver.
    */
   async stream(request: ChatRequest, emit: (event: ChatStreamEvent) => void, signal: AbortSignal): Promise<void> {
+    const { assistant } = this.ctx;
+    // Every model turn of one answer goes where the question was asked: the provider the user was
+    // shown, at the endpoint that was active then. Other settings, such as the model, may change.
+    const recipient = () => {
+      const { provider, baseUrl } = assistant.getStatus();
+      return JSON.stringify([provider, baseUrl ?? null]);
+    };
+    const asked = recipient();
+    const assertSameProvider = () => {
+      if (recipient() !== asked || (request.provider !== undefined && assistant.getStatus().provider !== request.provider)) {
+        throw new LLMError('CHAT_PROVIDER_CHANGED', 'The AI provider settings changed. Ask again to use the current provider.', 409);
+      }
+    };
     try {
       const { summary, text } = await this.resolveContext(request.context, request.lang);
       emit({ type: 'context', context: summary });
-      const streamChat = this.ctx.assistant.streamChat?.bind(this.ctx.assistant);
+      const streamChat = assistant.streamChat?.bind(assistant);
       if (!streamChat) throw new LLMError('CHAT_NOT_CONFIGURED', 'Configure an AI provider in Settings.', 503);
 
       // What the model is offered, from most to least; a refused offer falls back one step.
@@ -247,6 +260,9 @@ export class ChatService {
         let separate = delivered;
         const { tools } = offers[offer];
         let result;
+        // Checked right before each call: the question, the attached note and every lookup
+        // result must not reach a provider the user did not ask.
+        assertSameProvider();
         try {
           result = await streamChat({
             systemInstruction: system(),
@@ -279,11 +295,14 @@ export class ChatService {
         }
         steps.push({ role: 'assistant', toolCalls: result.toolCalls, replay: result.replay });
         for (const call of result.toolCalls) {
+          // Only what this turn offered runs; with data access off that is nothing at all.
+          const offered = tools.find(spec => spec.name === call.name);
           let content: string;
           if (round === MAX_TOOL_ROUNDS) {
             content = 'LOOKUP_LIMIT: No more lookups are available for this answer. Answer now with what you have.';
-          } else if (!tools.some(spec => spec.name === call.name && this.actionSpecs.includes(spec))) {
-            // Lookups, and anything that was not offered this turn, which is refused by name.
+          } else if (!offered) {
+            content = `UNKNOWN_TOOL: ${call.name} is not available.`;
+          } else if (!this.actionSpecs.includes(offered)) {
             content = await this.runTool(call, emit);
           } else if (proposed >= MAX_ACTIONS_PER_ANSWER) {
             content = `ACTION_LIMIT: One answer can propose at most ${MAX_ACTIONS_PER_ANSWER} changes. Offer the rest once the user has handled these.`;
@@ -555,7 +574,6 @@ export class ChatService {
   async undo(undo: ChatUndo): Promise<{ ok: true }> {
     const { application } = this.ctx;
     const stale = () => new ChatActionError('CHAT_UNDO_STALE', 'This data changed after the change was applied, so it was not undone automatically.');
-    const same = (a: string[] | null, b: string[] | null) => JSON.stringify(a && [...a].sort()) === JSON.stringify(b && [...b].sort());
     try {
       await this.ctx.writeLock.runGroup(async () => {
         if (undo.kind === 'practices') {
@@ -567,24 +585,16 @@ export class ChatService {
         } else if (undo.kind === 'note') {
           await application.notes.save({ content: undo.content, expectedContentHash: undo.expectedContentHash }, { frontendId: undo.frontendId });
         } else if (undo.kind === 'favorites') {
-          const { items } = await application.favorites.memberships(undo.problems.map(problem => problem.frontendId));
-          const current = (frontendId: string) => items.find(item => item.frontendId === frontendId)?.folderIds ?? null;
-          if (undo.problems.some(problem => !same(current(problem.frontendId), problem.after))) throw stale();
-          for (const problem of undo.problems) {
-            await application.favorites.saveProblem({ frontendId: problem.frontendId, expectedFolderIds: problem.after, folderIds: problem.before });
-          }
-          // The folder goes only if it is as empty as the change found it.
-          const folder = undo.createdFolder;
-          if (folder) {
-            const { folders } = await application.favorites.library();
-            if (folders.find(item => item.id === folder.id)?.count === 0) await application.favorites.deleteFolder(folder);
-          }
+          // One transaction: a folder renamed since refuses the whole undo instead of half of it.
+          await application.favorites.restoreProblems({
+            problems: undo.problems.map(problem => ({ frontendId: problem.frontendId, expectedFolderIds: problem.after, folderIds: problem.before })),
+            ...(undo.createdFolder ? { createdFolder: undo.createdFolder } : {}),
+          });
         } else {
-          const memberships = await application.goalLists.memberships(undo.problems.map(problem => problem.frontendId));
-          if (undo.problems.some(problem => !same(memberships.get(problem.frontendId) ?? [], problem.after))) throw stale();
-          for (const problem of undo.problems) {
-            await application.goalLists.setProblemMembership({ frontendId: problem.frontendId, expectedListIds: problem.after, listIds: problem.before }, false);
-          }
+          // One transaction, which also refuses to drop an entry that was checked off since.
+          await application.goalLists.restoreMemberships({
+            problems: undo.problems.map(problem => ({ frontendId: problem.frontendId, expectedListIds: problem.after, listIds: problem.before })),
+          });
         }
       });
     } catch (error) {

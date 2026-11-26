@@ -5,7 +5,25 @@
 import { useSyncExternalStore } from 'react';
 
 const DATA_ACCESS_KEY = 'leetcode_tracker_chat_data_access_v1';
+const CHAT_OPENED_KEY = 'leetcode_tracker_chat_opened_v1';
 const listeners = new Set<() => void>();
+
+/** First-use visibility is kept on the device, alongside chat placement. */
+export function hasOpenedChat(): boolean {
+  try {
+    return localStorage.getItem(CHAT_OPENED_KEY) === 'yes';
+  } catch {
+    return false;
+  }
+}
+
+export function rememberChatOpened(): void {
+  try {
+    localStorage.setItem(CHAT_OPENED_KEY, 'yes');
+  } catch {
+    // The launcher can still tuck away for the remainder of this session.
+  }
+}
 
 /**
  * Whether the AI may look up tracker data while answering. On unless the user turned it off; a

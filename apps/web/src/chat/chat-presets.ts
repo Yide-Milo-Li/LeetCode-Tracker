@@ -1,10 +1,8 @@
 /**
  * Preset questions for the AI chat: the graded hint ladder and the practice review.
  *
- * A preset is an ordinary user message. The text shown in the conversation is exactly what the
- * model receives, so nothing is asked on the user's behalf that they cannot read. Each one names
- * its problem, because one conversation can move between problems while only the current one is
- * attached as data.
+ * A preset is an ordinary user message. The conversation shows a short label and lets the reader
+ * expand it to see the exact question the model received.
  */
 import type { PracticeRecord } from '../api.ts';
 import { localeFor } from '../date-format.ts';
@@ -47,6 +45,23 @@ export function hintLabel(level: number, lang: Language): string | null {
   if (level === SOLUTION_LEVEL) return zh ? '看完整解法' : 'Show the solution';
   if (level === 1) return zh ? '给个提示' : 'Give me a hint';
   return zh ? `下一个提示（${level}/${HINT_COUNT}）` : `Next hint (${level}/${HINT_COUNT})`;
+}
+
+/** Short display text for a tagged question, including questions restored from storage. */
+export function presetLabel(entry: ChatEntry, lang: Language): string | null {
+  const zh = lang === 'zh';
+  const level = entry.hint?.level;
+  if (typeof level === 'number' && Number.isInteger(level) && level >= 1 && level <= SOLUTION_LEVEL) {
+    if (level === SOLUTION_LEVEL) return hintLabel(level, lang);
+    const steps = zh ? ['给我一个方向', '指出关键观察', '给我伪代码'] : ['Give me a direction', 'Show the key insight', 'Outline the pseudocode'];
+    return zh ? `提示 ${level}/${HINT_COUNT} · ${steps[level - 1]}` : `Hint ${level}/${HINT_COUNT} · ${steps[level - 1]}`;
+  }
+  switch (entry.preset) {
+    case 'review': return zh ? '复盘练习' : 'Review practice';
+    case 'similar': return zh ? '找相似题' : 'Find similar problems';
+    case 'save-note': return zh ? '整理进笔记' : 'Save to my note';
+    default: return null;
+  }
 }
 
 /**

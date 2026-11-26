@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import {
   GOAL_LIST_PREFIX, createGoalListSchema, updateGoalListSchema, editGoalItemSchema, deleteGoalListSchema,
-  compareProblemIds, goalListSummary, goalListIdSchema, problemGoalMembershipSchema, addProblemsToGoalListsSchema,
+  compareProblemIds, goalListSummary, goalListIdSchema, problemGoalMembershipSchema, addProblemsToGoalListsSchema, restoreGoalMembershipsSchema,
   type EditGoalItem, type GoalList, type StoredGoalList,
 } from '../../../contracts/src/goal-lists.ts';
 import { goalCatalog, readGoalLists, readGoalListsById, readGoalListPage, readGoalMemberships, saveGoalList } from '../../../database/src/goal-lists.ts';
@@ -147,6 +147,42 @@ export function createGoalListOperations({ store, writeLock }: ApplicationContex
         }
         return { items: includeLists ? views(readGoalLists(db)) : [], added };
       }, ids.length > 1 ? 'before' : 'scheduled');
+    },
+    /**
+     * Undo one change that added problems to goal lists, in a single transaction; see
+     * {@link restoreGoalMembershipsSchema}.
+     *
+     * @throws 409 `STALE_GOAL_MEMBERSHIP` when a problem's lists moved on, or an entry to remove
+     * was checked off or linked to practice since; nothing is written then.
+     */
+    restoreMemberships(input: unknown) {
+      const { problems } = parse(restoreGoalMembershipsSchema, input);
+      return transaction(() => {
+        const memberships = readGoalMemberships(db, problems.map(problem => problem.frontendId));
+        const removals = new Map<string, Set<string>>();
+        for (const { frontendId, expectedListIds, listIds } of problems) {
+          const current = new Set(memberships.get(frontendId) ?? []);
+          if (expectedListIds.length !== current.size || expectedListIds.some(id => !current.has(id))) {
+            fail(409, { error: 'STALE_GOAL_MEMBERSHIP', frontendId });
+          }
+          if (listIds.some(id => !current.has(id))) fail(400, { error: 'INVALID_INPUT', message: 'A restore can only take problems out of lists.' });
+          for (const id of current) {
+            if (!listIds.includes(id)) removals.set(id, (removals.get(id) ?? new Set()).add(frontendId));
+          }
+        }
+        let removed = 0;
+        for (const list of readGoalListsById(db, new Set(removals.keys()))) {
+          const leaving = removals.get(list.id)!;
+          // Progress made on an entry since it was added would be lost with it.
+          const touched = list.items.find(item => leaving.has(item.frontendId) && (item.completed || item.linkedAfter !== undefined));
+          if (touched) fail(409, { error: 'STALE_GOAL_MEMBERSHIP', frontendId: touched.frontendId });
+          list.items = list.items.filter(item => !leaving.has(item.frontendId));
+          list.version++;
+          saveGoalList(db, list);
+          removed += leaving.size;
+        }
+        return { removed };
+      }, problems.length > 1 ? 'before' : 'scheduled');
     },
     setProblemMembership(input: unknown, includeLists = true) {
       const { frontendId, expectedListIds, listIds, newList } = parse(problemGoalMembershipSchema, input);

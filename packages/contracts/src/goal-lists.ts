@@ -26,6 +26,16 @@ export const problemGoalMembershipSchema = z.object({
   newList: z.object({ id: goalListIdSchema, name }).strict().optional(),
 }).strict().refine(input => !input.newList || input.listIds.includes(input.newList.id));
 export type ProblemGoalMembership = z.infer<typeof problemGoalMembershipSchema>;
+/**
+ * Take problems back out of goal lists one change added them to, all of them or none. Each problem
+ * must still be in exactly `expectedListIds`, `listIds` may only drop lists from that, and an entry
+ * that was checked off or linked to practice since is not removed.
+ */
+export const restoreGoalMembershipsSchema = z.object({
+  problems: z.array(z.object({ frontendId, expectedListIds: goalIds, listIds: goalIds }).strict()).min(1).max(100)
+    .refine(items => new Set(items.map(item => item.frontendId)).size === items.length),
+}).strict();
+export type RestoreGoalMemberships = z.infer<typeof restoreGoalMembershipsSchema>;
 export const addProblemsToGoalListsSchema = z.object({
   frontendIds: z.array(frontendId).min(1), listIds: goalIds.min(1),
 }).strict();

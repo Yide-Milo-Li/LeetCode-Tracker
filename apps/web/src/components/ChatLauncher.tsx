@@ -5,14 +5,15 @@
  * closing the panel. The panel itself (and its Markdown renderer) loads on first open.
  *
  * Collapsed, it is a small button docked to one of the four window edges. It can be dragged to
- * any spot along any edge and shrinks to a thin bar on that edge when left alone.
+ * any spot along any edge. After the first opening it shrinks to a thin bar when left alone.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { MessageSquareText } from 'lucide-react';
 import type { Language } from '../i18n.ts';
 import { useChat } from '../chat/useChat.ts';
-import { useChatProblem, type ChatAction, type ChatAskRequest } from '../chat/chat-context.ts';
+import { hasOpenedChat, rememberChatOpened } from '../chat/chat-settings.ts';
+import { useChatProblem, type ChatAsk, type ChatAskRequest } from '../chat/chat-context.ts';
 import { problemThread } from '../chat/chat-threads.ts';
 import { loadActiveTimer, subscribeTimer } from '../timer-service.ts';
 import {
@@ -41,12 +42,20 @@ export function ChatLauncher({ lang, onOpenAiSettings, ask = null, onDataChanged
   const zh = lang === 'zh';
   const chat = useChat(lang, { onDataChanged });
   const [open, setOpen] = useState(false);
+  const [openedBefore, setOpenedBefore] = useState(hasOpenedChat);
+  useEffect(() => {
+    if (open && !openedBefore) {
+      rememberChatOpened();
+      setOpenedBefore(true);
+    }
+  }, [open, openedBefore]);
   const launcher = useRef<HTMLButtonElement>(null);
   const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform ?? '');
   const shortcut = isMac ? '⌘J' : 'Ctrl+J';
 
   const viewProblem = useChatProblem();
-  const [pending, setPending] = useState<ChatAction | null>(null);
+  /** A preset waiting for the panel, with the problem it was asked about. */
+  const [pending, setPending] = useState<Required<ChatAsk> | null>(null);
   // The conversation follows the problem: the note that was just opened, the problem a timer was
   // started on, or the problem another view asked about. With none, the last conversation stays.
   useEffect(() => {
@@ -55,7 +64,7 @@ export function ChatLauncher({ lang, onOpenAiSettings, ask = null, onDataChanged
   useEffect(() => {
     if (!ask) return;
     chat.select(problemThread(ask.problem));
-    setPending(ask.action ?? null);
+    setPending(ask.action ? { problem: ask.problem, action: ask.action } : null);
     setOpen(true);
   }, [ask?.id]);
   // A running practice timer names the problem being worked on, so starting one brings its
@@ -82,9 +91,6 @@ export function ChatLauncher({ lang, onOpenAiSettings, ask = null, onDataChanged
     else if (wasBusy.current && !chat.anyBusy) setNews(true);
     wasBusy.current = chat.anyBusy;
   }, [chat.anyBusy, open]);
-  // A preset the panel never got to send must not go out when the panel is opened again later.
-  useEffect(() => { if (!open) setPending(null); }, [open]);
-
   const { position, viewport, save } = useChatPosition();
   const large = position.large === true;
   /** The size as stored with a placement; the compact size is the absence of the field. */
@@ -95,11 +101,12 @@ export function ChatLauncher({ lang, onOpenAiSettings, ask = null, onDataChanged
   const hovering = useRef(false);
   const restTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  /** Starts the countdown to tucking away; a pointer still on the launcher keeps it out. */
+  /** Start tucking only after first use and when the pointer leaves the launcher. */
   const rest = useCallback(() => {
     clearTimeout(restTimer.current);
+    if (!openedBefore) return;
     restTimer.current = setTimeout(() => { if (!hovering.current) setTucked(true); }, LAUNCHER_REST_MS);
-  }, []);
+  }, [openedBefore]);
   const wake = useCallback(() => {
     setTucked(false);
     rest();
@@ -133,6 +140,8 @@ export function ChatLauncher({ lang, onOpenAiSettings, ask = null, onDataChanged
 
   const close = useCallback(() => {
     setOpen(false);
+    // A preset that was still waiting must not go out when the panel opens again.
+    setPending(null);
     // The launcher re-mounts with the panel gone; return focus to it for keyboard users.
     setTimeout(() => launcher.current?.focus(), 0);
   }, []);
@@ -144,11 +153,12 @@ export function ChatLauncher({ lang, onOpenAiSettings, ask = null, onDataChanged
       // A modal dialog owns the keyboard, and the panel would open beneath its backdrop.
       if (document.querySelector('[data-overlay-host]')) return;
       event.preventDefault();
-      setOpen(value => !value);
+      if (open) close();
+      else setOpen(true);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isMac]);
+  }, [isMac, open, close]);
 
   if (open) {
     const at = panelDrag.dragging && dragPoint ? dragPoint : panelPoint(position, viewport);
@@ -171,6 +181,7 @@ export function ChatLauncher({ lang, onOpenAiSettings, ask = null, onDataChanged
     <div
       className={'chat-launcher' + (tucked && !dragging ? ' is-tucked' : '') + (dragging ? ' is-dragging' : '')}
       data-side={position.dock.side}
+      data-label-side={!openedBefore && !dragging ? (at.left + 20 < viewport.width / 2 ? 'right' : 'left') : undefined}
       style={{ transform: `translate3d(${at.left}px, ${at.top}px, 0)` }}
     >
       <Tooltip content={label} shortcut={shortcut} side={TOOLTIP_SIDE[position.dock.side]} disabled={dragging || tucked}>
@@ -188,7 +199,10 @@ export function ChatLauncher({ lang, onOpenAiSettings, ask = null, onDataChanged
           onKeyDown={wake}
           onClick={() => { if (!launcherDrag.consumeClick()) setOpen(true); }}
         >
-          <span className="chat-launcher-face"><MessageSquareText size={18} aria-hidden="true" /></span>
+          <span className="chat-launcher-face" aria-hidden="true">
+            <MessageSquareText size={18} />
+            {!openedBefore && !dragging && <span>{label}</span>}
+          </span>
         </button>
       </Tooltip>
     </div>

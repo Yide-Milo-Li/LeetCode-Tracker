@@ -11,20 +11,22 @@
  * and nothing is written until its confirming button is pressed.
  */
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowUp, Check, ChevronDown, Eraser, Lightbulb, Maximize2, Minimize2, NotebookPen, RefreshCw, Square, Trash2, X } from 'lucide-react';
+import { ArrowUp, Check, ChevronDown, Lightbulb, Maximize2, Minimize2, NotebookPen, RefreshCw, Square, Trash2, X } from 'lucide-react';
 import { api, type LLMProvider } from '../api.ts';
 import { CHAT_MAX_MESSAGE_CHARS } from '../../../../packages/contracts/src/chat-limits.ts';
+import type { ChatStatus } from '../../../../packages/contracts/src/chat.ts';
 import type { Language } from '../i18n.ts';
 import { ApiError } from '../platform/index.ts';
 import { localizeApiError } from '../error-i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
+import { useAsyncResource } from '../hooks/useAsyncResource.ts';
 import { applyDraft, describeChange, draftOf, isDecided, type AttemptDraft, type ChangeDraft, type ChatChange } from '../chat/chat-changes.ts';
-import type { ChatAction } from '../chat/chat-context.ts';
-import { hintLabel, hintPrompt, nextHintLevel, reviewPrompt, saveNotePrompt, similarPrompt } from '../chat/chat-presets.ts';
+import type { ChatAction, ChatAsk, ChatProblemRef } from '../chat/chat-context.ts';
+import { hintLabel, hintPrompt, nextHintLevel, presetLabel, reviewPrompt, saveNotePrompt, similarPrompt } from '../chat/chat-presets.ts';
 import { useChatDataAccess } from '../chat/chat-settings.ts';
 import { toolLabel } from '../chat/chat-tools.ts';
 import type { ChatDock, Point } from '../chat/chat-position.ts';
-import { GENERAL_THREAD, type ChatThreadRef } from '../chat/chat-threads.ts';
+import { GENERAL_THREAD, problemThread, type ChatThreadRef } from '../chat/chat-threads.ts';
 import type { ChatController, ChatEntry } from '../chat/useChat.ts';
 import { CopyButton } from './CopyButton.tsx';
 import { RenderedMarkdown } from './NotesMarkdownPreview.tsx';
@@ -37,8 +39,11 @@ const SETTINGS_ERRORS = new Set(['CHAT_NOT_CONFIGURED', 'CHAT_AUTH_ERROR', 'OPEN
 export interface ChatPanelProps {
   lang: Language;
   chat: ChatController;
-  /** A preset asked for from outside the panel; it runs once the provider status is known. */
-  pending: ChatAction | null;
+  /**
+   * A preset asked for from outside the panel; it runs once the provider status is known, in the
+   * conversation of the problem it was asked about.
+   */
+  pending: Required<ChatAsk> | null;
   /** The pending preset was sent or dropped; either way it must not run again. */
   onPendingHandled: () => void;
   /** Display form of the toggle shortcut, such as `Ctrl+J`. */
@@ -203,8 +208,23 @@ function ChangeCard({ change, lang, onConfirm, onDismiss, onUndo }: {
   );
 }
 
-function Answer({ entry, lang, isLast, busy, onRetry, onOpenAiSettings, onConfirmChange, onDismissChange, onUndoChange }: {
+function Question({ entry, lang }: { entry: ChatEntry; lang: Language }) {
+  const label = presetLabel(entry, lang);
+  return (
+    <div className="chat-entry chat-entry-user">
+      {label ? (
+        <details className="chat-preset">
+          <summary aria-label={lang === 'zh' ? `${label}，查看完整提问` : `${label}, view full question`}>{label}</summary>
+          <p>{entry.content}</p>
+        </details>
+      ) : <p>{entry.content}</p>}
+    </div>
+  );
+}
+
+function Answer({ entry, lang, isLast, busy, onRetry, onSaveNote, onOpenAiSettings, onConfirmChange, onDismissChange, onUndoChange }: {
   entry: ChatEntry; lang: Language; isLast: boolean; busy: boolean; onRetry: () => void; onOpenAiSettings: () => void;
+  onSaveNote?: () => void;
   onConfirmChange: (id: string, args?: Record<string, unknown>) => void; onDismissChange: (id: string) => void; onUndoChange: (id: string) => void;
 }) {
   const zh = lang === 'zh';
@@ -252,11 +272,13 @@ function Answer({ entry, lang, isLast, busy, onRetry, onOpenAiSettings, onConfir
       {entry.content && settled && (
         <div className="chat-entry-foot">
           <CopyButton text={() => entry.content} label={zh ? '复制回答' : 'Copy answer'} copiedLabel={zh ? '已复制' : 'Copied'} />
-          {/* A stopped or failed answer offers its own retry above; an answer whose changes may
-              already be applied is not replaced. */}
+          {/* An answer with a change can carry the only receipt or undo for that write. */}
           {isLast && !busy && entry.state === 'done' && changes.length === 0 && (
             <IconButton icon={RefreshCw} size={14} label={zh ? '重新回答' : 'Answer again'} onClick={onRetry} />
           )}
+          {onSaveNote && <button type="button" className="chat-action" onClick={onSaveNote}>
+            <NotebookPen size={14} aria-hidden="true" />{zh ? '整理进笔记' : 'Save to my note'}
+          </button>}
           {used && <p className="chat-entry-note">{zh ? '参考了：' : 'Used: '}{used}</p>}
         </div>
       )}
@@ -271,7 +293,11 @@ export function ChatPanel({
   const dataAccess = useChatDataAccess();
   const problem = chat.current.problem ?? null;
   const switcher = useActionPopover();
-  const [status, setStatus] = useState<{ configured: boolean; provider?: LLMProvider; model: string } | null>(null);
+  const { revision } = useWorkspace();
+  const [connection, setConnection] = useState<ChatStatus | 'failed' | null>(null);
+  const status = connection === 'failed' ? null : connection;
+  /** Bumped to read the provider again; see the status effect below. */
+  const [statusCheck, setStatusCheck] = useState(0);
   // Held by the controller, so text typed here survives closing the panel or switching conversations.
   const { draft, setDraft } = chat;
   const panel = useRef<HTMLElement>(null);
@@ -280,13 +306,31 @@ export function ChatPanel({
   /** Follow new text only while the reader is at the bottom; scrolling up to reread is respected. */
   const pinned = useRef(true);
 
+  // The panel stays open while Settings are used, so the provider it names is read again after a
+  // saved change (which bumps the workspace revision), when the window regains focus, and when an
+  // answer was refused because the provider changed.
   useEffect(() => {
     let current = true;
-    api.getChatStatus().then(value => { if (current) setStatus(value); },
-      () => { if (current) setStatus({ configured: false, model: '' }); });
+    api.getChatStatus().then(value => { if (current) setConnection(value); },
+      () => { if (current) setConnection('failed'); });
     return () => { current = false; };
+  }, [revision, statusCheck]);
+  useEffect(() => {
+    const refresh = () => setStatusCheck(count => count + 1);
+    window.addEventListener('focus', refresh);
+    return () => window.removeEventListener('focus', refresh);
   }, []);
+  const refused = chat.entries.at(-1)?.error?.code === 'CHAT_PROVIDER_CHANGED' ? chat.entries.at(-1)!.id : null;
+  useEffect(() => { if (refused) setStatusCheck(count => count + 1); }, [refused]);
   const ready = status?.configured === true;
+  const frontendId = problem?.frontendId;
+  const empty = chat.entries.length === 0;
+  const practice = useAsyncResource(async signal => {
+    const { total } = await api.getPracticeRecords({ questionFrontendId: frontendId, limit: 1, status: 'active' }, { signal });
+    return { frontendId, revision, available: total > 0 };
+  }, [frontendId, revision], ready && empty && Boolean(frontendId));
+  const hasPractice = !practice.loading && !practice.error && practice.data?.frontendId === frontendId
+    && practice.data?.revision === revision && practice.data.available;
   // The field is disabled until the provider status arrives, so the panel takes focus first; that
   // keeps Esc working from the moment it opens. The field takes over unless focus has moved on.
   useEffect(() => { panel.current?.focus(); }, []);
@@ -297,7 +341,7 @@ export function ChatPanel({
   useLayoutEffect(() => { pinned.current = true; }, [chat.current.key]);
   useLayoutEffect(() => {
     if (pinned.current && log.current) log.current.scrollTop = log.current.scrollHeight;
-  }, [chat.entries]);
+  }, [chat.entries, chat.busy]);
   useLayoutEffect(() => {
     const field = input.current;
     if (!field) return;
@@ -305,25 +349,35 @@ export function ChatPanel({
     field.style.height = `${Math.min(field.scrollHeight, 148)}px`;
   }, [draft]);
 
+  /** The question goes to the provider this panel names; the server refuses it if that changed. */
+  const provider = status?.provider;
   const ask = (text: string) => {
     if (!ready || chat.busy || !text.trim()) return;
     pinned.current = true;
-    chat.send(text);
+    chat.send(text, { provider });
     setDraft('');
     // A suggestion button disappears once the conversation starts; keep the keyboard in the field.
     input.current?.focus();
   };
-  /** Send a preset about this conversation's problem; hints climb one rung per request. */
-  const runAction = (action: ChatAction) => {
-    if (!problem || !ready || chat.busy) return;
+  /**
+   * Send a preset about a problem, by default this conversation's; hints climb one rung per
+   * request. A preset about another problem goes to that problem's conversation.
+   */
+  const runAction = (action: ChatAction, about: ChatProblemRef | null = problem) => {
+    if (!about || !ready) return;
+    const thread = problemThread(about);
+    const shown = thread.key === chat.current.key;
+    if (shown && chat.busy) return;
+    const target = shown && chat.current.problem ? chat.current.problem : about;
+    const options = { provider, thread: shown ? chat.current : thread };
     if (action.kind === 'hint') {
-      const level = nextHintLevel(chat.entries, problem.frontendId);
+      const level = nextHintLevel(shown ? chat.entries : chat.entriesOf(thread.key), target.frontendId);
       if (!hintLabel(level, lang)) return;
-      chat.send(hintPrompt(level, lang, problem), { frontendId: problem.frontendId, level });
+      chat.send(hintPrompt(level, lang, target), { ...options, hint: { frontendId: target.frontendId, level } });
     } else if (action.kind === 'review') {
-      chat.send(reviewPrompt(lang, problem, action.attempt));
+      chat.send(reviewPrompt(lang, target, action.attempt), { ...options, preset: action.kind });
     } else {
-      chat.send(action.kind === 'similar' ? similarPrompt(lang, problem) : saveNotePrompt(lang, problem));
+      chat.send(action.kind === 'similar' ? similarPrompt(lang, target) : saveNotePrompt(lang, target), { ...options, preset: action.kind });
     }
     pinned.current = true;
     input.current?.focus();
@@ -331,10 +385,11 @@ export function ChatPanel({
   useEffect(() => {
     if (!pending || !status) return;
     onPendingHandled();
-    runAction(pending);
+    // The problem it was asked about, even if another one's conversation is shown by now.
+    runAction(pending.action, pending.problem);
   }, [pending, status]);
 
-  const provider = status?.provider ? PROVIDER_NAMES[status.provider] : '';
+  const providerName = provider ? PROVIDER_NAMES[provider] : '';
   const nextHint = problem ? hintLabel(nextHintLevel(chat.entries, problem.frontendId), lang) : null;
   const title = threadName(chat.current, lang);
   // The general conversation is always offered, and so is the current one before its first question.
@@ -343,24 +398,24 @@ export function ChatPanel({
     ...(problem && !chat.threads.some(thread => thread.key === chat.current.key) ? [chat.current] : []),
     ...chat.threads.filter(thread => thread.key !== GENERAL_THREAD.key),
   ];
-  const reviewLabel = zh ? '复盘最近一次练习' : 'Review my latest attempt';
   const todayQuestion = zh ? '今天的计划里，我应该先做哪道题？' : "Which problem in today's plan should I start with?";
   const weakQuestion = zh ? '我最近哪类题最薄弱？接下来该怎么补？' : 'Which topics am I weakest at lately, and how should I work on them?';
   // Questions that take a lookup are offered only while data access provides one.
   const starters = problem
     ? [
-      { label: zh ? '给我一点这道题的提示，先不要给答案' : 'Give me a hint for this problem without the solution', run: () => runAction({ kind: 'hint' }) },
-      { label: reviewLabel, run: () => runAction({ kind: 'review' }) },
-      ...(dataAccess ? [{ label: zh ? '在我的题库里找几道同类型的题' : 'Find similar problems in my catalog', run: () => runAction({ kind: 'similar' }) }] : []),
+      { label: zh ? '给个提示' : 'Give me a hint', run: () => runAction({ kind: 'hint' }) },
+      ...(hasPractice ? [{ label: zh ? '复盘练习' : 'Review practice', run: () => runAction({ kind: 'review' }) }] : []),
+      ...(dataAccess ? [{ label: zh ? '找相似题' : 'Find similar problems', run: () => runAction({ kind: 'similar' }) }] : []),
     ]
     : dataAccess
       ? [{ label: todayQuestion, run: () => ask(todayQuestion) }, { label: weakQuestion, run: () => ask(weakQuestion) }]
       : [];
-  const lastEntry = chat.entries.at(-1);
-  // Offered after a plain answer about the problem; proposing the note change takes data access.
-  const canSaveNote = Boolean(problem && dataAccess && lastEntry?.role === 'assistant' && lastEntry.state === 'done'
-    && lastEntry.content.trim() && !lastEntry.changes?.length);
-  const followUps = chat.entries.length > 0 && (nextHint || canSaveNote);
+  const focusComposer = () => (ready ? input.current : panel.current)?.focus();
+  const clearConversation = (key: string) => {
+    switcher.close();
+    chat.clear(key);
+    focusComposer();
+  };
 
   return (
     <aside
@@ -393,7 +448,7 @@ export function ChatPanel({
               <ChevronDown size={14} aria-hidden="true" />
             </button>
           </h2>
-          {ready && <p>{provider}{status?.model ? ` · ${status.model.replace(/^models\//, '')}` : ''}</p>}
+          {ready && <p>{providerName}{status?.model ? ` · ${status.model.replace(/^models\//, '')}` : ''}</p>}
         </div>
         {switcher.rendered && (
           <div {...switcher.panelProps} className="notes-dropdown-menu chat-thread-menu" aria-label={zh ? '对话' : 'Conversations'}>
@@ -407,9 +462,11 @@ export function ChatPanel({
                     <span className="chat-thread-name">{name}</span>
                     {stored && <span className="chat-thread-time">{stored.busy ? (zh ? '回答中' : 'answering') : lastUsed(stored.usedAt, lang)}</span>}
                   </button>
-                  {stored && (
-                    <button type="button" className="chat-thread-delete" aria-label={zh ? `删除对话：${name}` : `Delete conversation: ${name}`}
-                      onClick={() => chat.clear(thread.key)}>
+                  {(stored || (thread.key === chat.current.key && chat.draft)) && (
+                    <button type="button" className="chat-thread-delete"
+                      title={zh ? `清空 ${name}` : `Clear ${name}`}
+                      aria-label={zh ? `清空对话：${name}` : `Clear conversation: ${name}`}
+                      onClick={() => clearConversation(thread.key)}>
                       <Trash2 size={14} aria-hidden="true" />
                     </button>
                   )}
@@ -420,11 +477,19 @@ export function ChatPanel({
         )}
         <IconButton icon={large ? Minimize2 : Maximize2} label={large ? (zh ? '还原面板大小' : 'Restore panel size') : (zh ? '放大面板' : 'Enlarge panel')}
           onClick={onToggleSize} tooltipSide="bottom" />
-        <IconButton icon={Eraser} label={zh ? '清空这个对话' : 'Clear this conversation'} disabled={chat.entries.length === 0}
-          onClick={() => { chat.clear(); input.current?.focus(); }} tooltipSide="bottom" />
         <IconButton icon={X} label={zh ? '关闭' : 'Close'} shortcut={shortcut} onClick={onClose} tooltipSide="bottom" />
       </header>
 
+      <div className="chat-clear-feedback" data-visible={chat.cleared ? 'true' : undefined}>
+        <p role="status">{chat.cleared
+          ? (zh ? `已清空 ${threadName(chat.cleared, lang)}` : `Cleared ${threadName(chat.cleared, lang)}`)
+          : null}</p>
+        {chat.cleared && (
+          <button type="button" className="text-link" onClick={() => { chat.undoClear(); focusComposer(); }}>
+            {zh ? '撤销清空' : 'Undo clear'}
+          </button>
+        )}
+      </div>
       <div
         ref={log}
         className="chat-log"
@@ -436,28 +501,23 @@ export function ChatPanel({
           pinned.current = node.scrollHeight - node.scrollTop - node.clientHeight < 48;
         }}
       >
-        {status && !ready && (
+        {connection === 'failed' ? (
+          <Feedback retry={{
+            label: zh ? '重试连接' : 'Retry connection',
+            run: () => { panel.current?.focus(); setConnection(null); setStatusCheck(count => count + 1); },
+          }}>
+            {zh ? '暂时无法读取 AI 连接状态。' : 'Could not check the AI connection.'}
+          </Feedback>
+        ) : connection === null ? (
+          <p className="chat-thinking" role="status">{zh ? '正在检查 AI 连接…' : 'Checking the AI connection…'}</p>
+        ) : !ready && (
           <div className="chat-empty">
             <p>{zh ? '连接一个 AI 服务后，就可以在这里提问。' : 'Connect an AI provider to ask questions here.'}</p>
             <button type="button" className="btn btn-secondary" onClick={onOpenAiSettings}>{zh ? '打开 AI 设置' : 'Open AI settings'}</button>
           </div>
         )}
-        {ready && chat.entries.length === 0 && (
+        {ready && empty && (
           <div className="chat-empty">
-            <p>
-              {problem
-                ? (zh
-                  ? `这是 ${title} 的对话，提问时会附带你在这道题上的练习记录和已保存的笔记。`
-                  : `This conversation is about ${title}. Your practice records and saved note for it go with each question.`)
-                : (zh ? '可以问题目思路、你的笔记，或者今天的练习安排。' : 'Ask about a problem, your notes, or what to practise today.')}
-            </p>
-            {dataAccess && (
-              <p>
-                {zh
-                  ? '也可以让 AI 记录练习、写笔记、收藏题目或加入题单，每次改动都会先请你确认。'
-                  : 'The AI can also record attempts, add to your notes, star problems and add them to goal lists. You confirm each change first.'}
-              </p>
-            )}
             {starters.length > 0 && (
               <ul className="chat-suggestions">
                 {starters.map(starter => (
@@ -467,41 +527,39 @@ export function ChatPanel({
                 ))}
               </ul>
             )}
-            <p className="chat-entry-note">
-              {dataAccess
-                ? (zh
-                  ? `AI 会按需查看你的题库、练习记录和笔记；提问内容和查到的数据会发送给 ${provider}。可在设置的 AI 助手里关闭。`
-                  : `The AI looks up your catalog, practice records and notes as needed. Your question and what it reads are sent to ${provider}. You can turn this off in Settings, under AI assistant.`)
-                : problem
-                  ? (zh
-                    ? `提问内容和这道题的数据会发送给 ${provider}。`
-                    : `Your question and this problem's data are sent to ${provider}.`)
-                  : (zh ? `只有提问内容会发送给 ${provider}。` : `Only your question is sent to ${provider}.`)}
-            </p>
+            <details className="chat-data-note chat-entry-note">
+              <summary>{zh ? `发送给 ${providerName} 的数据` : `What goes to ${providerName}`}</summary>
+              <p>
+                {problem
+                  ? (zh ? '提问和近期对话会随题目资料、近期练习和已保存的笔记一起发送。'
+                    : 'Your question and recent turns go with problem details, recent attempts and your saved note.')
+                  : (zh ? '每次发送本次提问及相关的近期对话。' : 'Each request includes your question and recent turns from this conversation.')}
+              </p>
+              {dataAccess && <p>{zh
+                ? 'AI 还可以按需查阅题库、练习记录和笔记，查到的数据也会发送。可在 AI 设置中关闭按需查阅。'
+                : 'The AI can also look up and send data from your catalog, practice records and notes. You can turn off lookups in AI settings.'}</p>}
+            </details>
           </div>
         )}
-        {chat.entries.map((entry, index) => entry.role === 'user'
-          ? <div key={entry.id} className="chat-entry chat-entry-user"><p>{entry.content}</p></div>
-          : <Answer key={entry.id} entry={entry} lang={lang} isLast={index === chat.entries.length - 1} busy={chat.busy}
-              onRetry={chat.retry} onOpenAiSettings={onOpenAiSettings}
-              onConfirmChange={chat.confirmChange} onDismissChange={chat.dismissChange} onUndoChange={chat.undoChange} />)}
+        {chat.entries.map((entry, index) => {
+          if (entry.role === 'user') return <Question key={entry.id} entry={entry} lang={lang} />;
+          const isLast = index === chat.entries.length - 1;
+          // The preset refers to the last answer, so put the action on that answer alone.
+          const canSaveNote = isLast && ready && !chat.busy && problem && dataAccess
+            && entry.state === 'done' && entry.content.trim() && !entry.changes?.length;
+          return <Answer key={entry.id} entry={entry} lang={lang} isLast={isLast} busy={chat.busy || !ready}
+            onRetry={() => chat.retry({ provider })} onSaveNote={canSaveNote ? () => runAction({ kind: 'save-note' }) : undefined}
+            onOpenAiSettings={onOpenAiSettings} onConfirmChange={chat.confirmChange}
+            onDismissChange={chat.dismissChange} onUndoChange={chat.undoChange} />;
+        })}
       </div>
 
       <form className="chat-composer" onSubmit={event => { event.preventDefault(); ask(draft); }}>
-        {/* Next steps on what was just answered. The empty conversation offers the presets as
-            starters instead. */}
-        {followUps && (
+        {!empty && nextHint && (
           <div className="chat-context">
-            {nextHint && (
-              <button type="button" className="chat-action" disabled={!ready || chat.busy} onClick={() => runAction({ kind: 'hint' })}>
-                <Lightbulb size={14} aria-hidden="true" />{nextHint}
-              </button>
-            )}
-            {canSaveNote && (
-              <button type="button" className="chat-action" disabled={!ready || chat.busy} onClick={() => runAction({ kind: 'save-note' })}>
-                <NotebookPen size={14} aria-hidden="true" />{zh ? '整理进笔记' : 'Save to my note'}
-              </button>
-            )}
+            <button type="button" className="chat-action" disabled={!ready || chat.busy} onClick={() => runAction({ kind: 'hint' })}>
+              <Lightbulb size={14} aria-hidden="true" />{nextHint}
+            </button>
           </div>
         )}
         <div className="chat-input-row">

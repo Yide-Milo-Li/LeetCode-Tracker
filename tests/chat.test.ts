@@ -774,6 +774,122 @@ test('an applied change can be taken back, unless the data has changed again sin
   await app.close();
 });
 
+test('an undo refused by a later edit leaves favorites and goal lists exactly as they were', async () => {
+  const { app } = await chatApp(async () => ({ model: 'm', provider: 'openai', usage }));
+  await seedProfile(app);
+  const json = async <T>(method: 'GET' | 'POST' | 'PUT' | 'PATCH', url: string, payload?: unknown) => {
+    const response = await app.inject({ method, url, ...(payload === undefined ? {} : { payload: payload as object }) });
+    assert.ok(response.statusCode < 300, response.payload);
+    return JSON.parse(response.payload) as T;
+  };
+  const apply = (name: string, args: Record<string, unknown>) =>
+    json<{ undo?: Record<string, unknown> }>('POST', '/api/v1/chat/actions', { name, args });
+  const undo = async (payload: unknown) => {
+    const response = await app.inject({ method: 'POST', url: '/api/v1/chat/actions/undo', payload: payload as object });
+    return { status: response.statusCode, error: (JSON.parse(response.payload) as { error?: string }).error };
+  };
+  const stale = { status: 409, error: 'CHAT_UNDO_STALE' };
+
+  // Favorites: the folder the change made was renamed. Before, the stars were taken back and only
+  // then the folder check failed, so the undo reported a failure after half of it had happened.
+  const folderId = '2d3b8b2a-8e3f-4c73-9b75-5b3b6f4e4d9c';
+  const starred = await apply('tracker_add_favorites', { frontendIds: ['42'], folderIds: [folderId], newFolder: { id: folderId, name: 'Review' } });
+  await json('PUT', '/api/v1/favorites/folders', { id: folderId, name: 'Hard ones', expectedName: 'Review' });
+  assert.deepEqual(await undo(starred.undo), stale);
+  const library = await json<{ total: number; folders: Array<{ id: string; name: string; count: number }> }>('GET', '/api/v1/favorites');
+  assert.deepEqual(library.folders.map(folder => [folder.id, folder.name, folder.count]), [[folderId, 'Hard ones', 1]]);
+  assert.equal(library.total, 1);
+  const stars = await json<{ items: Array<{ frontendId: string; folderIds: string[] }> }>('GET', '/api/v1/favorites/problems');
+  assert.deepEqual(stars.items.map(item => [item.frontendId, item.folderIds]), [['42', [folderId]]]);
+
+  // Goal lists: an entry the change added was checked off by hand. Before, the undo answered 200
+  // and the checked entry was gone; now neither problem leaves the list.
+  type Lists = { items: Array<{ id: string; version: number; items: Array<{ frontendId: string; completed: boolean }> }> };
+  const list = await json<{ id: string }>('POST', '/api/v1/goal-lists', { name: 'Blind 75', frontendIds: [] });
+  const entries = async () => (await json<Lists>('GET', '/api/v1/goal-lists')).items.find(item => item.id === list.id)!;
+  const added = await apply('tracker_add_to_goal_lists', { frontendIds: ['1', '42'], listIds: [list.id] });
+  assert.equal((added.undo?.problems as unknown[]).length, 2);
+  const before = await entries();
+  await json('PATCH', `/api/v1/goal-lists/${list.id}/items`, { expectedVersion: before.version, edit: { action: 'setCompleted', frontendId: '42', completed: true } });
+  assert.deepEqual(await undo(added.undo), stale);
+  assert.deepEqual((await entries()).items.map(item => [item.frontendId, item.completed]), [['1', false], ['42', true]]);
+  // Unchecked again, the entries are as the change left them, and the undo goes through.
+  const checked = await entries();
+  await json('PATCH', `/api/v1/goal-lists/${list.id}/items`, { expectedVersion: checked.version, edit: { action: 'setCompleted', frontendId: '42', completed: false } });
+  assert.deepEqual(await undo(added.undo), { status: 200, error: undefined });
+  assert.deepEqual((await entries()).items, []);
+  await app.close();
+});
+
+test('every model turn of an answer goes to the provider the question was asked of', async () => {
+  // A settings change can land while a lookup runs; the stub switches provider at that moment.
+  const active = { provider: 'openai' as 'openai' | 'deepseek', baseUrl: 'https://api.openai.com/v1' };
+  const calls: Array<Parameters<StreamChat>[0] & { provider: string }> = [];
+  let onCall: (round: number) => void = () => {};
+  const assistant: ILLMAssistant = {
+    getStatus: () => ({ configured: true, provider: active.provider, model: 'm', baseUrl: active.baseUrl }),
+    formatProgressText: async () => ({ candidates: [], unparsedSnippets: [], model: 'm' }),
+    streamChat: async params => {
+      calls.push({ ...params, provider: active.provider });
+      onCall(calls.length);
+      if (!params.steps?.length) return toolTurn([{ id: 'c1', name: 'tracker_get_favorite_folders', arguments: '{}' }]);
+      params.onDelta('Answer.');
+      return { model: 'm', provider: active.provider, usage };
+    },
+  };
+  const store = new CatalogStore(new DatabaseSync(':memory:'), { skipBackup: true });
+  const app = await buildApp({ store, disableStatic: true, geminiAssistant: assistant });
+  await seedProfile(app);
+  const ask = async (payload: Record<string, unknown> = {}) =>
+    events((await post(app, { messages: [{ role: 'user', content: 'Which folders do I have?' }], context: { frontendId: '42' }, ...payload })).payload);
+  const changed = { type: 'error', error: 'CHAT_PROVIDER_CHANGED', message: 'The AI provider settings changed. Ask again to use the current provider.' };
+
+  // The switch happens after the first turn: the second turn, which would carry the question, the
+  // attached note and the lookup result, is never sent to DeepSeek.
+  onCall = round => { if (round === 1) active.provider = 'deepseek'; };
+  const switched = await ask({ provider: 'openai' });
+  assert.deepEqual(switched.at(-1), changed);
+  assert.deepEqual(calls.map(call => call.provider), ['openai']);
+
+  // The same holds without a named provider, and for a new endpoint of the same provider.
+  active.provider = 'openai';
+  calls.length = 0;
+  onCall = round => { if (round === 1) active.baseUrl = 'https://gateway.example/v1'; };
+  assert.deepEqual((await ask()).at(-1), changed);
+  assert.equal(calls.length, 1);
+
+  // A question asked of a provider that is no longer active is not sent at all.
+  calls.length = 0;
+  onCall = () => {};
+  assert.deepEqual((await ask({ provider: 'deepseek' })).at(-1), changed);
+  assert.equal(calls.length, 0);
+
+  // Nothing changed: the answer completes over both turns.
+  const done = await ask({ provider: 'openai' });
+  assert.deepEqual(done.at(-1), { type: 'done', provider: 'openai', model: 'm' });
+  assert.equal(calls.length, 2);
+  assert.equal((await post(app, { messages: [{ role: 'user', content: 'hi' }], provider: 'claude' })).statusCode, 400);
+  await app.close();
+});
+
+test('with data access off a tool the model calls anyway is refused, not run', async () => {
+  const { app, calls } = await chatApp(async params => {
+    // A model that calls a lookup it was never offered.
+    if (calls.length === 1) return toolTurn([{ id: 'c1', name: 'tracker_list_practices', arguments: '{"frontendId":"42"}' }]);
+    params.onDelta('I cannot look that up.');
+    return { model: 'm', provider: 'openai', usage };
+  });
+  await seedProfile(app);
+  const answer = events((await post(app, { messages: [{ role: 'user', content: 'What went wrong on 42?' }], dataAccess: false })).payload);
+  assert.equal(answer.some(event => event.type === 'tool'), false);
+  assert.deepEqual(answer.at(-1), { type: 'done', provider: 'openai', model: 'm' });
+  assert.equal(calls.length, 2);
+  // Nothing from the lookup reaches the model, which was never offered tools.
+  assert.equal('tools' in calls[1], false);
+  assert.doesNotMatch(JSON.stringify(calls[1]), /Forgot the right-max pass/);
+  await app.close();
+});
+
 const lookup: ChatToolSpec = {
   name: 'tracker_list_practices',
   description: 'List practice records.',

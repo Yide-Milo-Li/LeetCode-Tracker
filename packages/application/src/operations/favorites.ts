@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { addFavoritesSchema, favoriteFolderSchema, removeFavoritesSchema, saveFavoriteFolderSchema, saveFavoriteSchema, type FavoriteFolder } from '../../../contracts/src/favorites.ts';
+import { addFavoritesSchema, favoriteFolderSchema, removeFavoritesSchema, restoreFavoritesSchema, saveFavoriteFolderSchema, saveFavoriteSchema, type FavoriteFolder } from '../../../contracts/src/favorites.ts';
 import { FAVORITE_FOLDER_PREFIX, FAVORITE_PROBLEM_PREFIX, readFavoriteFolders, readFavoriteLibrary, readFavoriteMemberships } from '../../../database/src/favorites.ts';
 import type { ApplicationContext } from '../context.ts';
 import { fail } from '../errors.ts';
@@ -98,6 +98,42 @@ export function createFavoriteOperations({ store, writeLock }: ApplicationContex
         }
         return { count: ids.size };
       }, frontendIds.length > 1 ? 'before' : 'scheduled');
+    },
+    /**
+     * Undo one change to favorites in a single transaction; see {@link restoreFavoritesSchema}.
+     *
+     * @throws 409 `STALE_FAVORITE` or `STALE_FAVORITE_FOLDER` when anything moved on since the
+     * change; nothing is written then.
+     */
+    restoreProblems(input: unknown) {
+      const { problems, createdFolder } = parse(restoreFavoritesSchema, input);
+      return write(() => {
+        const read = db.prepare('SELECT value FROM catalog_meta WHERE key=?');
+        const sorted = (ids: string[] | null) => JSON.stringify(ids && [...ids].sort());
+        for (const { frontendId, expectedFolderIds } of problems) {
+          const row = read.get(FAVORITE_PROBLEM_PREFIX + frontendId);
+          const current = row ? JSON.parse(String(row.value)) as string[] : null;
+          if (sorted(current) !== sorted(expectedFolderIds)) fail(409, { error: 'STALE_FAVORITE', frontendId });
+        }
+        const folder = createdFolder && readFavoriteFolders(db).find(item => item.id === createdFolder.id);
+        if (folder && folder.name !== createdFolder.name) fail(409, { error: 'STALE_FAVORITE_FOLDER' });
+        for (const { frontendId, folderIds } of problems) {
+          const key = FAVORITE_PROBLEM_PREFIX + frontendId;
+          if (folderIds === null) {
+            db.prepare('DELETE FROM catalog_meta WHERE key=?').run(key);
+          } else {
+            requireFolders(folderIds);
+            db.prepare('INSERT OR REPLACE INTO catalog_meta(key, value) VALUES(?, ?)').run(key, JSON.stringify([...folderIds].sort()));
+          }
+        }
+        // The folder goes only if it is as empty as the change found it.
+        if (folder) {
+          const used = db.prepare(`SELECT 1 FROM catalog_meta WHERE key GLOB ?
+            AND EXISTS (SELECT 1 FROM json_each(catalog_meta.value) WHERE value = ?) LIMIT 1`).get(FAVORITE_PROBLEM_PREFIX + '*', folder.id);
+          if (!used) db.prepare('DELETE FROM catalog_meta WHERE key=?').run(FAVORITE_FOLDER_PREFIX + folder.id);
+        }
+        return { restored: problems.length };
+      }, 'before');
     },
     removeProblems(input: unknown) {
       const { expected } = parse(removeFavoritesSchema, input);

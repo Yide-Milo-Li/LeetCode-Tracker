@@ -46,6 +46,12 @@ export const chatRequestSchema = z.object({
    * Omitted means allowed.
    */
   dataAccess: z.boolean().optional(),
+  /**
+   * The provider the user was told the question goes to. When another one is active, or the
+   * active one changes while answering, the answer ends with `CHAT_PROVIDER_CHANGED` before
+   * anything more is sent.
+   */
+  provider: llmProviderSchema.optional(),
 }).strict().superRefine((value, ctx) => {
   // Refinements also run on input that already failed a field rule, such as an empty list.
   const last = value.messages.at(-1);

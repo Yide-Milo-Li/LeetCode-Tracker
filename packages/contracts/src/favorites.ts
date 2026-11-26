@@ -33,6 +33,17 @@ export const removeFavoritesSchema = z.object({
     .refine(items => new Set(items.map(item => item.frontendId)).size === items.length),
 }).strict();
 export type RemoveFavorites = z.infer<typeof removeFavoritesSchema>;
+/**
+ * Put problems back to the folders they had before one change, all of them or none: each must
+ * still be in `expectedFolderIds`. `createdFolder` is a folder that change created; it is removed
+ * when nothing is left in it, and the restore is refused if it was renamed since.
+ */
+export const restoreFavoritesSchema = z.object({
+  problems: z.array(z.object({ frontendId, expectedFolderIds: favoriteFolderIds, folderIds: favoriteFolderIds.nullable() }).strict()).max(100)
+    .refine(items => new Set(items.map(item => item.frontendId)).size === items.length),
+  createdFolder: favoriteFolderSchema.optional(),
+}).strict();
+export type RestoreFavorites = z.infer<typeof restoreFavoritesSchema>;
 export const saveFavoriteFolderSchema = favoriteFolderSchema.extend({ expectedName: favoriteFolderName.nullable() });
 
 /** Present only for saved problems in a catalog query requesting favorite state. */

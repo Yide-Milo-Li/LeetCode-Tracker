@@ -58,16 +58,24 @@ export function draftOf(change: ChatActionProposal): ChangeDraft | null {
 
 /**
  * The proposal's arguments with the user's adjustments applied, or `null` while the draft cannot
- * be sent (an empty note, minutes outside 1 to 1440). Everything the form does not show is kept.
+ * be sent (an empty note, minutes outside 1 to 1440). Everything the form does not show is kept,
+ * and so is every field the user left as the form first showed it: a solved attempt with no
+ * stated outcome is shown as solved independently, but stays without an outcome unless the user
+ * picks one.
  */
 export function applyDraft(change: ChatActionProposal, draft: ChangeDraft): Record<string, unknown> | null {
   if (draft.kind === 'note') return draft.content.trim() ? { ...change.args, content: draft.content } : null;
   const records = (Array.isArray(change.args.records) ? change.args.records : []).map(object);
+  const shown = draftOf(change);
+  const initial = shown?.kind === 'practices' ? shown.attempts : [];
   const next: Array<Record<string, unknown>> = [];
   for (const [index, attempt] of draft.attempts.entries()) {
     const minutes = attempt.minutes.trim() === '' ? null : Number(attempt.minutes);
     if (minutes !== null && (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440)) return null;
-    next.push({ ...records[index], completed: attempt.outcome !== 'unsolved', outcome: attempt.outcome, durationMinutes: minutes });
+    const record = { ...records[index] };
+    if (attempt.outcome !== initial[index]?.outcome) Object.assign(record, { completed: attempt.outcome !== 'unsolved', outcome: attempt.outcome });
+    if (attempt.minutes.trim() !== initial[index]?.minutes.trim()) record.durationMinutes = minutes;
+    next.push(record);
   }
   return { ...change.args, records: next };
 }

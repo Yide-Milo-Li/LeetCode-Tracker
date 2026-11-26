@@ -34,6 +34,8 @@ export const GENERAL_THREAD: ChatThreadRef = { key: 'general' };
 export const problemThread = (problem: ChatProblemRef): ChatThreadRef => ({ key: `problem:${problem.frontendId}`, problem });
 
 const STORAGE_KEY = 'leetcode_tracker_chat_threads_v1';
+/** Where the conversations are stored, for telling another tab's writes apart in a `storage` event. */
+export const CHAT_STORAGE_KEY = STORAGE_KEY;
 /** The single conversation kept before conversations were split by problem. */
 const LEGACY_STORAGE_KEY = 'leetcode_tracker_chat_v1';
 /** Entries kept per conversation; older turns scroll out of a long one. */
@@ -92,18 +94,39 @@ export function pruneThreads(threads: Record<string, ChatThread>, now: number, k
   return Object.fromEntries(kept.map(thread => [thread.key, thread]));
 }
 
+/**
+ * The conversations as stored, or `null` when nothing readable is stored.
+ *
+ * @throws When storage cannot be read or holds text that is not JSON.
+ */
+function readStored(now: number): ChatState | null {
+  const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null') as { threads?: unknown; current?: unknown } | null;
+  if (!stored || typeof stored !== 'object') return null;
+  const threads: Record<string, ChatThread> = {};
+  for (const raw of Array.isArray(stored.threads) ? stored.threads as Array<{ entries?: unknown; usedAt?: unknown }> : []) {
+    const ref = readRef(raw);
+    if (ref) threads[ref.key] = { ...ref, entries: readEntries(raw.entries), usedAt: typeof raw.usedAt === 'number' ? raw.usedAt : now };
+  }
+  return { threads: pruneThreads(threads, now), current: readRef(stored.current) ?? GENERAL_THREAD };
+}
+
+/**
+ * The conversations another tab may have stored, or `null` when there is nothing readable to
+ * combine with; a write then stores this tab's conversations as they are.
+ */
+export function readStoredThreads(now = Date.now()): Record<string, ChatThread> | null {
+  try {
+    return readStored(now)?.threads ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** Read the stored conversations; anything malformed is skipped, and nothing stored means a fresh start. */
 export function loadChatState(now = Date.now()): ChatState {
   try {
-    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null') as { threads?: unknown; current?: unknown } | null;
-    if (stored) {
-      const threads: Record<string, ChatThread> = {};
-      for (const raw of Array.isArray(stored.threads) ? stored.threads as Array<{ entries?: unknown; usedAt?: unknown }> : []) {
-        const ref = readRef(raw);
-        if (ref) threads[ref.key] = { ...ref, entries: readEntries(raw.entries), usedAt: typeof raw.usedAt === 'number' ? raw.usedAt : now };
-      }
-      return { threads: pruneThreads(threads, now), current: readRef(stored.current) ?? GENERAL_THREAD };
-    }
+    const stored = readStored(now);
+    if (stored) return stored;
     // First run after the split: the old single conversation becomes the general one.
     const legacy = readEntries(JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY) ?? '[]'));
     return {
@@ -133,17 +156,64 @@ function storedEntry({ reading: _reading, ...entry }: ChatEntry): ChatEntry {
   };
 }
 
+/** A conversation as it is stored. */
+const storedThread = (thread: ChatThread): ChatThread => ({ ...thread, entries: thread.entries.slice(-STORED_ENTRIES).map(storedEntry) });
+
+/** Stored form of a conversation as text, kept per object: an unchanged conversation keeps its object. */
+const storedText = new WeakMap<ChatThread, string>();
+function storedForm(thread: ChatThread): string {
+  let text = storedText.get(thread);
+  if (text === undefined) {
+    text = JSON.stringify(storedThread(thread));
+    storedText.set(thread, text);
+  }
+  return text;
+}
+
+/**
+ * Combine this tab's conversations with the ones another tab stored, conversation by conversation.
+ *
+ * `base` is what this tab last stored or adopted. A conversation this tab changed or deleted since
+ * keeps its version here; any other takes the stored one, which another tab may have changed,
+ * created or deleted. A stored version that matches this tab's own is not adopted, because only
+ * this tab's copy holds what storage leaves out, such as the undo of a change just made.
+ *
+ * @returns `mine` itself when nothing is adopted.
+ */
+export function mergeChatThreads(
+  base: Record<string, ChatThread>, mine: Record<string, ChatThread>, theirs: Record<string, ChatThread>,
+): Record<string, ChatThread> {
+  const merged: Record<string, ChatThread> = {};
+  let adopted = false;
+  for (const key of new Set([...Object.keys(mine), ...Object.keys(theirs), ...Object.keys(base)])) {
+    const local = mine[key];
+    let next = local;
+    if (local === base[key]) {
+      const stored = theirs[key];
+      next = stored && local && storedForm(local) === storedForm(stored) ? local : stored;
+    }
+    if (next !== local) adopted = true;
+    if (next) merged[key] = next;
+  }
+  return adopted ? merged : mine;
+}
+
 /**
  * Store the conversations. When the browser refuses for lack of space, the least recently used
  * half is given up and the write is tried once more; storage is a convenience, so a second
  * failure is left alone.
+ *
+ * @param base What this tab last stored or adopted. When given, conversations this tab did not
+ * change since are taken from storage, so a write never undoes what another tab stored there.
  */
-export function saveChatState(state: ChatState): void {
+export function saveChatState(state: ChatState, base?: Record<string, ChatThread>): void {
   const write = (threads: ChatThread[]) => localStorage.setItem(STORAGE_KEY, JSON.stringify({
-    threads: threads.map(thread => ({ ...thread, entries: thread.entries.slice(-STORED_ENTRIES).map(storedEntry) })),
+    threads: threads.map(storedThread),
     current: state.current,
   }));
-  const threads = Object.values(state.threads).sort((a, b) => b.usedAt - a.usedAt);
+  const theirs = base ? readStoredThreads() : null;
+  const merged = base && theirs ? mergeChatThreads(base, state.threads, theirs) : state.threads;
+  const threads = Object.values(merged).sort((a, b) => b.usedAt - a.usedAt);
   try {
     write(threads);
     localStorage.removeItem(LEGACY_STORAGE_KEY);
