@@ -70,9 +70,13 @@ const ask = async (text: string) => {
   await act(async () => { fireEvent.keyDown(field, { key: 'Enter' }); });
 };
 
-async function clearConversation(name: string) {
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name })); });
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: `Clear conversation: ${name}` })); });
+async function openHistory(lang: 'en' | 'zh' = 'en') {
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: lang === 'zh' ? '历史记录' : 'History', expanded: false })); });
+}
+
+async function deleteConversation(name: string) {
+  await openHistory();
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: `Delete conversation: ${name}` })); });
 }
 
 it('decodes chat events across arbitrary chunk boundaries and skips malformed blocks', () => {
@@ -150,13 +154,17 @@ it('streams an answer, lists what the AI looked up and keeps the conversation', 
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Ask AI' })); });
   await waitFor(() => screen.getByText('What first?'));
 
-  assert.equal(screen.queryByRole('button', { name: /clear conversation/i }), null);
+  assert.equal(screen.queryByRole('button', { name: /delete conversation/i }), null);
   await act(async () => { fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Unsaved follow-up' } }); });
-  await clearConversation('General');
+  await deleteConversation('General');
   assert.equal(screen.queryByText('What first?'), null);
   assert.equal((screen.getByRole('textbox') as HTMLTextAreaElement).value, '');
   await waitFor(() => assert.deepEqual(stored().threads, []));
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Undo clear' })); });
+  await openHistory();
+  assert.ok(screen.getByText('No conversation history yet'));
+  assert.equal(screen.queryByRole('button', { name: 'Delete conversation: General' }), null);
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'History', expanded: true })); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Undo deletion' })); });
   assert.ok(screen.getByText('What first?'));
   assert.equal((screen.getByRole('textbox') as HTMLTextAreaElement).value, 'Unsaved follow-up');
   await waitFor(() => assert.deepEqual(stored().threads.map(thread => [thread.key, thread.entries.length]), [['general', 4]]));
@@ -253,18 +261,18 @@ it('expires clear undo and keeps a new draft if the conversation is restored', a
   await screen.findByText('Done.');
   const field = screen.getByRole('textbox') as HTMLTextAreaElement;
   await act(async () => { fireEvent.change(field, { target: { value: 'Original draft' } }); });
-  await clearConversation('General');
+  await deleteConversation('General');
   await act(async () => { fireEvent.change(field, { target: { value: 'New draft' } }); });
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Undo clear' })); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Undo deletion' })); });
   assert.equal(field.value, 'New draft');
   assert.ok(screen.getByText('Original question'));
 
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: Date.now() });
-  await clearConversation('General');
+  await deleteConversation('General');
   await act(async () => { t.mock.timers.tick(CHAT_CLEAR_UNDO_MS - 1); });
-  assert.ok(screen.getByRole('button', { name: 'Undo clear' }));
+  assert.ok(screen.getByRole('button', { name: 'Undo deletion' }));
   await act(async () => { t.mock.timers.tick(1); });
-  assert.equal(screen.queryByRole('button', { name: 'Undo clear' }), null);
+  assert.equal(screen.queryByRole('button', { name: 'Undo deletion' }), null);
   assert.equal(screen.queryByText('Original question'), null);
   assert.equal(loadChatState().threads.general, undefined);
 });
@@ -469,7 +477,7 @@ it('offers graded hints for the attached problem, then the solution, and a revie
   assert.equal(nextHint(), null);
 
   // Clearing the conversation starts the ladder over, and offers the review as a starter.
-  await clearConversation('#42 Trapping Rain Water');
+  await deleteConversation('#42 Trapping Rain Water');
   const review = await screen.findByRole('button', { name: 'Review practice' });
   await act(async () => { fireEvent.click(review); });
   await waitFor(() => assert.equal(requests.length, 6));
@@ -620,7 +628,7 @@ it('drops a preset that was still waiting when the panel closed', async () => {
   assert.equal(requests.length, 0);
 });
 
-it('keeps one conversation per problem and a general one, switched from the title', async () => {
+it('keeps one conversation per problem and a general one, switched from History', async () => {
   mock.method(api, 'getChatStatus', async () => ({ configured: true, provider: 'gemini', model: 'models/gemini-4-hydrogen' }));
   const requests = serveChat([{ type: 'context', context: {} }, { type: 'delta', text: 'ok' }, { type: 'done', provider: 'gemini', model: 'm' }]);
   setChatProblem(rain);
@@ -636,16 +644,15 @@ it('keeps one conversation per problem and a general one, switched from the titl
   assert.equal(requests[0].lang, 'zh');
   await waitFor(() => screen.getByRole('button', { name: '发送' }));
 
-  // The title lists the conversations; the general one is always there.
-  const openList = async () => { await act(async () => { fireEvent.click(screen.getByRole('button', { name: /切换对话|#42 Trapping Rain Water|通用对话/, expanded: false })); }); };
-  await openList();
+  // History contains saved conversations and offers a separate entry to start a general one.
+  await openHistory('zh');
   const rows = () => [...document.querySelectorAll('.chat-thread-row')].map(row => row.querySelector('.chat-thread-name')!.textContent);
-  assert.deepEqual(rows(), ['通用对话', '#42 Trapping Rain Water']);
+  assert.deepEqual(rows(), ['#42 Trapping Rain Water']);
   assert.equal(document.querySelector('.chat-thread-row [aria-current="true"] .chat-thread-name')!.textContent, '#42 Trapping Rain Water');
   assert.equal(document.querySelector('.chat-thread-time')!.textContent, '刚刚');
 
   // A question in the general conversation carries no problem and none of the other history.
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '通用对话' })); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '开始通用对话' })); });
   assert.equal(screen.getByRole('heading', { name: '通用对话' }).tagName, 'H2');
   assert.equal(screen.queryByText('ok'), null);
   await ask('动态规划怎么入门？');
@@ -654,20 +661,20 @@ it('keeps one conversation per problem and a general one, switched from the titl
   await waitFor(() => screen.getByRole('button', { name: '发送' }));
 
   // Back in the problem's conversation the hint ladder is where it was left.
-  await openList();
+  await openHistory('zh');
   await act(async () => { fireEvent.click(document.querySelector<HTMLElement>('.chat-thread-row:last-child .notes-dropdown-item')!); });
   assert.equal(screen.getByRole('heading', { name: '#42 Trapping Rain Water' }).tagName, 'H2');
   assert.equal(screen.getByRole('button', { name: '下一个提示（2/3）' }).tagName, 'BUTTON');
   assert.equal(screen.queryByText('动态规划怎么入门？'), null);
 
   // Clearing from the list removes only that conversation. Undo keeps the problem in view.
-  await openList();
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '清空对话：通用对话' })); });
+  await openHistory('zh');
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '删除对话：通用对话' })); });
   await waitFor(() => assert.deepEqual(
     (JSON.parse(localStorage.getItem('leetcode_tracker_chat_threads_v1')!) as { threads: Array<{ key: string }>; current: { key: string } }).threads.map(thread => thread.key),
     ['problem:42']));
   assert.equal(JSON.parse(localStorage.getItem('leetcode_tracker_chat_threads_v1')!).current.key, 'problem:42');
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '撤销清空' })); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '撤销删除' })); });
   assert.equal(loadChatState().threads.general.entries[0].content, '动态规划怎么入门？');
   assert.ok(screen.getByRole('heading', { name: '#42 Trapping Rain Water' }));
 });
@@ -695,9 +702,9 @@ it('lets an answer finish in its own conversation while another one is shown', a
   await ask('First');
   await waitFor(() => screen.getByText('Slow'));
   // Switch away mid-answer: the other conversation can be used at once.
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '#42 Trapping Rain Water' })); });
+  await openHistory();
   assert.equal(document.querySelector('.chat-thread-time')!.textContent, 'answering');
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'General' })); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Start a general conversation' })); });
   assert.equal(screen.queryByText('Slow'), null);
   await ask('Second');
   await waitFor(() => screen.getByText('Quick answer'));
@@ -708,10 +715,43 @@ it('lets an answer finish in its own conversation while another one is shown', a
   assert.deepEqual(JSON.parse(localStorage.getItem('leetcode_tracker_chat_threads_v1')!).threads, []);
   await act(async () => { release(); });
   await act(async () => { setChatProblem({ ...rain }); });
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'General' })); });
+  await openHistory();
   await act(async () => { fireEvent.click(document.querySelector<HTMLElement>('.chat-thread-row:last-child .notes-dropdown-item')!); });
   await waitFor(() => screen.getByText('Slow answer'));
   await waitFor(() => assert.equal(JSON.parse(localStorage.getItem('leetcode_tracker_chat_threads_v1')!).threads.length, 2));
+});
+
+it('shows the last question in History and persists a deletion and its undo during another answer', async () => {
+  const thread = problemThread(rain);
+  const question = { id: 'q', role: 'user' as const, content: 'Why use two pointers?', state: 'done' as const };
+  saveChatState({
+    threads: { [thread.key]: { ...thread, entries: [question], usedAt: Date.now() } },
+    current: GENERAL_THREAD,
+  });
+  mock.method(api, 'getChatStatus', async () => ({ configured: true, provider: 'openai', model: 'm' }));
+  let finish!: () => void;
+  globalThis.fetch = async () => new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encode([{ type: 'delta', text: 'Working on it' }]));
+      finish = () => { controller.enqueue(encode([{ type: 'done', provider: 'openai', model: 'm' }])); controller.close(); };
+    },
+  }));
+  await openPanel();
+  await ask('What should I practise?');
+  await screen.findByText('Working on it');
+  await openHistory();
+  const history = screen.getByRole('group', { name: 'Conversation history' });
+  assert.ok(history.contains(screen.getByText(question.content)));
+  const remove = screen.getByRole('button', { name: 'Delete conversation: #42 Trapping Rain Water' });
+  assert.equal(remove.textContent, 'Delete');
+  await act(async () => { fireEvent.click(remove); });
+  assert.equal(loadChatState().threads[thread.key], undefined);
+  assert.ok(screen.getByRole('button', { name: 'Stop answering' }));
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Undo deletion' })); });
+  assert.deepEqual(loadChatState().threads[thread.key]?.entries, [question]);
+  assert.equal(loadChatState().threads.general, undefined);
+  await act(async () => { finish(); });
+  await waitFor(() => assert.equal(loadChatState().threads.general?.entries.at(-1)?.content, 'Working on it'));
 });
 
 it('stores conversations per device, adopts the old single one and lets old ones go', () => {
@@ -954,7 +994,7 @@ it('offers to save a plain answer to the note and to find similar problems', asy
 
   // Proposing a change takes data access, so the offers go away with it.
   await act(async () => { setChatDataAccess(false); });
-  await clearConversation('#42 Trapping Rain Water');
+  await deleteConversation('#42 Trapping Rain Water');
   assert.equal(screen.queryByRole('button', { name: 'Find similar problems' }), null);
   assert.equal(screen.queryByText(/You confirm each change first/), null);
 });
@@ -1143,8 +1183,8 @@ it('opens a problem conversation from a row and follows the problem a timer star
   });
   await waitFor(() => screen.getByRole('heading', { name: '#42 Trapping Rain Water' }));
   // A later timer event for the same problem does not pull the user back from another conversation.
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '#42 Trapping Rain Water' })); });
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'General' })); });
+  await openHistory();
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Start a general conversation' })); });
   await act(async () => { window.dispatchEvent(new dom.window.CustomEvent(TIMER_CHANGE_EVENT)); });
   assert.ok(screen.getByRole('heading', { name: 'General' }));
 });
@@ -1209,7 +1249,7 @@ it('sends a preset about the problem it was asked about, even once another one i
   // The answer lands in the conversation of #15; the one in view stays the one the user chose.
   assert.ok(screen.getByRole('heading', { name: '#42 Trapping Rain Water' }));
   assert.equal(screen.queryByText(hintPrompt(1, 'en', threeSum)), null);
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '#42 Trapping Rain Water' })); });
+  await openHistory();
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^#15 3Sum/ })); });
   await waitFor(() => screen.getByText('ok'));
   assert.equal(screen.getByText(hintPrompt(1, 'en', threeSum)).tagName, 'P');
@@ -1298,6 +1338,6 @@ it('keeps conversations another tab stored, both when storing and while open', a
   await ask('Mine');
   await waitFor(() => screen.getByText('ok'));
   await waitFor(() => assert.deepEqual(Object.keys(loadChatState().threads).sort(), ['general', 'problem:42']));
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'General' })); });
+  await openHistory();
   assert.ok(screen.getByRole('button', { name: /^#42/ }));
 });

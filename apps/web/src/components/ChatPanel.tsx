@@ -4,14 +4,14 @@
  * The page behind stays usable, so the panel traps no focus and carries no overlay marker; global
  * shortcuts keep working whenever the cursor is outside its text field.
  *
- * It shows one conversation at a time: a problem's, or the general one. The title is the only
- * conversation control, a list of the recent ones.
+ * It shows one conversation at a time: a problem's, or the general one. History lists recent
+ * conversations for switching and deletion.
  *
  * A change the AI proposes appears under its answer as a card. The card states what will change
  * and nothing is written until its confirming button is pressed.
  */
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowUp, Check, ChevronDown, Lightbulb, Maximize2, Minimize2, NotebookPen, RefreshCw, Square, Trash2, X } from 'lucide-react';
+import { ArrowUp, Check, History, Lightbulb, Maximize2, Minimize2, NotebookPen, RefreshCw, Square, Trash2, X } from 'lucide-react';
 import { api, type LLMProvider } from '../api.ts';
 import { CHAT_MAX_MESSAGE_CHARS } from '../../../../packages/contracts/src/chat-limits.ts';
 import type { ChatStatus } from '../../../../packages/contracts/src/chat.ts';
@@ -292,7 +292,7 @@ export function ChatPanel({
   const zh = lang === 'zh';
   const dataAccess = useChatDataAccess();
   const problem = chat.current.problem ?? null;
-  const switcher = useActionPopover();
+  const switcher = useActionPopover({ align: 'end' });
   const { revision } = useWorkspace();
   const [connection, setConnection] = useState<ChatStatus | 'failed' | null>(null);
   const status = connection === 'failed' ? null : connection;
@@ -392,12 +392,12 @@ export function ChatPanel({
   const providerName = provider ? PROVIDER_NAMES[provider] : '';
   const nextHint = problem ? hintLabel(nextHintLevel(chat.entries, problem.frontendId), lang) : null;
   const title = threadName(chat.current, lang);
-  // The general conversation is always offered, and so is the current one before its first question.
-  const listed: ChatThreadRef[] = [
-    GENERAL_THREAD,
-    ...(problem && !chat.threads.some(thread => thread.key === chat.current.key) ? [chat.current] : []),
+  const general = chat.threads.find(thread => thread.key === GENERAL_THREAD.key);
+  const listed = [
+    ...(general ? [general] : []),
     ...chat.threads.filter(thread => thread.key !== GENERAL_THREAD.key),
   ];
+  const draftOnly = empty && Boolean(chat.draft);
   const todayQuestion = zh ? '今天的计划里，我应该先做哪道题？' : "Which problem in today's plan should I start with?";
   const weakQuestion = zh ? '我最近哪类题最薄弱？接下来该怎么补？' : 'Which topics am I weakest at lately, and how should I work on them?';
   // Questions that take a lookup are offered only while data access provides one.
@@ -411,6 +411,11 @@ export function ChatPanel({
       ? [{ label: todayQuestion, run: () => ask(todayQuestion) }, { label: weakQuestion, run: () => ask(weakQuestion) }]
       : [];
   const focusComposer = () => (ready ? input.current : panel.current)?.focus();
+  const openConversation = (thread: ChatThreadRef) => {
+    switcher.close();
+    chat.select(thread);
+    focusComposer();
+  };
   const clearConversation = (key: string) => {
     switcher.close();
     chat.clear(key);
@@ -442,34 +447,42 @@ export function ChatPanel({
         onMouseDown={event => { if (!(event.target as Element).closest('button, .chat-thread-menu')) event.preventDefault(); }}
       >
         <div className="chat-heading">
-          <h2>
-            <button type="button" className="chat-thread-button" title={zh ? '切换对话' : 'Switch conversation'} {...switcher.triggerProps}>
-              <span>{title}</span>
-              <ChevronDown size={14} aria-hidden="true" />
-            </button>
-          </h2>
+          <h2 title={title}>{title}</h2>
           {ready && <p>{providerName}{status?.model ? ` · ${status.model.replace(/^models\//, '')}` : ''}</p>}
         </div>
+        <button type="button" className="chat-thread-button" {...switcher.triggerProps}>
+          <History size={15} aria-hidden="true" />{zh ? '历史记录' : 'History'}
+        </button>
         {switcher.rendered && (
-          <div {...switcher.panelProps} className="notes-dropdown-menu chat-thread-menu" aria-label={zh ? '对话' : 'Conversations'}>
-            {listed.map(thread => {
+          <div {...switcher.panelProps} className="notes-dropdown-menu chat-thread-menu" role="group" aria-label={zh ? '对话历史' : 'Conversation history'}>
+            {!listed.length && !draftOnly && <p className="chat-history-empty">{zh ? '暂无历史对话' : 'No conversation history yet'}</p>}
+            {!general && problem && (
+              <button type="button" className="notes-dropdown-item" onClick={() => openConversation(GENERAL_THREAD)}>
+                {zh ? '开始通用对话' : 'Start a general conversation'}
+              </button>
+            )}
+            {(draftOnly ? [chat.current, ...listed] : listed).map(thread => {
               const name = threadName(thread, lang);
               const stored = chat.threads.find(candidate => candidate.key === thread.key);
+              const question = chat.entriesOf(thread.key).findLast(entry => entry.role === 'user');
+              const preview = question ? (presetLabel(question, lang) ?? question.content) : undefined;
               return (
                 <div key={thread.key} className="chat-thread-row">
                   <button type="button" className="notes-dropdown-item" aria-current={thread.key === chat.current.key ? 'true' : undefined}
-                    onClick={() => { switcher.close(); chat.select(thread); input.current?.focus(); }}>
-                    <span className="chat-thread-name">{name}</span>
+                    onClick={() => openConversation(thread)}>
+                    <span className="chat-thread-summary">
+                      <span className="chat-thread-name">{name}</span>
+                      {preview && <span className="chat-thread-preview">{preview.slice(0, 120)}</span>}
+                      {!stored && <span className="chat-thread-preview">{zh ? '未发送的草稿' : 'Unsent draft'}</span>}
+                    </span>
                     {stored && <span className="chat-thread-time">{stored.busy ? (zh ? '回答中' : 'answering') : lastUsed(stored.usedAt, lang)}</span>}
                   </button>
-                  {(stored || (thread.key === chat.current.key && chat.draft)) && (
-                    <button type="button" className="chat-thread-delete"
-                      title={zh ? `清空 ${name}` : `Clear ${name}`}
-                      aria-label={zh ? `清空对话：${name}` : `Clear conversation: ${name}`}
-                      onClick={() => clearConversation(thread.key)}>
-                      <Trash2 size={14} aria-hidden="true" />
-                    </button>
-                  )}
+                  <button type="button" className="chat-thread-delete"
+                    aria-label={zh ? `删除对话：${name}` : `Delete conversation: ${name}`}
+                    onClick={() => clearConversation(thread.key)}>
+                    <Trash2 size={14} aria-hidden="true" />
+                    {zh ? '删除' : 'Delete'}
+                  </button>
                 </div>
               );
             })}
@@ -482,11 +495,11 @@ export function ChatPanel({
 
       <div className="chat-clear-feedback" data-visible={chat.cleared ? 'true' : undefined}>
         <p role="status">{chat.cleared
-          ? (zh ? `已清空 ${threadName(chat.cleared, lang)}` : `Cleared ${threadName(chat.cleared, lang)}`)
+          ? (zh ? `已删除对话「${threadName(chat.cleared, lang)}」` : `Deleted conversation “${threadName(chat.cleared, lang)}”`)
           : null}</p>
         {chat.cleared && (
           <button type="button" className="text-link" onClick={() => { chat.undoClear(); focusComposer(); }}>
-            {zh ? '撤销清空' : 'Undo clear'}
+            {zh ? '撤销删除' : 'Undo deletion'}
           </button>
         )}
       </div>

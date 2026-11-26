@@ -215,12 +215,25 @@ export function useChat(lang: Language, options: ChatOptions = {}): ChatControll
    * changed here relative to this is written over its version (see `mergeChatThreads`).
    */
   const synced = useRef<{ threads: ChatState['threads']; current: ChatThreadRef | null }>({ threads: state.threads, current: null });
-  // Streaming rewrites an answer many times a second; store once nothing is in flight.
+  // Deletions and their undos must survive a reload even while another conversation is streaming.
+  const historyEdits = useRef(new Set<string>());
   const { threads: savedThreads, current: savedCurrent } = state;
   useEffect(() => {
-    if (busyKeys.size > 0 || (savedThreads === synced.current.threads && savedCurrent === synced.current.current)) return;
-    saveChatState({ threads: savedThreads, current: savedCurrent }, synced.current.threads);
-    synced.current = { threads: savedThreads, current: savedCurrent };
+    const base = synced.current.threads;
+    let threads = savedThreads;
+    if (busyKeys.size > 0) {
+      if (!historyEdits.current.size) return;
+      // Keep partial answers out of storage; write just the conversations the user managed.
+      threads = { ...base };
+      for (const key of historyEdits.current) {
+        if (savedThreads[key]) threads[key] = savedThreads[key];
+        else delete threads[key];
+      }
+    }
+    historyEdits.current.clear();
+    if (threads === base && savedCurrent === synced.current.current) return;
+    saveChatState({ threads, current: savedCurrent }, base);
+    synced.current = { threads, current: savedCurrent };
   }, [savedThreads, savedCurrent, busyKeys]);
   // Conversations another tab stored appear here too, except where this tab has its own changes.
   useEffect(() => {
@@ -437,6 +450,7 @@ export function useChat(lang: Language, options: ChatOptions = {}): ChatControll
   }, [openChange, patchChange]);
 
   const clear = useCallback((key: string = stateRef.current.current.key) => {
+    historyEdits.current.add(key);
     controllers.current.get(key)?.abort();
     controllers.current.delete(key);
     setBusyKeys(keys => { const next = new Set(keys); next.delete(key); return next; });
@@ -464,6 +478,7 @@ export function useChat(lang: Language, options: ChatOptions = {}): ChatControll
     const { key } = snapshot.ref;
     // Another tab can start this conversation again before its storage event arrives.
     const restarted = !synced.current.threads[key] && readStoredThreads()?.[key];
+    if (!restarted) historyEdits.current.add(key);
     const keep = new Set([...controllers.current.keys(), key]);
     setState(current => {
       const cleared = current.cleared;
