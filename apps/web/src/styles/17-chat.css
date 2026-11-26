@@ -124,7 +124,7 @@
   transform-origin: center bottom;
 }
 .chat-launcher.is-tucked .chat-launcher-button::before {
-  opacity: 0.4;
+  opacity: 0.25;
   transform: none;
 }
 /* The bar itself shows keyboard focus, and an answer still arriving while the panel is closed. */
