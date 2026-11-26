@@ -7,6 +7,7 @@ import { timeZoneSchema } from './time.ts';
 import {
   isSupportedGeminiModel,
   isSupportedOpenaiModel,
+  isValidDynamicOpenaiModel,
   normalizeGeminiModel,
   normalizeReasoningEffort,
 } from './llm-models.ts';
@@ -311,6 +312,24 @@ export type ThemePalette = z.infer<typeof themePaletteSchema>;
 /** Supported LLM provider types. */
 export const llmProviderSchema = z.enum(['gemini', 'openai', 'deepseek']);
 
+/** OpenAI credential source; see `OpenAIAuthMode`. */
+export const openaiAuthModeSchema = z.enum(['api_key', 'chatgpt']);
+
+/**
+ * Read-only state of this device's Sign in with ChatGPT connection.
+ * Never carries tokens, the issued client ID or the host ID.
+ */
+export const openaiOAuthSummarySchema = z.object({
+  /** A refresh token is stored for the signed-in account. */
+  connected: z.boolean(),
+  /** The stored session was rejected; the user must sign in again. */
+  reconnectRequired: z.boolean(),
+  accountEmail: z.string().nullable(),
+  /** The grant includes `chatgpt.tokens.use.direct`; sign-in alone does not allow inference. */
+  planScopeGranted: z.boolean(),
+});
+export type OpenAIOAuthSummary = z.infer<typeof openaiOAuthSummarySchema>;
+
 /**
  * Learner-wide review spacing policy. Mirrors `reviewPolicySchema` in `recommendations.ts`, which
  * cannot be imported here without a module cycle.
@@ -339,6 +358,11 @@ export const userSettingsSchema = z.object({
   openaiBaseUrl: z.string().max(256).nullable().optional(),
   openaiFallbackModels: z.array(z.string().max(100)).nullable().optional(),
   openaiReasoningEffort: z.string().max(32).nullable().optional(),
+  /** Effective credential source on this device (device-local, never synced). */
+  openaiAuthMode: openaiAuthModeSchema.optional(),
+  /** Model slug used with the ChatGPT plan on this device (device-local, never synced). */
+  openaiChatgptModel: z.string().max(100).nullable().optional(),
+  openaiOAuth: openaiOAuthSummarySchema.optional(),
   deepseekApiKey: z.string().max(256).nullable().optional(),
   deepseekModel: z.string().max(100).nullable().optional(),
   deepseekBaseUrl: z.string().max(256).nullable().optional(),
@@ -394,6 +418,8 @@ export const updateSettingsInputSchema = z.object({
   openaiBaseUrl: z.string().max(256).nullable().optional(),
   openaiFallbackModels: z.array(z.string().max(100)).nullable().optional(),
   openaiReasoningEffort: z.string().max(32).nullable().optional(),
+  openaiAuthMode: openaiAuthModeSchema.optional(),
+  openaiChatgptModel: z.string().max(100).nullable().optional(),
   deepseekApiKey: z.string().max(256).nullable().optional(),
   deepseekModel: z.string().max(100).nullable().optional(),
   deepseekBaseUrl: z.string().max(256).nullable().optional(),
@@ -418,6 +444,8 @@ export const updateSettingsInputSchema = z.object({
   data.openaiBaseUrl !== undefined ||
   data.openaiFallbackModels !== undefined ||
   data.openaiReasoningEffort !== undefined ||
+  data.openaiAuthMode !== undefined ||
+  data.openaiChatgptModel !== undefined ||
   data.deepseekApiKey !== undefined ||
   data.deepseekModel !== undefined ||
   data.deepseekBaseUrl !== undefined ||
@@ -430,6 +458,8 @@ export const updateSettingsInputSchema = z.object({
   message: 'Unsupported Gemini fallback model. Allowed model: models/gemini-4-hydrogen',
 }).refine(data => !data.openaiModel || !data.openaiModel.trim() || isSupportedOpenaiModel(data.openaiModel), {
   message: 'Unsupported OpenAI model. Allowed models: gpt-6-luna, gpt-6.1-terra',
+}).refine(data => !data.openaiChatgptModel || !data.openaiChatgptModel.trim() || isValidDynamicOpenaiModel(data.openaiChatgptModel), {
+  message: 'Invalid ChatGPT model identifier',
 }).refine(data => !data.geminiReasoningEffort || !data.geminiReasoningEffort.trim() || normalizeReasoningEffort('gemini', data.geminiReasoningEffort, data.geminiModel) !== null, {
   message: 'Unsupported Gemini thinkingLevel. Allowed values: low, medium, high, xhigh',
 }).refine(data => !data.openaiReasoningEffort || !data.openaiReasoningEffort.trim() || normalizeReasoningEffort('openai', data.openaiReasoningEffort) !== null, {

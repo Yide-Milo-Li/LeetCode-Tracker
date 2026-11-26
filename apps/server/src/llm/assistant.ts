@@ -21,6 +21,7 @@ import {
   normalizeOpenaiModel,
   resolveModelReasoningEffort,
   type CatalogProblem,
+  type OpenAIAuthMode,
   type ReasoningEffort,
 } from '../../../../packages/contracts/src/sync.ts';
 import {
@@ -43,6 +44,7 @@ import {
   type LLMAssistantOptions,
   type ILLMAssistant,
   type ILLMProvider,
+  type OpenAITokenSource,
   type ProviderConfig,
 } from './types.ts';
 import { GeminiProvider } from './providers/gemini.ts';
@@ -99,6 +101,9 @@ export class LLMAssistant implements ILLMAssistant {
     baseUrl?: string;
     fallbackModels: string[];
     reasoningEffort: ReasoningEffort;
+    /** OpenAI only: credential source and its Sign in with ChatGPT token source. */
+    authMode?: OpenAIAuthMode;
+    oauthTokenSource?: OpenAITokenSource;
   }>;
 
   private readonly maxRetriesPerModel: number;
@@ -185,6 +190,8 @@ export class LLMAssistant implements ILLMAssistant {
           openaiModel,
           openaiOpts?.reasoningEffort ?? (this.activeProviderType === 'openai' ? options.reasoningEffort : undefined) ?? process.env.OPENAI_REASONING_EFFORT
         ),
+        authMode: openaiOpts?.authMode ?? 'api_key',
+        oauthTokenSource: openaiOpts?.oauthTokenSource,
       },
       deepseek: {
         apiKey: deepseekOpts?.apiKey ?? (this.activeProviderType === 'deepseek' ? options.apiKey : undefined) ?? process.env.DEEPSEEK_API_KEY,
@@ -218,6 +225,8 @@ export class LLMAssistant implements ILLMAssistant {
         defaultModel: this.providerConfigs.openai.model,
         baseUrl: this.providerConfigs.openai.baseUrl,
         defaultReasoningEffort: this.providerConfigs.openai.reasoningEffort,
+        authMode: this.providerConfigs.openai.authMode,
+        oauthTokenSource: this.providerConfigs.openai.oauthTokenSource,
         customGenerateFn: options.customGenerateFn,
       }),
       deepseek: new DeepSeekProvider({
@@ -238,11 +247,24 @@ export class LLMAssistant implements ILLMAssistant {
   }
 
   /**
+   * Whether a provider has usable credentials: a ChatGPT session that grants plan usage for
+   * OpenAI in `chatgpt` mode, otherwise a non-empty API key.
+   *
+   * Every capability gates on this single check, so a provider that passes a connection test can
+   * never be treated as unconfigured by planning or imports.
+   */
+  private isProviderConfigured(providerType: LLMProviderType): boolean {
+    const cfg = this.providerConfigs[providerType];
+    if (providerType === 'openai' && cfg.authMode === 'chatgpt') return Boolean(cfg.oauthTokenSource?.isConnected());
+    return Boolean(cfg.apiKey && cfg.apiKey.trim().length > 0);
+  }
+
+  /**
    * Check status of currently active LLM provider.
    */
   public getStatus(): LLMAssistantStatus {
     const activeCfg = this.providerConfigs[this.activeProviderType];
-    const isConfigured = Boolean(activeCfg.apiKey && activeCfg.apiKey.trim().length > 0);
+    const isConfigured = this.isProviderConfigured(this.activeProviderType);
     return {
       configured: isConfigured,
       provider: this.activeProviderType,
@@ -321,12 +343,17 @@ export class LLMAssistant implements ILLMAssistant {
         } else if (pVal.model !== undefined) {
           cfg.reasoningEffort = resolveModelReasoningEffort(pKey, cfg.model, cfg.reasoningEffort);
         }
+        // The mode and its token source change together; a mode without a source is unconfigured.
+        if (pKey === 'openai' && pVal.authMode !== undefined) {
+          cfg.authMode = pVal.authMode;
+          cfg.oauthTokenSource = pVal.oauthTokenSource;
+        }
       }
     }
 
     // Replace adapters instead of mutating them: requests already running retain their credentials.
     this.providers.gemini = new GeminiProvider({ apiKey: this.providerConfigs.gemini.apiKey ?? '', defaultModel: this.providerConfigs.gemini.model, defaultReasoningEffort: this.providerConfigs.gemini.reasoningEffort, generateContentFn: this.hooks.generateContentFn });
-    this.providers.openai = new OpenAIProvider({ apiKey: this.providerConfigs.openai.apiKey ?? '', defaultModel: this.providerConfigs.openai.model, baseUrl: this.providerConfigs.openai.baseUrl, defaultReasoningEffort: this.providerConfigs.openai.reasoningEffort, customGenerateFn: this.hooks.customGenerateFn });
+    this.providers.openai = new OpenAIProvider({ apiKey: this.providerConfigs.openai.apiKey ?? '', defaultModel: this.providerConfigs.openai.model, baseUrl: this.providerConfigs.openai.baseUrl, defaultReasoningEffort: this.providerConfigs.openai.reasoningEffort, authMode: this.providerConfigs.openai.authMode, oauthTokenSource: this.providerConfigs.openai.oauthTokenSource, customGenerateFn: this.hooks.customGenerateFn });
     this.providers.deepseek = new DeepSeekProvider({ apiKey: this.providerConfigs.deepseek.apiKey ?? '', defaultModel: this.providerConfigs.deepseek.model, baseUrl: this.providerConfigs.deepseek.baseUrl, defaultReasoningEffort: this.providerConfigs.deepseek.reasoningEffort, customGenerateFn: this.hooks.customGenerateFn });
   }
 
@@ -348,13 +375,15 @@ export class LLMAssistant implements ILLMAssistant {
       params?.reasoningEffort ?? cfg.reasoningEffort
     );
     const started = Date.now();
+    const chatgpt = targetProviderType === 'openai' && (params?.authMode ?? cfg.authMode) === 'chatgpt';
     const result = await provider.testConnection({
+      authMode: params?.authMode,
       apiKey: params?.apiKey ?? cfg.apiKey,
       model: targetModel,
       baseUrl: params?.baseUrl ?? cfg.baseUrl,
       reasoningEffort: targetEffort,
     });
-    if ((params?.apiKey ?? cfg.apiKey)?.trim()) {
+    if (chatgpt ? cfg.oauthTokenSource?.isConnected() : (params?.apiKey ?? cfg.apiKey)?.trim()) {
       const usage = result.usage ?? normalizeUsage(targetProviderType);
       emitDiagnostic(this.diagnosticSink, { version: 1, at: started, operationId: randomUUID(), purpose: 'connectivity',
         attempt: 1, provider: targetProviderType, model: result.model, elapsedMs: Date.now() - started,
@@ -369,13 +398,15 @@ export class LLMAssistant implements ILLMAssistant {
    */
   public async formatProgressText(rawText: string, batchYear?: number): Promise<LLMFormatResult> {
     const activeCfg = this.providerConfigs[this.activeProviderType];
-    if (!activeCfg.apiKey || !activeCfg.apiKey.trim()) {
+    if (!this.isProviderConfigured(this.activeProviderType)) {
       const code = this.activeProviderType === 'gemini'
         ? 'GEMINI_NOT_CONFIGURED'
         : `${this.activeProviderType.toUpperCase()}_NOT_CONFIGURED`;
       throw new LLMError(
         code,
-        `${this.activeProviderType.toUpperCase()} API key is not configured. Please configure it in Settings or via environment variables.`,
+        this.activeProviderType === 'openai' && activeCfg.authMode === 'chatgpt'
+          ? 'ChatGPT is not connected. Sign in with ChatGPT in Settings, or switch OpenAI to an API key.'
+          : `${this.activeProviderType.toUpperCase()} API key is not configured. Please configure it in Settings or via environment variables.`,
         503,
         this.activeProviderType
       );
@@ -405,7 +436,7 @@ export class LLMAssistant implements ILLMAssistant {
   public async formatNoteMarkdown(fragments: AiFragment[]): Promise<{ groups: LayoutGroup[]; model: string; provider: LLMProviderType }> {
     const providerType = this.activeProviderType;
     const active = this.providerConfigs[providerType];
-    if (!active.apiKey?.trim()) throw new LLMError('NOTE_FORMAT_NOT_CONFIGURED', 'Configure an AI provider in Settings', 503, providerType);
+    if (!this.isProviderConfigured(providerType)) throw new LLMError('NOTE_FORMAT_NOT_CONFIGURED', 'Configure an AI provider in Settings', 503, providerType);
     const config = { ...active, fallbackModels: [...active.fallbackModels] };
     const generation = this.configurationGeneration;
     const provider = this.providers[providerType];
@@ -502,6 +533,8 @@ Do not invent or hallucinate problems not in the input. Leave unparsed lines unr
           return { ...res.decoded!, model: currentModel, provider: providerType };
         } catch (err) {
           clearTimeout(timeoutHandle);
+          // A lost ChatGPT session keeps its own code so the UI can offer to sign in again.
+          if (err instanceof LLMError) throw err;
           const error = err instanceof Error ? err : new Error(String(err));
           if (error instanceof ProviderOutputError) {
             throw new LLMError(error.reason === 'truncated' ? 'LLM_OUTPUT_TRUNCATED' : 'LLM_INVALID_OUTPUT', error.message, 422, providerType);
@@ -594,7 +627,7 @@ Do not invent or hallucinate problems not in the input. Leave unparsed lines unr
     const activeCfg = this.providerConfigs[providerType];
     const provider = this.providers[providerType];
 
-    if (!activeCfg.apiKey || !activeCfg.apiKey.trim() || problems.length === 0) {
+    if (!this.isProviderConfigured(providerType) || problems.length === 0) {
       return fallbackPlanContent(problems, params.rules);
     }
 
@@ -687,7 +720,7 @@ Do not invent or hallucinate problems not in the input. Leave unparsed lines unr
     const activeCfg = this.providerConfigs[providerType];
     const provider = this.providers[providerType];
 
-    if (!activeCfg.apiKey || !activeCfg.apiKey.trim() || !params.prompt.trim()) {
+    if (!this.isProviderConfigured(providerType) || !params.prompt.trim()) {
       return fallbackOverridePrompt(params.prompt, params.baseRules, params.knownTags);
     }
 
@@ -839,7 +872,7 @@ Return ONLY valid JSON conforming to the schema.`;
     const activeCfg = this.providerConfigs[providerType];
     const provider = this.providers[providerType];
 
-    if (!activeCfg.apiKey || !params.rules.preference?.trim() || params.candidates.length === 0) {
+    if (!this.isProviderConfigured(providerType) || !params.rules.preference?.trim() || params.candidates.length === 0) {
       return { selectedQuestionIds: [], model: 'local' };
     }
 

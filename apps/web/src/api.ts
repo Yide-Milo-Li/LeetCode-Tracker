@@ -47,6 +47,8 @@ import type {
   UpdateProgressSnapshotInput,
   UpdateSettingsInput,
   LLMProvider,
+  OpenAIAuthMode,
+  OpenAIOAuthSummary,
   UserSettings,
   SyncConfigInput,
   SyncPublishResult,
@@ -75,6 +77,12 @@ export interface GeminiStatus {
   /** The provider selected in Settings; any of the supported providers, not only Gemini. */
   provider?: LLMProvider;
   model: string;
+}
+
+/** A model offered to the signed-in ChatGPT account. */
+export interface ChatGPTModel {
+  slug: string;
+  displayName: string;
 }
 
 /** Result structure returned by Gemini formatting API. */
@@ -235,8 +243,33 @@ const settingsApi = {
     });
   },
 
+  /** Token-free state of this device's Sign in with ChatGPT connection. */
+  getOpenAIOAuthStatus(): Promise<OpenAIOAuthSummary> {
+    return request<OpenAIOAuthSummary>('/settings/openai/oauth/status');
+  },
+
+  /**
+   * Start a ChatGPT sign-in; open the returned URL in the system browser.
+   * `freshRegistration` registers a new client so a different account can be used.
+   */
+  connectOpenAIChatGPT(options: { freshRegistration?: boolean } = {}): Promise<{ authUrl: string }> {
+    return request<{ authUrl: string }>('/settings/openai/oauth/connect', { method: 'POST', body: JSON.stringify(options) });
+  },
+
+  /** Sign out of ChatGPT. `revocationConfirmed` is false when OpenAI could not be reached. */
+  disconnectOpenAIChatGPT(): Promise<OpenAIOAuthSummary & { revocationConfirmed: boolean }> {
+    return request<OpenAIOAuthSummary & { revocationConfirmed: boolean }>('/settings/openai/oauth/disconnect', { method: 'POST' });
+  },
+
+  /** Models the signed-in ChatGPT account can use, in the server's order. */
+  getOpenAIChatGPTModels(refresh = false): Promise<{ models: ChatGPTModel[] }> {
+    return request<{ models: ChatGPTModel[] }>(`/settings/openai/oauth/models${refresh ? '?refresh=1' : ''}`);
+  },
+
   testLlmConnection(params?: {
     provider?: LLMProvider;
+    /** OpenAI only: which credential source the visible draft uses. */
+    authMode?: OpenAIAuthMode;
     apiKey?: string;
     model?: string;
     baseUrl?: string;

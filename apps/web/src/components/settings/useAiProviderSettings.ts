@@ -5,7 +5,7 @@
  * survive switching between Settings tabs. Settings are loaded by the view's single mount fetch,
  * which hands the response to {@link AiProviderSettings.applyLoadedSettings}.
  */
-import React, { useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   defaultGeminiFallbackModels,
   defaultGeminiModel,
@@ -16,15 +16,28 @@ import {
   normalizeGeminiModel,
   normalizeOpenaiModel,
   resolveModelReasoningEffort,
+  type OpenAIAuthMode,
+  type OpenAIOAuthSummary,
   type ReasoningEffort,
 } from '../../../../../packages/contracts/src/sync.ts';
-import { api } from '../../api.ts';
+import { api, type ChatGPTModel } from '../../api.ts';
+import { openExternalUrl } from '../../platform/index.ts';
 import { translations, type Language } from '../../i18n.ts';
 import { localizeApiError } from '../../error-i18n.ts';
 import { useWorkspace } from '../../workspace.tsx';
 import { PROVIDER_PRESET_MODELS, type ProviderType } from './settings-model.ts';
 
 type LoadedSettings = Awaited<ReturnType<typeof api.getSettings>>;
+
+/** How often the Settings view re-reads the ChatGPT connection while a browser sign-in is pending. */
+const CHATGPT_AUTH_CHECK_MS = 3_000;
+/** Matches the server-side lifetime of an authorization `state`. */
+const CHATGPT_AUTH_TIMEOUT_MS = 10 * 60 * 1000;
+
+/** A ChatGPT session that can run requests: signed in, not rejected, plan usage granted. */
+export function isChatGPTUsable(oauth: OpenAIOAuthSummary | null | undefined): boolean {
+  return Boolean(oauth?.connected && !oauth.reconnectRequired && oauth.planScopeGranted);
+}
 
 /** Outcome of the last connection test; null when none is shown. */
 export type AiTestResult = { ok: boolean; model?: string; message?: string } | null;
@@ -67,6 +80,25 @@ export function useAiProviderSettings(lang: Language) {
   const [openaiReasoningEffort, setOpenaiReasoningEffort] = useState<ReasoningEffort>(
     () => getDefaultReasoningEffort('openai', defaultOpenaiModel)
   );
+
+  // OpenAI "Sign in with ChatGPT" state (device-local; the API key draft above is kept alongside it)
+  const [openaiAuthMode, setOpenaiAuthMode] = useState<OpenAIAuthMode>('api_key');
+  const [openaiOAuth, setOpenaiOAuth] = useState<OpenAIOAuthSummary | null>(null);
+  const [chatgptModel, setChatgptModel] = useState('');
+  const [chatgptModels, setChatgptModels] = useState<ChatGPTModel[]>([]);
+  const [loadingChatgptModels, setLoadingChatgptModels] = useState(false);
+  /** Epoch ms at which a pending browser sign-in is abandoned; null when none is pending. */
+  const [chatgptAuthDeadline, setChatgptAuthDeadline] = useState<number | null>(null);
+  const [chatgptBusy, setChatgptBusy] = useState(false);
+  const [chatgptNotice, setChatgptNotice] = useState('');
+  const [chatgptError, setChatgptError] = useState('');
+  /** Whether a session existed when the pending sign-in started, to tell "declined plan use" from "unchanged". */
+  const chatgptWasConnected = useRef(false);
+  // Read through a ref so the polling effect does not restart when the workspace object changes.
+  const notifyMutation = useRef(workspace.notifyMutation);
+  notifyMutation.current = workspace.notifyMutation;
+  const usingChatGPT = provider === 'openai' && openaiAuthMode === 'chatgpt';
+  const chatgptUsable = isChatGPTUsable(openaiOAuth);
 
   // DeepSeek state
   const [deepseekApiKey, setDeepseekApiKey] = useState('');
@@ -186,6 +218,169 @@ export function useAiProviderSettings(lang: Language) {
     }
   };
 
+  /** Switch the OpenAI credential source shown in the form; it is stored on save. */
+  const selectOpenaiAuthMode = (mode: OpenAIAuthMode) => {
+    markAiDirty();
+    setOpenaiAuthMode(mode);
+    setShowApiKey(false);
+  };
+
+  /** Choose the model used with the ChatGPT plan. */
+  const selectChatgptModel = (slug: string) => {
+    markAiDirty();
+    setChatgptModel(slug);
+  };
+
+  /**
+   * Load the signed-in account's model list. A failure leaves the previous list in place and is
+   * reported in `chatgptError`.
+   */
+  const loadChatgptModels = useCallback(async (refresh = false) => {
+    setLoadingChatgptModels(true);
+    try {
+      const { models } = await api.getOpenAIChatGPTModels(refresh);
+      setChatgptModels(models);
+      // An unset or no-longer-offered model falls back to the account's first listed model.
+      setChatgptModel((current) => (models.length > 0 && !models.some((m) => m.slug === current) ? models[0].slug : current));
+      setChatgptError('');
+    } catch (err) {
+      setChatgptError(localizeApiError(err, lang));
+    } finally {
+      setLoadingChatgptModels(false);
+    }
+  }, [lang]);
+
+  // The model picker needs the account's list as soon as a usable session exists.
+  useEffect(() => {
+    if (chatgptUsable) void loadChatgptModels();
+    else setChatgptModels([]);
+  }, [chatgptUsable, loadChatgptModels]);
+
+  // While the browser sign-in is pending, poll the local server until the callback landed.
+  useEffect(() => {
+    if (chatgptAuthDeadline === null) return;
+    const deadline = chatgptAuthDeadline;
+    const zh = lang === 'zh';
+    let cancelled = false;
+    let reading = false;
+
+    async function refreshStatus() {
+      if (reading || document.visibilityState === 'hidden') return;
+      reading = true;
+      try {
+        const next = await api.getOpenAIOAuthStatus();
+        if (cancelled) return;
+        if (isChatGPTUsable(next)) {
+          setOpenaiOAuth(next);
+          setChatgptAuthDeadline(null);
+          setOpenaiAuthMode('chatgpt');
+          setChatgptError('');
+          // The server picked a default model during sign-in; adopt it without clobbering other drafts.
+          const settings = await api.getSettings().catch(() => null);
+          if (cancelled) return;
+          if (settings?.openaiChatgptModel) setChatgptModel(settings.openaiChatgptModel);
+          // Signing in switches this device to the ChatGPT plan at once when OpenAI is already the saved provider.
+          const active = settings?.llmProvider === 'openai' && settings.openaiAuthMode === 'chatgpt';
+          if (active) setActiveProvider('openai');
+          setChatgptNotice(active
+            ? (zh
+                ? '正在使用您的 ChatGPT 套餐。符合条件的 AI 请求将计入该套餐，可在 ChatGPT 设置中管理用量。'
+                : "You're using your ChatGPT plan. Eligible AI requests in this app use it; manage usage in ChatGPT settings.")
+            : (zh ? 'ChatGPT 已连接。保存后即可将 OpenAI 用于 AI 功能。' : 'ChatGPT connected. Save to use OpenAI for AI features.'));
+          notifyMutation.current();
+          return;
+        }
+        // Signed in without allowing plan usage: a new sign-in, but not one that can run requests.
+        if (next.connected && !next.reconnectRequired && !next.planScopeGranted && !chatgptWasConnected.current) {
+          setOpenaiOAuth(next);
+          setChatgptAuthDeadline(null);
+          setChatgptNotice('');
+          setChatgptError(zh
+            ? '已登录，但未允许使用 ChatGPT 套餐。请重新登录并同意授权，或改用 API 密钥。'
+            : 'You signed in, but did not allow use of your ChatGPT plan. Sign in again and allow it, or use an API key instead.');
+          return;
+        }
+      } catch {
+        // A transient local status read can be retried while authorization is pending.
+      } finally {
+        reading = false;
+      }
+      if (!cancelled && Date.now() >= deadline) {
+        setChatgptAuthDeadline(null);
+        setChatgptNotice('');
+        setChatgptError(zh ? 'ChatGPT 登录未完成，请重试。' : 'ChatGPT sign-in did not finish. Try again.');
+      }
+    }
+
+    const refresh = () => void refreshStatus();
+    const timer = window.setInterval(refresh, CHATGPT_AUTH_CHECK_MS);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    refresh();
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [chatgptAuthDeadline, lang]);
+
+  /**
+   * Open the ChatGPT sign-in in the system browser and start waiting for its callback.
+   *
+   * @param freshRegistration Register a new client so a different ChatGPT account can be used.
+   */
+  async function connectChatgpt(freshRegistration = false) {
+    if (chatgptBusy) return;
+    const zh = lang === 'zh';
+    setChatgptBusy(true);
+    setChatgptError('');
+    setChatgptNotice('');
+    setChatgptAuthDeadline(null);
+    try {
+      chatgptWasConnected.current = Boolean(openaiOAuth?.connected) && !freshRegistration;
+      const deadline = Date.now() + CHATGPT_AUTH_TIMEOUT_MS;
+      const { authUrl } = await api.connectOpenAIChatGPT({ freshRegistration });
+      await openExternalUrl(authUrl);
+      setChatgptAuthDeadline(deadline);
+      setChatgptNotice(zh ? '请在浏览器中完成 ChatGPT 登录。连接状态会自动更新。' : 'Finish signing in to ChatGPT in your browser. This panel will update automatically.');
+    } catch (err) {
+      setChatgptError(localizeApiError(err, lang, zh ? '无法开始 ChatGPT 登录。' : 'Could not start ChatGPT sign-in.'));
+    } finally {
+      setChatgptBusy(false);
+    }
+  }
+
+  /** Stop waiting for a pending browser sign-in; a later callback for it is still accepted by the server. */
+  const cancelChatgptAuth = () => {
+    setChatgptAuthDeadline(null);
+    setChatgptNotice('');
+  };
+
+  /** Sign out of ChatGPT on this device; the stored OpenAI API key is not touched. */
+  async function disconnectChatgpt() {
+    if (chatgptBusy) return;
+    const zh = lang === 'zh';
+    setChatgptBusy(true);
+    setChatgptError('');
+    setChatgptAuthDeadline(null);
+    try {
+      const { revocationConfirmed, ...next } = await api.disconnectOpenAIChatGPT();
+      setOpenaiOAuth(next);
+      setActiveProvider((current) => (current === 'openai' && openaiAuthMode === 'chatgpt' ? null : current));
+      setChatgptNotice(revocationConfirmed
+        ? (zh ? '已断开 ChatGPT。' : 'ChatGPT disconnected.')
+        : (zh
+            ? '已在本机断开 ChatGPT，但未能确认 OpenAI 端的撤销。可在 ChatGPT 设置中断开此应用。'
+            : 'ChatGPT was disconnected on this device, but OpenAI did not confirm the revocation. You can disconnect this app in ChatGPT settings.'));
+      workspace.notifyMutation();
+    } catch (err) {
+      setChatgptError(localizeApiError(err, lang, zh ? '断开失败。' : 'Disconnect failed.'));
+    } finally {
+      setChatgptBusy(false);
+    }
+  }
+
   /**
    * Hydrate AI state from a settings response.
    *
@@ -197,8 +392,16 @@ export function useAiProviderSettings(lang: Language) {
     const savedProvider = settings.llmProvider ?? 'gemini';
     const savedKey =
       savedProvider === 'gemini' ? settings.geminiApiKey : savedProvider === 'openai' ? settings.openaiApiKey : settings.deepseekApiKey;
-    setActiveProvider(savedKey ? savedProvider : null);
+    // OpenAI in ChatGPT mode is ready when the session is usable, regardless of a stored key.
+    const savedReady = savedProvider === 'openai' && settings.openaiAuthMode === 'chatgpt'
+      ? isChatGPTUsable(settings.openaiOAuth)
+      : Boolean(savedKey);
+    setActiveProvider(savedReady ? savedProvider : null);
+    // Connection state is server-owned, so it refreshes even while the form has unsaved edits.
+    setOpenaiOAuth(settings.openaiOAuth ?? null);
     if (dirtyAi.current) return;
+    setOpenaiAuthMode(settings.openaiAuthMode ?? 'api_key');
+    setChatgptModel(settings.openaiChatgptModel ?? '');
     if (settings.llmProvider) {
       setProvider(settings.llmProvider);
     }
@@ -275,6 +478,9 @@ export function useAiProviderSettings(lang: Language) {
         openaiBaseUrl: openaiBaseUrl.trim() || null,
         openaiFallbackModels: cleanOpenaiFb,
         openaiReasoningEffort,
+        // The API key above is saved unchanged in ChatGPT mode, so switching back needs no re-entry.
+        openaiAuthMode,
+        openaiChatgptModel: chatgptModel.trim() || null,
         deepseekApiKey: deepseekApiKey.trim() || null,
         deepseekModel: deepseekPrimaryModel.trim() || null,
         deepseekBaseUrl: deepseekBaseUrl.trim() || null,
@@ -284,7 +490,7 @@ export function useAiProviderSettings(lang: Language) {
       setGeminiFallbackModels(cleanGeminiFb);
       setOpenaiFallbackModels(cleanOpenaiFb);
       setDeepseekFallbackModels(cleanDeepseekFb);
-      setActiveProvider(currentApiKey.trim() ? provider : null);
+      setActiveProvider((usingChatGPT ? chatgptUsable : currentApiKey.trim()) ? provider : null);
       workspace.notifyMutation();
       setAiSaved(true);
       dirtyAi.current = false;
@@ -295,14 +501,24 @@ export function useAiProviderSettings(lang: Language) {
     }
   }
 
+  /** The visible draft has credentials to test: a usable ChatGPT session or a non-empty key. */
+  const canTestConnection = usingChatGPT ? chatgptUsable : Boolean(currentApiKey.trim());
+
   /** Send a test ping to verify configured or drafted key and model connectivity. */
   async function handleTestConnection() {
-    if (!currentApiKey.trim()) return;
+    if (!canTestConnection) return;
     setTestingAi(true);
     setTestResult(null);
     setAiError('');
     try {
-      const res = provider === 'gemini'
+      const res = usingChatGPT
+        ? await api.testLlmConnection({
+            provider: 'openai',
+            authMode: 'chatgpt',
+            model: chatgptModel.trim() || undefined,
+            reasoningEffort: currentReasoningEffort,
+          })
+        : provider === 'gemini'
         ? await api.testGeminiConnection({
             apiKey: currentApiKey.trim(),
             model: currentPrimaryModel.trim() || undefined,
@@ -310,6 +526,7 @@ export function useAiProviderSettings(lang: Language) {
           })
         : await api.testLlmConnection({
             provider,
+            ...(provider === 'openai' ? { authMode: 'api_key' as const } : {}),
             apiKey: currentApiKey.trim(),
             model: currentPrimaryModel.trim() || undefined,
             baseUrl: currentBaseUrl.trim() || undefined,
@@ -358,6 +575,24 @@ export function useAiProviderSettings(lang: Language) {
     applyLoadedSettings,
     saveAiConfig,
     handleTestConnection,
+    canTestConnection,
+    openaiAuthMode,
+    selectOpenaiAuthMode,
+    usingChatGPT,
+    openaiOAuth,
+    chatgptUsable,
+    chatgptModel,
+    selectChatgptModel,
+    chatgptModels,
+    loadingChatgptModels,
+    loadChatgptModels,
+    chatgptAuthPending: chatgptAuthDeadline !== null,
+    chatgptBusy,
+    chatgptNotice,
+    chatgptError,
+    connectChatgpt,
+    cancelChatgptAuth,
+    disconnectChatgpt,
   };
 }
 

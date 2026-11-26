@@ -42,6 +42,7 @@ Publishing captures a snapshot before starting the upload. You can continue reco
 
 - AI provider API keys (`*_api_key`, `*_secret`, `*_token` settings).
 - All `sync_*` settings: device id and name, sync method, folder path, last synced snapshot, Google OAuth client and refresh token.
+- All `openai_oauth_*` settings: the [Sign in with ChatGPT](llm-providers.md#sign-in-with-chatgpt) host ID, issued client ID, tokens, account, sign-in method and ChatGPT model. Sign in on each device separately.
 - Browser-local UI state (sidebar state, first-run completion).
 
 ### Detecting local changes

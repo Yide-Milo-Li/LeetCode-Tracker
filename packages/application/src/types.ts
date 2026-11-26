@@ -4,7 +4,7 @@
  */
 import type { ProgressCandidateInput } from '../../contracts/src/practice.ts';
 import type { Bilingual, Rules, RulePatch } from '../../contracts/src/recommendations.ts';
-import type { CatalogProblem, ReasoningEffort } from '../../contracts/src/sync.ts';
+import type { CatalogProblem, OpenAIAuthMode, ReasoningEffort } from '../../contracts/src/sync.ts';
 import type { AiFragment, LayoutGroup } from '../../markdown/src/index.ts';
 
 export type LLMProviderType = 'gemini' | 'openai' | 'deepseek';
@@ -93,9 +93,30 @@ export interface GenerateContentOutput {
   usage?: import('./telemetry.ts').LLMUsage;
 }
 
+/**
+ * Source of Sign in with ChatGPT access tokens for the OpenAI provider.
+ *
+ * Owned by an application-level service so cached tokens, the single-flight refresh and rotated
+ * refresh tokens survive provider adapters being rebuilt on every configuration change.
+ */
+export interface OpenAITokenSource {
+  /** True when a stored session authorizes ChatGPT plan usage; makes no network request. */
+  isConnected(): boolean;
+  /**
+   * Return a valid access token, refreshing it when needed.
+   *
+   * @throws LLMError `OPENAI_OAUTH_RECONNECT_REQUIRED` when the user must sign in again.
+   */
+  get(signal?: AbortSignal): Promise<string>;
+  /** Forget a token the API rejected so the next `get` refreshes. */
+  invalidate(rejectedToken: string): void;
+}
+
 /** Parameters for testing provider connectivity. */
 export interface ConnectionTestParams {
   provider?: LLMProviderType;
+  /** OpenAI only: test the ChatGPT sign-in or the drafted API key regardless of the saved mode. */
+  authMode?: OpenAIAuthMode;
   apiKey?: string;
   model?: string;
   baseUrl?: string;
@@ -116,6 +137,8 @@ export interface ILLMProvider {
   readonly providerId: LLMProviderType;
   generateContent(params: GenerateContentParams): Promise<GenerateContentOutput>;
   testConnection(params?: ConnectionTestParams): Promise<ConnectionTestResult>;
+  /** Whether usable credentials exist. Absent means "has a non-empty API key". */
+  isConfigured?(): boolean;
   isFatalAuthError(err: Error): boolean;
   isModelNotFoundError(err: Error): boolean;
 }
@@ -156,6 +179,10 @@ export interface ProviderConfig {
   baseUrl?: string;
   fallbackModels?: string[];
   reasoningEffort?: ReasoningEffort;
+  /** OpenAI only. Absent means `api_key`. */
+  authMode?: OpenAIAuthMode;
+  /** OpenAI only. Required for `chatgpt` mode; ignored otherwise. */
+  oauthTokenSource?: OpenAITokenSource;
 }
 
 /** Options for configuring the LLMAssistant. */
