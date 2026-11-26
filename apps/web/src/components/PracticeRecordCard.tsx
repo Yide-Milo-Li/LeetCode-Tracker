@@ -7,6 +7,7 @@ import { api, type PracticeRecord } from '../api.ts';
 import type { Language } from '../i18n.ts';
 import { localizeApiError } from '../error-i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
+import { attemptLabel } from '../chat/chat-presets.ts';
 import { Feedback, IconButton } from './ui.tsx';
 
 /**
@@ -121,6 +122,17 @@ export function PracticeRecordCard({
       {record.status === 'active' && (
         <div className="action-row">
           <IconButton icon={Pencil} label={zh ? '编辑记录' : 'Edit record'} onClick={edit} />
+          {workspace.askAi && (
+            <button
+              className="btn btn-secondary"
+              onClick={() => workspace.askAi?.({
+                problem: { frontendId: record.questionFrontendId, title: record.problemTitle },
+                action: { kind: 'review', attempt: attemptLabel(record, lang, workspace.timezone) },
+              })}
+            >
+              {zh ? 'AI 复盘' : 'Review with AI'}
+            </button>
+          )}
           <button className="btn btn-danger" onClick={() => setConfirming(true)}>
             {zh ? '撤销此记录' : 'Revoke this record'}
           </button>

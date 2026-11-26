@@ -314,3 +314,227 @@ it('drags the launcher to an edge, remembers it and tucks away when left alone',
   await act(async () => { fireEvent.keyDown(window, { key: 'j', ctrlKey: true }); });
   assert.equal((await waitFor(() => screen.getByRole('complementary'))).style.left, `${width - 420 - 8}px`);
 });
+
+const { attemptLabel, hintLabel, hintPrompt, nextHintLevel, reviewPrompt } = await import('../apps/web/src/chat/chat-presets.ts');
+const { WorkspaceContext } = await import('../apps/web/src/workspace.tsx');
+const { TodayProblemRow } = await import('../apps/web/src/components/TodayProblemRow.tsx');
+const { PracticeRecordCard } = await import('../apps/web/src/components/PracticeRecordCard.tsx');
+
+const rain = { frontendId: '42', title: 'Trapping Rain Water' };
+const threeSum = { frontendId: '15', title: '3Sum' };
+const answer = (text: string): ChatStreamEvent[] => [
+  { type: 'context', context: { problem: { frontendId: '42', title: 'Trapping Rain Water' } } },
+  { type: 'delta', text },
+  { type: 'done', provider: 'openai', model: 'gpt-6-luna' },
+];
+
+it('climbs the hint ladder one answered rung at a time and describes an attempt', () => {
+  const turn = (level: number, text: string, frontendId = '42') => [
+    { id: `q${level}${Math.random()}`, role: 'user' as const, content: hintPrompt(level, 'en', rain), state: 'done' as const, hint: { frontendId, level } },
+    { id: `a${level}${Math.random()}`, role: 'assistant' as const, content: text, state: text ? 'done' as const : 'error' as const },
+  ];
+  assert.equal(nextHintLevel([], '42'), 1);
+  assert.equal(nextHintLevel(turn(1, 'Think about two pointers.'), '42'), 2);
+  // A rung whose answer produced no text is asked again, and each problem has its own ladder.
+  assert.equal(nextHintLevel([...turn(1, 'ok'), ...turn(2, '')], '42'), 2);
+  assert.equal(nextHintLevel(turn(1, 'ok'), '11'), 1);
+  assert.equal(nextHintLevel([1, 2, 3, 4].flatMap(level => turn(level, 'ok')), '42'), 5);
+  // A tag that came back from storage in the wrong shape is ignored.
+  const [question, reply] = turn(1, 'ok');
+  assert.equal(nextHintLevel([{ ...question, hint: { frontendId: '42', level: 'x' } }, reply] as never, '42'), 1);
+
+  assert.deepEqual([1, 2, 3, 4, 5].map(level => hintLabel(level, 'en')),
+    ['Give me a hint', 'Next hint (2/3)', 'Next hint (3/3)', 'Show the solution', null]);
+  assert.deepEqual([1, 2, 3, 4, 5].map(level => hintLabel(level, 'zh')),
+    ['给个提示', '下一个提示（2/3）', '下一个提示（3/3）', '看完整解法', null]);
+  assert.match(hintPrompt(1, 'en', rain), /^Hint 1 of 3 for #42 Trapping Rain Water: /);
+  assert.match(hintPrompt(3, 'zh', rain), /^#42 Trapping Rain Water 的提示 3\/3：/);
+  // A problem known only by its number is named by the number.
+  assert.match(hintPrompt(4, 'en', { frontendId: '7' }), /^Show me the full solution to #7 with code\./);
+
+  const record = { practicedAt: '2026-11-20', timePrecision: 'date' as const, completed: true, outcome: 'assisted' as const, durationMinutes: 35 };
+  assert.equal(attemptLabel(record, 'en', 'UTC'), '2026-11-20 (solved with help, 35 min)');
+  assert.equal(attemptLabel(record, 'zh', 'UTC'), '2026-11-20（借助提示或题解完成，35 分钟）');
+  const timed = { practicedAt: '2026-11-20T15:04:00Z', timePrecision: 'datetime' as const, completed: false, outcome: null, durationMinutes: null };
+  assert.match(attemptLabel(timed, 'en', 'Asia/Shanghai'), /^Nov 20, 2026, 11:04\sPM \(not solved\)$/);
+  // Nothing recorded beyond the time: the label is the time alone.
+  assert.match(attemptLabel({ ...timed, completed: true }, 'en', null), /^Nov 20, 2026, 3:04\sPM$/);
+  assert.match(reviewPrompt('en', rain), /^Review my latest attempt at #42 Trapping Rain Water\./);
+  assert.match(reviewPrompt('zh', rain, '2026-11-20（未解出）'), /^复盘我做 #42 Trapping Rain Water 的这次练习：2026-11-20（未解出）。/);
+});
+
+it('offers graded hints for the attached problem, then the solution and a review', async () => {
+  mock.method(api, 'getChatStatus', async () => ({ configured: true, provider: 'openai', model: 'gpt-6-luna' }));
+  const requests = serveChat(
+    answer('Think about what bounds the water.'),
+    // The second rung fails before any text arrives.
+    [{ type: 'context', context: {} }, { type: 'error', error: 'CHAT_UNAVAILABLE', message: 'The AI provider is unavailable.' }],
+    answer('ok'),
+  );
+  setChatProblem({ frontendId: '42', title: 'Trapping Rain Water' });
+  await openPanel();
+  const lastQuestion = () => requests.at(-1)!.messages.at(-1)!.content;
+  const quick = () => screen.queryByRole('group', { name: 'Quick questions about this problem' });
+  /** Click a quick question once the previous answer has finished. */
+  const press = async (name: string, sent: number) => {
+    await waitFor(() => assert.equal((screen.getByRole('button', { name }) as HTMLButtonElement).disabled, false));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name })); });
+    await waitFor(() => assert.equal(requests.length, sent));
+  };
+
+  // The empty conversation offers the presets as starters; the compact row appears afterwards.
+  assert.equal(quick(), null);
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Give me a hint for this problem without the solution' })); });
+  await waitFor(() => screen.getByText('Think about what bounds the water.'));
+  assert.deepEqual(requests[0], { messages: [{ role: 'user', content: hintPrompt(1, 'en', rain) }], context: { frontendId: '42' }, lang: 'en' });
+  // The preset is shown as the user's own message, word for word.
+  assert.equal(screen.getByText(hintPrompt(1, 'en', rain)).tagName, 'P');
+
+  await press('Next hint (2/3)', 2);
+  assert.equal(lastQuestion(), hintPrompt(2, 'en', rain));
+  await waitFor(() => screen.getByRole('alert'));
+  // The failed rung is offered again instead of being skipped.
+  await press('Next hint (2/3)', 3);
+  assert.equal(lastQuestion(), hintPrompt(2, 'en', rain));
+  await press('Next hint (3/3)', 4);
+  assert.equal(lastQuestion(), hintPrompt(3, 'en', rain));
+  await press('Show the solution', 5);
+  assert.equal(lastQuestion(), hintPrompt(4, 'en', rain));
+  await waitFor(() => assert.equal((screen.getByRole('button', { name: 'Review my latest attempt' }) as HTMLButtonElement).disabled, false));
+  // Nothing is left on the ladder; the review stays available.
+  assert.equal(screen.queryByRole('button', { name: /hint|solution/i }), null);
+  await press('Review my latest attempt', 6);
+  assert.equal(lastQuestion(), reviewPrompt('en', rain));
+  assert.deepEqual(requests[5].context, { frontendId: '42' });
+
+  // Leaving the problem out removes its quick questions.
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '#42 Trapping Rain Water' })); });
+  assert.equal(quick(), null);
+
+  // A new conversation starts the ladder over.
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '#42 Trapping Rain Water' })); });
+  await waitFor(() => screen.getByRole('button', { name: 'Send' }));
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'New chat' })); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Give me a hint for this problem without the solution' })); });
+  await waitFor(() => assert.equal(requests.length, 7));
+  assert.deepEqual(requests[6].messages, [{ role: 'user', content: hintPrompt(1, 'en', rain) }]);
+});
+
+it('opens on the asked problem and sends the preset when another view asks', async () => {
+  mock.method(api, 'getChatStatus', async () => ({ configured: true, provider: 'gemini', model: 'models/gemini-4-hydrogen' }));
+  const requests = serveChat(answer('ok'));
+  const launcher = (ask?: Parameters<typeof ChatLauncher>[0]['ask']) => <ChatLauncher lang="zh" onToday={false} onOpenAiSettings={() => {}} ask={ask} />;
+  let view!: ReturnType<typeof render>;
+  await act(async () => { view = render(launcher()); });
+  assert.equal(screen.queryByRole('complementary'), null);
+
+  await act(async () => { view.rerender(launcher({ id: 1, problem: { frontendId: '15', title: '3Sum' }, action: { kind: 'hint' } })); });
+  await waitFor(() => assert.equal(requests.length, 1));
+  assert.deepEqual(requests[0], { messages: [{ role: 'user', content: hintPrompt(1, 'zh', threeSum) }], context: { frontendId: '15' }, lang: 'zh' });
+  assert.equal(screen.getByRole('button', { name: '#15 3Sum' }).getAttribute('aria-pressed'), 'true');
+
+  // A later request continues the conversation, here with a review of one named attempt.
+  await waitFor(() => screen.getByRole('button', { name: '发送' }));
+  await act(async () => { fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Escape' }); });
+  await act(async () => {
+    view.rerender(launcher({ id: 2, problem: { frontendId: '15', title: '3Sum' }, action: { kind: 'review', attempt: '2026-11-20（未解出）' } }));
+  });
+  await waitFor(() => assert.equal(requests.length, 2));
+  assert.equal(requests[1].messages.length, 3);
+  assert.equal(requests[1].messages[2].content, reviewPrompt('zh', threeSum, '2026-11-20（未解出）'));
+
+  // Opening another problem's note replaces the asked problem, and leaving it leaves none.
+  await act(async () => { setChatProblem({ frontendId: '42', title: 'Trapping Rain Water' }); });
+  assert.equal(screen.queryByRole('button', { name: '#15 3Sum' }), null);
+  assert.equal(screen.getByRole('button', { name: '#42 Trapping Rain Water' }).getAttribute('aria-pressed'), 'true');
+  await act(async () => { setChatProblem(null); });
+  assert.equal(screen.queryByRole('button', { name: /^#/ }), null);
+
+  // A new conversation drops the asked problem as well.
+  await act(async () => { view.rerender(launcher({ id: 3, problem: { frontendId: '15', title: '3Sum' }, action: { kind: 'review' } })); });
+  await waitFor(() => assert.equal(requests.length, 3));
+  await waitFor(() => screen.getByRole('button', { name: '发送' }));
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '新对话' })); });
+  assert.equal(screen.queryByRole('button', { name: '#15 3Sum' }), null);
+});
+
+it('opens without sending a preset when no provider is connected', async () => {
+  mock.method(api, 'getChatStatus', async () => ({ configured: false, model: '' }));
+  const requests = serveChat([]);
+  await act(async () => {
+    render(<ChatLauncher lang="en" onToday={false} onOpenAiSettings={() => {}}
+      ask={{ id: 1, problem: { frontendId: '15', title: '3Sum' }, action: { kind: 'hint' } }} />);
+  });
+  await waitFor(() => screen.getByText('Connect an AI provider to ask questions here.'));
+  assert.equal(requests.length, 0);
+  assert.equal(screen.queryByText(hintPrompt(1, 'en', threeSum)), null);
+});
+
+it('asks for a hint from an open task, and for a review from a finished one or a practice record', async () => {
+  const askAi = mock.fn();
+  const workspace = { revision: 0, timezone: 'UTC', navigate() {}, notifyMutation() {}, openPractice() {}, askAi };
+  const item = {
+    id: 'item-1', kind: 'new' as const, reason: { en: 'Next in the list', zh: '清单中的下一题' }, addedAt: 1000, evidenceIds: [], completed: false,
+    problem: {
+      questionId: 'p42', questionFrontendId: '42', title: 'Trapping Rain Water', titleSlug: 'trapping-rain-water',
+      url: 'https://leetcode.com/problems/trapping-rain-water/', difficulty: 'Hard' as const, isPaidOnly: false,
+      topicTags: [{ id: 'two-pointers', name: 'Two Pointers', slug: 'two-pointers' }], source: 'jsonl' as const,
+    },
+  };
+  const row = (completed: boolean, value: typeof workspace | Omit<typeof workspace, 'askAi'> = workspace) => (
+    <WorkspaceContext.Provider value={value}>
+      <TodayProblemRow item={{ ...item, completed } as never} lang="en" isSaving={false} replacingBatch={false} replacingItemId={null}
+        onComplete={() => {}} onReplaceOne={() => {}} />
+    </WorkspaceContext.Provider>
+  );
+  const problem = { frontendId: '42', title: 'Trapping Rain Water' };
+  let view!: ReturnType<typeof render>;
+  await act(async () => { view = render(row(false)); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Ask AI for a hint' })); });
+  assert.deepEqual(askAi.mock.calls[0].arguments, [{ problem, action: { kind: 'hint' } }]);
+  await act(async () => { view.rerender(row(true)); });
+  assert.equal(screen.queryByRole('button', { name: 'Ask AI for a hint' }), null);
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Review my attempt with AI' })); });
+  assert.deepEqual(askAi.mock.calls[1].arguments, [{ problem, action: { kind: 'review' } }]);
+  // A render outside the app has no chat to hand the question to, so it offers none.
+  const { askAi: _unused, ...withoutChat } = workspace;
+  await act(async () => { view.rerender(row(false, withoutChat)); });
+  assert.equal(screen.queryByRole('button', { name: 'Ask AI for a hint' }), null);
+  cleanup();
+
+  const record = {
+    id: 'rec-1', questionId: 'p42', questionFrontendId: '42', problemTitle: 'Trapping Rain Water', completed: true, practicedAt: '2026-11-20',
+    timePrecision: 'date' as const, notes: 'Forgot the right-max pass', durationMinutes: 35, sourceTimezone: 'UTC', revision: 1,
+    status: 'active' as const, createdAt: 100, updatedAt: 100, revokedAt: null, outcome: 'assisted' as const,
+  };
+  const card = (status: 'active' | 'revoked') => (
+    <WorkspaceContext.Provider value={workspace}>
+      <PracticeRecordCard record={{ ...record, status } as never} lang="en" edit={() => {}} onChange={() => {}} />
+    </WorkspaceContext.Provider>
+  );
+  await act(async () => { view = render(card('active')); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Review with AI' })); });
+  assert.deepEqual(askAi.mock.calls[2].arguments,
+    [{ problem, action: { kind: 'review', attempt: '2026-11-20 (solved with help, 35 min)' } }]);
+  await act(async () => { view.rerender(card('revoked')); });
+  assert.equal(screen.queryByRole('button', { name: 'Review with AI' }), null);
+});
+
+it('drops a preset that was still waiting when the panel closed', async () => {
+  // The first status request never answers, so the preset cannot be sent before the panel closes.
+  const status = mock.method(api, 'getChatStatus', () => new Promise<never>(() => {}));
+  const requests = serveChat(answer('ok'));
+  await act(async () => {
+    render(<ChatLauncher lang="en" onToday={false} onOpenAiSettings={() => {}} ask={{ id: 1, problem: threeSum, action: { kind: 'hint' } }} />);
+  });
+  await waitFor(() => screen.getByRole('complementary'));
+  await act(async () => { fireEvent.keyDown(screen.getByRole('complementary'), { key: 'Escape' }); });
+  assert.equal(screen.queryByRole('complementary'), null);
+
+  status.mock.mockImplementation(async () => ({ configured: true, provider: 'openai', model: 'gpt-6-luna' }) as never);
+  await act(async () => { fireEvent.keyDown(window, { key: 'j', ctrlKey: true }); });
+  // The problem is still offered, but asking is left to the user.
+  await waitFor(() => screen.getByRole('button', { name: 'Give me a hint for this problem without the solution' }));
+  assert.equal(screen.getByRole('button', { name: '#15 3Sum' }).getAttribute('aria-pressed'), 'true');
+  assert.equal(requests.length, 0);
+});

@@ -28,3 +28,21 @@ function subscribe(listener: () => void): () => void {
 export function useChatProblem(): ChatProblemRef | null {
   return useSyncExternalStore(subscribe, () => current, () => current);
 }
+
+/** A preset question about one problem; the chat turns it into an ordinary user message. */
+export type ChatAction =
+  /** The next rung of the hint ladder for the problem. */
+  | { kind: 'hint' }
+  /** `attempt` names one practice in display form, such as its date and result; omitted means the latest. */
+  | { kind: 'review'; attempt?: string };
+
+/** What a view hands to the chat when the user asks for a preset from outside the panel. */
+export interface ChatAsk {
+  problem: ChatProblemRef;
+  action: ChatAction;
+}
+
+/** A handoff to the chat; `id` changes on every request so repeating the same one runs again. */
+export interface ChatAskRequest extends ChatAsk {
+  id: number;
+}

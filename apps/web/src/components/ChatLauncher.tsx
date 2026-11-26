@@ -12,6 +12,7 @@ import { flushSync } from 'react-dom';
 import { MessageSquareText } from 'lucide-react';
 import type { Language } from '../i18n.ts';
 import { useChat } from '../chat/useChat.ts';
+import { useChatProblem, type ChatAction, type ChatAskRequest, type ChatProblemRef } from '../chat/chat-context.ts';
 import {
   clampLauncher, clampPanel, dockAt, dockForPanel, launcherPoint, panelPoint, useChatPosition, useDrag, type Point,
 } from '../chat/chat-position.ts';
@@ -30,15 +31,33 @@ export interface ChatLauncherProps {
   /** Whether Today is the visible view; the day's plan is then offered as context by default. */
   onToday: boolean;
   onOpenAiSettings: () => void;
+  /** A preset another view asked for; each new `id` opens the panel on that problem and sends it. */
+  ask?: ChatAskRequest | null;
 }
 
-export function ChatLauncher({ lang, onToday, onOpenAiSettings }: ChatLauncherProps) {
+export function ChatLauncher({ lang, onToday, onOpenAiSettings, ask = null }: ChatLauncherProps) {
   const zh = lang === 'zh';
   const chat = useChat(lang);
   const [open, setOpen] = useState(false);
   const launcher = useRef<HTMLButtonElement>(null);
   const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform ?? '');
   const shortcut = isMac ? '⌘J' : 'Ctrl+J';
+
+  const viewProblem = useChatProblem();
+  /** Problem of the last preset asked from another view; it stands in while no view shows one. */
+  const [askedProblem, setAskedProblem] = useState<ChatProblemRef | null>(null);
+  const [pending, setPending] = useState<ChatAction | null>(null);
+  // Whichever happened last decides: opening another problem's note replaces the asked one.
+  useEffect(() => { if (viewProblem) setAskedProblem(null); }, [viewProblem?.frontendId]);
+  useEffect(() => {
+    if (!ask) return;
+    setAskedProblem(ask.problem);
+    setPending(ask.action);
+    setOpen(true);
+  }, [ask?.id]);
+  const clearPending = useCallback(() => setPending(null), []);
+  // A preset the panel never got to send must not go out when the panel is opened again later.
+  useEffect(() => { if (!open) setPending(null); }, [open]);
 
   const { position, viewport, save } = useChatPosition();
   /** Live corner of whichever element is being dragged; `null` when both rest at their saved place. */
@@ -107,6 +126,8 @@ export function ChatLauncher({ lang, onToday, onOpenAiSettings }: ChatLauncherPr
     return (
       <React.Suspense fallback={null}>
         <ChatPanel lang={lang} chat={chat} onToday={onToday} shortcut={shortcut} onClose={close}
+          problem={askedProblem ?? viewProblem} pending={pending} onPendingHandled={clearPending}
+          onNewChat={() => { chat.reset(); setAskedProblem(null); }}
           onOpenAiSettings={() => { close(); onOpenAiSettings(); }}
           position={at} side={position.dock.side} dragging={panelDrag.dragging}
           onDragStart={event => panelDrag.start(event, at)} />

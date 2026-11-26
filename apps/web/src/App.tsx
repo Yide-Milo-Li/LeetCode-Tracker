@@ -27,6 +27,7 @@ import { PracticeTimerPill } from './components/PracticeTimer.tsx';
 import { DesktopUpdateNotice } from './components/DesktopUpdateNotice.tsx';
 import { ShortcutHelpModal } from './components/ShortcutHelpModal.tsx';
 import { ChatLauncher } from './components/ChatLauncher.tsx';
+import type { ChatAsk, ChatAskRequest } from './chat/chat-context.ts';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.ts';
 import { SetupGate } from './components/SetupGate.tsx';
 import { brandIconUrl } from './brand-icons.ts';
@@ -175,6 +176,12 @@ export function App() {
     return [...queue, request];
   }), []);
   const reportPracticeOutcome = useCallback((outcome: PracticeOutcome) => setOutcomes((items) => [...items, outcome]), []);
+  const [chatAsk, setChatAsk] = useState<ChatAskRequest | null>(null);
+  /** Hand a preset question to the chat. Practice dialogs close first: they are modal and would cover the panel. */
+  const askAi = useCallback((ask: ChatAsk) => {
+    setPracticeQueue([]);
+    setChatAsk((prior) => ({ ...ask, id: (prior?.id ?? 0) + 1 }));
+  }, []);
   const plan = useDailyPlan(lang, timezone);
   const [desktopAgentRevision, setDesktopAgentRevision] = useState(0);
   const [dismissedActivity, dismissActivity] = useState('');
@@ -302,8 +309,8 @@ export function App() {
     [navigate],
   );
   const workspace = useMemo(
-    () => ({ revision, favoriteRevision, desktopAgentRevision, timezone, selectedNoteProblem, navigate, openRecords, notifyMutation, openPractice, reportPracticeOutcome }),
-    [revision, favoriteRevision, desktopAgentRevision, timezone, selectedNoteProblem, navigate, openRecords, notifyMutation, openPractice, reportPracticeOutcome],
+    () => ({ revision, favoriteRevision, desktopAgentRevision, timezone, selectedNoteProblem, navigate, openRecords, notifyMutation, openPractice, askAi, reportPracticeOutcome }),
+    [revision, favoriteRevision, desktopAgentRevision, timezone, selectedNoteProblem, navigate, openRecords, notifyMutation, openPractice, askAi, reportPracticeOutcome],
   );
   const zh = lang === 'zh';
   const error = errorCause ? localizeApiError(errorCause, lang) : '';
@@ -730,6 +737,7 @@ export function App() {
         <ChatLauncher
           lang={lang}
           onToday={view === 'today'}
+          ask={chatAsk}
           onOpenAiSettings={() => {
             setSettingsSection('ai');
             navigate('settings');

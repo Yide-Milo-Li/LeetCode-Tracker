@@ -3,7 +3,7 @@
  * Renders reliable completion circle, topic tags with overflow dropdown, and contextual action links.
  */
 import React from 'react';
-import { Check, Circle, RefreshCw, Plus, Trash2 } from 'lucide-react';
+import { Check, Circle, Lightbulb, MessageSquareText, RefreshCw, Plus, Trash2 } from 'lucide-react';
 import type { PlanItem } from '../api.ts';
 import type { RecommendationFeedbackReason } from '../../../../packages/contracts/src/recommendations.ts';
 import { translations, type Language } from '../i18n.ts';
@@ -57,6 +57,8 @@ export function TodayProblemRow({
 
   const reasonText = item.reason[lang] || item.reason.en;
   const problemUrl = /^https?:\/\//i.test(item.problem.url) ? item.problem.url : undefined;
+  // Before the problem is done the useful question is a hint; afterwards it is a review of the attempt.
+  const aiLabel = item.completed ? (zh ? 'AI 复盘这次练习' : 'Review my attempt with AI') : (zh ? '向 AI 要提示' : 'Ask AI for a hint');
 
   return (
     <article className={'today-problem ' + (item.completed ? 'completed' : '') + (justCompleted && item.completed ? ' just-completed' : '')}>
@@ -196,6 +198,20 @@ export function TodayProblemRow({
           title={item.problem.title}
           disabled={isAppending || isSaving}
         />
+        {workspace.askAi && (
+          <Tooltip text={aiLabel} position="top">
+            <button
+              className="btn-icon"
+              aria-label={aiLabel}
+              onClick={() => workspace.askAi?.({
+                problem: { frontendId: item.problem.questionFrontendId, title: item.problem.title },
+                action: { kind: item.completed ? 'review' : 'hint' },
+              })}
+            >
+              {item.completed ? <MessageSquareText size={18} /> : <Lightbulb size={18} />}
+            </button>
+          </Tooltip>
+        )}
         <Tooltip text={canRemove === false ? t.cannotRemoveLastProblem : t.removeProblem} position="top">
           <button
             className="btn-icon btn-icon-danger"

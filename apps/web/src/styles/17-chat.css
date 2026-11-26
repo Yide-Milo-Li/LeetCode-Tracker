@@ -345,6 +345,46 @@ html.dark .chat-panel {
   border-top: 1px solid var(--border-color);
   background: var(--muted-surface);
 }
+/* Preset questions about the attached problem. Square corners set them apart from the pill
+   toggles below: these send at once, the pills only choose what is attached. */
+.chat-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.chat-action {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text-main);
+  font-size: 12.5px;
+  line-height: 1.4;
+  transition:
+    border-color var(--fast) ease,
+    opacity var(--fast) ease;
+}
+.chat-action svg {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: color var(--fast) ease;
+}
+.chat-action:hover:not(:disabled) {
+  border-color: var(--outline);
+}
+.chat-action:hover:not(:disabled) svg {
+  color: var(--primary);
+}
+.chat-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .chat-context {
   display: flex;
   flex-wrap: wrap;

@@ -22,6 +22,14 @@ export interface ChatEntry {
   error?: { code: string; message: string };
   /** Local data the server attached when producing this answer. */
   context?: ChatContextSummary;
+  /** On a question from the hint ladder: the problem and the rung it asked for. */
+  hint?: ChatHint;
+}
+
+/** Rung of the hint ladder a question asked for; see `chat-presets.ts`. */
+export interface ChatHint {
+  frontendId: string;
+  level: number;
 }
 
 const STORAGE_KEY = 'leetcode_tracker_chat_v1';
@@ -63,8 +71,12 @@ export function requestTurns(entries: ChatEntry[]): ChatTurn[] {
 export interface ChatController {
   entries: ChatEntry[];
   busy: boolean;
-  /** Ask a question; ignored while an answer is streaming or when the text is blank. */
-  send(text: string, context: ChatContext): void;
+  /**
+   * Ask a question; ignored while an answer is streaming or when the text is blank.
+   *
+   * @param hint Marks the question as a rung of the hint ladder, so the next rung can be offered.
+   */
+  send(text: string, context: ChatContext, hint?: ChatHint): void;
   /** Ask the last question again, replacing its failed or stopped answer. */
   retry(): void;
   stop(): void;
@@ -127,10 +139,10 @@ export function useChat(lang: Language): ChatController {
       });
   }, []);
 
-  const send = useCallback((text: string, context: ChatContext) => {
+  const send = useCallback((text: string, context: ChatContext, hint?: ChatHint) => {
     const content = text.trim();
     if (!content || controller.current) return;
-    run([...entriesRef.current, { id: crypto.randomUUID(), role: 'user', content, state: 'done' }], context);
+    run([...entriesRef.current, { id: crypto.randomUUID(), role: 'user', content, state: 'done', ...(hint ? { hint } : {}) }], context);
   }, [run]);
 
   const retry = useCallback(() => {

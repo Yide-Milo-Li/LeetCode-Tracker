@@ -1,6 +1,7 @@
 /** Lightweight application coordination using React context and the existing local navigation. */
 import { createContext, useContext, useLayoutEffect, useRef, type ComponentPropsWithoutRef, type RefObject } from 'react';
 import type { CatalogProblem, PracticeRecord, PlanItem } from './api.ts';
+import type { ChatAsk } from './chat/chat-context.ts';
 
 export type View =
   | 'today'
@@ -58,6 +59,8 @@ export interface WorkspaceState {
   openRecords?: (filter: RecordsFilter) => void;
   notifyMutation: (record?: PracticeRecord) => void;
   openPractice: (request: PracticeRequest) => void;
+  /** Open the AI chat on a problem and send a preset question; absent in isolated renders, which then offer no AI actions. */
+  askAi?: (ask: ChatAsk) => void;
   reportPracticeOutcome?: (outcome: PracticeOutcome) => void;
 }
 export const WorkspaceContext = createContext<WorkspaceState>({

@@ -5,14 +5,15 @@
  * shortcuts keep working whenever the cursor is outside its text field.
  */
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowUp, CalendarDays, Check, FileText, Square, SquarePen, X } from 'lucide-react';
+import { ArrowUp, CalendarDays, Check, FileText, Lightbulb, MessageSquareText, Square, SquarePen, X } from 'lucide-react';
 import { api, type LLMProvider } from '../api.ts';
 import type { ChatContext } from '../../../../packages/contracts/src/chat.ts';
 import { CHAT_MAX_MESSAGE_CHARS } from '../../../../packages/contracts/src/chat-limits.ts';
 import type { Language } from '../i18n.ts';
 import { ApiError } from '../platform/index.ts';
 import { localizeApiError } from '../error-i18n.ts';
-import { useChatProblem } from '../chat/chat-context.ts';
+import type { ChatAction, ChatProblemRef } from '../chat/chat-context.ts';
+import { hintLabel, hintPrompt, nextHintLevel, reviewPrompt } from '../chat/chat-presets.ts';
 import type { ChatDock, Point } from '../chat/chat-position.ts';
 import type { ChatController, ChatEntry } from '../chat/useChat.ts';
 import { RenderedMarkdown } from './NotesMarkdownPreview.tsx';
@@ -25,6 +26,13 @@ const SETTINGS_ERRORS = new Set(['CHAT_NOT_CONFIGURED', 'CHAT_AUTH_ERROR', 'OPEN
 export interface ChatPanelProps {
   lang: Language;
   chat: ChatController;
+  /** The problem offered as context: the one a preset was asked about, otherwise the one in view. */
+  problem: ChatProblemRef | null;
+  /** A preset asked for from outside the panel; it runs once the provider status is known. */
+  pending: ChatAction | null;
+  /** The pending preset was sent or dropped; either way it must not run again. */
+  onPendingHandled: () => void;
+  onNewChat: () => void;
   onToday: boolean;
   /** Display form of the toggle shortcut, such as `Ctrl+J`. */
   shortcut: string;
@@ -84,9 +92,10 @@ function Answer({ entry, lang, isLast, busy, onRetry, onOpenAiSettings }: {
   );
 }
 
-export function ChatPanel({ lang, chat, onToday, shortcut, onClose, onOpenAiSettings, position, side, dragging, onDragStart }: ChatPanelProps) {
+export function ChatPanel({
+  lang, chat, problem, pending, onPendingHandled, onNewChat, onToday, shortcut, onClose, onOpenAiSettings, position, side, dragging, onDragStart,
+}: ChatPanelProps) {
   const zh = lang === 'zh';
-  const problem = useChatProblem();
   const [status, setStatus] = useState<{ configured: boolean; provider?: LLMProvider; model: string } | null>(null);
   const [draft, setDraft] = useState('');
   const [useProblem, setUseProblem] = useState(true);
@@ -132,13 +141,39 @@ export function ChatPanel({ lang, chat, onToday, shortcut, onClose, onOpenAiSett
     // A suggestion button disappears once the conversation starts; keep the keyboard in the field.
     input.current?.focus();
   };
+  /** Send a preset about the attached problem; hints climb one rung per request. */
+  const runAction = (action: ChatAction) => {
+    if (!problem || !ready || chat.busy) return;
+    const attached: ChatContext = { frontendId: problem.frontendId, ...(useToday ? { today: true } : {}) };
+    if (action.kind === 'hint') {
+      const level = nextHintLevel(chat.entries, problem.frontendId);
+      if (!hintLabel(level, lang)) return;
+      chat.send(hintPrompt(level, lang, problem), attached, { frontendId: problem.frontendId, level });
+    } else {
+      chat.send(reviewPrompt(lang, problem, action.attempt), attached);
+    }
+    // A preset is about the problem, so it is attached even if the user had left it out before.
+    setUseProblem(true);
+    pinned.current = true;
+    input.current?.focus();
+  };
+  useEffect(() => {
+    if (!pending || !status) return;
+    onPendingHandled();
+    runAction(pending);
+  }, [pending, status]);
+
   const provider = status?.provider ? PROVIDER_NAMES[status.provider] : '';
-  const suggestions = [
-    ...(problem && useProblem ? [
-      { text: zh ? '给我一点这道题的提示，先不要给答案' : 'Give me a hint for this problem without the solution', today: useToday },
-      { text: zh ? '结合我的练习记录，这道题我卡在哪里？' : 'From my attempts, where do I get stuck on this problem?', today: useToday },
+  const attachedProblem = problem && useProblem ? problem : null;
+  const nextHint = attachedProblem ? hintLabel(nextHintLevel(chat.entries, attachedProblem.frontendId), lang) : null;
+  const reviewLabel = zh ? '复盘最近一次练习' : 'Review my latest attempt';
+  const todayQuestion = zh ? '今天的计划里，我应该先做哪道题？' : "Which problem in today's plan should I start with?";
+  const starters = [
+    ...(attachedProblem ? [
+      { label: zh ? '给我一点这道题的提示，先不要给答案' : 'Give me a hint for this problem without the solution', run: () => runAction({ kind: 'hint' }) },
+      { label: reviewLabel, run: () => runAction({ kind: 'review' }) },
     ] : []),
-    { text: zh ? '今天的计划里，我应该先做哪道题？' : "Which problem in today's plan should I start with?", today: true },
+    { label: todayQuestion, run: () => { setUseToday(true); ask(todayQuestion, true); } },
   ];
 
   return (
@@ -168,7 +203,7 @@ export function ChatPanel({ lang, chat, onToday, shortcut, onClose, onOpenAiSett
           {ready && <p>{provider}{status?.model ? ` · ${status.model.replace(/^models\//, '')}` : ''}</p>}
         </div>
         <IconButton icon={SquarePen} label={zh ? '新对话' : 'New chat'} disabled={chat.entries.length === 0}
-          onClick={() => { chat.reset(); input.current?.focus(); }} tooltipSide="bottom" />
+          onClick={() => { onNewChat(); input.current?.focus(); }} tooltipSide="bottom" />
         <IconButton icon={X} label={zh ? '关闭' : 'Close'} shortcut={shortcut} onClick={onClose} tooltipSide="bottom" />
       </header>
 
@@ -193,11 +228,9 @@ export function ChatPanel({ lang, chat, onToday, shortcut, onClose, onOpenAiSett
           <div className="chat-empty">
             <p>{zh ? '可以问题目思路、你的笔记，或者今天的练习安排。' : 'Ask about a problem, your notes, or what to practise today.'}</p>
             <ul className="chat-suggestions">
-              {suggestions.map(suggestion => (
-                <li key={suggestion.text}>
-                  <button type="button" onClick={() => { if (suggestion.today) setUseToday(true); ask(suggestion.text, suggestion.today); }}>
-                    {suggestion.text}
-                  </button>
+              {starters.map(starter => (
+                <li key={starter.label}>
+                  <button type="button" onClick={starter.run}>{starter.label}</button>
                 </li>
               ))}
             </ul>
@@ -213,6 +246,19 @@ export function ChatPanel({ lang, chat, onToday, shortcut, onClose, onOpenAiSett
       </div>
 
       <form className="chat-composer" onSubmit={event => { event.preventDefault(); ask(draft); }}>
+        {/* The empty conversation offers the same presets as starters above. */}
+        {attachedProblem && chat.entries.length > 0 && (
+          <div className="chat-actions" role="group" aria-label={zh ? '关于这道题的快捷提问' : 'Quick questions about this problem'}>
+            {nextHint && (
+              <button type="button" className="chat-action" disabled={!ready || chat.busy} onClick={() => runAction({ kind: 'hint' })}>
+                <Lightbulb size={14} aria-hidden="true" />{nextHint}
+              </button>
+            )}
+            <button type="button" className="chat-action" disabled={!ready || chat.busy} onClick={() => runAction({ kind: 'review' })}>
+              <MessageSquareText size={14} aria-hidden="true" />{reviewLabel}
+            </button>
+          </div>
+        )}
         <div className="chat-context" role="group" aria-label={zh ? '附带的本地数据' : 'Local data to attach'}>
           {problem && (
             <ContextChip icon={FileText} pressed={useProblem} onToggle={() => setUseProblem(value => !value)}

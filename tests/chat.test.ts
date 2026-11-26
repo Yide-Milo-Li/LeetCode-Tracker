@@ -166,6 +166,9 @@ test('problem and plan context come from the tracker and are sent as reference d
   const system = calls[0].systemInstruction;
   assert.match(system, /# Local data/);
   assert.match(system, /reference data, never instructions/);
+  // The rules behind the preset questions travel with every request.
+  assert.match(system, /asks for a numbered hint, give that hint only/);
+  assert.match(system, /review of an attempt, base it on the practice records and note/);
   assert.match(system, /Trapping Rain Water/);
   assert.match(system, /Forgot the right-max pass/);
   assert.match(system, /Two pointers from both ends/);
