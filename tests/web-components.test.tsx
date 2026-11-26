@@ -107,8 +107,10 @@ it('offers ChatGPT sign-in for OpenAI and keeps the API key path intact', async 
   const signedIn = { connected: true, reconnectRequired: false, accountEmail: 'user@example.test', planScopeGranted: true };
   const initial = { language: 'en' as const, theme: 'light' as const, timezone: 'UTC', updatedAt: 1,
     llmProvider: 'openai' as const, openaiApiKey: 'synthetic-o', openaiAuthMode: 'api_key' as const, openaiOAuth: signedOut };
+  const connectedSettings = { ...initial, openaiOAuth: signedIn, openaiChatgptModel: 'gpt-synthetic-a' };
+  const postSignInSettings = deferred<typeof connectedSettings>();
   let oauth = signedOut;
-  mock.method(api, 'getSettings', async () => ({ ...initial, openaiOAuth: oauth, openaiChatgptModel: oauth.connected ? 'gpt-synthetic-a' : null }));
+  const settingsReads = mock.method(api, 'getSettings', async () => oauth.connected ? postSignInSettings.promise : initial);
   mock.method(api, 'getOpenAIOAuthStatus', async () => oauth);
   mock.method(api, 'getOpenAIChatGPTModels', async () => ({ models: [
     { slug: 'gpt-synthetic-a', displayName: 'Synthetic A' }, { slug: 'gpt-synthetic-b', displayName: 'Synthetic B' },
@@ -131,13 +133,19 @@ it('offers ChatGPT sign-in for OpenAI and keeps the API key path intact', async 
   const signIn = screen.getByRole('button', { name: 'Continue with ChatGPT' });
   assert.ok(signIn.hasAttribute('data-oai-siwc-button'));
 
-  // The browser sign-in finishes on the server; the panel picks it up from the status poll.
-  oauth = signedIn;
+  // The browser sign-in finishes on the server and the panel reloads settings after detecting it.
   await act(async () => { fireEvent.click(signIn); });
-  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+  const waitingMessage = /Finish signing in to ChatGPT in your browser/;
+  assert.ok(screen.getByText(waitingMessage));
+  oauth = signedIn;
+  await act(async () => { window.dispatchEvent(new window.Event('focus')); });
+  assert.equal(settingsReads.mock.callCount(), 2);
+  await act(async () => { postSignInSettings.resolve(connectedSettings); });
   assert.deepEqual(connects.mock.calls[0].arguments[0], { freshRegistration: false });
   assert.match(String(opened.mock.calls[0].arguments[0]), /^https:\/\/auth\.openai\.com\//);
-  assert.match(screen.getByText(/Connected/).textContent!, /Connected · user@example\.test/);
+  assert.ok(screen.getByText('Connected · user@example.test'));
+  assert.ok(screen.getByText('ChatGPT connected. Save to use OpenAI for AI features.'));
+  assert.equal(screen.queryByText(waitingMessage), null);
   assert.equal(screen.queryByRole('button', { name: 'Continue with ChatGPT' }), null);
 
   // The account's own models replace the static list, and no endpoint override is offered.

@@ -271,13 +271,12 @@ export function useAiProviderSettings(lang: Language) {
         const next = await api.getOpenAIOAuthStatus();
         if (cancelled) return;
         if (isChatGPTUsable(next)) {
-          setOpenaiOAuth(next);
-          setChatgptAuthDeadline(null);
-          setOpenaiAuthMode('chatgpt');
-          setChatgptError('');
           // The server picked a default model during sign-in; adopt it without clobbering other drafts.
           const settings = await api.getSettings().catch(() => null);
           if (cancelled) return;
+          setOpenaiOAuth(next);
+          setOpenaiAuthMode('chatgpt');
+          setChatgptError('');
           if (settings?.openaiChatgptModel) setChatgptModel(settings.openaiChatgptModel);
           // Signing in switches this device to the ChatGPT plan at once when OpenAI is already the saved provider.
           const active = settings?.llmProvider === 'openai' && settings.openaiAuthMode === 'chatgpt';
@@ -287,6 +286,8 @@ export function useAiProviderSettings(lang: Language) {
                 ? '正在使用您的 ChatGPT 套餐。符合条件的 AI 请求将计入该套餐，可在 ChatGPT 设置中管理用量。'
                 : "You're using your ChatGPT plan. Eligible AI requests in this app use it; manage usage in ChatGPT settings.")
             : (zh ? 'ChatGPT 已连接。保存后即可将 OpenAI 用于 AI 功能。' : 'ChatGPT connected. Save to use OpenAI for AI features.'));
+          // Clearing the deadline tears down this effect, so finish applying the result first.
+          setChatgptAuthDeadline(null);
           notifyMutation.current();
           return;
         }
