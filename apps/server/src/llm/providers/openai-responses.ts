@@ -11,6 +11,7 @@
 import type { ReasoningEffort } from '../../../../../packages/contracts/src/sync.ts';
 import { normalizeUsage, type LLMUsage } from '../usage.ts';
 import { ProviderOutputError } from './base.ts';
+import { sseData } from './sse.ts';
 
 type FetchFn = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -37,7 +38,12 @@ export interface ResponsesRequest {
   instructions: string;
   /** Extra developer message placed before the user prompt (for example the JSON schema). */
   developer?: string;
-  prompt: string;
+  /** Single user turn. Ignored when `messages` is given. */
+  prompt?: string;
+  /** Whole conversation, oldest first; the route keeps no history (`store: false`). */
+  messages?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  /** Called with each visible text fragment as it arrives. */
+  onDelta?: (text: string) => void;
   reasoningEffort?: ReasoningEffort;
   /** Ask for a JSON object. The word "JSON" must then appear in `developer` or `prompt`. */
   json?: boolean;
@@ -73,7 +79,7 @@ export function buildResponsesBody(request: ResponsesRequest): Record<string, un
     instructions: request.instructions,
     input: [
       ...(request.developer ? [{ role: 'developer', content: request.developer }] : []),
-      { role: 'user', content: request.prompt },
+      ...(request.messages ?? [{ role: 'user', content: request.prompt ?? '' }]),
     ],
     store: false,
     stream: true,
@@ -151,7 +157,10 @@ export async function createResponse(
     const body = (event.response && typeof event.response === 'object' ? event.response : {}) as Record<string, unknown>;
     switch (event.type) {
       case 'response.output_text.delta':
-        if (typeof event.delta === 'string') text += event.delta;
+        if (typeof event.delta === 'string' && event.delta) {
+          text += event.delta;
+          request.onDelta?.(event.delta);
+        }
         return;
       case 'response.completed':
         state.completed = {
@@ -185,42 +194,13 @@ export async function createResponse(
     }
   };
 
-  /** Parse one SSE block; `data:` lines of a block are joined before JSON decoding. */
-  const dispatch = (block: string): void => {
-    const data = block.split('\n')
-      .filter(line => line.startsWith('data:'))
-      .map(line => line.slice(5).replace(/^ /, ''))
-      .join('\n');
-    if (!data || data === '[DONE]') return;
+  for await (const data of sseData(response.body)) {
+    if (data === '[DONE]') continue;
     let event: unknown;
-    try { event = JSON.parse(data); } catch { return; }
+    try { event = JSON.parse(data); } catch { continue; }
     if (event && typeof event === 'object') handle(event as Record<string, unknown>);
-  };
-
-  const reader = response.body.getReader();
-  // A streaming decoder keeps multi-byte characters intact when a chunk boundary splits them.
-  const decoder = new TextDecoder('utf-8');
-  let buffer = '';
-  try {
-    while (!state.completed) {
-      const { done, value } = await reader.read();
-      buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
-      // A lone trailing CR waits for its LF in the next chunk instead of faking a blank line.
-      buffer = buffer.replace(/\r\n/g, '\n');
-      let boundary = buffer.indexOf('\n\n');
-      while (boundary !== -1 && !state.completed) {
-        const block = buffer.slice(0, boundary);
-        buffer = buffer.slice(boundary + 2);
-        dispatch(block);
-        boundary = buffer.indexOf('\n\n');
-      }
-      if (done) {
-        if (!state.completed && buffer.trim()) dispatch(buffer);
-        break;
-      }
-    }
-  } finally {
-    await reader.cancel().catch(() => undefined);
+    // Leaving the loop cancels the reader, so nothing after the terminal event is read.
+    if (state.completed) break;
   }
   if (!state.completed) throw new ResponsesApiError(502, null, 'The response stream ended before completion.');
   return state.completed;

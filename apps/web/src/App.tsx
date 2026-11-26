@@ -26,6 +26,7 @@ import { PracticeWorkspace } from './components/PracticeWorkspace.tsx';
 import { PracticeTimerPill } from './components/PracticeTimer.tsx';
 import { DesktopUpdateNotice } from './components/DesktopUpdateNotice.tsx';
 import { ShortcutHelpModal } from './components/ShortcutHelpModal.tsx';
+import { ChatLauncher } from './components/ChatLauncher.tsx';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.ts';
 import { SetupGate } from './components/SetupGate.tsx';
 import { brandIconUrl } from './brand-icons.ts';
@@ -726,6 +727,14 @@ export function App() {
         {showShortcutHelp && (
           <ShortcutHelpModal lang={lang} onClose={closeShortcutHelp} />
         )}
+        <ChatLauncher
+          lang={lang}
+          onToday={view === 'today'}
+          onOpenAiSettings={() => {
+            setSettingsSection('ai');
+            navigate('settings');
+          }}
+        />
       </div>
       </GoalListsScope>
     </WorkspaceContext.Provider>

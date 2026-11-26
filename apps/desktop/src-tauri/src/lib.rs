@@ -11,13 +11,16 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tauri::{AppHandle, Manager, State};
+use tauri::{ipc::Channel, AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
+/// Upper bound for one streamed answer; the sidecar ends a stalled stream much sooner.
+const STREAM_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+const STREAM_BODY_LIMIT: usize = 1024 * 1024;
 
 /// Immutable authenticated connection; process ownership stays with DesktopState.
 #[derive(Clone)]
@@ -42,6 +45,8 @@ struct DesktopState {
     exiting: AtomicBool,
     installing_update: AtomicBool,
     exports: tokio::sync::Mutex<()>,
+    /// Cancellation handles of streamed API calls in flight, keyed by the renderer's stream ID.
+    streams: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
     #[cfg(windows)]
     win_icons: Mutex<icon::WindowsIconState>,
 }
@@ -58,6 +63,7 @@ impl Default for DesktopState {
             exiting: AtomicBool::new(false),
             installing_update: AtomicBool::new(false),
             exports: tokio::sync::Mutex::new(()),
+            streams: Mutex::new(HashMap::new()),
             #[cfg(windows)]
             win_icons: Mutex::new(icon::WindowsIconState::default()),
         }
@@ -342,6 +348,103 @@ async fn api_request(
     })
 }
 
+/// Outcome of a streamed call. `body` holds the error payload of a non-2xx reply and is empty
+/// otherwise, because a successful body was already delivered through the channel.
+#[derive(Serialize)]
+struct StreamResponse {
+    status: u16,
+    body: String,
+}
+
+/// Forward the chat event stream to the renderer chunk by chunk.
+///
+/// Chunks are raw bytes: a multi-byte character may be split across two of them, so decoding is
+/// left to the renderer's streaming decoder. `api_stream_cancel` with the same `stream_id` closes
+/// the connection, which makes the sidecar stop the provider request.
+#[tauri::command]
+async fn api_stream(
+    state: State<'_, DesktopState>,
+    path: String,
+    body: String,
+    stream_id: String,
+    on_chunk: Channel<Vec<u8>>,
+) -> Result<StreamResponse, String> {
+    let connection = state.connection()?;
+    let url = security::stream_url(connection.port, &path)?;
+    if body.len() > STREAM_BODY_LIMIT {
+        return Err("Request exceeds endpoint size limit".into());
+    }
+    if stream_id.is_empty() || stream_id.len() > 64 {
+        return Err("Invalid stream id".into());
+    }
+    let cancel = Arc::new(tokio::sync::Notify::new());
+    state
+        .streams
+        .lock()
+        .map_err(|_| "Stream lock failed")?
+        .insert(stream_id.clone(), cancel.clone());
+    let request = state
+        .http()
+        .await?
+        .post(url)
+        .timeout(STREAM_TIMEOUT)
+        .header("x-desktop-session-token", &connection.token)
+        .header("content-type", "application/json")
+        .header("accept", "text/event-stream")
+        .body(body);
+    let result = forward_stream(request, &cancel, &on_chunk).await;
+    if let Ok(mut streams) = state.streams.lock() {
+        streams.remove(&stream_id);
+    }
+    result
+}
+
+/// Relay response chunks until the body ends, the renderer cancels, or the transport fails.
+async fn forward_stream(
+    request: reqwest::RequestBuilder,
+    cancel: &tokio::sync::Notify,
+    on_chunk: &Channel<Vec<u8>>,
+) -> Result<StreamResponse, String> {
+    let cancelled = StreamResponse {
+        status: 499,
+        body: String::new(),
+    };
+    let mut response = tokio::select! {
+        response = request.send() => response.map_err(|e| e.to_string())?,
+        _ = cancel.notified() => return Ok(cancelled),
+    };
+    let status = response.status().as_u16();
+    if !response.status().is_success() {
+        let body = response.text().await.map_err(|e| e.to_string())?;
+        return Ok(StreamResponse { status, body });
+    }
+    loop {
+        tokio::select! {
+            chunk = response.chunk() => match chunk.map_err(|e| e.to_string())? {
+                Some(bytes) => on_chunk.send(bytes.to_vec()).map_err(|e| e.to_string())?,
+                None => break,
+            },
+            // Dropping the response closes the loopback connection.
+            _ = cancel.notified() => return Ok(cancelled),
+        }
+    }
+    Ok(StreamResponse {
+        status,
+        body: String::new(),
+    })
+}
+
+/// Stop a streamed call; unknown or finished IDs are ignored.
+#[tauri::command]
+fn api_stream_cancel(state: State<'_, DesktopState>, stream_id: String) {
+    if let Ok(streams) = state.streams.lock() {
+        if let Some(cancel) = streams.get(&stream_id) {
+            // The permit is kept if the stream is not waiting yet, so a cancel is never lost.
+            cancel.notify_one();
+        }
+    }
+}
+
 /// Only a Rust native dialog grants a destination; no renderer path is accepted.
 #[tauri::command]
 async fn export_data_file(
@@ -539,6 +642,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             api_request,
+            api_stream,
+            api_stream_cancel,
             export_data_file,
             pick_folder,
             open_external,

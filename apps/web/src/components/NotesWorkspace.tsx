@@ -7,12 +7,13 @@
  * the note editor and its save/format/AI-review revision logic in `notes/useNoteEditor`, and
  * the panes and dialogs in `notes/*`.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { BookOpen } from 'lucide-react';
 import { hasMeaningfulNoteContent } from '../api.ts';
 import { translations, type Language } from '../i18n.ts';
 import { useActionPopover } from './ui.tsx';
-import { useWorkspace } from '../workspace.tsx';
+import { useWorkspace, ViewVisible } from '../workspace.tsx';
+import { setChatProblem } from '../chat/chat-context.ts';
 import { useFormatOnSaveSetting } from './notes/useFormatOnSaveSetting.ts';
 import { useNotesList } from './notes/useNotesList.ts';
 import { useNoteEditor } from './notes/useNoteEditor.ts';
@@ -64,6 +65,15 @@ export function NotesWorkspace({
   const formatSetting = useFormatOnSaveSetting(controlledFormatOnSave);
   const list = useNotesList({ selectedId, setSelectedId });
   const { items, selectedSummary } = list;
+
+  // Offer the open note's problem to the AI chat while this workspace is the visible view.
+  const visible = useContext(ViewVisible);
+  const chatProblemTitle = selectedSummary?.questionFrontendId === selectedId ? selectedSummary?.title : undefined;
+  useEffect(() => {
+    if (!visible || !selectedId) return;
+    setChatProblem({ frontendId: selectedId, title: chatProblemTitle });
+    return () => setChatProblem(null);
+  }, [visible, selectedId, chatProblemTitle]);
   const editor = useNoteEditor({
     lang,
     selectedId,

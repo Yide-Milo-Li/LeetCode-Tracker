@@ -46,6 +46,7 @@ import type {
   UpdatePracticeRecordInput,
   UpdateProgressSnapshotInput,
   UpdateSettingsInput,
+  ChatStatus,
   LLMProvider,
   OpenAIAuthMode,
   OpenAIOAuthSummary,
@@ -715,6 +716,13 @@ export const syncApi = {
 };
 
 /** Unified API client instance aggregating all endpoint domains. */
+export const chatApi = {
+  /** Whether the active AI provider can answer chat questions. */
+  getChatStatus(): Promise<ChatStatus> {
+    return request('/chat/status');
+  },
+};
+
 export const api = {
   getDesktopAgentStatus: () => request<DesktopAgentStatus>('/desktop-agent'),
   setDesktopAgentEnabled: (enabled: boolean) => request<DesktopAgentStatus>('/desktop-agent', {
@@ -730,4 +738,5 @@ export const api = {
   ...exportApi,
   ...bundleApi,
   ...syncApi,
+  ...chatApi,
 };

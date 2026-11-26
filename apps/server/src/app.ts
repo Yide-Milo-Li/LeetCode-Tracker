@@ -18,6 +18,7 @@ import { registerAllRoutes } from './routes/index.ts';
 import { GOOGLE_CALLBACK_PATH } from './routes/sync.ts';
 import { OPENAI_CALLBACK_PATH } from './llm/openai-oauth.ts';
 import { OpenAIOAuthService, type OpenAIOAuthServiceOptions } from './llm/openai-oauth-service.ts';
+import { ChatService } from './chat/chat-service.ts';
 import { DeviceSyncService, type DeviceSyncOptions } from './sync/sync-service.ts';
 import { reloadModelConfiguration } from './profile-refresh.ts';
 import { DESKTOP_AGENT_HEADER, DESKTOP_AGENT_PATH } from '../../../packages/contracts/src/desktop-agent.ts';
@@ -166,6 +167,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     if (reply.statusCode < 200 || reply.statusCode >= 300 ||
         !['POST', 'PATCH', 'PUT', 'DELETE'].includes(request.method) ||
         request.url.startsWith('/api/v1/sync/') || request.url.startsWith('/api/v1/settings/openai/oauth/') ||
+        // A chat request reads the profile and never changes it.
+        request.url.startsWith('/api/v1/chat/') ||
         request.routeOptions.url === '/api/v1/goal-lists/memberships/lookup') return;
     deviceSync.observeLocalWrite();
   });
@@ -173,6 +176,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     application,
     deviceSync,
     openAIOAuth,
+    chat: new ChatService({ application, assistant: gemini }),
     afterBundleRestore: () => { agentApplication?.resetTransientState(); openAIOAuth.reset(); },
   });
   if (options.desktopAgent && agentApplication) {

@@ -207,6 +207,50 @@ const API_ERROR_MESSAGES: Record<string, BilingualMessage> = {
     en: 'OpenAI is not ready. Sign in with ChatGPT or add an API key in Settings.',
     zh: 'OpenAI 尚未就绪。请在设置中使用 ChatGPT 登录或填写 API 密钥。',
   },
+  CHAT_NOT_CONFIGURED: {
+    en: 'No AI provider is ready. Add one in Settings to use chat.',
+    zh: '还没有可用的 AI 服务，请先在设置中配置。',
+  },
+  CHAT_AUTH_ERROR: {
+    en: 'The AI provider rejected your credentials. Check them in Settings.',
+    zh: 'AI 服务商拒绝了当前凭据，请在设置中检查。',
+  },
+  CHAT_QUOTA: {
+    en: 'The AI provider quota or plan limit was reached. Try later or switch providers in Settings.',
+    zh: 'AI 服务商的配额或套餐用量已用完。请稍后再试，或在设置中切换服务商。',
+  },
+  CHAT_TIMEOUT: {
+    en: 'The AI provider stopped responding. Try again.',
+    zh: 'AI 服务商没有继续响应，请重试。',
+  },
+  CHAT_TRUNCATED: {
+    en: 'The answer reached the model output limit. Ask it to continue.',
+    zh: '回答达到了模型的输出上限，可以让它继续。',
+  },
+  CHAT_EMPTY: {
+    en: 'The AI provider returned an empty answer. Try rephrasing the question.',
+    zh: 'AI 服务商返回了空回答，请换个问法再试。',
+  },
+  CHAT_INTERRUPTED: {
+    en: 'The answer was interrupted before it finished. Try again.',
+    zh: '回答在完成前中断了，请重试。',
+  },
+  CHAT_UNAVAILABLE: {
+    en: 'The AI provider could not answer right now. Try again shortly.',
+    zh: 'AI 服务商暂时无法回答，请稍后重试。',
+  },
+  CHAT_FAILED: {
+    en: 'The chat request failed. Try again.',
+    zh: '对话请求失败，请重试。',
+  },
+  CHAT_NETWORK: {
+    en: 'Could not reach the local service. Check that the app is still running.',
+    zh: '无法连接本地服务，请确认应用仍在运行。',
+  },
+  INVALID_CHAT_REQUEST: {
+    en: 'This conversation could not be sent. Start a new chat and ask again.',
+    zh: '这段对话无法发送，请新建对话后重新提问。',
+  },
   OPENAI_OAUTH_RECONNECT_REQUIRED: {
     en: 'ChatGPT access expired or was revoked. Sign in again in Settings.',
     zh: 'ChatGPT 授权已过期或被撤销，请在设置中重新登录。',

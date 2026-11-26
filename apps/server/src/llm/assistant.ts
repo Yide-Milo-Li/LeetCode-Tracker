@@ -44,6 +44,7 @@ import {
   type LLMAssistantOptions,
   type ILLMAssistant,
   type ILLMProvider,
+  type ChatMessage,
   type OpenAITokenSource,
   type ProviderConfig,
 } from './types.ts';
@@ -109,6 +110,7 @@ export class LLMAssistant implements ILLMAssistant {
   private readonly maxRetriesPerModel: number;
   private readonly initialBackoffMs: number;
   private readonly timeoutMs: number;
+  private readonly chatIdleTimeoutMs: number;
   private readonly hooks: Pick<LLMAssistantOptions, 'generateContentFn' | 'customGenerateFn'>;
   private formattingLock: Promise<void> = Promise.resolve();
   private configurationGeneration = 0;
@@ -156,6 +158,7 @@ export class LLMAssistant implements ILLMAssistant {
     this.maxRetriesPerModel = options.maxRetriesPerModel ?? 2;
     this.initialBackoffMs = options.initialBackoffMs ?? 1000;
     this.timeoutMs = options.timeoutMs ?? 60000;
+    this.chatIdleTimeoutMs = options.chatIdleTimeoutMs ?? 120000;
 
     // Initialize provider-specific configs
     const geminiOpts = options.providers?.gemini;
@@ -928,5 +931,109 @@ Return ONLY valid JSON conforming to the schema.`;
     }
 
     return { selectedQuestionIds: [], model: 'local' };
+  }
+
+  /**
+   * Stream one chat answer from the active provider.
+   *
+   * A fallback model is tried only while nothing has reached the caller; once text was delivered
+   * a failure is final, so an answer never restarts under the reader. The request is abandoned
+   * after `chatIdleTimeoutMs` without progress rather than at a fixed total duration, because a
+   * long answer is expected and a stalled one is not.
+   *
+   * @throws LLMError `CHAT_NOT_CONFIGURED`, `CHAT_CANCELLED`, `CHAT_TIMEOUT`, `CHAT_AUTH_ERROR`,
+   * `CHAT_QUOTA`, `CHAT_TRUNCATED`, `CHAT_EMPTY`, `CHAT_INTERRUPTED`, `CHAT_UNAVAILABLE`, or
+   * `OPENAI_OAUTH_RECONNECT_REQUIRED` from a lost ChatGPT session.
+   */
+  public async streamChat(params: {
+    systemInstruction: string;
+    messages: ChatMessage[];
+    onDelta: (text: string) => void;
+    abortSignal?: AbortSignal;
+  }): Promise<{ model: string; provider: LLMProviderType; usage: LLMUsage }> {
+    const providerType = this.activeProviderType;
+    const active = this.providerConfigs[providerType];
+    if (!this.isProviderConfigured(providerType)) {
+      throw new LLMError('CHAT_NOT_CONFIGURED', 'Configure an AI provider in Settings.', 503, providerType);
+    }
+    const provider = this.providers[providerType];
+    if (!provider.streamChat) throw new LLMError('CHAT_UNAVAILABLE', 'This AI provider cannot stream chat answers.', 503, providerType);
+    const config = { ...active, fallbackModels: [...active.fallbackModels] };
+    const operation = { id: randomUUID(), attempt: 0, usages: [] as LLMUsage[] };
+
+    const controller = new AbortController();
+    let cancelled = false;
+    let timedOut = false;
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    const armIdleTimer = () => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => { timedOut = true; controller.abort(); }, this.chatIdleTimeoutMs);
+    };
+    const onCancel = () => { cancelled = true; controller.abort(); };
+    if (params.abortSignal?.aborted) onCancel();
+    else params.abortSignal?.addEventListener('abort', onCancel, { once: true });
+    // Settle at the abort even when a transport ignores its signal.
+    const aborted = new Promise<never>((_resolve, reject) => {
+      const fail = () => reject(new DOMException('Chat request aborted', 'AbortError'));
+      if (controller.signal.aborted) fail();
+      else controller.signal.addEventListener('abort', fail, { once: true });
+    });
+    aborted.catch(() => {});
+
+    try {
+      for (const model of [config.model, ...config.fallbackModels]) {
+        if (controller.signal.aborted) break;
+        let delivered = false;
+        const started = Date.now();
+        let status: 'ok' | 'failed' | 'timeout' = 'failed';
+        let usage = normalizeUsage(providerType);
+        armIdleTimer();
+        try {
+          const result = await Promise.race([provider.streamChat({
+            model,
+            systemInstruction: params.systemInstruction,
+            messages: params.messages,
+            abortSignal: controller.signal,
+            reasoningEffort: resolveModelReasoningEffort(providerType, model, config.reasoningEffort),
+            onDelta: text => {
+              if (controller.signal.aborted) return;
+              delivered = true;
+              armIdleTimer();
+              params.onDelta(text);
+            },
+          }), aborted]);
+          usage = result.usage ?? usage;
+          status = 'ok';
+          return { model: result.model, provider: providerType, usage };
+        } catch (err) {
+          if (err instanceof ProviderOutputError) usage = err.usage ?? usage;
+          if (timedOut) status = 'timeout';
+          if (cancelled) throw new LLMError('CHAT_CANCELLED', 'The chat request was cancelled.', 499, providerType);
+          if (timedOut) throw new LLMError('CHAT_TIMEOUT', 'The AI provider stopped responding.', 504, providerType);
+          // A lost ChatGPT session keeps its own code so the UI can offer to sign in again.
+          if (err instanceof LLMError) throw err;
+          const error = err instanceof Error ? err : new Error(String(err));
+          if (error instanceof ProviderOutputError) {
+            throw error.reason === 'truncated'
+              ? new LLMError('CHAT_TRUNCATED', 'The answer reached the model output limit.', 502, providerType)
+              : new LLMError('CHAT_EMPTY', 'The AI provider returned an empty answer.', 502, providerType);
+          }
+          if (provider.isFatalAuthError(error)) throw new LLMError('CHAT_AUTH_ERROR', 'AI provider authentication failed.', 401, providerType);
+          if (/429|402|quota|balance|usage_limit/i.test(error.message)) throw new LLMError('CHAT_QUOTA', 'AI provider quota was exceeded.', 429, providerType);
+          if (delivered) throw new LLMError('CHAT_INTERRUPTED', 'The answer was interrupted.', 502, providerType);
+          // Nothing was shown yet: another configured model may still answer.
+        } finally {
+          operation.usages.push(usage);
+          emitDiagnostic(this.diagnosticSink, { version: 1, at: started, operationId: operation.id, purpose: 'chat',
+            attempt: ++operation.attempt, provider: providerType, model, elapsedMs: Date.now() - started, status, usage,
+            operationUsage: sumUsage(operation.usages) });
+        }
+      }
+      if (cancelled) throw new LLMError('CHAT_CANCELLED', 'The chat request was cancelled.', 499, providerType);
+      throw new LLMError('CHAT_UNAVAILABLE', 'The AI provider could not answer. Try again.', 503, providerType);
+    } finally {
+      clearTimeout(idleTimer);
+      params.abortSignal?.removeEventListener('abort', onCancel);
+    }
   }
 }

@@ -31,6 +31,7 @@ export function ShortcutHelpModal({ lang, onClose }: ShortcutHelpModalProps) {
         { key: '/', desc: zh ? '快速聚焦搜索框' : 'Focus catalog search' },
         { key: 'N', desc: zh ? '快速唤起手动记录' : 'Log new manual practice' },
         { key: '?', desc: zh ? '打开快捷键速查' : 'Open keyboard shortcuts' },
+        { key: isMac ? '⌘J' : 'Ctrl+J', desc: zh ? '打开或关闭 AI 对话' : 'Open or close AI chat' },
         { key: 'Esc', desc: zh ? '关闭弹窗 / 取消聚焦' : 'Close modal or drawer' },
       ],
     },

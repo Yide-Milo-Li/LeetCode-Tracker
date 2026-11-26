@@ -39,6 +39,16 @@ pub fn export_url(port: u16, path: &str) -> Result<Url, String> {
     }
 }
 
+/// Only the chat endpoint may be forwarded to the renderer as it arrives.
+pub fn stream_url(port: u16, path: &str) -> Result<Url, String> {
+    let url = api_url(port, path)?;
+    if url.path() == "/api/v1/chat/stream" && url.query().is_none() {
+        Ok(url)
+    } else {
+        Err("Not a streaming endpoint".into())
+    }
+}
+
 /// Validate parsed origins instead of trusting hostname prefixes.
 pub fn external_url(value: &str) -> Result<Url, String> {
     if value.chars().any(char::is_control) {
@@ -161,6 +171,16 @@ mod tests {
             assert!(export_url(1234, path).is_err(), "{path}");
         }
         assert!(export_url(1234, "/api/v1/export/notion-csv?table=history").is_ok());
+        for path in [
+            "/api/v1/settings",
+            "/api/v1/chat/status",
+            "/api/v1/chat/stream/../settings",
+            "/api/v1/chat/stream?next=/api/v1/settings",
+            "/api/v1/chat/stream/",
+        ] {
+            assert!(stream_url(1234, path).is_err(), "{path}");
+        }
+        assert!(stream_url(1234, "/api/v1/chat/stream").is_ok());
         assert!(api_url(1234, "/api/v1/problems?search=a%2Fb%2Ec%5Cd").is_ok());
         assert!(validate_filename("../output.zip").is_err());
     }

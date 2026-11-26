@@ -10,3 +10,4 @@ export * from './notes.ts';
 export * from './mastery.ts';
 export * from './knowledge-profile.ts';
 export * from './device-sync.ts';
+export * from './chat.ts';

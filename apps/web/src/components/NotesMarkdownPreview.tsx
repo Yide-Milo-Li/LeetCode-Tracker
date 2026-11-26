@@ -9,7 +9,7 @@ import { translations, type Language } from '../i18n.ts';
 const plugins = [remarkGfm, remarkMath];
 
 /** Render source as React nodes without executing raw HTML or loading images. */
-const RenderedMarkdown = memo(function RenderedMarkdown({ content, lang }: { content: string; lang: Language }) {
+export const RenderedMarkdown = memo(function RenderedMarkdown({ content, lang }: { content: string; lang: Language }) {
   return (
     <Markdown
       remarkPlugins={plugins}

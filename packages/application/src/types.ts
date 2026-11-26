@@ -85,6 +85,24 @@ export interface GenerateContentParams {
   purpose?: 'progress_import' | 'override_parse' | 'semantic_rank' | 'coaching' | 'note_format';
 }
 
+/** One turn of a chat conversation; the system prompt travels separately. */
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+/** Parameters for one streamed plain-text chat completion. */
+export interface StreamChatParams {
+  model: string;
+  systemInstruction: string;
+  /** Whole conversation, oldest first, ending with the user turn to answer. */
+  messages: ChatMessage[];
+  abortSignal: AbortSignal;
+  reasoningEffort?: ReasoningEffort;
+  /** Called with each visible text fragment in order; reasoning text is never passed. */
+  onDelta: (text: string) => void;
+}
+
 /** Raw result from a provider content generation call. */
 export interface GenerateContentOutput {
   text?: string;
@@ -136,6 +154,11 @@ export interface ConnectionTestResult {
 export interface ILLMProvider {
   readonly providerId: LLMProviderType;
   generateContent(params: GenerateContentParams): Promise<GenerateContentOutput>;
+  /**
+   * Stream a plain-text answer. Resolves with the full text after the provider reported the end
+   * of the answer; rejects when the stream fails or ends early, even if deltas were delivered.
+   */
+  streamChat?(params: StreamChatParams): Promise<GenerateContentOutput>;
   testConnection(params?: ConnectionTestParams): Promise<ConnectionTestResult>;
   /** Whether usable credentials exist. Absent means "has a non-empty API key". */
   isConfigured?(): boolean;
@@ -197,6 +220,8 @@ export interface LLMAssistantOptions {
   maxRetriesPerModel?: number;
   initialBackoffMs?: number;
   timeoutMs?: number;
+  /** Abandon a chat stream after this long without progress. Defaults to two minutes. */
+  chatIdleTimeoutMs?: number;
   customGenerateFn?: CustomGenerateFn;
   generateContentFn?: GeminiGenerateContentFn;
   diagnosticSink?: import('./telemetry.ts').DiagnosticSink;
@@ -230,6 +255,18 @@ export interface ILLMAssistant {
     date: string;
     deadline?: number;
   }): Promise<{ selectedQuestionIds: string[]; model: string; provider?: LLMProviderType }>;
+  /**
+   * Stream one chat answer from the active provider.
+   *
+   * @throws LLMError with a `CHAT_*` code, or `OPENAI_OAUTH_RECONNECT_REQUIRED`.
+   */
+  streamChat?(params: {
+    systemInstruction: string;
+    messages: ChatMessage[];
+    onDelta: (text: string) => void;
+    /** Aborting stops the provider request; the call then rejects with `CHAT_CANCELLED`. */
+    abortSignal?: AbortSignal;
+  }): Promise<{ model: string; provider: LLMProviderType; usage: import('./telemetry.ts').LLMUsage }>;
   getStatus(): LLMAssistantStatus;
   updateConfig?(config: {
     provider?: LLMProviderType | null;

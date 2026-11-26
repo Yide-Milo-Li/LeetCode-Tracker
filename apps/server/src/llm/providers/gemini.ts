@@ -16,13 +16,22 @@ import type {
   ConnectionTestParams,
   ConnectionTestResult,
   GeminiGenerateContentFn,
+  StreamChatParams,
 } from '../types.ts';
+
+/** Streaming transport; replaceable so tests need no network. */
+export type GeminiStreamFn = (params: {
+  model: string;
+  contents: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }>;
+  config: { systemInstruction: string; abortSignal: AbortSignal; thinkingConfig: { thinkingLevel: ThinkingLevel } };
+}) => Promise<AsyncIterable<{ text?: string; usageMetadata?: unknown; candidates?: Array<{ finishReason?: string }> }>>;
 
 export interface GeminiProviderOptions {
   apiKey?: string;
   defaultModel?: string;
   defaultReasoningEffort?: ReasoningEffort;
   generateContentFn?: GeminiGenerateContentFn;
+  streamFn?: GeminiStreamFn;
 }
 
 /** Provider transport isolated from domain decisions and other provider credentials. */
@@ -32,6 +41,7 @@ export class GeminiProvider extends BaseLLMProvider {
   private defaultModel: string;
   private defaultReasoningEffort: ReasoningEffort;
   private readonly generateContentFn?: GeminiGenerateContentFn;
+  private readonly streamFn?: GeminiStreamFn;
 
   /** Configure this adapter without making an external request. */
   constructor(options: GeminiProviderOptions = {}) {
@@ -44,6 +54,7 @@ export class GeminiProvider extends BaseLLMProvider {
       options.defaultReasoningEffort ?? process.env.GEMINI_REASONING_EFFORT
     );
     this.generateContentFn = options.generateContentFn;
+    this.streamFn = options.streamFn;
   }
 
   /** Apply explicit credential changes; omitted fields preserve current values. */
@@ -109,6 +120,54 @@ export class GeminiProvider extends BaseLLMProvider {
     const usage = normalizeUsage('gemini', response.usageMetadata);
     if (response.candidates?.[0]?.finishReason === 'MAX_TOKENS') throw new ProviderOutputError('truncated', usage);
     return { text: response.text, model: params.model, provider: 'gemini', usage };
+  }
+
+  /**
+   * Stream a plain-text answer with `generateContentStream`. Thought parts are not forwarded.
+   *
+   * @throws ProviderOutputError `truncated` when the model hit its output limit, `invalid` when
+   * the answer was empty (for example a blocked response).
+   * @throws Error when the key is missing, the request fails, or the stream ends without a
+   * finish reason.
+   */
+  public async streamChat(params: StreamChatParams): Promise<GenerateContentOutput> {
+    const effort = resolveModelReasoningEffort('gemini', params.model, params.reasoningEffort ?? this.defaultReasoningEffort);
+    if (!this.streamFn && !this.apiKey) {
+      throw new Error('Gemini API key is not configured');
+    }
+    const apiKey = this.apiKey;
+    const open: GeminiStreamFn = this.streamFn
+      ?? (request => new GoogleGenAI({ apiKey }).models.generateContentStream(request));
+    const stream = await open({
+      model: params.model,
+      // Gemini names the assistant role `model`.
+      contents: params.messages.map(message => ({
+        role: message.role === 'assistant' ? 'model' as const : 'user' as const,
+        parts: [{ text: message.content }],
+      })),
+      config: {
+        systemInstruction: params.systemInstruction,
+        abortSignal: params.abortSignal,
+        thinkingConfig: { thinkingLevel: effort.toUpperCase() as unknown as ThinkingLevel },
+      },
+    });
+
+    let text = '';
+    let usage = normalizeUsage('gemini');
+    let finishReason: string | undefined;
+    for await (const chunk of stream) {
+      if (chunk.usageMetadata) usage = normalizeUsage('gemini', chunk.usageMetadata);
+      finishReason = chunk.candidates?.[0]?.finishReason ?? finishReason;
+      if (chunk.text) {
+        text += chunk.text;
+        params.onDelta(chunk.text);
+      }
+    }
+
+    if (finishReason === 'MAX_TOKENS') throw new ProviderOutputError('truncated', usage);
+    if (!finishReason) throw new Error('[502] The Gemini stream ended before completion.');
+    if (!text.trim()) throw new ProviderOutputError('invalid', usage);
+    return { text, model: params.model, provider: 'gemini', usage };
   }
 
   /** Probe the selected credentials with a bounded request; never persist draft values. */

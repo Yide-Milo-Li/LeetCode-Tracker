@@ -45,6 +45,18 @@ Each provider exposes its vendor-accurate reasoning effort options in Settings a
 
 Preset identifiers are conveniences, not proof that an account has access to every listed model. Use the connection test to check your account or gateway; custom model identifiers are not exposed for any provider, and settings/test endpoints reject unsupported Gemini or OpenAI model identifiers and unsupported reasoning effort values. Official model identifiers were checked against the OpenAI model docs (`gpt-6-luna`, `gpt-6.1-terra`) and [DeepSeek model table](https://api-docs.deepseek.com/quick_start/pricing/). No live account availability was tested.
 
+## In-app chat
+
+The floating **Ask AI** panel (`Ctrl+J`, `⌘J` on macOS) sends questions to the provider selected in Settings. It works with Gemini, OpenAI with an API key, OpenAI with Sign in with ChatGPT, and DeepSeek.
+
+- `POST /api/v1/chat/stream` answers with Server-Sent Events: one `context` event, `delta` events with answer text, then exactly one `done` or `error`. Invalid input and a missing provider are rejected with a JSON error before the stream opens. `GET /api/v1/chat/status` reports whether chat can run.
+- The server keeps no conversation. The client resends the recent turns with each question, at most 40 turns, 24,000 characters per turn and 120,000 in total. The conversation is stored in the browser's `localStorage` on this device. It is not in the profile database, backups, bundles or device sync.
+- Two kinds of local data can be attached, each a toggle the user controls: the problem open in Notes (practice summary, latest attempts and the saved note, cut to 8,000 characters) and today's plan. The server reads both through the MCP read tools `tracker_get_note_context` and `tracker_get_today` in-process. The model cannot choose tools or arguments, and chat never writes to the profile. Unsaved note edits are not included.
+- Attached data and the conversation are sent to the selected provider. The panel states this before the first question, and each answer lists the data it used.
+- Transports: Gemini uses `generateContentStream`; OpenAI and DeepSeek use Chat Completions with `stream: true`; ChatGPT mode uses the Responses API with the whole conversation in `input`, `store: false` and no fields that route rejects. Reasoning text is not shown.
+- A fallback model is tried only before any text was shown. After that a failure ends the answer, and the partial text stays visible with a retry. A stream that makes no progress for two minutes is abandoned. Closing the connection or pressing Stop cancels the provider request.
+- Failures use stable codes: `CHAT_NOT_CONFIGURED`, `CHAT_AUTH_ERROR`, `CHAT_QUOTA`, `CHAT_TIMEOUT`, `CHAT_TRUNCATED`, `CHAT_EMPTY`, `CHAT_INTERRUPTED`, `CHAT_UNAVAILABLE`, `CHAT_CANCELLED`, and `OPENAI_OAUTH_RECONNECT_REQUIRED` for a lost ChatGPT session. Diagnostics record token counts under the purpose `chat`, never message text.
+
 ## Provider boundary and failure behavior
 
 AI note formatting is an explicit, read-only proposal. The selected range is bounded to 20,000 characters and 200 fragments; each configured model is attempted at most once within a 45-second overall deadline. The model returns layout instructions using fragment IDs. The server reconstructs the note from its original fragments, validates their order and protected content, and returns a candidate for review. Existing code blocks, inline code, formulas, links and protected blocks are withheld from the provider. Other selected note text is sent to the selected endpoint. Invalid suggestions are rejected without an automatic retry; saving the draft remains a separate action.

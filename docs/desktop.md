@@ -125,7 +125,7 @@ To prevent orphan background processes:
 - On each launch, the host generates a high-entropy 256-bit random session secret.
 - The secret is passed to the sidecar exclusively via a private stdin handshake stream.
 - All `/api/v1/*` routes strictly require the `x-desktop-session-token` header, returning HTTP 401 `UNAUTHORIZED_SESSION` for unauthorized requests.
-- The web interface communicates through Rust's `api_request`; the session token is not returned to the renderer. Rust restricts requests to the loopback `/api/v1/` namespace and disables redirects and proxies. This does not protect against privileged local software inspecting process memory or traffic.
+- The web interface communicates through Rust's `api_request`; the session token is not returned to the renderer. Rust restricts requests to the loopback `/api/v1/` namespace and disables redirects and proxies. This does not protect against privileged local software inspecting process memory or traffic. The AI chat answer is the one response delivered incrementally: `api_stream` accepts only `POST /api/v1/chat/stream`, forwards the body to the renderer as byte chunks over a Tauri channel, and `api_stream_cancel` closes the connection.
 - External links use the OS URL handler directly (`ShellExecuteW` on Windows, `/usr/bin/open` on macOS), with parsed HTTPS host validation for `leetcode.com`, `leetcode.cn`, and `github.com`; no command interpreter is invoked.
 - Desktop Markdown, CSV, ZIP, and snapshot exports require a native save dialog. The renderer cannot choose a destination path. A unique temporary file beside the chosen destination is replaced atomically only after a complete download; cancellation and failures preserve existing files.
 

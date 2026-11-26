@@ -13,6 +13,7 @@ import {
 } from '../../../../../packages/contracts/src/sync.ts';
 import { BaseLLMProvider, ProviderOutputError } from './base.ts';
 import { normalizeUsage } from '../usage.ts';
+import { sseData } from './sse.ts';
 import { createResponse, ResponsesApiError, type ResponsesRequest, type ResponsesResult } from './openai-responses.ts';
 import {
   LLMError,
@@ -23,6 +24,7 @@ import {
   type ConnectionTestResult,
   type CustomGenerateFn,
   type OpenAITokenSource,
+  type StreamChatParams,
 } from '../types.ts';
 
 export type FetchFn = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -237,6 +239,110 @@ export class OpenAIProvider extends BaseLLMProvider {
       try { JSON.parse(text); } catch { throw new ProviderOutputError('invalid', usage); }
     }
     return { text, model: data.model || params.model, provider: this.providerId, usage };
+  }
+
+  /**
+   * Stream a plain-text answer: Chat Completions with `stream: true`, or the Responses API in
+   * `chatgpt` mode. Reasoning deltas (`reasoning_content`) are not forwarded.
+   *
+   * @throws ProviderOutputError `truncated` when the model hit its output limit, `invalid` when
+   * the answer was empty.
+   * @throws Error whose message starts with `[status]` for HTTP and in-stream provider errors, and
+   * when the stream ends without a finish signal.
+   */
+  public async streamChat(params: StreamChatParams): Promise<GenerateContentOutput> {
+    const effort = resolveModelReasoningEffort(
+      this.providerId,
+      params.model,
+      params.reasoningEffort ?? this.defaultReasoningEffort
+    );
+
+    if (this.authMode === 'chatgpt') {
+      let streamed = false;
+      const result = await this.requestWithChatGPT({
+        model: params.model,
+        instructions: params.systemInstruction,
+        messages: params.messages,
+        reasoningEffort: effort,
+        abortSignal: params.abortSignal,
+        onDelta: text => { streamed = true; params.onDelta(text); },
+      });
+      // A response may complete with its text only in the final event.
+      if (!streamed && result.text) params.onDelta(result.text);
+      if (!result.text.trim()) throw new ProviderOutputError('invalid', result.usage);
+      return { text: result.text, model: result.model, provider: this.providerId, usage: result.usage };
+    }
+
+    if (!this.apiKey) {
+      throw new Error(`${this.providerId.toUpperCase()} API key is not configured`);
+    }
+
+    const response = await this.fetchFn(`${this.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+        Authorization: `Bearer ${this.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: params.model,
+        messages: [{ role: 'system', content: params.systemInstruction }, ...params.messages],
+        stream: true,
+        reasoning_effort: effort,
+        ...(this.providerId === 'deepseek'
+          ? { thinking: { type: effort === 'none' ? 'disabled' : 'enabled' } }
+          : {}),
+        // Token counts arrive in a final chunk only on request; unknown gateways keep their protocol.
+        ...(this.providerId === 'deepseek' || this.baseUrl === 'https://api.openai.com/v1'
+          ? { stream_options: { include_usage: true } }
+          : {}),
+      }),
+      signal: params.abortSignal,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      let message = `${this.providerId.toUpperCase()} API returned status ${response.status}`;
+      try {
+        const parsed = JSON.parse(errorText) as { error?: { message?: string } };
+        if (parsed.error?.message) message = parsed.error.message;
+      } catch {
+        if (errorText) message += `: ${errorText.slice(0, 300)}`;
+      }
+      throw new Error(`[${response.status}] ${message}`);
+    }
+    if (!response.body) throw new Error('[502] The provider returned no event stream.');
+
+    let text = '';
+    let model = params.model;
+    let usage = normalizeUsage(this.providerId);
+    let finishReason: string | null = null;
+    let done = false;
+    for await (const data of sseData(response.body)) {
+      if (data === '[DONE]') { done = true; break; }
+      let chunk: {
+        error?: { message?: string };
+        model?: string;
+        usage?: unknown;
+        choices?: Array<{ finish_reason?: string | null; delta?: { content?: string | null } }>;
+      };
+      try { chunk = JSON.parse(data); } catch { continue; }
+      if (chunk.error) throw new Error(`[502] ${chunk.error.message ?? 'The provider reported a stream error.'}`);
+      if (typeof chunk.model === 'string' && chunk.model) model = chunk.model;
+      if (chunk.usage) usage = normalizeUsage(this.providerId, chunk.usage);
+      const choice = chunk.choices?.[0];
+      if (typeof choice?.delta?.content === 'string' && choice.delta.content) {
+        text += choice.delta.content;
+        params.onDelta(choice.delta.content);
+      }
+      if (choice?.finish_reason) finishReason = choice.finish_reason;
+    }
+
+    if (finishReason === 'length') throw new ProviderOutputError('truncated', usage);
+    // Without a finish signal the connection dropped mid-answer.
+    if (!finishReason && !done) throw new Error('[502] The provider stream ended before completion.');
+    if (!text.trim()) throw new ProviderOutputError('invalid', usage);
+    return { text, model, provider: this.providerId, usage };
   }
 
   /** Probe the selected credentials with a bounded request; never persist draft values. */
