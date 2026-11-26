@@ -11,67 +11,129 @@
 .chat-launcher {
   left: 0;
   top: 0;
-  transition:
-    transform 260ms cubic-bezier(0.16, 1, 0.3, 1),
-    opacity 260ms ease;
-}
-/* Left alone, only a sliver stays on screen; hover or focus brings it back. */
-.chat-launcher.is-tucked {
-  opacity: 0.6;
+  transition: transform 260ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 .chat-launcher.is-dragging {
   transition: none;
 }
 
+/* The button is the 40px hit box. It draws two things: the round face, and the thin bar that
+   stands in for it on the window edge while the launcher is left alone. */
 .chat-launcher-button {
+  position: relative;
   width: 40px;
   height: 40px;
+  display: block;
+  background: transparent;
+  cursor: grab;
+  touch-action: none;
+}
+/* Extends the hit area to the window edge, so the pointer that reveals a tucked launcher is still
+   on it once it has slid out. */
+.chat-launcher-button::after {
+  content: '';
+  position: absolute;
+  inset: -12px;
+}
+
+.chat-launcher-face {
+  position: absolute;
+  inset: 0;
   display: grid;
   place-items: center;
   border-radius: 50%;
   background: var(--surface);
   color: var(--text-muted);
   box-shadow: 0 0 0 1px var(--border-color), var(--shadow-xs);
-  cursor: grab;
-  touch-action: none;
   transition:
     background var(--btn-motion),
     color var(--btn-motion),
-    transform var(--btn-motion);
+    opacity 180ms ease,
+    transform 260ms cubic-bezier(0.16, 1, 0.3, 1);
 }
-/* Extends the hit area to the window edge, so the pointer that reveals a tucked launcher is still
-   on it once it has slid out. */
-.chat-launcher-button {
-  position: relative;
-}
-.chat-launcher-button::after {
-  content: '';
-  position: absolute;
-  inset: -6px -12px;
-}
-.chat-launcher-button:hover,
-.chat-launcher-button:focus-visible {
+.chat-launcher-button:hover .chat-launcher-face,
+.chat-launcher-button:focus-visible .chat-launcher-face,
+.chat-launcher-button.is-busy .chat-launcher-face {
   background: var(--primary);
   color: var(--on-primary);
 }
-/* A tucked launcher that still holds keyboard focus keeps its ring but not the filled look. */
-.chat-launcher.is-tucked .chat-launcher-button:not(:hover, .is-busy) {
-  background: var(--surface);
-  color: var(--text-muted);
-}
-.chat-launcher-button:active {
+.chat-launcher-button:active .chat-launcher-face {
   transform: scale(0.95);
 }
 .chat-launcher.is-dragging .chat-launcher-button {
   cursor: grabbing;
+}
+.chat-launcher.is-dragging .chat-launcher-face {
   box-shadow: 0 0 0 1px var(--border-color), var(--shadow-md);
 }
-/* An answer is still arriving while the panel is closed: the sliver stays readable as a signal. */
-.chat-launcher-button.is-busy {
-  background: var(--primary);
-  color: var(--on-primary);
+
+/* The bar: 4px thick, lying along the docked edge, 4px in from it. */
+.chat-launcher-button::before {
+  content: '';
+  position: absolute;
+  border-radius: 2px;
+  background: var(--text-muted);
+  opacity: 0;
+  transition:
+    opacity 180ms ease,
+    transform 260ms cubic-bezier(0.16, 1, 0.3, 1),
+    background var(--btn-motion);
 }
-.chat-launcher.is-tucked:has(.is-busy) {
+.chat-launcher[data-side='left'] .chat-launcher-button::before,
+.chat-launcher[data-side='right'] .chat-launcher-button::before {
+  top: 2px;
+  width: 4px;
+  height: 36px;
+  transform: scaleY(0.4);
+}
+.chat-launcher[data-side='top'] .chat-launcher-button::before,
+.chat-launcher[data-side='bottom'] .chat-launcher-button::before {
+  left: 2px;
+  width: 36px;
+  height: 4px;
+  transform: scaleX(0.4);
+}
+.chat-launcher[data-side='left'] .chat-launcher-button::before {
+  left: 4px;
+}
+.chat-launcher[data-side='right'] .chat-launcher-button::before {
+  right: 4px;
+}
+.chat-launcher[data-side='top'] .chat-launcher-button::before {
+  top: 4px;
+}
+.chat-launcher[data-side='bottom'] .chat-launcher-button::before {
+  bottom: 4px;
+}
+
+/* Left alone, the face shrinks into its edge and the bar takes its place. */
+.chat-launcher.is-tucked .chat-launcher-face {
+  opacity: 0;
+  transform: scale(0.3);
+}
+.chat-launcher[data-side='left'] .chat-launcher-face {
+  transform-origin: left center;
+}
+.chat-launcher[data-side='right'] .chat-launcher-face {
+  transform-origin: right center;
+}
+.chat-launcher[data-side='top'] .chat-launcher-face {
+  transform-origin: center top;
+}
+.chat-launcher[data-side='bottom'] .chat-launcher-face {
+  transform-origin: center bottom;
+}
+.chat-launcher.is-tucked .chat-launcher-button::before {
+  opacity: 0.4;
+  transform: none;
+}
+/* The bar itself shows keyboard focus, and an answer still arriving while the panel is closed. */
+.chat-launcher.is-tucked .chat-launcher-button:focus-visible {
+  outline: 0;
+}
+.chat-launcher.is-tucked .chat-launcher-button:focus-visible::before,
+.chat-launcher.is-tucked .chat-launcher-button.is-busy::before {
+  background: var(--primary);
   opacity: 1;
 }
 
@@ -99,8 +161,12 @@ html.chat-dragging * {
 .chat-panel:focus {
   outline: 0;
 }
-.chat-panel[data-side='left'] {
+.chat-panel[data-side='left'],
+.chat-panel[data-side='bottom'] {
   transform-origin: bottom left;
+}
+.chat-panel[data-side='top'] {
+  transform-origin: top left;
 }
 html.dark .chat-panel {
   box-shadow: 0 0 0 1px var(--border-color), 0 12px 36px rgba(0, 0, 0, 0.4);
@@ -389,7 +455,8 @@ html.dark .chat-panel {
     animation: none;
   }
   .chat-launcher,
-  .chat-launcher-button,
+  .chat-launcher-face,
+  .chat-launcher-button::before,
   .chat-send {
     transition: none;
   }

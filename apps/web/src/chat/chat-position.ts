@@ -1,7 +1,7 @@
 /**
  * Placement of the floating chat: where the collapsed launcher docks and where the panel opens.
  *
- * The launcher always rests against the left or right window edge so it can tuck out of the way;
+ * The launcher always rests against one of the four window edges so it can shrink out of the way;
  * the panel may sit anywhere inside the window. Both are remembered on this device only.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -10,8 +10,6 @@ import type React from 'react';
 export const LAUNCHER_SIZE = 40;
 /** Gap between the revealed launcher and the window edge. */
 const EDGE_GAP = 12;
-/** Width of the launcher that stays on screen while it is tucked away. */
-const TUCK_VISIBLE = 12;
 export const PANEL_WIDTH = 420;
 /** Gap around a panel that opens from the dock; a dragged panel may come closer to the edge. */
 const PANEL_MARGIN = 24;
@@ -23,8 +21,14 @@ const STORAGE_KEY = 'leetcode_tracker_chat_position_v1';
 export interface Viewport { width: number; height: number }
 /** Top-left corner in viewport pixels. */
 export interface Point { left: number; top: number }
-/** Edge the launcher rests on, and the distance from its bottom to the bottom of the window. */
-export interface ChatDock { side: 'left' | 'right'; bottom: number }
+/**
+ * Edge the launcher rests on and where along it: on a side edge, the distance from its bottom to
+ * the bottom of the window; on the top or bottom edge, the distance from its left to the left of
+ * the window.
+ */
+export type ChatDock =
+  | { side: 'left' | 'right'; bottom: number }
+  | { side: 'top' | 'bottom'; left: number };
 /** `panel` is set once the user has dragged the panel; without it the panel opens beside the dock. */
 export interface ChatPosition { dock: ChatDock; panel?: Point }
 
@@ -35,9 +39,18 @@ const clamp = (value: number, min: number, max: number) => Math.min(Math.max(val
 /** Matches the CSS height of `.chat-panel`. */
 export const panelHeight = (viewport: Viewport) => Math.min(620, viewport.height - 2 * PANEL_MARGIN);
 
-/** Where the launcher is drawn; a tucked launcher keeps only a sliver inside the window. */
+/**
+ * Where the launcher is drawn. Tucked, it sits flush against its edge, where it is drawn as a thin
+ * bar; its box stays in place so the bar can be hovered, clicked and dragged.
+ */
 export function launcherPoint(dock: ChatDock, viewport: Viewport, tucked: boolean): Point {
-  const inset = tucked ? TUCK_VISIBLE - LAUNCHER_SIZE : EDGE_GAP;
+  const inset = tucked ? 0 : EDGE_GAP;
+  if ('left' in dock) {
+    return {
+      left: clamp(dock.left, EDGE_GAP, viewport.width - LAUNCHER_SIZE - EDGE_GAP),
+      top: dock.side === 'top' ? inset : viewport.height - LAUNCHER_SIZE - inset,
+    };
+  }
   return {
     left: dock.side === 'left' ? inset : viewport.width - LAUNCHER_SIZE - inset,
     top: clamp(viewport.height - dock.bottom - LAUNCHER_SIZE, EDGE_GAP, viewport.height - LAUNCHER_SIZE - EDGE_GAP),
@@ -50,32 +63,66 @@ export const clampLauncher = (point: Point, viewport: Viewport): Point => ({
   top: clamp(point.top, 0, viewport.height - LAUNCHER_SIZE),
 });
 
-/** Dock for a launcher released at `point`: the nearer edge, at the height it was dropped. */
-export const dockAt = (point: Point, viewport: Viewport): ChatDock => ({
-  side: point.left + LAUNCHER_SIZE / 2 < viewport.width / 2 ? 'left' : 'right',
-  bottom: clamp(viewport.height - point.top - LAUNCHER_SIZE, EDGE_GAP, viewport.height - LAUNCHER_SIZE - EDGE_GAP),
-});
+/** Dock for a launcher released at `point`: the nearest of the four edges, at the spot it was dropped. */
+export function dockAt(point: Point, viewport: Viewport): ChatDock {
+  const x = point.left + LAUNCHER_SIZE / 2;
+  const y = point.top + LAUNCHER_SIZE / 2;
+  const toSide = Math.min(x, viewport.width - x);
+  const toTopOrBottom = Math.min(y, viewport.height - y);
+  if (toTopOrBottom < toSide) {
+    return {
+      side: y < viewport.height / 2 ? 'top' : 'bottom',
+      left: clamp(point.left, EDGE_GAP, viewport.width - LAUNCHER_SIZE - EDGE_GAP),
+    };
+  }
+  return {
+    side: x < viewport.width / 2 ? 'left' : 'right',
+    bottom: clamp(viewport.height - point.top - LAUNCHER_SIZE, EDGE_GAP, viewport.height - LAUNCHER_SIZE - EDGE_GAP),
+  };
+}
 
 export const clampPanel = (point: Point, viewport: Viewport): Point => ({
   left: clamp(point.left, PANEL_MIN_GAP, viewport.width - PANEL_WIDTH - PANEL_MIN_GAP),
   top: clamp(point.top, PANEL_MIN_GAP, viewport.height - panelHeight(viewport) - PANEL_MIN_GAP),
 });
 
-/** Where the panel opens: the spot it was dragged to, otherwise beside the dock with bottoms aligned. */
+/** Where the panel opens: the spot it was dragged to, otherwise at the dock's edge, aligned with the launcher. */
 export function panelPoint(position: ChatPosition, viewport: Viewport): Point {
   if (position.panel) return clampPanel(position.panel, viewport);
   const height = panelHeight(viewport);
+  const { dock } = position;
+  if ('left' in dock) {
+    return {
+      left: clamp(dock.left, PANEL_MARGIN, viewport.width - PANEL_WIDTH - PANEL_MARGIN),
+      top: dock.side === 'top' ? PANEL_MARGIN : Math.max(PANEL_MARGIN, viewport.height - height - PANEL_MARGIN),
+    };
+  }
   return {
-    left: position.dock.side === 'left' ? PANEL_MARGIN : viewport.width - PANEL_WIDTH - PANEL_MARGIN,
-    top: clamp(viewport.height - position.dock.bottom - height, PANEL_MARGIN, viewport.height - height - PANEL_MARGIN),
+    left: dock.side === 'left' ? PANEL_MARGIN : viewport.width - PANEL_WIDTH - PANEL_MARGIN,
+    top: clamp(viewport.height - dock.bottom - height, PANEL_MARGIN, viewport.height - height - PANEL_MARGIN),
   };
 }
 
-/** Dock for a panel at `point`, so the launcher reappears on the panel's side when it closes. */
-export const dockForPanel = (point: Point, viewport: Viewport): ChatDock => ({
-  side: point.left + PANEL_WIDTH / 2 < viewport.width / 2 ? 'left' : 'right',
-  bottom: clamp(viewport.height - point.top - panelHeight(viewport), EDGE_GAP, viewport.height - LAUNCHER_SIZE - EDGE_GAP),
-});
+/**
+ * Dock for a panel dragged to `point`, so the launcher reappears next to the panel when it closes.
+ *
+ * The launcher stays on the kind of edge it was on: a top or bottom dock follows the panel's left
+ * edge, a side dock follows its bottom edge. The panel fills most of the window height, so its
+ * distance to the top and bottom says little about where the user wants the launcher.
+ */
+export function dockForPanel(point: Point, viewport: Viewport, current: ChatDock): ChatDock {
+  const height = panelHeight(viewport);
+  if (current.side === 'top' || current.side === 'bottom') {
+    return {
+      side: point.top + height / 2 < viewport.height / 2 ? 'top' : 'bottom',
+      left: clamp(point.left, EDGE_GAP, viewport.width - LAUNCHER_SIZE - EDGE_GAP),
+    };
+  }
+  return {
+    side: point.left + PANEL_WIDTH / 2 < viewport.width / 2 ? 'left' : 'right',
+    bottom: clamp(viewport.height - point.top - height, EDGE_GAP, viewport.height - LAUNCHER_SIZE - EDGE_GAP),
+  };
+}
 
 const isNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 
@@ -83,11 +130,14 @@ const isNumber = (value: unknown): value is number => typeof value === 'number' 
 function loadPosition(): ChatPosition {
   try {
     const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null') as Partial<ChatPosition> | null;
-    const dock = stored?.dock;
-    if (!dock || (dock.side !== 'left' && dock.side !== 'right') || !isNumber(dock.bottom)) return DEFAULT_CHAT_POSITION;
-    const panel = stored.panel;
+    const raw = stored?.dock as { side?: unknown; bottom?: unknown; left?: unknown } | undefined;
+    let dock: ChatDock;
+    if ((raw?.side === 'left' || raw?.side === 'right') && isNumber(raw.bottom)) dock = { side: raw.side, bottom: raw.bottom };
+    else if ((raw?.side === 'top' || raw?.side === 'bottom') && isNumber(raw.left)) dock = { side: raw.side, left: raw.left };
+    else return DEFAULT_CHAT_POSITION;
+    const panel = stored?.panel;
     return {
-      dock: { side: dock.side, bottom: dock.bottom },
+      dock,
       ...(panel && isNumber(panel.left) && isNumber(panel.top) ? { panel: { left: panel.left, top: panel.top } } : {}),
     };
   } catch {

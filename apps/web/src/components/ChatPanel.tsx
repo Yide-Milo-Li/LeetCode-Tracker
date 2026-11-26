@@ -13,7 +13,7 @@ import type { Language } from '../i18n.ts';
 import { ApiError } from '../platform/index.ts';
 import { localizeApiError } from '../error-i18n.ts';
 import { useChatProblem } from '../chat/chat-context.ts';
-import type { Point } from '../chat/chat-position.ts';
+import type { ChatDock, Point } from '../chat/chat-position.ts';
 import type { ChatController, ChatEntry } from '../chat/useChat.ts';
 import { RenderedMarkdown } from './NotesMarkdownPreview.tsx';
 import { Feedback, IconButton } from './ui.tsx';
@@ -32,8 +32,8 @@ export interface ChatPanelProps {
   onOpenAiSettings: () => void;
   /** Top-left corner in viewport pixels. */
   position: Point;
-  /** Window edge the launcher docks on; the panel grows from that side when it opens. */
-  side: 'left' | 'right';
+  /** Window edge the launcher docks on; the panel grows from that edge when it opens. */
+  side: ChatDock['side'];
   dragging: boolean;
   /** Pointer went down on the header outside its buttons. */
   onDragStart: (event: React.PointerEvent) => void;

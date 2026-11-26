@@ -4,8 +4,8 @@
  * Stays mounted for the whole session so the conversation and an answer in progress survive
  * closing the panel. The panel itself (and its Markdown renderer) loads on first open.
  *
- * Collapsed, it is a small button docked to the left or right window edge. It can be dragged to
- * any height on either edge and tucks most of itself off screen when left alone.
+ * Collapsed, it is a small button docked to one of the four window edges. It can be dragged to
+ * any spot along any edge and shrinks to a thin bar on that edge when left alone.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
@@ -19,7 +19,10 @@ import { Tooltip } from './ui.tsx';
 
 const ChatPanel = React.lazy(() => import('./ChatPanel.tsx').then(module => ({ default: module.ChatPanel })));
 
-/** How long the launcher stays fully visible after the pointer or keyboard leaves it. */
+/** The tooltip opens toward the inside of the window. */
+const TOOLTIP_SIDE = { left: 'right', right: 'left', top: 'bottom', bottom: 'top' } as const;
+
+/** How long the launcher stays a full button after the pointer or keyboard leaves it. */
 export const LAUNCHER_REST_MS = 2500;
 
 export interface ChatLauncherProps {
@@ -76,7 +79,7 @@ export function ChatLauncher({ lang, onToday, onOpenAiSettings }: ChatLauncherPr
     onEnd: point => {
       const panel = clampPanel(point, viewport);
       setDragPoint(null);
-      save({ dock: dockForPanel(panel, viewport), panel });
+      save({ dock: dockForPanel(panel, viewport, position.dock), panel });
     },
   });
 
@@ -117,9 +120,10 @@ export function ChatLauncher({ lang, onToday, onOpenAiSettings }: ChatLauncherPr
   return (
     <div
       className={'chat-launcher' + (tucked && !dragging ? ' is-tucked' : '') + (dragging ? ' is-dragging' : '')}
+      data-side={position.dock.side}
       style={{ transform: `translate3d(${at.left}px, ${at.top}px, 0)` }}
     >
-      <Tooltip content={label} shortcut={shortcut} side={position.dock.side === 'right' ? 'left' : 'right'} disabled={dragging || tucked}>
+      <Tooltip content={label} shortcut={shortcut} side={TOOLTIP_SIDE[position.dock.side]} disabled={dragging || tucked}>
         <button
           ref={launcher}
           type="button"
@@ -134,7 +138,7 @@ export function ChatLauncher({ lang, onToday, onOpenAiSettings }: ChatLauncherPr
           onKeyDown={wake}
           onClick={() => { if (!launcherDrag.consumeClick()) setOpen(true); }}
         >
-          <MessageSquareText size={18} aria-hidden="true" />
+          <span className="chat-launcher-face"><MessageSquareText size={18} aria-hidden="true" /></span>
         </button>
       </Tooltip>
     </div>

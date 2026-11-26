@@ -234,19 +234,31 @@ it('does not send while an IME candidate is being confirmed', async () => {
 it('docks the launcher beside the nearer edge and opens the panel next to it', () => {
   const viewport = { width: 1280, height: 800 };
   assert.deepEqual(launcherPoint(DEFAULT_CHAT_POSITION.dock, viewport, false), { left: 1228, top: 736 });
-  // Tucked, only a sliver stays inside the window.
-  assert.deepEqual(launcherPoint(DEFAULT_CHAT_POSITION.dock, viewport, true), { left: 1268, top: 736 });
-  assert.deepEqual(launcherPoint({ side: 'left', bottom: 300 }, viewport, true), { left: -28, top: 460 });
+  // Tucked, it sits flush against its edge, where it is drawn as a bar.
+  assert.deepEqual(launcherPoint(DEFAULT_CHAT_POSITION.dock, viewport, true), { left: 1240, top: 736 });
+  assert.deepEqual(launcherPoint({ side: 'left', bottom: 300 }, viewport, true), { left: 0, top: 460 });
 
-  assert.deepEqual(dockAt({ left: 200, top: 100 }, viewport), { side: 'left', bottom: 660 });
-  assert.deepEqual(dockAt({ left: 900, top: 790 }, viewport), { side: 'right', bottom: 12 });
+  assert.deepEqual(dockAt({ left: 60, top: 100 }, viewport), { side: 'left', bottom: 660 });
+  assert.deepEqual(dockAt({ left: 1230, top: 500 }, viewport), { side: 'right', bottom: 260 });
   assert.deepEqual(panelPoint({ dock: { side: 'left', bottom: 660 } }, viewport), { left: 24, top: 24 });
   assert.deepEqual(panelPoint(DEFAULT_CHAT_POSITION, viewport), { left: 836, top: 156 });
 
   // A dragged panel is kept where it was dropped, and pulled back inside a smaller window.
   assert.deepEqual(panelPoint({ dock: DEFAULT_CHAT_POSITION.dock, panel: { left: 300, top: 60 } }, viewport), { left: 300, top: 60 });
   assert.deepEqual(panelPoint({ dock: DEFAULT_CHAT_POSITION.dock, panel: { left: 900, top: 400 } }, { width: 1024, height: 700 }), { left: 596, top: 72 });
-  assert.deepEqual(dockForPanel({ left: 100, top: 60 }, viewport), { side: 'left', bottom: 120 });
+  assert.deepEqual(dockForPanel({ left: 100, top: 60 }, viewport, DEFAULT_CHAT_POSITION.dock), { side: 'left', bottom: 120 });
+
+  // The top and bottom edges dock too: the nearest edge wins and the horizontal spot is kept.
+  assert.deepEqual(dockAt({ left: 600, top: 30 }, viewport), { side: 'top', left: 600 });
+  assert.deepEqual(dockAt({ left: 1200, top: 770 }, viewport), { side: 'bottom', left: 1200 });
+  assert.deepEqual(dockAt({ left: 20, top: 400 }, viewport), { side: 'left', bottom: 360 });
+  assert.deepEqual(launcherPoint({ side: 'top', left: 600 }, viewport, false), { left: 600, top: 12 });
+  assert.deepEqual(launcherPoint({ side: 'top', left: 600 }, viewport, true), { left: 600, top: 0 });
+  assert.deepEqual(launcherPoint({ side: 'bottom', left: 600 }, viewport, true), { left: 600, top: 760 });
+  assert.deepEqual(panelPoint({ dock: { side: 'top', left: 600 } }, viewport), { left: 600, top: 24 });
+  assert.deepEqual(panelPoint({ dock: { side: 'bottom', left: 1228 } }, viewport), { left: 836, top: 156 });
+  // A dragged panel leaves the launcher on the kind of edge it was on.
+  assert.deepEqual(dockForPanel({ left: 300, top: 150 }, viewport, { side: 'top', left: 600 }), { side: 'bottom', left: 300 });
 });
 
 it('drags the launcher to an edge, remembers it and tucks away when left alone', async () => {
@@ -279,7 +291,8 @@ it('drags the launcher to an edge, remembers it and tucks away when left alone',
   assert.equal(dock.style.transform, `translate3d(12px, 216px, 0)`);
 
   await waitFor(() => assert.equal(dock.classList.contains('is-tucked'), true), { timeout: LAUNCHER_REST_MS + 1500 });
-  assert.equal(dock.style.transform, 'translate3d(-28px, 216px, 0)');
+  assert.equal(dock.style.transform, 'translate3d(0px, 216px, 0)');
+  assert.equal(dock.getAttribute('data-side'), 'left');
   await act(async () => { fireEvent.pointerEnter(button); });
   assert.equal(dock.classList.contains('is-tucked'), false);
 
