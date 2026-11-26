@@ -5,11 +5,12 @@
  * provider are rejected with an ordinary JSON error before the stream opens; failures after
  * that arrive as an `error` event on a `200` stream.
  *
- * `POST /api/v1/chat/actions` applies one change the user confirmed. It is the only chat route
- * that writes to the profile; a refused change answers with the change tool's own error code.
+ * `POST /api/v1/chat/actions` applies one change the user confirmed, and
+ * `POST /api/v1/chat/actions/undo` takes one back. They are the only chat routes that write to the
+ * profile; a refusal answers with a stable error code and leaves the profile unchanged.
  */
 import type { FastifyInstance } from 'fastify';
-import { chatActionRequestSchema, chatRequestSchema, type ChatStreamEvent } from '../../../../packages/contracts/src/chat.ts';
+import { chatActionRequestSchema, chatRequestSchema, chatUndoSchema, type ChatStreamEvent } from '../../../../packages/contracts/src/chat.ts';
 import { ChatActionError } from '../chat/chat-service.ts';
 import type { RouteContext } from './types.ts';
 
@@ -60,6 +61,19 @@ export function registerChatRoutes(app: FastifyInstance, { chat }: RouteContext)
     }
     try {
       return await chat.apply(parsed.data);
+    } catch (error) {
+      if (!(error instanceof ChatActionError)) throw error;
+      return reply.code(error.status).send({ error: error.code, message: error.message });
+    }
+  });
+
+  app.post('/api/v1/chat/actions/undo', { bodyLimit: CHAT_BODY_LIMIT }, async (request, reply) => {
+    const parsed = chatUndoSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'INVALID_CHAT_ACTION', message: 'Expected the undo details of an applied change.' });
+    }
+    try {
+      return await chat.undo(parsed.data);
     } catch (error) {
       if (!(error instanceof ChatActionError)) throw error;
       return reply.code(error.status).send({ error: error.code, message: error.message });

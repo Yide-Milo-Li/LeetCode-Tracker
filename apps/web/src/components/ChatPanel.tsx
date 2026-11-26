@@ -18,7 +18,7 @@ import type { Language } from '../i18n.ts';
 import { ApiError } from '../platform/index.ts';
 import { localizeApiError } from '../error-i18n.ts';
 import { useWorkspace } from '../workspace.tsx';
-import { describeChange, type ChatChange } from '../chat/chat-changes.ts';
+import { applyDraft, describeChange, draftOf, isDecided, type AttemptDraft, type ChangeDraft, type ChatChange } from '../chat/chat-changes.ts';
 import type { ChatAction } from '../chat/chat-context.ts';
 import { hintLabel, hintPrompt, nextHintLevel, reviewPrompt, saveNotePrompt, similarPrompt } from '../chat/chat-presets.ts';
 import { useChatDataAccess } from '../chat/chat-settings.ts';
@@ -75,50 +75,127 @@ function lastUsed(usedAt: number, lang: Language, now = Date.now()): string {
   return zh ? `${days} 天前` : `${days} d ago`;
 }
 
-/** Why a confirmed change was refused, in terms of what to do next. */
-function changeError(error: { code: string; message: string }, lang: Language): string {
+/** Why a confirmation, or the undo of an applied change, was refused, in terms of what to do next. */
+function changeError(error: { code: string; message: string }, lang: Language, undoing: boolean): string {
+  const zh = lang === 'zh';
   if (error.code === 'NOTE_CHANGED') {
-    return lang === 'zh' ? '笔记在 AI 读取之后有了改动。请让它重新准备这次修改。' : 'The note changed after the AI read it. Ask it to prepare the change again.';
+    return zh ? '笔记在 AI 读取之后有了改动。请让它重新准备这次修改。' : 'The note changed after the AI read it. Ask it to prepare the change again.';
   }
-  return localizeApiError(new ApiError(0, error.code, error.message), lang,
-    lang === 'zh' ? '这次改动没有保存，数据没有变化。' : 'The change was not saved. Nothing changed.');
+  if (error.code === 'CHAT_UNDO_STALE') {
+    return zh
+      ? '这项数据在确认之后又有改动，所以没有自动撤销。仍想改回去的话，请到对应页面手动处理。'
+      : 'This data changed after you confirmed, so it was not undone. To change it back, edit it where it lives.';
+  }
+  return localizeApiError(new ApiError(0, error.code, error.message), lang, undoing
+    ? (zh ? '没有撤销成功，这项改动仍然有效。' : 'The undo did not go through. The change is still in place.')
+    : (zh ? '这次改动没有保存，数据没有变化。' : 'The change was not saved. Nothing changed.'));
+}
+
+/** The values of a proposal the user may adjust before confirming it. */
+function ChangeForm({ change, draft, lang, onChange }: {
+  change: ChatChange; draft: ChangeDraft; lang: Language; onChange: (draft: ChangeDraft) => void;
+}) {
+  const zh = lang === 'zh';
+  if (draft.kind === 'note') {
+    return (
+      <textarea className="chat-change-text" rows={7} value={draft.content} maxLength={50_000}
+        aria-label={zh ? '将写入的内容' : 'Text to be written'}
+        onChange={event => onChange({ kind: 'note', content: event.target.value })} />
+    );
+  }
+  const set = (index: number, patch: Partial<AttemptDraft>) =>
+    onChange({ kind: 'practices', attempts: draft.attempts.map((attempt, at) => at === index ? { ...attempt, ...patch } : attempt) });
+  return (
+    <div className="chat-change-attempts">
+      {draft.attempts.map((attempt, index) => {
+        const name = `#${attempt.frontendId}${change.labels.problems[attempt.frontendId] ? ` ${change.labels.problems[attempt.frontendId]}` : ''}`;
+        return (
+          <div key={index} className="chat-change-attempt" role="group" aria-label={name}>
+            <span className="chat-change-attempt-name">{name}</span>
+            <select value={attempt.outcome} aria-label={zh ? '结果' : 'Result'}
+              onChange={event => set(index, { outcome: event.target.value as AttemptDraft['outcome'] })}>
+              <option value="independent">{zh ? '独立完成' : 'Solved independently'}</option>
+              <option value="assisted">{zh ? '借助提示或题解完成' : 'Solved with help'}</option>
+              <option value="unsolved">{zh ? '未解出' : 'Not solved'}</option>
+            </select>
+            <label className="chat-change-minutes">
+              <input type="number" inputMode="numeric" min={1} max={1440} step={1} value={attempt.minutes}
+                aria-label={zh ? '用时（分钟）' : 'Duration in minutes'}
+                onChange={event => set(index, { minutes: event.target.value })} />
+              <span aria-hidden="true">{zh ? '分钟' : 'min'}</span>
+            </label>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 /** One proposed change: what it will do, and the buttons that decide it. */
-function ChangeCard({ change, lang, onConfirm, onDismiss }: {
-  change: ChatChange; lang: Language; onConfirm: () => void; onDismiss: () => void;
+function ChangeCard({ change, lang, onConfirm, onDismiss, onUndo }: {
+  change: ChatChange; lang: Language; onConfirm: (args?: Record<string, unknown>) => void; onDismiss: () => void; onUndo: () => void;
 }) {
   const zh = lang === 'zh';
   const { timezone } = useWorkspace();
   const view = describeChange(change, lang, timezone);
   const applying = change.state === 'applying';
-  const decided = change.state === 'applied' || change.state === 'dismissed';
+  const decided = isDecided(change);
   // A change built on an older note fails the same way every time; only a new proposal helps.
   const retryable = change.error?.code !== 'NOTE_CHANGED';
+  const open = change.state === 'pending' || (change.state === 'failed' && retryable);
+  /** The adjusted values while the user is editing; `null` shows the proposal as it stands. */
+  const [draft, setDraft] = useState<ChangeDraft | null>(null);
+  const editing = open && draft !== null;
+  const edited = editing ? applyDraft(change, draft) : null;
+  const startEditing = open ? draftOf(change) : null;
   return (
     <section className="chat-change" data-state={change.state} aria-label={view.title}>
       <h3>{view.title}</h3>
-      <ul>
-        {view.lines.map((line, index) => <li key={index}>{line}</li>)}
-      </ul>
-      {view.body && !decided && (
-        <div className="notes-preview-pane chat-answer chat-change-body" tabIndex={0} aria-label={zh ? '将写入的内容' : 'Text to be written'}>
-          <RenderedMarkdown content={view.body} lang={lang} />
-        </div>
+      {/* The practice form names each attempt itself; a note keeps saying where its text goes. */}
+      {(!editing || draft.kind === 'note') && (
+        <ul>
+          {view.lines.map((line, index) => <li key={index}>{line}</li>)}
+        </ul>
       )}
-      {change.state === 'failed' && change.error && <p className="chat-change-error" role="alert">{changeError(change.error, lang)}</p>}
+      {editing ? <ChangeForm change={change} draft={draft} lang={lang} onChange={setDraft} /> : (
+        <>
+          {view.body && !decided && (
+            <div className="notes-preview-pane chat-answer chat-change-body" tabIndex={0} aria-label={zh ? '将写入的内容' : 'Text to be written'}>
+              <RenderedMarkdown content={view.body} lang={lang} />
+            </div>
+          )}
+        </>
+      )}
+      {change.error && (change.state === 'failed' || change.state === 'applied') && (
+        <p className="chat-change-error" role="alert">{changeError(change.error, lang, change.state === 'applied')}</p>
+      )}
       {decided ? (
-        <p className="chat-change-status" role="status">
-          {change.state === 'applied' && <Check size={14} aria-hidden="true" />}
-          {change.state === 'applied' ? view.done : (zh ? '已取消，没有改动' : 'Dismissed, nothing changed')}
-        </p>
+        <div className="chat-change-status">
+          <p role="status">
+            {change.state === 'applied' && <Check size={14} aria-hidden="true" />}
+            {change.state === 'applied' ? view.done
+              : change.state === 'undoing' ? (zh ? '正在撤销…' : 'Undoing…')
+              : change.state === 'undone' ? (zh ? '已撤销，数据恢复到了改动之前' : 'Undone. The data is as it was before.')
+              : (zh ? '已取消，没有改动' : 'Dismissed, nothing changed')}
+          </p>
+          {change.state === 'applied' && change.undo && (
+            <button type="button" className="text-link" onClick={onUndo}>{zh ? '撤销' : 'Undo'}</button>
+          )}
+        </div>
+      ) : editing ? (
+        <div className="chat-change-actions">
+          <button type="button" className="btn btn-primary btn-sm" disabled={!edited}
+            onClick={() => { if (edited) { setDraft(null); onConfirm(edited); } }}>{view.confirm}</button>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDraft(null)}>{zh ? '放弃修改' : 'Discard edits'}</button>
+        </div>
       ) : (
         <div className="chat-change-actions">
           {(change.state !== 'failed' || retryable) && (
-            <button type="button" className="btn btn-primary btn-sm" disabled={applying} onClick={onConfirm}>
+            <button type="button" className="btn btn-primary btn-sm" disabled={applying} onClick={() => onConfirm()}>
               {applying ? (zh ? '正在保存…' : 'Saving…') : change.state === 'failed' ? (zh ? '再试一次' : 'Try again') : view.confirm}
             </button>
           )}
+          {startEditing && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDraft(startEditing)}>{zh ? '修改' : 'Edit'}</button>}
           <button type="button" className="btn btn-ghost btn-sm" disabled={applying} onClick={onDismiss}>{zh ? '不用了' : 'Dismiss'}</button>
         </div>
       )}
@@ -126,9 +203,9 @@ function ChangeCard({ change, lang, onConfirm, onDismiss }: {
   );
 }
 
-function Answer({ entry, lang, isLast, busy, onRetry, onOpenAiSettings, onConfirmChange, onDismissChange }: {
+function Answer({ entry, lang, isLast, busy, onRetry, onOpenAiSettings, onConfirmChange, onDismissChange, onUndoChange }: {
   entry: ChatEntry; lang: Language; isLast: boolean; busy: boolean; onRetry: () => void; onOpenAiSettings: () => void;
-  onConfirmChange: (id: string) => void; onDismissChange: (id: string) => void;
+  onConfirmChange: (id: string, args?: Record<string, unknown>) => void; onDismissChange: (id: string) => void; onUndoChange: (id: string) => void;
 }) {
   const zh = lang === 'zh';
   const changes = entry.changes ?? [];
@@ -154,7 +231,8 @@ function Answer({ entry, lang, isLast, busy, onRetry, onOpenAiSettings, onConfir
       )}
       {changes.map(change => (
         <ChangeCard key={change.id} change={change} lang={lang}
-          onConfirm={() => onConfirmChange(change.id)} onDismiss={() => onDismissChange(change.id)} />
+          onConfirm={args => onConfirmChange(change.id, args)} onDismiss={() => onDismissChange(change.id)}
+          onUndo={() => onUndoChange(change.id)} />
       ))}
       {entry.state === 'stopped' && (
         <p className="chat-entry-note">
@@ -406,7 +484,7 @@ export function ChatPanel({
           ? <div key={entry.id} className="chat-entry chat-entry-user"><p>{entry.content}</p></div>
           : <Answer key={entry.id} entry={entry} lang={lang} isLast={index === chat.entries.length - 1} busy={chat.busy}
               onRetry={chat.retry} onOpenAiSettings={onOpenAiSettings}
-              onConfirmChange={chat.confirmChange} onDismissChange={chat.dismissChange} />)}
+              onConfirmChange={chat.confirmChange} onDismissChange={chat.dismissChange} onUndoChange={chat.undoChange} />)}
       </div>
 
       <form className="chat-composer" onSubmit={event => { event.preventDefault(); ask(draft); }}>

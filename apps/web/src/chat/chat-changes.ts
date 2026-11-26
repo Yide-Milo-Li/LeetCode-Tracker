@@ -4,17 +4,72 @@
  * The server decides which changes exist and validates them; this module only displays what a
  * proposal will do, in the interface language, from the arguments that will be sent back.
  */
-import type { ChatActionProposal } from '../../../../packages/contracts/src/chat.ts';
+import type { ChatActionProposal, ChatUndo } from '../../../../packages/contracts/src/chat.ts';
 import { localeFor } from '../date-format.ts';
 import type { Language } from '../i18n.ts';
 
 /**
- * A proposal and what became of it. `applying` is a confirmation in flight; `failed` keeps the
- * refusal so the card can show it and offer another try.
+ * A proposal and what became of it. `applying` and `undoing` are requests in flight; `failed`
+ * keeps the refusal so the card can show it and offer another try; `undone` is an applied change
+ * that was taken back.
  */
 export interface ChatChange extends ChatActionProposal {
-  state: 'pending' | 'applying' | 'applied' | 'dismissed' | 'failed';
+  state: 'pending' | 'applying' | 'applied' | 'undoing' | 'undone' | 'dismissed' | 'failed';
+  /** Why the confirmation, or the undo of an applied change, was refused. */
   error?: { code: string; message: string };
+  /** The user changed the proposed values before confirming. */
+  edited?: boolean;
+  /**
+   * What takes the applied change back. Held for this session only: it can carry a whole note,
+   * and the longer ago a change was made the less likely an undo still applies cleanly.
+   */
+  undo?: ChatUndo;
+}
+
+/** A proposal that needs no decision any more. */
+export const isDecided = (change: ChatChange) => change.state === 'applied' || change.state === 'undoing' || change.state === 'undone' || change.state === 'dismissed';
+
+/** One attempt of a practice proposal, as the edit form shows it. */
+export interface AttemptDraft {
+  frontendId: string;
+  outcome: 'independent' | 'assisted' | 'unsolved';
+  /** Text of the minutes field; empty means no duration. */
+  minutes: string;
+}
+
+/** What the user may adjust before confirming, or `null` for a change that is confirmed as proposed. */
+export type ChangeDraft = { kind: 'practices'; attempts: AttemptDraft[] } | { kind: 'note'; content: string };
+
+/** The adjustable values of a proposal as it stands. */
+export function draftOf(change: ChatActionProposal): ChangeDraft | null {
+  if (change.name === 'tracker_create_practices') {
+    return {
+      kind: 'practices',
+      attempts: (Array.isArray(change.args.records) ? change.args.records : []).map(object).map(record => ({
+        frontendId: String(record.questionFrontendId ?? ''),
+        outcome: record.outcome === 'assisted' ? 'assisted' : record.outcome === 'unsolved' || record.completed !== true ? 'unsolved' : 'independent',
+        minutes: typeof record.durationMinutes === 'number' ? String(record.durationMinutes) : '',
+      })),
+    };
+  }
+  if (change.name === 'tracker_patch_note' && typeof change.args.content === 'string') return { kind: 'note', content: change.args.content };
+  return null;
+}
+
+/**
+ * The proposal's arguments with the user's adjustments applied, or `null` while the draft cannot
+ * be sent (an empty note, minutes outside 1 to 1440). Everything the form does not show is kept.
+ */
+export function applyDraft(change: ChatActionProposal, draft: ChangeDraft): Record<string, unknown> | null {
+  if (draft.kind === 'note') return draft.content.trim() ? { ...change.args, content: draft.content } : null;
+  const records = (Array.isArray(change.args.records) ? change.args.records : []).map(object);
+  const next: Array<Record<string, unknown>> = [];
+  for (const [index, attempt] of draft.attempts.entries()) {
+    const minutes = attempt.minutes.trim() === '' ? null : Number(attempt.minutes);
+    if (minutes !== null && (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440)) return null;
+    next.push({ ...records[index], completed: attempt.outcome !== 'unsolved', outcome: attempt.outcome, durationMinutes: minutes });
+  }
+  return { ...change.args, records: next };
 }
 
 /** What a change card shows. */
@@ -114,7 +169,9 @@ export function describeChange(change: ChatActionProposal, lang: Language, zone:
  * it, so it never has to guess whether the user confirmed.
  */
 export function changeStatusNote(change: ChatChange): string {
-  const outcome = change.state === 'applied' ? 'the user confirmed it and it was applied'
+  const outcome = change.state === 'applied' || change.state === 'undoing'
+    ? `the user ${change.edited ? 'edited its values, then confirmed it' : 'confirmed it'} and it was applied`
+    : change.state === 'undone' ? 'the user confirmed it, then undid it; nothing changed'
     : change.state === 'dismissed' ? 'the user dismissed it; nothing changed'
     : change.state === 'failed' ? `the user confirmed it but it failed (${change.error?.code ?? 'unknown'}); nothing changed`
     : 'not confirmed yet; nothing changed';

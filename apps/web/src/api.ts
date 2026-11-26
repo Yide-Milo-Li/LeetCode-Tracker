@@ -48,6 +48,7 @@ import type {
   UpdateSettingsInput,
   ChatActionReceipt,
   ChatActionRequest,
+  ChatUndo,
   ChatStatus,
   LLMProvider,
   OpenAIAuthMode,
@@ -731,6 +732,15 @@ export const chatApi = {
    */
   applyChatAction(input: ChatActionRequest): Promise<ChatActionReceipt> {
     return request('/chat/actions', { method: 'POST', body: JSON.stringify(input) });
+  },
+
+  /**
+   * Take back a change applied through {@link applyChatAction}, using the `undo` of its receipt.
+   *
+   * @throws ApiError `CHAT_UNDO_STALE` when the data changed again since; nothing is undone then.
+   */
+  undoChatAction(undo: ChatUndo): Promise<{ ok: true }> {
+    return request('/chat/actions/undo', { method: 'POST', body: JSON.stringify(undo) });
   },
 };
 

@@ -16,8 +16,9 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type {
-  ChatActionProposal, ChatActionReceipt, ChatActionRequest, ChatContext, ChatContextSummary, ChatRequest, ChatStatus, ChatStreamEvent,
+  ChatActionProposal, ChatActionReceipt, ChatActionRequest, ChatContext, ChatContextSummary, ChatRequest, ChatStatus, ChatStreamEvent, ChatUndo,
 } from '../../../../packages/contracts/src/chat.ts';
+import { ApplicationError } from '../../../../packages/application/src/errors.ts';
 import type { TrackerApplication } from '../../../../packages/application/src/application.ts';
 import type { AsyncLock } from '../../../../packages/application/src/locks.ts';
 import { createTrackerToolRegistry } from '../../../mcp/src/tools.ts';
@@ -155,6 +156,17 @@ function actionParameters(tool: RegisteredTool): JsonObject {
     properties,
     required: (Array.isArray(schema.required) ? schema.required as string[] : []).filter(name => !SERVER_SET_ARGUMENTS.includes(name)),
   };
+}
+
+/** State read before a change, by what the change touches; see {@link ChatService.undo}. */
+interface ChangeTargets {
+  note?: string;
+  /** Sorted folder IDs per problem; `null` is not starred. */
+  folders?: Map<string, string[] | null>;
+  /** Every favorite folder that existed. */
+  folderIds?: Set<string>;
+  /** Sorted goal list IDs per problem. */
+  lists?: Map<string, string[]>;
 }
 
 export interface ChatServiceContext {
@@ -447,9 +459,16 @@ export class ChatService {
     const tool = (CHAT_ACTION_NAMES as readonly string[]).includes(name) ? this.tools.get(name as ChatActionName) : undefined;
     if (!tool || tool.annotations.readOnlyHint) throw new ChatActionError('CHAT_ACTION_UNKNOWN', 'This change is not available in chat.', 400);
     let result;
+    let undo: ChatUndo | undefined;
     try {
       if (tool.access(args) !== 'write') throw new ProfileError('INVALID_INPUT', 'Only a change can be applied.');
-      result = await this.ctx.writeLock.runGroup(() => tool.invoke(this.ctx.application, args));
+      // One group, so nothing else writes between reading the earlier state and the change.
+      result = await this.ctx.writeLock.runGroup(async () => {
+        const before = await this.readTargets(tool.name, args);
+        const applied = await tool.invoke(this.ctx.application, args);
+        if (!applied.isError) undo = await this.undoOf(tool.name, args, before, record(applied.structuredContent) ?? {});
+        return applied;
+      });
     } catch (error) {
       result = toolError(error);
     }
@@ -460,7 +479,122 @@ export class ChatService {
         code === 'INVALID_INPUT' ? 400 : 409);
     }
     this.ctx.application.invalidateRecommendations();
-    return { result: details };
+    return { result: details, ...(undo ? { undo } : {}) };
+  }
+
+  /** The state a change is about to touch: the note's text, or each problem's folders or goal lists. */
+  private async readTargets(name: string, args: JsonObject): Promise<ChangeTargets> {
+    const { application } = this.ctx;
+    const ids = Array.isArray(args.frontendIds) ? [...new Set(args.frontendIds.map(String))] : [];
+    if (name === 'tracker_patch_note') {
+      const { note } = await application.notes.read({}, { frontendId: String(args.frontendId) });
+      return { note: note?.content ?? '' };
+    }
+    if (name === 'tracker_add_favorites') {
+      const { items } = await application.favorites.memberships(ids);
+      const { folders } = await application.favorites.library();
+      return {
+        folders: new Map(ids.map(id => [id, items.find(item => item.frontendId === id)?.folderIds.slice().sort() ?? null])),
+        folderIds: new Set(folders.map(folder => folder.id)),
+      };
+    }
+    if (name === 'tracker_add_to_goal_lists') {
+      const memberships = await application.goalLists.memberships(ids);
+      return { lists: new Map(ids.map(id => [id, (memberships.get(id) ?? []).slice().sort()])) };
+    }
+    return {};
+  }
+
+  /**
+   * What takes an applied change back, or `undefined` when it altered nothing (a replayed
+   * practice batch, an unchanged note, problems that were already in every folder or list).
+   */
+  private async undoOf(name: string, args: JsonObject, before: ChangeTargets, result: JsonObject): Promise<ChatUndo | undefined> {
+    if (name === 'tracker_create_practices') {
+      const records = (Array.isArray(result.records) ? result.records : []).map(record)
+        .flatMap(item => item && item.replayed !== true && typeof item.id === 'string' && typeof item.revision === 'number'
+          ? [{ id: item.id, revision: item.revision }] : []);
+      return records.length ? { kind: 'practices', records } : undefined;
+    }
+    if (name === 'tracker_patch_note') {
+      return result.status === 'applied' && before.note !== undefined && typeof result.contentHash === 'string'
+        ? { kind: 'note', frontendId: String(result.frontendId), content: before.note, expectedContentHash: result.contentHash }
+        : undefined;
+    }
+    const after = await this.readTargets(name, args);
+    const same = (a: string[] | null, b: string[] | null) => JSON.stringify(a) === JSON.stringify(b);
+    if (name === 'tracker_add_favorites' && before.folders && after.folders) {
+      const problems = [...after.folders].flatMap(([frontendId, folderIds]) => {
+        const earlier = before.folders!.get(frontendId) ?? null;
+        return folderIds && !same(earlier, folderIds) ? [{ frontendId, before: earlier, after: folderIds }] : [];
+      });
+      const created = record(args.newFolder);
+      const createdFolder = created && typeof created.id === 'string' && typeof created.name === 'string' && !before.folderIds?.has(created.id)
+        ? { id: created.id, name: created.name } : undefined;
+      return problems.length || createdFolder ? { kind: 'favorites', problems, ...(createdFolder ? { createdFolder } : {}) } : undefined;
+    }
+    if (name === 'tracker_add_to_goal_lists' && before.lists && after.lists) {
+      const problems = [...after.lists].flatMap(([frontendId, listIds]) => {
+        const earlier = before.lists!.get(frontendId) ?? [];
+        return same(earlier, listIds) ? [] : [{ frontendId, before: earlier, after: listIds }];
+      });
+      return problems.length ? { kind: 'goal-lists', problems } : undefined;
+    }
+    return undefined;
+  }
+
+  /**
+   * Take back a change that was applied through {@link apply}.
+   *
+   * The undo is all or nothing: every target must still be in the state the change left it in.
+   * Otherwise nothing is touched, because restoring the earlier state would also discard
+   * whatever was done since.
+   *
+   * @throws ChatActionError `CHAT_UNDO_STALE` when the data changed after the change was applied.
+   */
+  async undo(undo: ChatUndo): Promise<{ ok: true }> {
+    const { application } = this.ctx;
+    const stale = () => new ChatActionError('CHAT_UNDO_STALE', 'This data changed after the change was applied, so it was not undone automatically.');
+    const same = (a: string[] | null, b: string[] | null) => JSON.stringify(a && [...a].sort()) === JSON.stringify(b && [...b].sort());
+    try {
+      await this.ctx.writeLock.runGroup(async () => {
+        if (undo.kind === 'practices') {
+          for (const { id, revision } of undo.records) {
+            const current = await application.practice.read({}, { id });
+            if (current.status !== 'active' || current.revision !== revision) throw stale();
+          }
+          for (const { id, revision } of undo.records) await application.practice.revoke({ expectedRevision: revision }, { id });
+        } else if (undo.kind === 'note') {
+          await application.notes.save({ content: undo.content, expectedContentHash: undo.expectedContentHash }, { frontendId: undo.frontendId });
+        } else if (undo.kind === 'favorites') {
+          const { items } = await application.favorites.memberships(undo.problems.map(problem => problem.frontendId));
+          const current = (frontendId: string) => items.find(item => item.frontendId === frontendId)?.folderIds ?? null;
+          if (undo.problems.some(problem => !same(current(problem.frontendId), problem.after))) throw stale();
+          for (const problem of undo.problems) {
+            await application.favorites.saveProblem({ frontendId: problem.frontendId, expectedFolderIds: problem.after, folderIds: problem.before });
+          }
+          // The folder goes only if it is as empty as the change found it.
+          const folder = undo.createdFolder;
+          if (folder) {
+            const { folders } = await application.favorites.library();
+            if (folders.find(item => item.id === folder.id)?.count === 0) await application.favorites.deleteFolder(folder);
+          }
+        } else {
+          const memberships = await application.goalLists.memberships(undo.problems.map(problem => problem.frontendId));
+          if (undo.problems.some(problem => !same(memberships.get(problem.frontendId) ?? [], problem.after))) throw stale();
+          for (const problem of undo.problems) {
+            await application.goalLists.setProblemMembership({ frontendId: problem.frontendId, expectedListIds: problem.after, listIds: problem.before }, false);
+          }
+        }
+      });
+    } catch (error) {
+      if (error instanceof ChatActionError) throw error;
+      // A refusal from the tracker here means the same thing: the target is no longer as the change left it.
+      if (error instanceof ApplicationError) throw stale();
+      throw error;
+    }
+    application.invalidateRecommendations();
+    return { ok: true };
   }
 
   /** Read the attached problem in-process; a refusal or failure yields null so chat still answers. */

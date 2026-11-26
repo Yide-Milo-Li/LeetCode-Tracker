@@ -14,6 +14,7 @@ import type { Language } from '../i18n.ts';
 import { useChat } from '../chat/useChat.ts';
 import { useChatProblem, type ChatAction, type ChatAskRequest } from '../chat/chat-context.ts';
 import { problemThread } from '../chat/chat-threads.ts';
+import { loadActiveTimer, subscribeTimer } from '../timer-service.ts';
 import {
   clampLauncher, clampPanel, dockAt, dockForPanel, launcherPoint, panelPoint, useChatPosition, useDrag, type Point,
 } from '../chat/chat-position.ts';
@@ -30,7 +31,7 @@ export const LAUNCHER_REST_MS = 2500;
 export interface ChatLauncherProps {
   lang: Language;
   onOpenAiSettings: () => void;
-  /** A preset another view asked for; each new `id` opens the panel on that problem and sends it. */
+  /** What another view asked for; each new `id` opens the panel on that problem and sends its preset, if it has one. */
   ask?: ChatAskRequest | null;
   /** A change confirmed in chat was written to the tracker; the views showing that data should reload. */
   onDataChanged?: () => void;
@@ -46,17 +47,32 @@ export function ChatLauncher({ lang, onOpenAiSettings, ask = null, onDataChanged
 
   const viewProblem = useChatProblem();
   const [pending, setPending] = useState<ChatAction | null>(null);
-  // The conversation follows the problem: the note that was just opened, or the problem a preset
-  // was asked about. With neither, the last conversation stays.
+  // The conversation follows the problem: the note that was just opened, the problem a timer was
+  // started on, or the problem another view asked about. With none, the last conversation stays.
   useEffect(() => {
     if (viewProblem) chat.select(problemThread(viewProblem));
   }, [viewProblem?.frontendId, viewProblem?.title]);
   useEffect(() => {
     if (!ask) return;
     chat.select(problemThread(ask.problem));
-    setPending(ask.action);
+    setPending(ask.action ?? null);
     setOpen(true);
   }, [ask?.id]);
+  // A running practice timer names the problem being worked on, so starting one brings its
+  // conversation up, as opening a note does. The timer is read once at start for a session that
+  // begins with one running.
+  const timed = useRef<string | null>(null);
+  useEffect(() => {
+    const follow = () => {
+      const timer = loadActiveTimer();
+      const frontendId = timer?.frontendId ?? null;
+      if (frontendId === timed.current) return;
+      timed.current = frontendId;
+      if (timer) chat.select(problemThread({ frontendId: timer.frontendId, ...(timer.title ? { title: timer.title } : {}) }));
+    };
+    follow();
+    return subscribeTimer(follow);
+  }, [chat.select]);
   const clearPending = useCallback(() => setPending(null), []);
   // An answer that finished behind a closed panel is marked on the launcher until the panel opens.
   const [news, setNews] = useState(false);

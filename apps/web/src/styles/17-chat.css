@@ -514,14 +514,78 @@ html.dark .chat-panel {
   font-size: 12.5px;
   line-height: 1.5;
 }
+/* The outcome, with the way back beside it while there is one. */
 .chat-change-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-muted);
+}
+.chat-change-status p {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+.chat-change-status .text-link {
+  padding: 0;
+  color: var(--primary);
+  font-size: inherit;
+  font-weight: 560;
+}
+.chat-change[data-state='applied'] .chat-change-status p {
+  color: var(--primary);
+}
+
+/* Adjusting a proposal before confirming: the same card, with its values as fields. */
+.chat-change-attempts {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+.chat-change-attempt {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 8px;
+  align-items: center;
+}
+.chat-change-attempt-name {
+  grid-column: 1 / -1;
+  font-size: 13.5px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.chat-change-attempt select,
+.chat-change-minutes input {
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: 13px;
+}
+.chat-change-attempt select {
+  min-width: 0;
+  width: 100%;
+}
+.chat-change-minutes {
   display: flex;
   align-items: center;
   gap: 6px;
   color: var(--text-muted);
+  font-size: 13px;
 }
-.chat-change[data-state='applied'] .chat-change-status {
-  color: var(--primary);
+.chat-change-minutes input {
+  width: 76px;
+  font-variant-numeric: tabular-nums;
+}
+.chat-change-text {
+  display: block;
+  width: 100%;
+  min-height: 120px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  resize: vertical;
+  font-size: 13px;
+  line-height: 1.55;
 }
 .chat-change-error {
   color: var(--danger);

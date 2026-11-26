@@ -40,10 +40,13 @@ export type ChatAction =
   /** Put the last answer into the problem's note, as a change the user confirms. */
   | { kind: 'save-note' };
 
-/** What a view hands to the chat when the user asks for a preset from outside the panel. */
+/**
+ * What a view hands to the chat when the user asks about a problem from outside the panel. With
+ * no `action` the panel opens on the problem's conversation and sends nothing.
+ */
 export interface ChatAsk {
   problem: ChatProblemRef;
-  action: ChatAction;
+  action?: ChatAction;
 }
 
 /** A handoff to the chat; `id` changes on every request so repeating the same one runs again. */

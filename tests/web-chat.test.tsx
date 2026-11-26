@@ -923,3 +923,141 @@ it('names a lookup under earlier text, marks an answer that finished behind a cl
   assert.deepEqual(kept.map(args => 'content' in args), [false, true]);
   assert.equal(kept[0].heading, 'Pitfalls');
 });
+
+it('lets a proposal be adjusted before confirming and an applied change be taken back', async () => {
+  mock.method(api, 'getChatStatus', async () => ({ configured: true, provider: 'openai', model: 'gpt-6-luna' }));
+  const applied: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const practiceUndo = { kind: 'practices' as const, records: [{ id: 'r1', revision: 1 }] };
+  const noteUndo = { kind: 'note' as const, frontendId: '42', content: '## Idea', expectedContentHash: 'hash-2' };
+  mock.method(api, 'applyChatAction', async (input: { name: string; args: Record<string, unknown> }) => {
+    applied.push(input);
+    return { result: {}, undo: input.name === 'tracker_patch_note' ? noteUndo : practiceUndo };
+  });
+  const undone: unknown[] = [];
+  mock.method(api, 'undoChatAction', async (undo: { kind: string }) => {
+    undone.push(undo);
+    if (undo.kind === 'note') throw new ApiError(409, 'CHAT_UNDO_STALE', 'This data changed after the change was applied, so it was not undone automatically.');
+    return { ok: true as const };
+  });
+  const requests = serveChat([
+    { type: 'context', context: {} },
+    { type: 'action', action: practiceCard },
+    { type: 'action', action: noteCard },
+    { type: 'delta', text: 'Confirm the cards to save these.' },
+    { type: 'done', provider: 'openai', model: 'gpt-6-luna' },
+  ], answer('ok'));
+  const changed = mock.fn();
+  await act(async () => { render(<ChatLauncher lang="en" onOpenAiSettings={() => {}} onDataChanged={changed} />); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Ask AI' })); });
+  await waitFor(() => screen.getByRole('complementary'));
+  await ask('Log #1 and note the pitfall.');
+  await waitFor(() => screen.getByText('Confirm the cards to save these.'));
+  const card = (name: string) => within(screen.getByRole('region', { name }));
+  const press = async (name: string, label: string) => { await act(async () => { fireEvent.click(card(name).getByRole('button', { name: label })); }); };
+
+  // The practice card turns into its own fields; a value the tracker would refuse cannot be sent.
+  await press('Record an attempt', 'Edit');
+  const attempt = within(card('Record an attempt').getByRole('group', { name: '#1 Two Sum' }));
+  const minutes = attempt.getByRole('spinbutton', { name: 'Duration in minutes' }) as HTMLInputElement;
+  assert.equal((attempt.getByRole('combobox', { name: 'Result' }) as HTMLSelectElement).value, 'independent');
+  assert.equal(minutes.value, '20');
+  await act(async () => { fireEvent.change(attempt.getByRole('combobox', { name: 'Result' }), { target: { value: 'assisted' } }); });
+  await act(async () => { fireEvent.change(minutes, { target: { value: '0' } }); });
+  assert.equal((card('Record an attempt').getByRole('button', { name: 'Record' }) as HTMLButtonElement).disabled, true);
+  await act(async () => { fireEvent.change(minutes, { target: { value: '35' } }); });
+  await press('Record an attempt', 'Record');
+  await waitFor(() => card('Record an attempt').getByText('Recorded'));
+  // Only the adjusted values differ from the proposal; the rest, such as the operation ID, is kept.
+  const proposed = (practiceCard.args.records as Array<Record<string, unknown>>)[0];
+  assert.deepEqual(applied[0], { name: practiceCard.name, args: { ...practiceCard.args, records: [{ ...proposed, completed: true, outcome: 'assisted', durationMinutes: 35 }] } });
+  assert.match(card('Record an attempt').getByRole('listitem').textContent ?? '', /solved with help · 35 min/);
+
+  // Edits can be discarded, which leaves the proposal as it was.
+  const noteText = () => card('Add to the note').getByRole('textbox', { name: 'Text to be written' }) as HTMLTextAreaElement;
+  await press('Add to the note', 'Edit');
+  await act(async () => { fireEvent.change(noteText(), { target: { value: 'Thrown away.' } }); });
+  await press('Add to the note', 'Discard edits');
+  assert.equal(card('Add to the note').getByText('right max').tagName, 'STRONG');
+  await press('Add to the note', 'Edit');
+  assert.equal(noteText().value, noteCard.args.content);
+  await act(async () => { fireEvent.change(noteText(), { target: { value: '   ' } }); });
+  assert.equal((card('Add to the note').getByRole('button', { name: 'Add' }) as HTMLButtonElement).disabled, true);
+  await act(async () => { fireEvent.change(noteText(), { target: { value: 'My own wording.' } }); });
+  await press('Add to the note', 'Add');
+  await waitFor(() => card('Add to the note').getByText('Saved to the note'));
+  assert.deepEqual(applied[1], { name: noteCard.name, args: { ...noteCard.args, content: 'My own wording.' } });
+  assert.equal(changed.mock.callCount(), 2);
+
+  // An applied change is taken back with what its receipt said, and the views reload again.
+  await press('Record an attempt', 'Undo');
+  await waitFor(() => card('Record an attempt').getByText('Undone. The data is as it was before.'));
+  assert.deepEqual(undone, [practiceUndo]);
+  assert.equal(changed.mock.callCount(), 3);
+  assert.equal(card('Record an attempt').queryByRole('button'), null);
+  // A change the data has moved past stays applied, says why, and stops offering the undo.
+  await press('Add to the note', 'Undo');
+  await waitFor(() => assert.match(card('Add to the note').getByRole('alert').textContent ?? '', /^This data changed after you confirmed, so it was not undone\./));
+  assert.ok(card('Add to the note').getByText('Saved to the note'));
+  assert.equal(card('Add to the note').queryByRole('button'), null);
+  assert.equal(changed.mock.callCount(), 3);
+
+  // The model hears what the user did with each proposal.
+  await ask('Thanks');
+  await waitFor(() => assert.equal(requests.length, 2));
+  assert.equal(requests[1].messages[1].content, [
+    'Confirm the cards to save these.',
+    '',
+    '[Proposed change tracker_create_practices: the user confirmed it, then undid it; nothing changed]',
+    '[Proposed change tracker_patch_note: the user edited its values, then confirmed it and it was applied]',
+  ].join('\n'));
+
+  // What an undo needs stays in memory; a change caught mid-undo is stored as applied.
+  await waitFor(() => screen.getByText('ok'));
+  await waitFor(() => assert.ok(localStorage.getItem('leetcode_tracker_chat_threads_v1')?.includes('undone')));
+  assert.doesNotMatch(localStorage.getItem('leetcode_tracker_chat_threads_v1')!, /"undo":|hash-2/);
+  localStorage.setItem('leetcode_tracker_chat_threads_v1', JSON.stringify({ current: { key: 'general' }, threads: [{ key: 'general', usedAt: Date.now(), entries: [
+    { id: 'a', role: 'assistant', content: 'Confirm it.', state: 'done', changes: [{ ...practiceCard, state: 'undoing', undo: practiceUndo }] },
+  ] }] }));
+  assert.deepEqual(loadChatState().threads.general.entries[0].changes, [{ ...practiceCard, state: 'applied' }]);
+});
+
+it('opens a problem conversation from a row and follows the problem a timer starts on', async () => {
+  mock.method(api, 'getChatStatus', async () => ({ configured: true, provider: 'openai', model: 'gpt-6-luna' }));
+  const requests = serveChat(answer('ok'));
+  const { AskAiButton } = await import('../apps/web/src/components/AskAiButton.tsx');
+  const { startTimer, TIMER_CHANGE_EVENT } = await import('../apps/web/src/timer-service.ts');
+
+  // A row hands over its problem without a question; a view without the chat offers nothing.
+  const askAi = mock.fn();
+  const workspace = { revision: 0, timezone: 'UTC', navigate() {}, notifyMutation() {}, openPractice() {} };
+  const row = (value: typeof workspace & { askAi?: typeof askAi }) => (
+    <WorkspaceContext.Provider value={value}><AskAiButton lang="en" frontendId="15" title="3Sum" /></WorkspaceContext.Provider>
+  );
+  const view = render(row({ ...workspace, askAi }));
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Ask AI about #15' })); });
+  assert.deepEqual(askAi.mock.calls[0].arguments, [{ problem: threeSum }]);
+  view.rerender(row(workspace));
+  assert.equal(screen.queryByRole('button', { name: 'Ask AI about #15' }), null);
+  view.unmount();
+
+  // The panel opens on that problem and sends nothing.
+  const launcher = (ask?: Parameters<typeof ChatLauncher>[0]['ask']) => <ChatLauncher lang="en" onOpenAiSettings={() => {}} ask={ask} />;
+  let chat!: ReturnType<typeof render>;
+  await act(async () => { chat = render(launcher()); });
+  await act(async () => { chat.rerender(launcher({ id: 1, problem: threeSum })); });
+  await waitFor(() => screen.getByRole('heading', { name: '#15 3Sum' }));
+  await waitFor(() => screen.getByRole('button', { name: 'Give me a hint for this problem without the solution' }));
+  assert.equal(requests.length, 0);
+
+  // Starting a timer on another problem brings that problem's conversation up.
+  await act(async () => {
+    startTimer(rain);
+    window.dispatchEvent(new dom.window.CustomEvent(TIMER_CHANGE_EVENT));
+  });
+  await waitFor(() => screen.getByRole('heading', { name: '#42 Trapping Rain Water' }));
+  // A later timer event for the same problem does not pull the user back from another conversation.
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '#42 Trapping Rain Water' })); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'General' })); });
+  await act(async () => { window.dispatchEvent(new dom.window.CustomEvent(TIMER_CHANGE_EVENT)); });
+  assert.ok(screen.getByRole('heading', { name: 'General' }));
+});

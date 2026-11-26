@@ -16,6 +16,7 @@ import { formatInstant } from '../date-format.ts';
 import { localizeApiError } from '../error-i18n.ts';
 import { useWorkspace, ViewVisible } from '../workspace.tsx';
 import { Dialog, Feedback, Field, PageHeader, Pagination, IconButton, Tooltip } from './ui.tsx';
+import { AskAiButton } from './AskAiButton.tsx';
 import { PracticeEditor, PracticeHistory } from './PracticeWorkspace.tsx';
 import { PracticeTimerButton } from './PracticeTimer.tsx';
 import { ExportLink } from './ExportLink.tsx';
@@ -515,6 +516,7 @@ function CatalogWorkspace({ lang, onNavigateSettings, favoritesOnly = false, fav
                       <IconButton icon={Plus} label={t.logPractice}
                         onClick={() => workspace.openPractice({ mode: 'manual', problem })} />
                       <PracticeTimerButton lang={lang} frontendId={problem.questionFrontendId} title={problem.title} />
+                      <AskAiButton lang={lang} frontendId={problem.questionFrontendId} title={problem.title} />
                       {safeUrl(problem.url) && (
                         <Tooltip text={t.openLink} side="top"><a
                           className="btn-icon"

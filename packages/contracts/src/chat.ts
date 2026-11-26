@@ -10,7 +10,8 @@
  *
  * The model can also propose a change to the tracker. A proposal arrives as an `action` event and
  * changes nothing; the client shows it and, once the user confirms, sends it to
- * `POST /api/v1/chat/actions`, the only chat route that writes.
+ * `POST /api/v1/chat/actions`. That route and `POST /api/v1/chat/actions/undo`, which takes an
+ * applied change back, are the only chat routes that write.
  */
 import { z } from 'zod';
 import { llmProviderSchema } from './sync.ts';
@@ -60,7 +61,8 @@ export type ChatRequest = z.infer<typeof chatRequestSchema>;
 /**
  * A change the model proposed, as the client must send it back to apply it.
  *
- * `args` are complete and already validated; the client displays them and never edits them.
+ * `args` are complete and already validated. The user may edit them before confirming; applying
+ * validates them again.
  */
 export interface ChatActionProposal {
   /** Unique per proposal, for tracking its state in the conversation. */
@@ -86,9 +88,45 @@ export const chatActionRequestSchema = z.object({
 }).strict();
 export type ChatActionRequest = z.infer<typeof chatActionRequestSchema>;
 
+const undoIds = z.array(z.string().min(1).max(100)).max(100);
+const undoProblem = z.string().min(1).max(100);
+
+/**
+ * What takes one applied change back: the state before it and the state it left, so the undo can
+ * be refused when the data has changed again since.
+ */
+export const chatUndoSchema = z.discriminatedUnion('kind', [
+  /** Revoke the records the change created, each at the revision it was created with. */
+  z.object({
+    kind: z.literal('practices'),
+    records: z.array(z.object({ id: z.string().min(1).max(100), revision: z.number().int().positive() }).strict()).min(1).max(50),
+  }).strict(),
+  /** Put the note's earlier text back, provided the note still is what the change wrote. */
+  z.object({
+    kind: z.literal('note'),
+    frontendId: undoProblem,
+    content: z.string().max(100_000),
+    expectedContentHash: z.string().min(1).max(200),
+  }).strict(),
+  /** Restore each problem's folders (`null` is not starred) and drop the folder the change created. */
+  z.object({
+    kind: z.literal('favorites'),
+    problems: z.array(z.object({ frontendId: undoProblem, before: undoIds.nullable(), after: undoIds }).strict()).max(100),
+    createdFolder: z.object({ id: z.string().min(1).max(100), name: z.string().min(1).max(200) }).strict().optional(),
+  }).strict(),
+  /** Restore each problem's goal lists. */
+  z.object({
+    kind: z.literal('goal-lists'),
+    problems: z.array(z.object({ frontendId: undoProblem, before: undoIds, after: undoIds }).strict()).min(1).max(100),
+  }).strict(),
+]);
+export type ChatUndo = z.infer<typeof chatUndoSchema>;
+
 /** Receipt of an applied change, as the change tool reported it. */
 export interface ChatActionReceipt {
   result: Record<string, unknown>;
+  /** Present when the change altered something; send it to `POST /api/v1/chat/actions/undo` to take it back. */
+  undo?: ChatUndo;
 }
 
 /** What the server attached, so the UI can show which local data the answer could use. */

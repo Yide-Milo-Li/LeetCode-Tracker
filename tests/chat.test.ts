@@ -690,6 +690,90 @@ test('a change the model proposes is shown for confirmation and written only whe
   await app.close();
 });
 
+test('an applied change can be taken back, unless the data has changed again since', async () => {
+  const { app } = await chatApp(async () => ({ model: 'm', provider: 'openai', usage }));
+  await seedProfile(app);
+  const json = async <T>(method: 'GET' | 'POST' | 'PUT', url: string, payload?: unknown) =>
+    JSON.parse((await app.inject({ method, url, ...(payload === undefined ? {} : { payload: payload as object }) })).payload) as T;
+  const apply = async (name: string, args: Record<string, unknown>) => {
+    const response = await app.inject({ method: 'POST', url: '/api/v1/chat/actions', payload: { name, args } });
+    assert.equal(response.statusCode, 200, response.payload);
+    return JSON.parse(response.payload) as { result: Record<string, unknown>; undo?: Record<string, unknown> };
+  };
+  const undo = async (payload: unknown) => {
+    const response = await app.inject({ method: 'POST', url: '/api/v1/chat/actions/undo', payload: payload as object });
+    return { status: response.statusCode, body: JSON.parse(response.payload) as { ok?: boolean; error?: string } };
+  };
+  const stale = { status: 409, error: 'CHAT_UNDO_STALE' };
+  const outcome = async (payload: unknown) => { const { status, body } = await undo(payload); return { status, error: body.error }; };
+
+  // Practice: the created records are revoked once; a replayed batch has nothing to take back.
+  const practiceCount = async () => (await json<{ items: unknown[] }>('GET', '/api/v1/practice-records')).items.length;
+  const practices = await practiceCount();
+  const batch = { operationId: '6f1d2c3b-0a4e-4f5a-9b6c-7d8e9f0a1b2c', dryRun: false, records: [{ questionFrontendId: '1', completed: true, practicedAt: '2026-03-02T09:30:00Z' }] };
+  const recorded = await apply('tracker_create_practices', batch);
+  assert.equal(recorded.undo?.kind, 'practices');
+  assert.equal((recorded.undo?.records as unknown[]).length, 1);
+  assert.equal('undo' in await apply('tracker_create_practices', batch), false);
+  assert.equal(await practiceCount(), practices + 1);
+  assert.deepEqual((await undo(recorded.undo)).body, { ok: true });
+  assert.equal(await practiceCount(), practices);
+  assert.deepEqual(await outcome(recorded.undo), stale);
+
+  // Note: the earlier text comes back, but never over an edit made after the change.
+  const noteOf = async () => (await json<{ note: { content: string } }>('GET', '/api/v1/notes/42')).note.content;
+  const patch = async () => apply('tracker_patch_note', { frontendId: '42', heading: 'Pitfalls', mode: 'append', content: 'Track the right max too.', expectedContentHash: contentHash(await noteOf()) });
+  const original = await noteOf();
+  const noted = await patch();
+  assert.notEqual(await noteOf(), original);
+  assert.deepEqual((await undo(noted.undo)).body, { ok: true });
+  assert.equal(await noteOf(), original);
+  const notedAgain = await patch();
+  const edited = `${await noteOf()}\n\nMy own line.`;
+  assert.equal((await app.inject({ method: 'PUT', url: '/api/v1/notes/42', payload: { content: edited } })).statusCode, 200);
+  assert.deepEqual(await outcome(notedAgain.undo), stale);
+  assert.equal(await noteOf(), edited);
+
+  // Favorites: each problem returns to its own earlier state, and the folder the change made goes with it.
+  const stars = async () => Object.fromEntries((await json<{ items: Array<{ frontendId: string; folderIds: string[] }> }>('GET', '/api/v1/favorites/problems'))
+    .items.map(item => [item.frontendId, item.folderIds]));
+  const folders = async () => (await json<{ folders: Array<{ name: string }> }>('GET', '/api/v1/favorites')).folders.map(folder => folder.name);
+  assert.equal((await app.inject({ method: 'PUT', url: '/api/v1/favorites/problems', payload: { frontendId: '1', expectedFolderIds: null, folderIds: [] } })).statusCode, 200);
+  const star = (id: string) => apply('tracker_add_favorites', { frontendIds: ['1', '42'], folderIds: [id], newFolder: { id, name: 'Review' } });
+  const first = '0b1f6f0e-6c1d-4a51-9a53-3f1f4d1c2b7a';
+  const starred = await star(first);
+  assert.deepEqual(starred.undo, { kind: 'favorites', createdFolder: { id: first, name: 'Review' }, problems: [
+    { frontendId: '1', before: [], after: [first] },
+    { frontendId: '42', before: null, after: [first] },
+  ] });
+  assert.deepEqual((await undo(starred.undo)).body, { ok: true });
+  assert.deepEqual(await stars(), { 1: [] });
+  assert.deepEqual(await folders(), []);
+  // One problem was unstarred by hand afterwards: nothing is undone, the other keeps its folder.
+  const second = '1c2a7a1f-7d2e-4b62-8a64-4a2a5e2d3c8b';
+  const starredAgain = await star(second);
+  assert.equal((await app.inject({ method: 'PUT', url: '/api/v1/favorites/problems', payload: { frontendId: '42', expectedFolderIds: [second], folderIds: null } })).statusCode, 200);
+  assert.deepEqual(await outcome(starredAgain.undo), stale);
+  assert.deepEqual(await stars(), { 1: [second] });
+
+  // Goal lists: only the problems the change added leave the list.
+  const list = await json<{ id: string }>('POST', '/api/v1/goal-lists', { name: 'Blind 75', frontendIds: ['1'] });
+  const members = async () => (await json<{ items: Array<{ id: string; items: Array<{ frontendId: string }> }> }>('GET', '/api/v1/goal-lists'))
+    .items.find(item => item.id === list.id)!.items.map(item => item.frontendId);
+  const added = await apply('tracker_add_to_goal_lists', { frontendIds: ['1', '42'], listIds: [list.id] });
+  assert.deepEqual(added.undo, { kind: 'goal-lists', problems: [{ frontendId: '42', before: [], after: [list.id] }] });
+  assert.deepEqual(await members(), ['1', '42']);
+  assert.deepEqual((await undo(added.undo)).body, { ok: true });
+  assert.deepEqual(await members(), ['1']);
+  assert.deepEqual(await outcome(added.undo), stale);
+  // Adding what is already there changes nothing, so there is nothing to undo.
+  assert.equal('undo' in await apply('tracker_add_to_goal_lists', { frontendIds: ['1'], listIds: [list.id] }), false);
+
+  assert.deepEqual(await outcome({ kind: 'practices', records: [] }), { status: 400, error: 'INVALID_CHAT_ACTION' });
+  assert.deepEqual(await outcome({ kind: 'everything' }), { status: 400, error: 'INVALID_CHAT_ACTION' });
+  await app.close();
+});
+
 const lookup: ChatToolSpec = {
   name: 'tracker_list_practices',
   description: 'List practice records.',

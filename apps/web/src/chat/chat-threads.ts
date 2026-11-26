@@ -5,7 +5,7 @@
  * browser's `localStorage` only; they are not part of the profile, backups or device sync. Old
  * and surplus conversations are dropped automatically so storage stays bounded.
  */
-import type { ChatChange } from './chat-changes.ts';
+import { isDecided, type ChatChange } from './chat-changes.ts';
 import type { ChatProblemRef } from './chat-context.ts';
 import type { ChatEntry } from './useChat.ts';
 
@@ -66,7 +66,10 @@ function readChanges(value: unknown[]): ChatChange[] {
     return !!raw && typeof raw.id === 'string' && typeof raw.name === 'string' && typeof raw.state === 'string'
       && !!raw.args && typeof raw.args === 'object' && !!labels
       && ['problems', 'folders', 'lists'].every(kind => !!labels[kind] && typeof labels[kind] === 'object');
-  }).map(change => change.state === 'applying' ? { ...change, state: 'pending' } : change);
+  }).map(({ undo: _undo, ...change }) => change.state === 'applying' ? { ...change, state: 'pending' }
+    // The change itself was applied; only whether its undo went through is unknown.
+    : change.state === 'undoing' ? { ...change, state: 'applied' }
+    : change);
 }
 
 function readRef(value: unknown): ChatThreadRef | null {
@@ -115,13 +118,15 @@ export function loadChatState(now = Date.now()): ChatState {
 /**
  * An entry as it is stored. A decided proposal no longer shows or sends the text it would have
  * written, which for a note can be tens of thousands of characters, so that text is left out.
+ * Undo details stay in memory: they can hold a whole earlier note, and an undo is for a change
+ * just made.
  */
 function storedEntry({ reading: _reading, ...entry }: ChatEntry): ChatEntry {
-  if (!entry.changes?.some(change => typeof change.args.content === 'string' && (change.state === 'applied' || change.state === 'dismissed'))) return entry;
+  if (!entry.changes) return entry;
   return {
     ...entry,
-    changes: entry.changes.map(change => {
-      if (change.state !== 'applied' && change.state !== 'dismissed') return change;
+    changes: entry.changes.map(({ undo: _undo, ...change }) => {
+      if (!isDecided(change) || typeof change.args.content !== 'string') return change;
       const { content: _content, ...args } = change.args;
       return { ...change, args };
     }),

@@ -10,6 +10,7 @@ import { QuickNoteDrawer } from './QuickNoteDrawer.tsx';
 import { Tooltip } from './ui.tsx';
 import { TodayFavoriteStar } from './TodayFavorites.tsx';
 import { ProblemGoalButton } from './ProblemGoalLists.tsx';
+import { AskAiButton } from './AskAiButton.tsx';
 
 export function GoalProblemActions({ lang, frontendId, title, disabled, onRemove, fallbackFocusRef }: {
   lang: Language;
@@ -53,6 +54,7 @@ export function GoalProblemActions({ lang, frontendId, title, disabled, onRemove
           aria-label={(zh ? '记录练习 #' : 'Record practice for #') + frontendId}><Plus size={18} aria-hidden="true" /></button>
       </Tooltip>
       <PracticeTimerButton lang={lang} frontendId={frontendId} title={title} disabled={disabled} />
+      <AskAiButton lang={lang} frontendId={frontendId} title={title} />
       <Tooltip text={removeLabel} position="top">
         <button type="button" className="btn-icon btn-icon-danger" disabled={disabled} aria-label={removeLabel}
           onClick={onRemove}><Trash2 size={18} aria-hidden="true" /></button>

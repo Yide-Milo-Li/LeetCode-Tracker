@@ -119,10 +119,14 @@ export interface ChatController {
   /**
    * Apply a change the AI proposed in the current conversation. Ignored unless the change is
    * waiting or failed; the outcome is recorded on the change, never thrown.
+   *
+   * @param args The proposal's arguments as the user adjusted them; omitted applies it as proposed.
    */
-  confirmChange(id: string): void;
+  confirmChange(id: string, args?: Record<string, unknown>): void;
   /** Turn a waiting or failed proposal down; nothing is sent. */
   dismissChange(id: string): void;
+  /** Take an applied change back. Ignored unless it was applied in this session; a refusal is recorded on the change. */
+  undoChange(id: string): void;
 }
 
 export interface ChatOptions {
@@ -277,29 +281,47 @@ export function useChat(lang: Language, options: ChatOptions = {}): ChatControll
       : entry);
     return { ...current, threads: { ...current.threads, [key]: { ...target, entries } } };
   }), []);
-  /** A proposal of the current conversation that can still be decided, with that conversation's key. */
-  const openChange = useCallback((id: string) => {
+  /** A proposal of the current conversation in one of `states`, with that conversation's key. */
+  const findChange = useCallback((id: string, states: ReadonlyArray<ChatChange['state']>) => {
     const { current, threads } = stateRef.current;
     const change = threads[current.key]?.entries.flatMap(entry => entry.changes ?? []).find(item => item.id === id);
-    return change && (change.state === 'pending' || change.state === 'failed') ? { key: current.key, change } : null;
+    return change && states.includes(change.state) ? { key: current.key, change } : null;
   }, []);
+  const openChange = useCallback((id: string) => findChange(id, ['pending', 'failed']), [findChange]);
+  const failureOf = (error: unknown) => error instanceof ApiError
+    ? { code: error.code, message: error.message }
+    : { code: 'CHAT_NETWORK', message: 'Could not reach the local service.' };
 
-  const confirmChange = useCallback((id: string) => {
+  const confirmChange = useCallback((id: string, edited?: Record<string, unknown>) => {
     const open = openChange(id);
     if (!open || confirming.current.has(id)) return;
     const { key, change } = open;
+    const args = edited ?? change.args;
     confirming.current.add(id);
-    patchChange(key, id, ({ error: _error, ...item }) => ({ ...item, state: 'applying' }));
-    api.applyChatAction({ name: change.name, args: change.args }).then(() => {
-      patchChange(key, id, item => ({ ...item, state: 'applied' }));
+    patchChange(key, id, ({ error: _error, ...item }) => ({ ...item, args, ...(edited ? { edited: true } : {}), state: 'applying' }));
+    api.applyChatAction({ name: change.name, args }).then(receipt => {
+      patchChange(key, id, item => ({ ...item, state: 'applied', ...(receipt.undo ? { undo: receipt.undo } : {}) }));
       onDataChanged.current?.();
     }, error => {
-      const failure = error instanceof ApiError
-        ? { code: error.code, message: error.message }
-        : { code: 'CHAT_NETWORK', message: 'Could not reach the local service.' };
-      patchChange(key, id, item => ({ ...item, state: 'failed', error: failure }));
+      patchChange(key, id, item => ({ ...item, state: 'failed', error: failureOf(error) }));
     }).finally(() => confirming.current.delete(id));
   }, [openChange, patchChange]);
+
+  const undoChange = useCallback((id: string) => {
+    const found = findChange(id, ['applied']);
+    if (!found?.change.undo || confirming.current.has(id)) return;
+    const { key, change } = found;
+    confirming.current.add(id);
+    patchChange(key, id, ({ error: _error, ...item }) => ({ ...item, state: 'undoing' }));
+    api.undoChatAction(change.undo!).then(() => {
+      patchChange(key, id, ({ undo: _undo, ...item }) => ({ ...item, state: 'undone' }));
+      onDataChanged.current?.();
+    }, error => {
+      // The change stays applied. A change the data has moved past cannot be undone later either.
+      const failure = failureOf(error);
+      patchChange(key, id, ({ undo, ...item }) => ({ ...item, state: 'applied', error: failure, ...(failure.code === 'CHAT_UNDO_STALE' ? {} : { undo }) }));
+    }).finally(() => confirming.current.delete(id));
+  }, [findChange, patchChange]);
 
   const dismissChange = useCallback((id: string) => {
     const open = openChange(id);
@@ -330,6 +352,6 @@ export function useChat(lang: Language, options: ChatOptions = {}): ChatControll
     anyBusy: busyKeys.size > 0,
     threads, select, send, retry, stop, clear,
     draft: drafts[state.current.key] ?? '',
-    setDraft, confirmChange, dismissChange,
+    setDraft, confirmChange, dismissChange, undoChange,
   };
 }
