@@ -4,36 +4,82 @@
 .chat-launcher,
 .chat-panel {
   position: fixed;
-  right: 24px;
-  bottom: 24px;
   z-index: 90;
 }
 
+/* Placed with an inline transform: docked to a window edge, or under the pointer while dragged. */
+.chat-launcher {
+  left: 0;
+  top: 0;
+  transition:
+    transform 260ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 260ms ease;
+}
+/* Left alone, only a sliver stays on screen; hover or focus brings it back. */
+.chat-launcher.is-tucked {
+  opacity: 0.6;
+}
+.chat-launcher.is-dragging {
+  transition: none;
+}
+
 .chat-launcher-button {
-  width: 44px;
-  height: 44px;
+  width: 40px;
+  height: 40px;
   display: grid;
   place-items: center;
   border-radius: 50%;
   background: var(--surface);
-  color: var(--primary);
-  box-shadow: 0 0 0 1px var(--border-color), var(--shadow-md);
+  color: var(--text-muted);
+  box-shadow: 0 0 0 1px var(--border-color), var(--shadow-xs);
+  cursor: grab;
+  touch-action: none;
   transition:
     background var(--btn-motion),
     color var(--btn-motion),
     transform var(--btn-motion);
 }
-.chat-launcher-button:hover {
+/* Extends the hit area to the window edge, so the pointer that reveals a tucked launcher is still
+   on it once it has slid out. */
+.chat-launcher-button {
+  position: relative;
+}
+.chat-launcher-button::after {
+  content: '';
+  position: absolute;
+  inset: -6px -12px;
+}
+.chat-launcher-button:hover,
+.chat-launcher-button:focus-visible {
   background: var(--primary);
   color: var(--on-primary);
-  transform: translateY(-1px);
+}
+/* A tucked launcher that still holds keyboard focus keeps its ring but not the filled look. */
+.chat-launcher.is-tucked .chat-launcher-button:not(:hover, .is-busy) {
+  background: var(--surface);
+  color: var(--text-muted);
 }
 .chat-launcher-button:active {
   transform: scale(0.95);
 }
-/* An answer is still arriving while the panel is closed. */
+.chat-launcher.is-dragging .chat-launcher-button {
+  cursor: grabbing;
+  box-shadow: 0 0 0 1px var(--border-color), var(--shadow-md);
+}
+/* An answer is still arriving while the panel is closed: the sliver stays readable as a signal. */
 .chat-launcher-button.is-busy {
-  background: var(--selected);
+  background: var(--primary);
+  color: var(--on-primary);
+}
+.chat-launcher.is-tucked:has(.is-busy) {
+  opacity: 1;
+}
+
+/* A drag crosses the whole page; keep it from selecting text on the way. */
+html.chat-dragging,
+html.chat-dragging * {
+  user-select: none;
+  cursor: grabbing !important;
 }
 
 .chat-panel {
@@ -48,6 +94,13 @@
   box-shadow: 0 0 0 1px var(--border-color), 0 12px 36px rgba(30, 38, 27, 0.14);
   transform-origin: bottom right;
   animation: chat-panel-in var(--overlay-enter);
+}
+/* Focused by script only, as the fallback target while the text field is unavailable. */
+.chat-panel:focus {
+  outline: 0;
+}
+.chat-panel[data-side='left'] {
+  transform-origin: bottom left;
 }
 html.dark .chat-panel {
   box-shadow: 0 0 0 1px var(--border-color), 0 12px 36px rgba(0, 0, 0, 0.4);
@@ -65,6 +118,12 @@ html.dark .chat-panel {
   gap: 2px;
   padding: 8px 8px 8px 16px;
   border-bottom: 1px solid var(--border-color);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+.chat-header button {
+  cursor: pointer;
 }
 .chat-heading {
   flex: 1;
@@ -329,6 +388,7 @@ html.dark .chat-panel {
   .chat-thinking {
     animation: none;
   }
+  .chat-launcher,
   .chat-launcher-button,
   .chat-send {
     transition: none;

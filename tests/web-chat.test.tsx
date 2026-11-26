@@ -20,7 +20,8 @@ const { api } = await import('../apps/web/src/api.ts');
 const { createChatEventDecoder } = await import('../apps/web/src/chat/chat-stream.ts');
 const { requestTurns } = await import('../apps/web/src/chat/useChat.ts');
 const { setChatProblem } = await import('../apps/web/src/chat/chat-context.ts');
-const { ChatLauncher } = await import('../apps/web/src/components/ChatLauncher.tsx');
+const { ChatLauncher, LAUNCHER_REST_MS } = await import('../apps/web/src/components/ChatLauncher.tsx');
+const { DEFAULT_CHAT_POSITION, dockAt, dockForPanel, launcherPoint, panelPoint } = await import('../apps/web/src/chat/chat-position.ts');
 
 const originalFetch = globalThis.fetch;
 afterEach(() => {
@@ -228,4 +229,75 @@ it('does not send while an IME candidate is being confirmed', async () => {
   assert.equal(field.value, '动态规划');
   await act(async () => { fireEvent.keyDown(field, { key: 'Enter' }); });
   await waitFor(() => assert.equal(requests.length, 1));
+});
+
+it('docks the launcher beside the nearer edge and opens the panel next to it', () => {
+  const viewport = { width: 1280, height: 800 };
+  assert.deepEqual(launcherPoint(DEFAULT_CHAT_POSITION.dock, viewport, false), { left: 1228, top: 736 });
+  // Tucked, only a sliver stays inside the window.
+  assert.deepEqual(launcherPoint(DEFAULT_CHAT_POSITION.dock, viewport, true), { left: 1268, top: 736 });
+  assert.deepEqual(launcherPoint({ side: 'left', bottom: 300 }, viewport, true), { left: -28, top: 460 });
+
+  assert.deepEqual(dockAt({ left: 200, top: 100 }, viewport), { side: 'left', bottom: 660 });
+  assert.deepEqual(dockAt({ left: 900, top: 790 }, viewport), { side: 'right', bottom: 12 });
+  assert.deepEqual(panelPoint({ dock: { side: 'left', bottom: 660 } }, viewport), { left: 24, top: 24 });
+  assert.deepEqual(panelPoint(DEFAULT_CHAT_POSITION, viewport), { left: 836, top: 156 });
+
+  // A dragged panel is kept where it was dropped, and pulled back inside a smaller window.
+  assert.deepEqual(panelPoint({ dock: DEFAULT_CHAT_POSITION.dock, panel: { left: 300, top: 60 } }, viewport), { left: 300, top: 60 });
+  assert.deepEqual(panelPoint({ dock: DEFAULT_CHAT_POSITION.dock, panel: { left: 900, top: 400 } }, { width: 1024, height: 700 }), { left: 596, top: 72 });
+  assert.deepEqual(dockForPanel({ left: 100, top: 60 }, viewport), { side: 'left', bottom: 120 });
+});
+
+it('drags the launcher to an edge, remembers it and tucks away when left alone', async () => {
+  mock.method(api, 'getChatStatus', async () => ({ configured: false, model: '' }));
+  const stored = () => JSON.parse(localStorage.getItem('leetcode_tracker_chat_position_v1') ?? 'null');
+  const view = await act(async () => render(<ChatLauncher lang="en" onToday={false} onOpenAiSettings={() => {}} />));
+  const button = screen.getByRole('button', { name: 'Ask AI' });
+  const dock = button.closest('.chat-launcher') as HTMLElement;
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  assert.equal(dock.style.transform, `translate3d(${width - 52}px, ${height - 64}px, 0)`);
+
+  // A small wobble is still a click.
+  await act(async () => { fireEvent.pointerDown(button, { button: 0, clientX: 500, clientY: 500 }); });
+  await act(async () => { fireEvent.pointerMove(window, { clientX: 502, clientY: 501 }); });
+  await act(async () => { fireEvent.pointerUp(window, { clientX: 502, clientY: 501 }); });
+  assert.equal(stored(), null);
+
+  await act(async () => { fireEvent.pointerDown(button, { button: 0, clientX: width - 30, clientY: height - 40 }); });
+  await act(async () => { fireEvent.pointerMove(window, { clientX: 130, clientY: 240 }); });
+  assert.equal(dock.classList.contains('is-dragging'), true);
+  assert.equal(dock.style.transform, `translate3d(108px, ${240 - 24}px, 0)`);
+  // The click that a browser reports for the release does not open the panel.
+  await act(async () => {
+    fireEvent.pointerUp(window, { clientX: 130, clientY: 240 });
+    fireEvent.click(button);
+  });
+  assert.equal(screen.queryAllByRole('complementary').length, 0);
+  assert.deepEqual(stored(), { dock: { side: 'left', bottom: height - 216 - 40 } });
+  assert.equal(dock.style.transform, `translate3d(12px, 216px, 0)`);
+
+  await waitFor(() => assert.equal(dock.classList.contains('is-tucked'), true), { timeout: LAUNCHER_REST_MS + 1500 });
+  assert.equal(dock.style.transform, 'translate3d(-28px, 216px, 0)');
+  await act(async () => { fireEvent.pointerEnter(button); });
+  assert.equal(dock.classList.contains('is-tucked'), false);
+
+  // The panel opens on the launcher's side; dragging its header moves it and the dock with it.
+  await act(async () => { fireEvent.click(button); });
+  const panel = await waitFor(() => screen.getByRole('complementary'));
+  assert.equal(panel.getAttribute('data-side'), 'left');
+  assert.equal(panel.style.left, '24px');
+  await act(async () => { fireEvent.pointerDown(screen.getByRole('heading', { name: 'Ask AI' }), { button: 0, clientX: 100, clientY: 100 }); });
+  await act(async () => { fireEvent.pointerMove(window, { clientX: 100 + width, clientY: 100 }); });
+  await act(async () => { fireEvent.pointerUp(window, { clientX: 100 + width, clientY: 100 }); });
+  assert.equal(panel.style.left, `${width - 420 - 8}px`);
+  assert.equal(stored().dock.side, 'right');
+  assert.equal(stored().panel.left, width - 420 - 8);
+
+  // A reload restores the placement.
+  view.unmount();
+  await act(async () => { render(<ChatLauncher lang="en" onToday={false} onOpenAiSettings={() => {}} />); });
+  await act(async () => { fireEvent.keyDown(window, { key: 'j', ctrlKey: true }); });
+  assert.equal((await waitFor(() => screen.getByRole('complementary'))).style.left, `${width - 420 - 8}px`);
 });

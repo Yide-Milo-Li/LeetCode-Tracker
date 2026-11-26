@@ -13,6 +13,7 @@ import type { Language } from '../i18n.ts';
 import { ApiError } from '../platform/index.ts';
 import { localizeApiError } from '../error-i18n.ts';
 import { useChatProblem } from '../chat/chat-context.ts';
+import type { Point } from '../chat/chat-position.ts';
 import type { ChatController, ChatEntry } from '../chat/useChat.ts';
 import { RenderedMarkdown } from './NotesMarkdownPreview.tsx';
 import { Feedback, IconButton } from './ui.tsx';
@@ -29,6 +30,13 @@ export interface ChatPanelProps {
   shortcut: string;
   onClose: () => void;
   onOpenAiSettings: () => void;
+  /** Top-left corner in viewport pixels. */
+  position: Point;
+  /** Window edge the launcher docks on; the panel grows from that side when it opens. */
+  side: 'left' | 'right';
+  dragging: boolean;
+  /** Pointer went down on the header outside its buttons. */
+  onDragStart: (event: React.PointerEvent) => void;
 }
 
 /** A toggle for one piece of local data; the check mark carries the state besides the tint. */
@@ -76,13 +84,14 @@ function Answer({ entry, lang, isLast, busy, onRetry, onOpenAiSettings }: {
   );
 }
 
-export function ChatPanel({ lang, chat, onToday, shortcut, onClose, onOpenAiSettings }: ChatPanelProps) {
+export function ChatPanel({ lang, chat, onToday, shortcut, onClose, onOpenAiSettings, position, side, dragging, onDragStart }: ChatPanelProps) {
   const zh = lang === 'zh';
   const problem = useChatProblem();
   const [status, setStatus] = useState<{ configured: boolean; provider?: LLMProvider; model: string } | null>(null);
   const [draft, setDraft] = useState('');
   const [useProblem, setUseProblem] = useState(true);
   const [useToday, setUseToday] = useState(onToday);
+  const panel = useRef<HTMLElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const log = useRef<HTMLDivElement>(null);
   /** Follow new text only while the reader is at the bottom; scrolling up to reread is respected. */
@@ -94,7 +103,13 @@ export function ChatPanel({ lang, chat, onToday, shortcut, onClose, onOpenAiSett
       () => { if (current) setStatus({ configured: false, model: '' }); });
     return () => { current = false; };
   }, []);
-  useEffect(() => { input.current?.focus(); }, []);
+  const ready = status?.configured === true;
+  // The field is disabled until the provider status arrives, so the panel takes focus first; that
+  // keeps Esc working from the moment it opens. The field takes over unless focus has moved on.
+  useEffect(() => { panel.current?.focus(); }, []);
+  useEffect(() => {
+    if (ready && document.activeElement === panel.current) input.current?.focus();
+  }, [ready]);
   useLayoutEffect(() => {
     if (pinned.current && log.current) log.current.scrollTop = log.current.scrollHeight;
   }, [chat.entries]);
@@ -109,7 +124,6 @@ export function ChatPanel({ lang, chat, onToday, shortcut, onClose, onOpenAiSett
     ...(problem && useProblem ? { frontendId: problem.frontendId } : {}),
     ...(today ? { today: true } : {}),
   });
-  const ready = status?.configured === true;
   const ask = (text: string, today = useToday) => {
     if (!ready || chat.busy || !text.trim()) return;
     pinned.current = true;
@@ -129,7 +143,11 @@ export function ChatPanel({ lang, chat, onToday, shortcut, onClose, onOpenAiSett
 
   return (
     <aside
-      className="chat-panel"
+      ref={panel}
+      tabIndex={-1}
+      className={'chat-panel' + (dragging ? ' is-dragging' : '')}
+      data-side={side}
+      style={{ left: position.left, top: position.top }}
       aria-label={zh ? 'AI 对话' : 'AI chat'}
       onKeyDown={event => {
         if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
@@ -138,7 +156,13 @@ export function ChatPanel({ lang, chat, onToday, shortcut, onClose, onOpenAiSett
         }
       }}
     >
-      <header className="chat-header">
+      <header
+        className="chat-header"
+        title={zh ? '拖动以移动' : 'Drag to move'}
+        onPointerDown={event => { if (!(event.target as Element).closest('button')) onDragStart(event); }}
+        // Grabbing the header must not take focus from the text field, or Esc would stop closing the panel.
+        onMouseDown={event => { if (!(event.target as Element).closest('button')) event.preventDefault(); }}
+      >
         <div className="chat-heading">
           <h2>{zh ? '问 AI' : 'Ask AI'}</h2>
           {ready && <p>{provider}{status?.model ? ` · ${status.model.replace(/^models\//, '')}` : ''}</p>}

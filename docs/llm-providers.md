@@ -49,6 +49,8 @@ Preset identifiers are conveniences, not proof that an account has access to eve
 
 The floating **Ask AI** panel (`Ctrl+J`, `⌘J` on macOS) sends questions to the provider selected in Settings. It works with Gemini, OpenAI with an API key, OpenAI with Sign in with ChatGPT, and DeepSeek.
 
+Collapsed, the panel is a small button docked to the left or right window edge. It can be dragged to any height on either edge and, 2.5 seconds after the pointer leaves it, slides mostly off screen until hovered or focused; while an answer is still arriving it stays tinted. The open panel moves by its header and stays open until closed. Both placements are remembered in this browser's `localStorage` only.
+
 - `POST /api/v1/chat/stream` answers with Server-Sent Events: one `context` event, `delta` events with answer text, then exactly one `done` or `error`. Invalid input and a missing provider are rejected with a JSON error before the stream opens. `GET /api/v1/chat/status` reports whether chat can run.
 - The server keeps no conversation. The client resends the recent turns with each question, at most 40 turns, 24,000 characters per turn and 120,000 in total. The conversation is stored in the browser's `localStorage` on this device. It is not in the profile database, backups, bundles or device sync.
 - Two kinds of local data can be attached, each a toggle the user controls: the problem open in Notes (practice summary, latest attempts and the saved note, cut to 8,000 characters) and today's plan. The server reads both through the MCP read tools `tracker_get_note_context` and `tracker_get_today` in-process. The model cannot choose tools or arguments, and chat never writes to the profile. Unsaved note edits are not included.
