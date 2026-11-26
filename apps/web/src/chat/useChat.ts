@@ -32,6 +32,8 @@ export interface ChatEntry {
   context?: ChatContextSummary;
   /** Read tools the model used for this answer, in first-use order, each once. */
   tools?: string[];
+  /** While streaming: the read tool whose lookup is under way; cleared when text follows. */
+  reading?: string;
   /** Changes the AI proposed in this answer, in the order it proposed them. */
   changes?: ChatChange[];
   /** On a question from the hint ladder: the problem and the rung it asked for. */
@@ -49,6 +51,13 @@ export interface ChatHint {
  * cost tokens on every question, and the model can look tracker data up again.
  */
 export const CHAT_REQUEST_TURNS = 12;
+
+/**
+ * Answer text is added to the conversation at most this often. Every addition re-renders the
+ * answer's Markdown from the start, so applying each fragment as it arrives costs more the longer
+ * the answer gets.
+ */
+const DELTA_FLUSH_MS = 40;
 
 /**
  * Select the turns to send: newest first until a request limit is reached, never starting with
@@ -132,6 +141,8 @@ export function useChat(lang: Language, options: ChatOptions = {}): ChatControll
   stateRef.current = state;
   /** One request per conversation at most, by conversation key. */
   const controllers = useRef(new Map<string, AbortController>());
+  /** Proposals whose confirmation is in flight, so a second press cannot send a second request. */
+  const confirming = useRef(new Set<string>());
   const [busyKeys, setBusyKeys] = useState<ReadonlySet<string>>(new Set());
   const langRef = useRef(lang);
   langRef.current = lang;
@@ -164,17 +175,36 @@ export function useChat(lang: Language, options: ChatOptions = {}): ChatControll
     }));
     setBusyKeys(keys => new Set(keys).add(key));
     let terminal = false;
+    /** Text received but not yet shown; see {@link DELTA_FLUSH_MS}. */
+    let buffered = '';
+    let flushTimer: ReturnType<typeof setTimeout> | undefined;
+    const flush = () => {
+      clearTimeout(flushTimer);
+      flushTimer = undefined;
+      if (!buffered) return;
+      const text = buffered;
+      buffered = '';
+      patch(({ reading: _reading, ...entry }) => ({ ...entry, content: entry.content + text }));
+    };
+    /** The answer is over: nothing is being read any more. */
+    const settle = (change: (entry: ChatEntry) => ChatEntry) => patch(({ reading: _reading, ...entry }) => change(entry));
 
     const onEvent = (event: ChatStreamEvent) => {
       if (abort.signal.aborted) return;
+      if (event.type === 'delta') {
+        buffered += event.text;
+        flushTimer ??= setTimeout(flush, DELTA_FLUSH_MS);
+        return;
+      }
+      // Everything else keeps its place after the text that came before it.
+      flush();
       if (event.type === 'context') patch(entry => ({ ...entry, context: event.context }));
-      else if (event.type === 'delta') patch(entry => ({ ...entry, content: entry.content + event.text }));
-      else if (event.type === 'tool') patch(entry => entry.tools?.includes(event.name) ? entry : { ...entry, tools: [...(entry.tools ?? []), event.name] });
+      else if (event.type === 'tool') patch(entry => ({ ...entry, reading: event.name, tools: entry.tools?.includes(event.name) ? entry.tools : [...(entry.tools ?? []), event.name] }));
       else if (event.type === 'action') patch(entry => ({ ...entry, changes: [...(entry.changes ?? []), { ...event.action, state: 'pending' }] }));
-      else if (event.type === 'done') { terminal = true; patch(entry => ({ ...entry, state: 'done' })); }
-      else { terminal = true; patch(entry => ({ ...entry, state: 'error', error: { code: event.error, message: event.message } })); }
+      else if (event.type === 'done') { terminal = true; settle(entry => ({ ...entry, state: 'done' })); }
+      else { terminal = true; settle(entry => ({ ...entry, state: 'error', error: { code: event.error, message: event.message } })); }
     };
-    const fail = (code: string, message: string) => patch(entry => ({ ...entry, state: 'error', error: { code, message } }));
+    const fail = (code: string, message: string) => settle(entry => ({ ...entry, state: 'error', error: { code, message } }));
 
     const request = {
       messages: requestTurns(history),
@@ -193,7 +223,9 @@ export function useChat(lang: Language, options: ChatOptions = {}): ChatControll
         else fail('CHAT_NETWORK', 'Could not reach the local service.');
       })
       .finally(() => {
-        if (abort.signal.aborted) patch(entry => entry.state === 'streaming' ? { ...entry, state: 'stopped' } : entry);
+        // Text that arrived before a stop is kept.
+        flush();
+        if (abort.signal.aborted) settle(entry => entry.state === 'streaming' ? { ...entry, state: 'stopped' } : entry);
         if (controllers.current.get(key) === abort) {
           controllers.current.delete(key);
           setBusyKeys(keys => { const next = new Set(keys); next.delete(key); return next; });
@@ -254,8 +286,9 @@ export function useChat(lang: Language, options: ChatOptions = {}): ChatControll
 
   const confirmChange = useCallback((id: string) => {
     const open = openChange(id);
-    if (!open) return;
+    if (!open || confirming.current.has(id)) return;
     const { key, change } = open;
+    confirming.current.add(id);
     patchChange(key, id, ({ error: _error, ...item }) => ({ ...item, state: 'applying' }));
     api.applyChatAction({ name: change.name, args: change.args }).then(() => {
       patchChange(key, id, item => ({ ...item, state: 'applied' }));
@@ -265,7 +298,7 @@ export function useChat(lang: Language, options: ChatOptions = {}): ChatControll
         ? { code: error.code, message: error.message }
         : { code: 'CHAT_NETWORK', message: 'Could not reach the local service.' };
       patchChange(key, id, item => ({ ...item, state: 'failed', error: failure }));
-    });
+    }).finally(() => confirming.current.delete(id));
   }, [openChange, patchChange]);
 
   const dismissChange = useCallback((id: string) => {

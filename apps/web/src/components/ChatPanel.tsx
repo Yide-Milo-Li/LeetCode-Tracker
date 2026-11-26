@@ -138,8 +138,8 @@ function Answer({ entry, lang, isLast, busy, onRetry, onOpenAiSettings, onConfir
     entry.context?.problem && `#${entry.context.problem.frontendId} ${entry.context.problem.title}`,
     ...lookups,
   ].filter(Boolean).join(zh ? '、' : ', ');
-  // Before any text arrives, say what is being read instead of a bare "thinking".
-  const reading = lookups.at(-1);
+  // Say what is being read instead of a bare "thinking", before any text and between paragraphs.
+  const reading = entry.reading ? toolLabel(entry.reading, lang) : undefined;
   return (
     <div className="chat-entry chat-entry-assistant">
       {entry.content
@@ -149,6 +149,9 @@ function Answer({ entry, lang, isLast, busy, onRetry, onOpenAiSettings, onConfir
             {reading ? (zh ? `正在查看${reading}…` : `Reading ${reading}…`) : (zh ? '正在思考…' : 'Thinking…')}
           </p>
         )}
+      {entry.content && !settled && reading && (
+        <p className="chat-thinking chat-reading" role="status">{zh ? `正在查看${reading}…` : `Reading ${reading}…`}</p>
+      )}
       {changes.map(change => (
         <ChangeCard key={change.id} change={change} lang={lang}
           onConfirm={() => onConfirmChange(change.id)} onDismiss={() => onDismissChange(change.id)} />

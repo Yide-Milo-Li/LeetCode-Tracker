@@ -871,3 +871,55 @@ it('offers to save a plain answer to the note and to find similar problems', asy
   assert.equal(screen.queryByRole('button', { name: 'Find similar problems in my catalog' }), null);
   assert.equal(screen.queryByText(/You confirm each change first/), null);
 });
+
+it('names a lookup under earlier text, marks an answer that finished behind a closed panel and confirms a card once', async () => {
+  mock.method(api, 'getChatStatus', async () => ({ configured: true, provider: 'openai', model: 'gpt-6-luna' }));
+  let applied = 0;
+  mock.method(api, 'applyChatAction', async () => { applied += 1; return { result: {} }; });
+  // The answer pauses on a lookup until released.
+  let release!: () => void;
+  globalThis.fetch = (async () => new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encode([{ type: 'context', context: {} }, { type: 'delta', text: 'Let me check.' }, { type: 'tool', name: 'tracker_get_today' }]));
+      release = () => {
+        controller.enqueue(encode([
+          { type: 'delta', text: '\n\nStart with Two Sum.' },
+          { type: 'action', action: practiceCard },
+          { type: 'done', provider: 'openai', model: 'm' },
+        ]));
+        controller.close();
+      };
+    },
+  }), { status: 200 })) as typeof fetch;
+
+  await openPanel();
+  await ask('What first?');
+  // The text so far stays, with what is being read under it.
+  await waitFor(() => screen.getByText("Reading today's plan…"));
+  assert.ok(screen.getByText('Let me check.'));
+
+  await act(async () => { fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Escape' }); });
+  assert.ok(screen.getByRole('button', { name: 'Ask AI (answering)' }));
+  await act(async () => { release(); });
+  await waitFor(() => screen.getByRole('button', { name: 'Ask AI (new answer)' }));
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Ask AI (new answer)' })); });
+  await waitFor(() => screen.getByText('Start with Two Sum.'));
+  assert.equal(screen.queryByText("Reading today's plan…"), null);
+
+  // Two presses before the card redraws still send one confirmation.
+  const record = screen.getByRole('button', { name: 'Record' });
+  await act(async () => { fireEvent.click(record); fireEvent.click(record); });
+  await waitFor(() => screen.getByText('Recorded'));
+  assert.equal(applied, 1);
+
+  // Once read, the launcher is plain again.
+  await act(async () => { fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Escape' }); });
+  assert.ok(screen.getByRole('button', { name: 'Ask AI' }));
+
+  // A decided note change is stored without the text it carried; an open one keeps it.
+  const entry = (state: 'applied' | 'pending') => ({ id: state, role: 'assistant' as const, content: 'Confirm it.', state: 'done' as const, changes: [{ ...noteCard, id: state, state }] });
+  saveChatState({ current: GENERAL_THREAD, threads: { general: { ...GENERAL_THREAD, usedAt: Date.now(), entries: [entry('applied'), entry('pending')] } } });
+  const kept = loadChatState().threads.general.entries.map(item => item.changes![0].args);
+  assert.deepEqual(kept.map(args => 'content' in args), [false, true]);
+  assert.equal(kept[0].heading, 'Pitfalls');
+});

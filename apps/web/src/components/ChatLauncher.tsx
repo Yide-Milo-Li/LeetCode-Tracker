@@ -58,6 +58,14 @@ export function ChatLauncher({ lang, onOpenAiSettings, ask = null, onDataChanged
     setOpen(true);
   }, [ask?.id]);
   const clearPending = useCallback(() => setPending(null), []);
+  // An answer that finished behind a closed panel is marked on the launcher until the panel opens.
+  const [news, setNews] = useState(false);
+  const wasBusy = useRef(false);
+  useEffect(() => {
+    if (open) setNews(false);
+    else if (wasBusy.current && !chat.anyBusy) setNews(true);
+    wasBusy.current = chat.anyBusy;
+  }, [chat.anyBusy, open]);
   // A preset the panel never got to send must not go out when the panel is opened again later.
   useEffect(() => { if (!open) setPending(null); }, [open]);
 
@@ -153,8 +161,8 @@ export function ChatLauncher({ lang, onOpenAiSettings, ask = null, onDataChanged
         <button
           ref={launcher}
           type="button"
-          className={'chat-launcher-button' + (chat.anyBusy ? ' is-busy' : '')}
-          aria-label={chat.anyBusy ? (zh ? '问 AI（正在回答）' : 'Ask AI (answering)') : label}
+          className={'chat-launcher-button' + (chat.anyBusy ? ' is-busy' : news ? ' has-news' : '')}
+          aria-label={chat.anyBusy ? (zh ? '问 AI（正在回答）' : 'Ask AI (answering)') : news ? (zh ? '问 AI（有新回答）' : 'Ask AI (new answer)') : label}
           aria-expanded={false}
           onPointerDown={event => launcherDrag.start(event, launcherPoint(position.dock, viewport, false))}
           // Rendered at once: the tooltip is off while tucked and decides on the mouse event that follows.

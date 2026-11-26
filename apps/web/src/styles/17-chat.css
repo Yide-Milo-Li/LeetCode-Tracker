@@ -53,7 +53,8 @@
 }
 .chat-launcher-button:hover .chat-launcher-face,
 .chat-launcher-button:focus-visible .chat-launcher-face,
-.chat-launcher-button.is-busy .chat-launcher-face {
+.chat-launcher-button.is-busy .chat-launcher-face,
+.chat-launcher-button.has-news .chat-launcher-face {
   background: var(--primary);
   color: var(--on-primary);
 }
@@ -127,12 +128,13 @@
   opacity: 0.25;
   transform: none;
 }
-/* The bar itself shows keyboard focus, and an answer still arriving while the panel is closed. */
+/* The bar itself shows keyboard focus, and an answer arriving or waiting to be read while the panel is closed. */
 .chat-launcher.is-tucked .chat-launcher-button:focus-visible {
   outline: 0;
 }
 .chat-launcher.is-tucked .chat-launcher-button:focus-visible::before,
-.chat-launcher.is-tucked .chat-launcher-button.is-busy::before {
+.chat-launcher.is-tucked .chat-launcher-button.is-busy::before,
+.chat-launcher.is-tucked .chat-launcher-button.has-news::before {
   background: var(--primary);
   opacity: 1;
 }
@@ -541,6 +543,11 @@ html.dark .chat-panel {
   margin: 0;
   font-size: 14px;
   animation: chat-thinking 1.4s ease-in-out infinite;
+}
+/* A lookup after some text has already arrived: the same signal, as a line under that text. */
+.chat-reading {
+  margin-top: 8px;
+  font-size: 13px;
 }
 @keyframes chat-thinking {
   50% {

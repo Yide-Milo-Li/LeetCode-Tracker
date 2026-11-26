@@ -113,13 +113,29 @@ export function loadChatState(now = Date.now()): ChatState {
 }
 
 /**
+ * An entry as it is stored. A decided proposal no longer shows or sends the text it would have
+ * written, which for a note can be tens of thousands of characters, so that text is left out.
+ */
+function storedEntry({ reading: _reading, ...entry }: ChatEntry): ChatEntry {
+  if (!entry.changes?.some(change => typeof change.args.content === 'string' && (change.state === 'applied' || change.state === 'dismissed'))) return entry;
+  return {
+    ...entry,
+    changes: entry.changes.map(change => {
+      if (change.state !== 'applied' && change.state !== 'dismissed') return change;
+      const { content: _content, ...args } = change.args;
+      return { ...change, args };
+    }),
+  };
+}
+
+/**
  * Store the conversations. When the browser refuses for lack of space, the least recently used
  * half is given up and the write is tried once more; storage is a convenience, so a second
  * failure is left alone.
  */
 export function saveChatState(state: ChatState): void {
   const write = (threads: ChatThread[]) => localStorage.setItem(STORAGE_KEY, JSON.stringify({
-    threads: threads.map(thread => ({ ...thread, entries: thread.entries.slice(-STORED_ENTRIES) })),
+    threads: threads.map(thread => ({ ...thread, entries: thread.entries.slice(-STORED_ENTRIES).map(storedEntry) })),
     current: state.current,
   }));
   const threads = Object.values(state.threads).sort((a, b) => b.usedAt - a.usedAt);

@@ -501,6 +501,8 @@ test('the model looks tracker data up through read tools and each lookup is repo
   assert.equal(practices.parameters.type, 'object');
   assert.ok('frontendId' in (practices.parameters.properties as object));
   assert.ok(!('$schema' in practices.parameters));
+  // Schema boilerplate that costs tokens on every turn is left out.
+  assert.doesNotMatch(JSON.stringify(offered), /0-9a-fA-F|9007199254740991/);
   assert.match(calls[0].systemInstruction, /read the user's tracker with the tracker tools/);
   assert.match(calls[0].systemInstruction, /Calling one of these changes nothing/);
 
@@ -548,8 +550,21 @@ test('a long lookup result is cut, endless lookups are stopped and a tool refusa
   });
   const plain = events((await post(picky.app, { messages: [{ role: 'user', content: 'hi' }] })).payload);
   assert.deepEqual(plain.slice(1), [{ type: 'delta', text: 'Plain answer.' }, { type: 'done', provider: 'openai', model: 'm' }]);
-  assert.equal(picky.calls.length, 2);
-  assert.match(picky.calls[1].systemInstruction, /You cannot read other tracker data/);
+  // The offer shrinks one step at a time: all tools, the lookups alone, then none.
+  assert.deepEqual(picky.calls.map(call => call.tools?.length ?? 0), [CHAT_TOOL_NAMES.length + CHAT_ACTION_NAMES.length, CHAT_TOOL_NAMES.length, 0]);
+  assert.match(picky.calls[2].systemInstruction, /You cannot read other tracker data/);
+  // A provider that only refuses the change tools keeps the lookups, and the model is told it can only read.
+  const readOnly = await chatApp(async params => {
+    if (params.tools?.some(tool => tool.name === 'tracker_patch_note')) throw new LLMError('CHAT_UNAVAILABLE', 'The AI provider could not answer. Try again.', 503, 'openai');
+    params.onDelta('Read-only answer.');
+    return { model: 'm', provider: 'openai', usage };
+  });
+  await post(readOnly.app, { messages: [{ role: 'user', content: 'hi' }] });
+  assert.deepEqual(readOnly.calls[1].tools?.map(tool => tool.name), [...CHAT_TOOL_NAMES]);
+  assert.match(readOnly.calls[1].systemInstruction, /read the user's tracker with the tracker tools/);
+  assert.match(readOnly.calls[1].systemInstruction, /say that you can only read/);
+  assert.doesNotMatch(readOnly.calls[1].systemInstruction, /propose four kinds of change/);
+  await readOnly.app.close();
   // Other failures, and a failure after text was shown, are not retried.
   const quota = await chatApp(async () => { throw new LLMError('CHAT_QUOTA', 'AI provider quota was exceeded.', 429, 'openai'); });
   await post(quota.app, { messages: [{ role: 'user', content: 'hi' }] });
