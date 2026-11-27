@@ -15,7 +15,7 @@ export function practiceTarget(anchor: HTMLAnchorElement, url: URL): PracticePro
   return { frontendId, title, url: url.href };
 }
 
-type Command = 'practice_open' | 'practice_layout' | 'practice_on_problem' | 'practice_close';
+type Command = 'practice_open' | 'practice_layout' | 'practice_location' | 'practice_close';
 export function practiceCommand<T = void>(command: Command, args?: Record<string, unknown>): Promise<T> {
   const bridge = (window as unknown as { __TAURI_INTERNALS__: { invoke<R>(command: string, args?: unknown): Promise<R> } }).__TAURI_INTERNALS__;
   return bridge.invoke<T>(command, args);

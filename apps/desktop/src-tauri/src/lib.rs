@@ -627,7 +627,9 @@ pub fn run() {
         practice::practice_open,
         practice::practice_layout,
         practice::practice_close,
-        practice::practice_on_problem,
+        practice::practice_location,
+        #[cfg(feature = "desktop-e2e")]
+        practice::practice_test_history,
         api_request,
         api_stream,
         api_stream_cancel,

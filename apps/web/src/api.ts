@@ -163,6 +163,10 @@ const catalogApi = {
     return request<CatalogStats>('/catalog/stats');
   },
 
+  getCatalogProblemBySlug(slug: string, { signal }: ReadOptions = {}): Promise<{ problem: Pick<CatalogListProblem, 'questionFrontendId' | 'title'> | null }> {
+    return request(`/catalog/problems/by-slug/${encodeURIComponent(slug)}`, { signal });
+  },
+
   getCatalog(
     query: CatalogQuery = {},
     { signal }: ReadOptions = {},

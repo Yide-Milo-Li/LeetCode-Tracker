@@ -12,7 +12,7 @@ interface Props {
   onSaved?: () => void;
   excerpt: string | null;
   onExcerptUsed(): void;
-  onStatus(status: PracticeNoteStatus): void;
+  onStatus(frontendId: string, status: PracticeNoteStatus): void;
 }
 
 /** The side panel edits the same versioned Markdown note as the Notes workspace. */
@@ -23,7 +23,7 @@ export function PracticeNote({ frontendId, lang, onSaved, onStatus, excerpt, onE
   const editor = useNoteEditor({ selectedId: frontendId, lang, formatSetting, controlledFormatOnSave: undefined,
     externalRevision: desktopAgentRevision, loadTimeline: false, onSaved });
   const status = editor.savingNote ? 'saving' : editor.hasUnsavedChanges ? 'dirty' : 'clean';
-  useLayoutEffect(() => { onStatus(status); }, [status, onStatus]);
+  useLayoutEffect(() => { onStatus(frontendId, status); }, [frontendId, status, onStatus]);
 
   const inserted = useRef<string | null>(null);
   useLayoutEffect(() => {

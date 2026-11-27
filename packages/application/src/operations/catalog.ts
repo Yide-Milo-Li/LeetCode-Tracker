@@ -193,5 +193,6 @@ export function createCatalogOperations(context: ApplicationContext) {
     if (!id) return fail(400, { error: 'INVALID_REQUEST', message: 'Frontend ID is required.' });
     return { problem: store.getProblem(id, 'frontendId') ?? null };
   };
-  return { preview, commit, history, result, query, tags, stats, frontendIds, read };
+  const readBySlug = async (slug: string) => ({ problem: store.getPracticeProblem(slug) });
+  return { preview, commit, history, result, query, tags, stats, frontendIds, read, readBySlug };
 }

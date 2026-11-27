@@ -166,15 +166,36 @@ pub async fn practice_layout(
     Ok(())
 }
 
-/// The shell asks only whether the selected problem is still on screen. Login URLs never leave this boundary.
+/// Only the canonical problem link crosses the boundary, including after same-document navigation.
+fn current_problem_link(url: &Url) -> Option<String> {
+    if !leetcode(url) {
+        return None;
+    }
+    Some(format!(
+        "{}/problems/{}/",
+        url.origin().ascii_serialization(),
+        problem_slug(url)?
+    ))
+}
+
 #[tauri::command]
-pub async fn practice_on_problem(app: AppHandle, url: String) -> Result<bool, String> {
-    let expected = problem_url(&url)?;
+pub async fn practice_location(app: AppHandle) -> Result<Option<String>, String> {
     let view = app.get_webview(LABEL).ok_or("Practice page is closed")?;
     let current = view.url().map_err(|e| e.to_string())?;
-    Ok(leetcode(&current)
-        && current.host_str() == expected.host_str()
-        && problem_slug(&current) == problem_slug(&expected))
+    Ok(current_problem_link(&current))
+}
+
+// The embedded WebDriver cannot target a child of a multi-webview window.
+#[cfg(feature = "desktop-e2e")]
+#[tauri::command]
+pub async fn practice_test_history(app: AppHandle, back: bool) -> Result<(), String> {
+    let view = app.get_webview(LABEL).ok_or("Practice page is closed")?;
+    view.eval(if back {
+        "history.back()"
+    } else {
+        "history.pushState(null, '', '/problems/add-two-numbers/description/')"
+    })
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -195,6 +216,25 @@ pub fn close_views(app: &AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn location_exposes_only_a_trusted_problem_link() {
+        for (url, expected) in [
+            (
+                "https://leetcode.cn/problems/two-sum/submissions/123/?from=x#code",
+                Some("https://leetcode.cn/problems/two-sum/"),
+            ),
+            (
+                "https://leetcode.com/accounts/login/?next=/problems/test/",
+                None,
+            ),
+            ("https://leetcode.com.evil.test/problems/test/", None),
+        ] {
+            assert_eq!(
+                current_problem_link(&Url::parse(url).unwrap()).as_deref(),
+                expected
+            );
+        }
+    }
     #[test]
     fn page_slot_stays_below_the_toolbar_with_or_without_window_chrome() {
         let slot = Viewport {

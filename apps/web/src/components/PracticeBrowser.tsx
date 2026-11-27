@@ -6,6 +6,7 @@ import { PracticeDivider, practiceSplitBounds, readPracticeSplit } from './Pract
 import type { Language } from '../i18n.ts';
 import { openExternalUrl } from '../platform/index.ts';
 import { practiceCommand, type PracticeProblem } from '../platform/practice.ts';
+import { followPracticeLocation, type PracticeLocation } from '../platform/practice-location.ts';
 
 export type PracticePane = 'chat' | 'note';
 
@@ -28,17 +29,20 @@ function schedule(work: () => Promise<void>): Promise<void> {
 }
 
 interface Props {
-  problem: PracticeProblem;
+  initial: PracticeProblem;
+  location: PracticeLocation;
+  onLocation(location: PracticeLocation): void;
   lang: Language;
   open: boolean;
   busy: boolean;
   news: boolean;
   pane: PracticePane;
   onPane(pane: PracticePane): void;
-  onNoteStatus(status: PracticeNoteStatus): void;
+  draftIds: ReadonlySet<string>;
+  onNoteStatus(frontendId: string, status: PracticeNoteStatus): void;
   onNoteSaved?: () => void;
-  excerpt: string | null;
-  onExcerptUsed(): void;
+  insertions: ReadonlyMap<string, { id: string; text: string | null }>;
+  onExcerptUsed(frontendId: string): void;
   discardRequest: (() => void) | null;
   cancelDiscard(): void;
   shortcut: string;
@@ -48,14 +52,18 @@ interface Props {
   children: React.ReactNode;
 }
 
-export function PracticeBrowser({ problem, lang, open, busy, news, pane, onPane, onNoteStatus, onNoteSaved, excerpt, onExcerptUsed, discardRequest, cancelDiscard, shortcut, width, onToggle, onClose, children }: Props) {
+export function PracticeBrowser({ initial, location, onLocation, lang, open, busy, news, pane, onPane, draftIds, onNoteStatus, onNoteSaved, insertions, onExcerptUsed, discardRequest, cancelDiscard, shortcut, width, onToggle, onClose, children }: Props) {
   const zh = lang === 'zh';
+  const problem = typeof location === 'object' ? location : null;
+  const locationLabel = location === 'loading' ? (zh ? '正在识别题目…' : 'Finding problem…')
+    : location === 'unknown' ? (zh ? '本地题库无法匹配此题' : 'No unique catalog match')
+    : location === 'unavailable' ? (zh ? '暂时无法识别题目' : 'Problem lookup unavailable')
+    : (zh ? '打开题目以继续对话和笔记' : 'Open a problem to use chat and notes');
   const dialog = useRef<HTMLDialogElement>(null);
   const slot = useRef<HTMLDivElement>(null);
   const [attempt, retry] = useState(0);
   const [failed, setFailed] = useState(false);
   const [externalFailed, setExternalFailed] = useState(false);
-  const [elsewhere, setElsewhere] = useState(false);
   const syncLayout = useRef<(focus: boolean) => void>(() => {});
   const previousOpen = useRef(open);
   const [zoom, setZoom] = useState(savedZoom);
@@ -68,10 +76,14 @@ export function PracticeBrowser({ problem, lang, open, busy, news, pane, onPane,
   const pageWidth = Math.round(Math.max(min, Math.min(max, fraction === null ? width - defaultRail : width * fraction)));
   const [manualSplit, setManualSplit] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
-  const [visitedNote, setVisitedNote] = useState(false);
+  const [visitedNote, setVisitedNote] = useState<string>();
   const split = autoSplit || manualSplit;
   const panelId = useId();
-  useEffect(() => { if (open && pane === 'note') setVisitedNote(true); }, [open, pane]);
+  const activeId = problem?.frontendId;
+  useEffect(() => { if (open && pane === 'note') setVisitedNote(activeId); }, [open, pane, activeId]);
+  // Keep background editors only while they own a draft, a pending insert or a save in flight.
+  const editorIds = new Set(draftIds);
+  if (activeId && (visitedNote === activeId || (open && pane === 'note'))) editorIds.add(activeId);
 
   useEffect(() => {
     const adjust = (event: Event) => {
@@ -100,7 +112,7 @@ export function PracticeBrowser({ problem, lang, open, busy, news, pane, onPane,
     let last = '';
     let appliedZoom: number | undefined;
     setFailed(false);
-    setElsewhere(false);
+    let stopFollowing: (() => void) | undefined;
     const update = (focus: boolean) => {
       focusPage ||= focus;
       if (scheduled) return;
@@ -117,13 +129,14 @@ export function PracticeBrowser({ problem, lang, open, busy, news, pane, onPane,
         focusPage = false;
         if (!created) {
           // Even a session opened immediately into chat gets a live page for the return trip.
-          const initial = viewport ?? {
+          const initialViewport = viewport ?? {
             width: window.innerWidth,
             height: Math.max(1, window.innerHeight - node.parentElement!.querySelector('header')!.getBoundingClientRect().bottom),
             viewportWidth: window.innerWidth,
           };
-          await practiceCommand('practice_open', { url: problem.url, viewport: initial });
+          await practiceCommand('practice_open', { url: initial.url, viewport: initialViewport });
           created = true;
+          if (alive) stopFollowing = followPracticeLocation(initial, onLocation);
         } else if (key === last && !focusNow && appliedZoom === zoomRef.current) return;
         const percent = zoomRef.current;
         if (alive) await practiceCommand('practice_layout', { viewport, focusPage: focusNow, zoom: percent === appliedZoom ? null : percent / 100 });
@@ -137,26 +150,15 @@ export function PracticeBrowser({ problem, lang, open, busy, news, pane, onPane,
     window.addEventListener('resize', resized);
     function resized() { update(false); }
     update(!previousOpen.current);
-    // A site's own client-side links may change problems without loading a new document.
-    let checking = false;
-    const locationCheck = window.setInterval(async () => {
-      if (!created || checking || document.hidden) return;
-      checking = true;
-      try {
-        const matches = await practiceCommand<boolean>('practice_on_problem', { url: problem.url });
-        if (alive) setElsewhere(!matches);
-      } catch { if (alive) setFailed(true); }
-      finally { checking = false; }
-    }, 1500);
     return () => {
       alive = false;
       observer.disconnect();
-      window.clearInterval(locationCheck);
+      stopFollowing?.();
       window.removeEventListener('resize', resized);
       syncLayout.current = () => {};
       void schedule(() => practiceCommand('practice_close')).catch(() => {});
     };
-  }, [problem.url, attempt]);
+  }, [initial, onLocation, attempt]);
 
   useLayoutEffect(() => {
     zoomRef.current = zoom;
@@ -172,6 +174,11 @@ export function PracticeBrowser({ problem, lang, open, busy, news, pane, onPane,
   }, [failed]);
 
   const label = zh ? '问 LCT' : 'Ask LCT';
+  const openInBrowser = async () => {
+    setExternalFailed(false);
+    const url = await practiceCommand<string | null>('practice_location').catch(() => null);
+    await openExternalUrl(url ?? problem?.url ?? initial.url);
+  };
   return createPortal(
     <dialog ref={dialog} className="practice-workspace" data-overlay-host="" data-chat={open ? 'open' : 'closed'}
       data-split={open && split ? 'true' : undefined} style={{ '--practice-rail': (width - pageWidth) + 'px' } as React.CSSProperties}
@@ -181,10 +188,8 @@ export function PracticeBrowser({ problem, lang, open, busy, news, pane, onPane,
       }}>
       <header className="practice-toolbar">
         <button type="button" className="practice-icon" aria-label={zh ? '返回 LCT' : 'Back to LCT'} title={zh ? '返回 LCT' : 'Back to LCT'} onClick={onClose}><ArrowLeft size={16} /></button>
-        <span className="practice-title" title={problem.title}><span>#{problem.frontendId}</span> {problem.title}</span>
-        {elsewhere && !failed && <button className="text-link" onClick={() => retry(n => n + 1)}
-          title={zh ? `对话和笔记仍属于 #${problem.frontendId}` : `Chat and notes are still for #${problem.frontendId}`}>
-          {zh ? `回到 #${problem.frontendId}` : `Return to #${problem.frontendId}`}</button>}
+        <span className="practice-title" role="status" title={problem?.title ?? locationLabel}>{problem
+          ? <><span>#{problem.frontendId}</span> {problem.title}</> : locationLabel}</span>
         <button className="practice-icon" aria-label={zh ? '页面选项' : 'Page options'} title={zh ? '页面选项' : 'Page options'}
           aria-expanded={optionsOpen} aria-controls={panelId + '-options'} onClick={() => setOptionsOpen(value => !value)}><MoreHorizontal size={17} /></button>
         {!open ? <button type="button" className="practice-ask" data-practice-chat-toggle="" aria-expanded={false}
@@ -212,7 +217,7 @@ export function PracticeBrowser({ problem, lang, open, busy, news, pane, onPane,
           <label>{zh ? '题目页面缩放' : 'Problem page zoom'} <select value={zoom} onChange={event => setZoom(Number(event.target.value))}>
             {ZOOM_STEPS.map(percent => <option key={percent} value={percent}>{percent}%</option>)}
           </select></label>
-          <button className="text-link" onClick={() => { void openExternalUrl(problem.url).catch(() => setExternalFailed(true)); }}>
+          <button className="text-link" onClick={() => { void openInBrowser().catch(() => setExternalFailed(true)); }}>
             <ExternalLink size={14} />{zh ? '用系统浏览器打开' : 'Open in system browser'}
           </button>
           {externalFailed && <span role="alert">{zh ? '无法打开系统浏览器。' : 'Could not open the system browser.'}</span>}
@@ -225,15 +230,19 @@ export function PracticeBrowser({ problem, lang, open, busy, news, pane, onPane,
       {open && split && <PracticeDivider lang={lang} pageId={panelId + '-page'} width={width}
         pageWidth={pageWidth} preference={fraction} onChange={setFraction} />}
       <div className="practice-chat" role="tabpanel" id={panelId + '-chat-panel'} aria-labelledby={panelId + '-chat'} hidden={!open || pane !== 'chat'}>
-        {open && pane === 'chat' && children}
+        {open && pane === 'chat' && (problem ? children : <p>{locationLabel}</p>)}
       </div>
       <div className="practice-chat practice-note" role="tabpanel" id={panelId + '-note-panel'} aria-labelledby={panelId + '-note'} hidden={!open || pane !== 'note'}>
         {discardRequest && <div className="practice-note-conflict" role="alert">
-          <p>{zh ? '离开后会丢失未保存的笔记。' : 'Leaving will discard your unsaved note edits.'}</p>
+          <p>{zh ? '离开后将放弃以下题目的笔记草稿' : 'Leaving will discard note drafts for'} {Array.from(draftIds, id => '#' + id).join(', ')}</p>
           <button className="btn btn-secondary btn-sm" onClick={cancelDiscard}>{zh ? '继续编辑' : 'Keep editing'}</button>
           <button className="text-link" onClick={discardRequest}>{zh ? '放弃修改并离开' : 'Discard and leave'}</button>
         </div>}
-        {(visitedNote || (open && pane === 'note')) && <PracticeNote frontendId={problem.frontendId} lang={lang} onStatus={onNoteStatus} onSaved={onNoteSaved} excerpt={excerpt} onExcerptUsed={onExcerptUsed} />}
+        {!problem && <p>{locationLabel}</p>}
+        {Array.from(editorIds, id => <div key={id} className="practice-note-slot" hidden={id !== activeId}>
+          <PracticeNote frontendId={id} lang={lang} onStatus={onNoteStatus} onSaved={onNoteSaved}
+            excerpt={insertions.get(id)?.text ?? null} onExcerptUsed={() => onExcerptUsed(id)} />
+        </div>)}
       </div>
     </dialog>, document.body,
   );

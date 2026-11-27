@@ -8,7 +8,7 @@ Open a problem from Today, Problems, a goal list or Notes. Choose **Ask LCT** or
 
 Drag the divider between LeetCode and the panel to adjust their widths. The app remembers the proportion on this device. With the divider focused, use the left and right arrow keys to adjust it. Double-click the divider or press Enter on it to restore automatic sizing.
 
-Use **Chat** and **Note** at the top of the panel to switch while solving. Both follow the problem ID shown in the toolbar. Following a link to a different problem within LeetCode keeps the original association. Open the other problem from LCT to start its own conversation and note. The note editor keeps your unsaved text as you switch or collapse the panel. **Save note** writes to the same problem note you see in the Notes workspace.
+Use **Chat** and **Note** at the top of the panel to switch while solving. Opening another problem inside LeetCode switches both to its catalog entry. The toolbar shows its number and title. Returning to a problem restores its conversation and any unsaved note edits from this practice session. Chat and notes pause on sign-in pages and on problems outside your local catalog. **Save note** writes to the same problem note you see in the Notes workspace.
 
 After an answer, choose **Draft note from this chat**. LCT uses questions and follow-ups from the current visit. When reopening a problem before asking a new question, **Draft note from chat history** uses its earlier conversation. Review the suggested change in chat and confirm it, then choose **View problem note**. If the assistant returns a text draft, **Add to note draft** places it after your handwritten text for editing and saving. LeetCode editor contents and account credentials stay outside the chat context.
 

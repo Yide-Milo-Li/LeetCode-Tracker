@@ -10,6 +10,8 @@ export function registerCatalogRoutes(app: FastifyInstance, { application }: Rou
   app.get('/api/v1/imports/:id', applicationRoute(r => catalog.result({}, r.params as { id: string })));
   app.get('/api/v1/catalog', applicationRoute(r => catalog.query(r.query)));
   app.get('/api/v1/catalog/tags', applicationRoute(() => catalog.tags()));
+  app.get('/api/v1/catalog/problems/by-slug/:slug', applicationRoute(r =>
+    catalog.readBySlug((r.params as { slug: string }).slug)));
   app.get('/api/v1/catalog/problems/:frontendId', applicationRoute(async r => {
     const { problem } = await catalog.read({}, r.params as { frontendId: string });
     if (!problem) return { problem: null };

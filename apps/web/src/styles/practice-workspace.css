@@ -78,6 +78,7 @@
 .practice-options select { min-height: 28px; padding-block: 2px; }
 .practice-chat[hidden] { display: none; }
 .practice-note { flex-direction: column; justify-content: flex-start; align-items: center; }
+.practice-note-slot:not([hidden]) { display: contents; }
 .practice-note-editor {
   display: flex; flex-direction: column; min-block-size: 0; flex: 1; inline-size: 100%; max-inline-size: 54rem;
 }

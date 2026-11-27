@@ -515,6 +515,10 @@ describe('Fastify Local API (/api/v1)', () => {
     ].join('\n'));
 
     // Query with search
+    const lookup = (slug: string) => app.inject({ method: 'GET', url: '/api/v1/catalog/problems/by-slug/' + slug });
+    assert.equal((await lookup('add-two-numbers')).json().problem.questionFrontendId, '2');
+    assert.deepEqual((await lookup('sum')).json(), { problem: null });
+
     const searchRes = await app.inject({ method: 'GET', url: '/api/v1/catalog?search=Sum' });
     assert.equal(searchRes.statusCode, 200);
     const searchBody = JSON.parse(searchRes.payload);
@@ -531,6 +535,13 @@ describe('Fastify Local API (/api/v1)', () => {
     assert.equal(allTagsRes.statusCode, 200);
     const tagsList = JSON.parse(allTagsRes.payload);
     assert.ok(tagsList.tags.length >= 3);
+
+    await store.importJsonl(JSON.stringify({ id: 'LCR 007', title: 'Local title', difficulty: 'Easy',
+      url: 'https://leetcode.cn/problems/official-slug/description/?lang=en' }));
+    assert.equal((await lookup('official-slug')).json().problem.questionFrontendId, 'LCR 007');
+    assert.deepEqual((await lookup('local-title')).json(), { problem: null });
+    await store.importJsonl(JSON.stringify({ id: '4', title: 'Two Sum', difficulty: 'Easy' }));
+    assert.deepEqual((await lookup('two-sum')).json(), { problem: null });
   });
 
   it('supports all pagination combinations and validates parameter boundaries on catalog query', async () => {

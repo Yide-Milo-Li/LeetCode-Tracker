@@ -723,11 +723,22 @@ it('continues a problem chat in the workspace and drafts from this visit alone w
   const { PRACTICE_OPEN, PRACTICE_SHORTCUT } = await import('../apps/web/src/platform/practice.ts');
   const { setChatWritePermission } = await import('../apps/web/src/chat/chat-settings.ts');
   const calls: string[] = [];
+  const origin = 'https://leetcode.com/problems/';
+  let pageUrl: string | null = origin + 'trapping-rain-water/';
+  let resolveSlow!: (result: { problem: null }) => void;
+  const slowLookup = new Promise<{ problem: null }>(resolve => { resolveSlow = resolve; });
+  const lookup = mock.method(api, 'getCatalogProblemBySlug', async (slug: string) => {
+    if (slug === 'slow') return slowLookup;
+    return { problem: slug === '3sum' ? { title: '3Sum', questionFrontendId: '15' } : null };
+  });
+  let finishReply: (() => void) | undefined;
+  let delayReply = false;
   let saved = 'Initial observation';
   const note = () => ({ questionId: '42', questionFrontendId: '42', updatedAt: 1, content: saved });
   mock.method(api, 'getSettings', async () => ({ notesFormatOnSave: false }));
-  mock.method(api, 'getNote', async () => ({ note: note(), contentHash: 'base' }));
+  mock.method(api, 'getNote', async (id: string) => ({ note: id === '42' ? note() : null, contentHash: 'base' }));
   const save = mock.method(api, 'upsertNote', async (id: string, text: string, hash: string) => {
+    if (id === '15') return { note: { ...note(), questionFrontendId: id, content: text }, contentHash: 'other' };
     assert.equal(id, '42');
     assert.equal(hash, 'base');
     saved = text;
@@ -752,12 +763,16 @@ it('continues a problem chat in the workspace and drafts from this visit alone w
       calls.push(command);
       if (command === 'api_stream') {
         requests.push(JSON.parse(args.body));
+        if (delayReply) {
+          delayReply = false;
+          await new Promise<void>(resolve => { finishReply = resolve; });
+        }
         const events = answer('Look at the boundary.');
         if (proposeNote) events.unshift({ type: 'action', action: noteCard });
         args.onChunk.onmessage(Array.from(encode(events)));
         return { status: 200, body: '' };
       }
-      if (command === 'practice_on_problem') return true;
+      if (command === 'practice_location') return pageUrl;
     },
   } });
   try {
@@ -823,6 +838,50 @@ it('continues a problem chat in the workspace and drafts from this visit alone w
     await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'View problem note' })); });
     await waitFor(() => assert.equal(editor.value, 'My own thought\n\nLook at the boundary.\n\nTrack the right maximum.'));
     assert.equal(apply.mock.callCount(), 1);
+    const move = async (slug: string | null) => {
+      pageUrl = slug ? origin + slug + '/' : null;
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+    };
+    const visibleEditor = () => screen.getByRole('textbox', { name: 'Problem note' }) as HTMLTextAreaElement;
+    await act(async () => { fireEvent.change(editor, { target: { value: 'Unfinished rain note' } }); });
+    await clickTab('Chat');
+    proposeNote = false;
+    delayReply = true;
+    await ask('One more rain question');
+    await waitFor(() => assert.ok(finishReply));
+    await move('slow');
+    await waitFor(() => assert.ok(lookup.mock.calls.some(call => call.arguments[0] === 'slow')));
+    await move('3sum');
+    await act(async () => { resolveSlow({ problem: null }); finishReply!(); });
+    await waitFor(() => assert.match(document.querySelector('.practice-title')!.textContent!, /#15 3Sum/));
+    assert.equal(screen.queryByText('One more rain question'), null);
+    assert.equal(screen.queryByText('Look at the boundary.'), null);
+    await ask('A question for 3Sum');
+    await waitFor(() => assert.equal(requests.at(-1)?.context?.frontendId, '15'));
+    await clickTab('Note');
+    await waitFor(() => assert.equal(visibleEditor().disabled, false));
+    assert.equal(visibleEditor().value, '');
+    await act(async () => { fireEvent.change(visibleEditor(), { target: { value: 'Only for 3Sum' } }); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save note' })); });
+    await waitFor(() => assert.deepEqual(save.mock.calls.at(-1)?.arguments.slice(0, 2), ['15', 'Only for 3Sum']));
+    await move('not-imported');
+    await waitFor(() => assert.match(document.querySelector('.practice-title')!.textContent!, /No unique catalog match/));
+    assert.equal(screen.queryByRole('textbox'), null);
+    await move(null);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Back to LCT' })); });
+    assert.match(screen.getByRole('alert').textContent!, /#42/);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Keep editing' })); });
+    await move('trapping-rain-water');
+    await waitFor(() => assert.equal(visibleEditor().value, 'Unfinished rain note'));
+    await clickTab('Chat');
+    assert.ok(await screen.findByText('One more rain question'));
+    assert.equal(screen.queryByText('A question for 3Sum'), null);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Draft note from this chat' })); });
+    await waitFor(() => assert.match(requests.at(-1)!.messages[0].content, /One more rain question/));
+    assert.doesNotMatch(requests.at(-1)!.messages[0].content, /A question for 3Sum|Old visit only/);
+    await clickTab('Note');
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save note' })); });
+    await waitFor(() => assert.equal(saved, 'Unfinished rain note'));
     assert.equal(calls.filter(name => name === 'practice_open').length, 1);
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Back to LCT' })); });
     await waitFor(() => assert.ok(calls.includes('practice_close')));

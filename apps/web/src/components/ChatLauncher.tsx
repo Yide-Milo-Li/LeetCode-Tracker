@@ -19,6 +19,7 @@ import { sessionNotePrompt } from '../chat/chat-presets.ts';
 import type { PracticePane } from './PracticeBrowser.tsx';
 import type { PracticeNoteStatus } from './PracticeNote.tsx';
 import { PRACTICE_OPEN, PRACTICE_SHORTCUT, type PracticeProblem } from '../platform/practice.ts';
+import type { PracticeLocation } from '../platform/practice-location.ts';
 import { loadActiveTimer, subscribeTimer } from '../timer-service.ts';
 import {
   clampLauncher, clampPanel, dockAt, dockForPanel, launcherPoint, panelEdgeHold, panelPoint, useChatPosition, useDrag, type Point,
@@ -50,15 +51,20 @@ export interface ChatLauncherProps {
 
 export function ChatLauncher({ lang, page, onOpenAiSettings, ask = null, sidebar, onDataChanged }: ChatLauncherProps) {
   const zh = lang === 'zh';
-  const [practice, setPractice] = useState<{ problem: PracticeProblem; before: Set<string> } | null>(null);
+  const [practice, setPractice] = useState<{ initial: PracticeProblem; location: PracticeLocation } | null>(null);
+  const sessionHistory = useRef(new Map<string, Set<string>>());
   const [pane, setPane] = useState<PracticePane>('chat');
-  const [noteStatus, setNoteStatus] = useState<PracticeNoteStatus>('clean');
+  const [noteStatuses, setNoteStatuses] = useState(new Map<string, PracticeNoteStatus>());
   const [discardRequest, setDiscardRequest] = useState<(() => void) | null>(null);
-  const [excerpt, setExcerpt] = useState<{ id: string; text: string } | null>(null);
-  const [insertedAnswer, setInsertedAnswer] = useState<string | null>(null);
-  const updateNoteStatus = useCallback((status: PracticeNoteStatus) => {
-    setNoteStatus(status);
-    if (status === 'clean') setDiscardRequest(null);
+  const [insertions, setInsertions] = useState(new Map<string, { id: string; text: string | null }>());
+  const updateNoteStatus = useCallback((id: string, status: PracticeNoteStatus) => {
+    setNoteStatuses(previous => {
+      if ((previous.get(id) ?? 'clean') === status) return previous;
+      const next = new Map(previous);
+      if (status === 'clean') next.delete(id);
+      else next.set(id, status);
+      return next;
+    });
   }, []);
   const chat = useChat(lang, { onDataChanged, page: practice ? 'problems' : page });
   const { navigate } = useWorkspace();
@@ -80,30 +86,41 @@ export function ChatLauncher({ lang, page, onOpenAiSettings, ask = null, sidebar
   const viewProblem = useChatProblem();
   /** A preset waiting for the panel, with the problem it was asked about. */
   const [pending, setPending] = useState<Required<ChatAsk> | null>(null);
+  const selectPractice = useCallback(({ frontendId, title }: PracticeProblem) => {
+    const thread = problemThread({ frontendId, title });
+    if (!sessionHistory.current.has(frontendId)) {
+      sessionHistory.current.set(frontendId, new Set(chat.entriesOf(thread.key).map(entry => entry.id)));
+    }
+    chat.select(thread);
+  }, [chat.select, chat.entriesOf]);
+  const followLocation = useCallback((location: PracticeLocation) => {
+    if (typeof location === 'object') selectPractice(location);
+    setPractice(current => current && { ...current, location });
+    setPending(null);
+  }, [selectPractice]);
   useEffect(() => {
     const enter = (event: Event) => {
       const problem = (event as CustomEvent<PracticeProblem>).detail;
-      const thread = problemThread(problem);
+      sessionHistory.current.clear();
       setPane('chat');
-      setNoteStatus('clean');
-      setInsertedAnswer(null);
-      setExcerpt(null);
+      setNoteStatuses(new Map());
+      setInsertions(new Map());
       setDiscardRequest(null);
-      setPractice({ problem, before: new Set(chat.entriesOf(thread.key).map(entry => entry.id)) });
-      chat.select(thread);
+      setPractice({ initial: problem, location: problem });
+      selectPractice(problem);
       setOpen(false);
       setPending(null);
     };
     window.addEventListener(PRACTICE_OPEN, enter);
     return () => window.removeEventListener(PRACTICE_OPEN, enter);
-  }, [chat.select, chat.entriesOf]);
+  }, [selectPractice]);
   // The conversation follows the problem: the note that was just opened, the problem a timer was
   // started on, or the problem another view asked about. With none, the last conversation stays.
   useEffect(() => {
     if (!practice && viewProblem) chat.select(problemThread(viewProblem));
   }, [viewProblem?.frontendId, viewProblem?.title, practice]);
   useEffect(() => {
-    if (!ask) return;
+    if (!ask || practice) return;
     chat.select(problemThread(ask.problem));
     setPending(ask.action ? { problem: ask.problem, action: ask.action } : null);
     setOpen(true);
@@ -127,13 +144,14 @@ export function ChatLauncher({ lang, page, onOpenAiSettings, ask = null, sidebar
   const clearPending = useCallback(() => setPending(null), []);
   // An answer that finished behind a closed panel is marked on the launcher until the panel opens.
   const [news, setNews] = useState(false);
-  const wasBusy = useRef(false);
+  const activityKey = practice ? chat.current.key : null;
+  const previousActivity = useRef({ key: activityKey, busy: false });
   const activityBusy = practice ? chat.busy : chat.anyBusy;
   useEffect(() => {
-    if (open) setNews(false);
-    else if (wasBusy.current && !activityBusy) setNews(true);
-    wasBusy.current = activityBusy;
-  }, [activityBusy, open]);
+    if (open || previousActivity.current.key !== activityKey) setNews(false);
+    else if (previousActivity.current.busy && !activityBusy) setNews(true);
+    previousActivity.current = { key: activityKey, busy: activityBusy };
+  }, [activityKey, activityBusy, open]);
   const { position, viewport, save } = useChatPosition();
   const large = position.large === true;
   /** The size as stored with a placement; the compact size is the absence of the field. */
@@ -246,32 +264,44 @@ export function ChatLauncher({ lang, page, onOpenAiSettings, ask = null, sidebar
     sidebar.container,
   );
 
+  const draftIds = new Set(noteStatuses.keys());
+  for (const [id, insert] of insertions) if (insert.text !== null) draftIds.add(id);
+  useEffect(() => { if (!draftIds.size) setDiscardRequest(null); }, [draftIds.size]);
   if (practice) {
-    const { problem, before } = practice;
+    const problem = typeof practice.location === 'object' ? practice.location : null;
+    const before = problem ? sessionHistory.current.get(problem.frontendId) : undefined;
+    const saving = Array.from(noteStatuses.values()).includes('saving');
     const leave = (after?: () => void) => {
       const finish = () => { setOpen(false); setPending(null); setPractice(null); setDiscardRequest(null); after?.(); };
-      if (noteStatus === 'clean') finish();
+      if (!draftIds.size) finish();
       else {
         setOpen(true);
         setPane('note');
-        if (noteStatus === 'dirty') setDiscardRequest(() => finish);
+        setDiscardRequest(() => finish);
       }
     };
     const toggle = () => { setPending(null); setPane('chat'); setOpen(value => !value); };
-    const entries = chat.entriesOf(problemThread(problem).key);
+    const entries = problem ? chat.entriesOf(problemThread(problem).key) : [];
     const eligible = (entry: (typeof entries)[number]) => entry.role === 'user' && entry.preset !== 'session-note';
-    const currentVisit = entries.some(entry => eligible(entry) && !before.has(entry.id));
+    const currentVisit = entries.some(entry => eligible(entry) && !before?.has(entry.id));
     return <React.Suspense fallback={null}>
-      <PracticeBrowser problem={problem} lang={lang} open={open} busy={chat.busy} news={news} width={viewport.width}
+      <PracticeBrowser initial={practice.initial} location={practice.location} onLocation={followLocation}
+        lang={lang} open={open} busy={!!problem && chat.busy} news={!!problem && news} width={viewport.width}
         shortcut={shortcut} pane={pane} onPane={setPane} onToggle={toggle} onClose={() => leave()}
-        onNoteStatus={updateNoteStatus} onNoteSaved={onDataChanged} excerpt={excerpt?.text ?? null}
-        onExcerptUsed={() => { setInsertedAnswer(excerpt?.id ?? null); setExcerpt(null); }}
-        discardRequest={noteStatus === 'dirty' ? discardRequest : null} cancelDiscard={() => setDiscardRequest(null)}>
-        {open && <React.Suspense fallback={null}>
+        draftIds={draftIds} onNoteStatus={updateNoteStatus} onNoteSaved={onDataChanged} insertions={insertions}
+        onExcerptUsed={id => setInsertions(previous => {
+          const insert = previous.get(id);
+          return insert ? new Map(previous).set(id, { ...insert, text: null }) : previous;
+        })}
+        discardRequest={draftIds.size && !saving ? discardRequest : null} cancelDiscard={() => setDiscardRequest(null)}>
+        {open && problem && chat.current.problem?.frontendId === problem.frontendId && <React.Suspense fallback={null}>
           <ChatPanel id={panelId} lang={lang} chat={chat} shortcut={shortcut} onClose={toggle}
-            practiceNote={{ available: entries.some(eligible), fromHistory: !currentVisit, insertedAnswer,
+            practiceNote={{ available: entries.some(eligible), fromHistory: !currentVisit, insertedAnswer: insertions.get(problem.frontendId)?.id ?? null,
               prompt: () => sessionNotePrompt(lang, problem, entries, currentVisit ? before : undefined),
-              view: () => setPane('note'), addDraft: (id, text) => { setExcerpt({ id, text }); setPane('note'); } }}
+              view: () => setPane('note'), addDraft: (id, text) => {
+                setInsertions(previous => new Map(previous).set(problem.frontendId, { id, text }));
+                setPane('note');
+              } }}
             onWorkspaceLink={link => {
               if (link.view === 'notes' && link.targetId === problem.frontendId) setPane('note');
               else leave(() => openWorkspaceLink(link));

@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 
 describe('embedded LeetCode practice', () => {
-  it('opens a catalog problem, preserves reading width, and returns to the catalog', async () => {
+  it('follows native problem history, keeps drafts with their problems, and preserves reading width', async () => {
     await browser.waitUntil(async () => (await browser.execute(() => window.__TAURI_INTERNALS__?.invoke('get_desktop_status')))?.state === 'ready');
     await browser.execute(async () => {
       const core = window.__TAURI_INTERNALS__;
@@ -12,7 +12,9 @@ describe('embedded LeetCode practice', () => {
         if (result.status !== 200) throw new Error('Could not prepare test catalog: ' + result.status);
         return JSON.parse(result.body);
       }
-      const preview = await post('/imports/preview', { content: JSON.stringify({ id: '1', title: 'Two Sum', difficulty: 'Easy', tags: ['Array'] }) });
+      const problems = [{ id: '1', title: 'Two Sum', difficulty: 'Easy', tags: ['Array'] },
+        { id: '2', title: 'Add Two Numbers', difficulty: 'Medium', tags: ['Linked List'] }];
+      const preview = await post('/imports/preview', { content: problems.map(problem => JSON.stringify(problem)).join('\n') });
       await post('/imports', { previewId: preview.previewId });
     });
     await browser.execute(() => { location.hash = '#problems'; });
@@ -42,7 +44,7 @@ describe('embedded LeetCode practice', () => {
           const child = await until(getPage);
           const chrome = dialog.querySelector('header');
           const toggle = chrome.querySelector('[data-practice-chat-toggle]');
-          const onProblem = await until(() => window.__TAURI__.core.invoke('practice_on_problem', { url: link.href }));
+          const onProblem = await until(async () => (await window.__TAURI__.core.invoke('practice_location')) === link.href);
           const nativeWindow = window.__TAURI__.window.getCurrentWindow();
           async function toolbarClear() {
             const [host, size, position] = await Promise.all([nativeWindow.innerSize(), child.size(), child.position()]);
@@ -97,7 +99,34 @@ describe('embedded LeetCode practice', () => {
           const chatWidth = dialog.querySelector('.chat-panel').getBoundingClientRect().width;
           const siteWidth = page.getBoundingClientRect().width;
           chrome.querySelector('[role="tab"][id$="-note"]').click();
-          await until(() => dialog.querySelector('.practice-note textarea:not(:disabled)'));
+          const noteField = () => dialog.querySelector('.practice-note-slot:not([hidden]) textarea:not(:disabled)');
+          const edit = (field, value) => {
+            Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(field, value);
+            field.dispatchEvent(new Event('input', { bubbles: true }));
+          };
+          const firstNote = await until(noteField);
+          const initialText = firstNote.value;
+          const draft = initialText + '\nCheck the complement.';
+          edit(firstNote, draft);
+          const title = chrome.querySelector('.practice-title');
+          const move = back => window.__TAURI__.core.invoke('practice_test_history', { back });
+          await move(false);
+          await until(() => title.textContent.includes('#2 Add Two Numbers'));
+          const secondNote = await until(noteField);
+          if (secondNote.value === draft) throw new Error('Draft appeared on the wrong problem');
+          const saved = secondNote.value.trimEnd() === 'Carry the one.' ? 'Check the last carry.\n' : 'Carry the one.\n';
+          edit(secondNote, saved);
+          (await until(() => secondNote.closest('.practice-note-editor').querySelector('footer button:not(:disabled)'))).click();
+          await until(async () => {
+            const response = await window.__TAURI__.core.invoke('api_request', {
+              method: 'GET', path: '/api/v1/notes/2', headers: {}, body: null,
+            });
+            return JSON.parse(response.body).note?.content === saved;
+          });
+          await move(true);
+          await until(() => title.textContent.includes('#1 Two Sum'));
+          if ((await until(noteField)).value !== draft) throw new Error('Back lost the first draft');
+          edit(noteField(), initialText);
           if (!wide) {
             const pin = chrome.querySelector('button[aria-pressed]');
             pin.click();
@@ -126,6 +155,10 @@ describe('embedded LeetCode practice', () => {
         finally {
           document.querySelector('.practice-toolbar button')?.click();
           await sleep(350);
+          document.querySelector('.practice-note-conflict button.text-link')?.click();
+          if (document.querySelector('dialog.practice-workspace[open]')) {
+            await window.__TAURI__.core.invoke('practice_close');
+          }
         }
         done(result);
       });

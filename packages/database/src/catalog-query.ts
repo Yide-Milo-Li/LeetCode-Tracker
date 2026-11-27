@@ -97,6 +97,27 @@ export function getProblemRecord(
   });
 }
 
+/** An imported title can be translated, and multiple rows can share a slug. Prefer
+ * the slug in each row's actual LeetCode link and require one matching identity. */
+export function findPracticeProblem(db: DatabaseSync, slug: string) {
+  if (!/^[a-z\d-]+$/i.test(slug)) return null;
+  const candidates = db.prepare(`
+    SELECT frontend_question_id, title, title_slug, url FROM problems
+    WHERE title_slug = ? OR instr(url, ?) > 0
+  `).iterate(slug, '/problems/' + slug);
+  let match: { questionFrontendId: string; title: string } | null = null;
+  for (const row of candidates) {
+    const url = URL.parse(String(row.url));
+    const linkedSlug = url && !url.username && !url.password &&
+      (url.origin === 'https://leetcode.com' || url.origin === 'https://leetcode.cn')
+      ? /^\/problems\/([a-z\d-]+)(?:\/|$)/i.exec(url.pathname)?.[1] : undefined;
+    if ((linkedSlug ?? row.title_slug) !== slug) continue;
+    if (match) return null;
+    match = { questionFrontendId: String(row.frontend_question_id), title: String(row.title) };
+  }
+  return match;
+}
+
 /**
  * Query filtered and paginated catalog problems.
  */

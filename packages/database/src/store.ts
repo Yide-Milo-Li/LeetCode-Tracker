@@ -120,6 +120,7 @@ import {
 // Catalog query exports
 import {
   getProblemRecord,
+  findPracticeProblem,
   queryCatalogProblems,
   getAllCatalogTags,
   getCatalogStatistics,
@@ -349,6 +350,10 @@ export class CatalogStore {
   /** Look up a problem by internal questionId, frontend ID, or URL slug. */
   public getProblem(value: string, by: 'id' | 'frontendId' | 'slug' = 'id'): CatalogProblem | null {
     return getProblemRecord(this.db, value, by);
+  }
+
+  public getPracticeProblem(slug: string) {
+    return findPracticeProblem(this.db, slug);
   }
 
   /** Query filtered and paginated catalog problems. */
