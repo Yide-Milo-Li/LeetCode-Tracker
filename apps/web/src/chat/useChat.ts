@@ -196,6 +196,7 @@ export interface ChatController {
 }
 
 export interface ChatOptions {
+  page?: ChatRequest['page'];
   /** Chat wrote to the tracker; views showing that data should reload. */
   onDataChanged?: () => void;
 }
@@ -215,6 +216,8 @@ export function useChat(lang: Language, options: ChatOptions = {}): ChatControll
   const [busyKeys, setBusyKeys] = useState<ReadonlySet<string>>(new Set());
   const langRef = useRef(lang);
   langRef.current = lang;
+  const pageRef = useRef(options.page);
+  pageRef.current = options.page;
 
   /**
    * The state as this tab last stored or adopted it. Another tab may have stored since; only what
@@ -340,6 +343,7 @@ export function useChat(lang: Language, options: ChatOptions = {}): ChatControll
       messages: requestTurns(history),
       context: thread.problem ? { frontendId: thread.problem.frontendId } : {},
       lang: langRef.current,
+      ...(dataAccess && pageRef.current ? { page: pageRef.current } : {}),
       // Read when the question is sent, so a change in Settings applies to the next one.
       ...(dataAccess ? {} : { dataAccess: false }),
       ...(fullAccess ? { writePermission: 'full' } : {}),

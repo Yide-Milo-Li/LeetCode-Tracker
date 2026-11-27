@@ -39,6 +39,7 @@ export function summarizePlanItem(item: PlanItem, lang: 'en' | 'zh' = 'en') {
   return {
     frontendId: item.problem.questionFrontendId,
     title: item.problem.title,
+    url: item.problem.url,
     difficulty: item.problem.difficulty,
     kind: item.kind,
     reason: item.reason[lang] || item.reason.en,

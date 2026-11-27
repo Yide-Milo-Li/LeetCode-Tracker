@@ -176,7 +176,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     application,
     deviceSync,
     openAIOAuth,
-    chat: new ChatService({ application, assistant: gemini, writeLock }),
+    chat: new ChatService({ application, assistant: gemini, writeLock, desktop: Boolean(agentApplication) }),
     afterBundleRestore: () => { agentApplication?.resetTransientState(); openAIOAuth.reset(); },
   });
   if (options.desktopAgent && agentApplication) {

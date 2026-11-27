@@ -70,7 +70,7 @@ export function NotesWorkspace({
   const visible = useContext(ViewVisible);
   const chatProblemTitle = selectedSummary?.questionFrontendId === selectedId ? selectedSummary?.title : undefined;
   useEffect(() => {
-    if (!visible || !selectedId) return;
+    if (!visible || !selectedId || !chatProblemTitle) return;
     setChatProblem({ frontendId: selectedId, title: chatProblemTitle });
     return () => setChatProblem(null);
   }, [visible, selectedId, chatProblemTitle]);
@@ -252,7 +252,16 @@ export function NotesWorkspace({
           ) : (
             <div className="nw-detail-empty">
               <BookOpen size={36} className="nw-detail-empty-icon" />
-              <div>{t.selectProblemToViewNotes}</div>
+              {selectedId ? (
+                <div role="status">
+                  {list.selectionFailure === 'missing'
+                    ? (zh ? `本地题库中找不到 #${selectedId}。` : `Problem #${selectedId} is missing from the local catalog.`)
+                    : list.selectionFailure === 'failed'
+                      ? (zh ? `无法打开 #${selectedId} 的笔记。` : `Could not open the note for #${selectedId}.`)
+                      : t.loadingNotes}
+                  {list.selectionFailure === 'failed' && <button type="button" className="text-link" onClick={list.retrySelection}>{t.retry}</button>}
+                </div>
+              ) : <div>{t.selectProblemToViewNotes}</div>}
               <NotesExportMenu lang={lang} />
             </div>
           )}

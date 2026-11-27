@@ -13,6 +13,7 @@
  */
 import { z } from 'zod';
 import { llmProviderSchema } from './sync.ts';
+import { workspaceViews, linkedSettingsSections } from './workspace-links.ts';
 import { CHAT_MAX_MESSAGES, CHAT_MAX_MESSAGE_CHARS, CHAT_MAX_TOTAL_CHARS } from './chat-limits.ts';
 
 export * from './chat-limits.ts';
@@ -42,6 +43,8 @@ export const chatRequestSchema = z.object({
   context: chatContextSchema.optional(),
   /** Interface language; the model still answers in the language the user writes in. */
   lang: z.enum(['en', 'zh']).optional(),
+  /** Only the named workspace or settings tab, never the full URL or draft. */
+  page: z.union([z.enum(workspaceViews), z.templateLiteral(['settings/', z.enum(linkedSettingsSections)])]).optional(),
   /**
    * `false` keeps the model from looking anything up, leaving only the attached `context`.
    * Omitted means allowed.
@@ -140,7 +143,11 @@ export interface ChatActionReceipt {
 
 /** What the server attached, so the UI can show which local data the answer could use. */
 export interface ChatContextSummary {
-  problem?: { frontendId: string; title: string };
+  problem?: { frontendId: string; title: string; url?: string };
+  /** Number of recent attempts attached alongside the problem's practice summary. */
+  recentAttemptCount?: number;
+  /** How much of the saved note was attached, when it had content to include. */
+  savedNote?: 'full' | 'excerpt' | 'headings';
 }
 
 export type ChatStreamEvent =
@@ -154,6 +161,8 @@ export type ChatStreamEvent =
   /** A change was applied while answering with full access. */
   | { type: 'action-applied'; action: ChatActionProposal; undo?: ChatUndo }
   | { type: 'done'; provider: z.infer<typeof llmProviderSchema>; model: string }
+  /** The local catalog supplied navigation choices without calling a model. */
+  | { type: 'done'; source: 'catalog' }
   /** `error` is a stable code such as `CHAT_QUOTA`; `message` is an English fallback. */
   | { type: 'error'; error: string; message: string };
 

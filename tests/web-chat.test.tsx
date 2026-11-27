@@ -15,7 +15,7 @@ Object.assign(globalThis, {
 });
 Object.defineProperty(globalThis, 'navigator', { configurable: true, value: dom.window.navigator });
 const React = await import('react');
-const { render, fireEvent, screen, act, cleanup, waitFor } = await import('@testing-library/react');
+const { render, fireEvent, screen, act, cleanup, waitFor, within } = await import('@testing-library/react');
 const { api } = await import('../apps/web/src/api.ts');
 const { createChatEventDecoder } = await import('../apps/web/src/chat/chat-stream.ts');
 const { CHAT_CLEAR_UNDO_MS, requestTurns } = await import('../apps/web/src/chat/useChat.ts');
@@ -71,7 +71,10 @@ const ask = async (text: string) => {
 };
 
 async function openHistory(lang: 'en' | 'zh' = 'en') {
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: lang === 'zh' ? '历史记录' : 'History', expanded: false })); });
+  const trigger = screen.getByRole('button', { name: lang === 'zh' ? '历史记录' : 'History' });
+  if (trigger.getAttribute('aria-expanded') === 'false') {
+    await act(async () => { fireEvent.click(trigger); });
+  }
 }
 
 async function deleteConversation(name: string) {
@@ -136,7 +139,11 @@ it('streams an answer, lists what the AI looked up and keeps the conversation', 
   await ask('What first?');
   await waitFor(() => screen.getByText(/先做简单题/));
   assert.equal(screen.getByText('Two Sum').tagName, 'STRONG');
-  assert.equal(screen.getByText("Used: today's plan, practice records, tracker_future_tool").tagName, 'P');
+  const sources = screen.getByText('View sources').closest('details')!;
+  assert.equal(sources.open, false);
+  await act(async () => { fireEvent.click(screen.getByText('View sources')); });
+  assert.equal(sources.open, true);
+  assert.equal(sources.querySelector('p')?.textContent, "Lookups · today's plan, practice records, tracker_future_tool");
   assert.deepEqual(requests[0], { messages: [{ role: 'user', content: 'What first?' }], context: {}, lang: 'en', provider: 'openai' });
   assert.equal((screen.getByRole('textbox') as HTMLTextAreaElement).value, '');
 
@@ -160,11 +167,15 @@ it('streams an answer, lists what the AI looked up and keeps the conversation', 
   assert.equal(screen.queryByText('What first?'), null);
   assert.equal((screen.getByRole('textbox') as HTMLTextAreaElement).value, '');
   await waitFor(() => assert.deepEqual(stored().threads, []));
-  await openHistory();
+  assert.ok(screen.getByRole('button', { name: 'History', expanded: true }));
   assert.ok(screen.getByText('No conversation history yet'));
   assert.equal(screen.queryByRole('button', { name: 'Delete conversation: General' }), null);
+  const history = within(screen.getByRole('group', { name: 'Conversation history' }));
+  const undo = history.getByRole('button', { name: 'Undo deletion' });
+  assert.equal(document.activeElement, undo);
+  await act(async () => { fireEvent.click(undo); });
+  assert.equal(document.activeElement, history.getByRole('button', { name: /^General/ }));
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'History', expanded: true })); });
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Undo deletion' })); });
   assert.ok(screen.getByText('What first?'));
   assert.equal((screen.getByRole('textbox') as HTMLTextAreaElement).value, 'Unsaved follow-up');
   await waitFor(() => assert.deepEqual(stored().threads.map(thread => [thread.key, thread.entries.length]), [['general', 4]]));
@@ -265,14 +276,16 @@ it('expires clear undo and keeps a new draft if the conversation is restored', a
   await act(async () => { fireEvent.change(field, { target: { value: 'New draft' } }); });
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Undo deletion' })); });
   assert.equal(field.value, 'New draft');
-  assert.ok(screen.getByText('Original question'));
+  assert.ok(within(screen.getByRole('log')).getByText('Original question'));
 
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: Date.now() });
   await deleteConversation('General');
+  assert.equal(document.activeElement, screen.getByRole('button', { name: 'Undo deletion' }));
   await act(async () => { t.mock.timers.tick(CHAT_CLEAR_UNDO_MS - 1); });
   assert.ok(screen.getByRole('button', { name: 'Undo deletion' }));
   await act(async () => { t.mock.timers.tick(1); });
   assert.equal(screen.queryByRole('button', { name: 'Undo deletion' }), null);
+  assert.equal(document.activeElement, screen.getByRole('button', { name: 'History', expanded: true }));
   assert.equal(screen.queryByText('Original question'), null);
   assert.equal(loadChatState().threads.general, undefined);
 });
@@ -383,6 +396,98 @@ it('drags the launcher to an edge, remembers it and tucks away when left alone',
 
 const { attemptLabel, hintLabel, hintPrompt, nextHintLevel, reviewPrompt, saveNotePrompt, similarPrompt } = await import('../apps/web/src/chat/chat-presets.ts');
 const { WorkspaceContext } = await import('../apps/web/src/workspace.tsx');
+const { parseWorkspaceLink, problemWorkspaceHref } = await import('../packages/contracts/src/workspace-links.ts');
+
+it('recognizes exact workspace fragments and round-trips encoded catalog IDs', () => {
+  for (const id of ['1', 'LCR 007', '面试题 02.01', 'a/b (c)#50%']) {
+    assert.deepEqual(parseWorkspaceLink(problemWorkspaceHref('notes', id)), { view: 'notes', targetId: id });
+  }
+  for (const href of ['#notes/', '#notes/%', '#notes/a/b', '#notes/%00', '#records/1', '#settings/unknown', '#unknown', '/notes/1']) {
+    assert.equal(parseWorkspaceLink(href), null, href);
+  }
+  assert.deepEqual(parseWorkspaceLink('#settings/ai'), { view: 'settings', targetId: 'ai' });
+  assert.deepEqual(parseWorkspaceLink('/#notes/42'), { view: 'notes', targetId: '42' });
+  assert.equal(parseWorkspaceLink('#settings/clients'), null);
+  assert.deepEqual(parseWorkspaceLink('#settings/clients', true), { view: 'settings', targetId: 'clients' });
+  assert.deepEqual(parseWorkspaceLink('#statistics'), { view: 'statistics' });
+});
+
+it('repairs link labels in the conversation language without rewriting notes, code or unknown paths', async () => {
+  const { RenderedMarkdown } = await import('../apps/web/src/components/NotesMarkdownPreview.tsx');
+  const { chatLanguageHint } = await import('../packages/contracts/src/chat-language.ts');
+  assert.equal(chatLanguageHint('请用英文变量名解释这道题。'), 'zh');
+  assert.equal(chatLanguageHint('不要用英文回答，请用中文。'), 'zh');
+  const navigate = mock.fn();
+  const content = [
+    '先看 **[\`#notes/42\`](#notes/42)**，再去 /#settings/ai。',
+    '[打开原题](https://leetcode.com/problems/two-sum/) 或 https://leetcode.com/problems/trapping-rain-water/',
+    '保留 \`#notes/42\`、#unknown、/#settings/clients 和 #notes/42/extra。',
+    '\`\`\`text\n#records\n\`\`\`',
+  ].join('\n\n');
+  const problem = { frontendId: '42', title: 'Trapping Rain Water' };
+  const view = render(<RenderedMarkdown content={content} lang="en" conversationLanguage={chatLanguageHint('我的双指针笔记在哪？')} problem={problem} onWorkspaceLink={navigate} />);
+  const note = screen.getByRole('link', { name: '查看 #42 Trapping Rain Water 的笔记' });
+  assert.equal(note.getAttribute('href'), '#notes/42');
+  assert.equal(note.parentElement?.tagName, 'STRONG');
+  const settings = screen.getByRole('link', { name: '设置中的「AI 助手」' });
+  assert.equal(settings.getAttribute('href'), '#settings/ai');
+  fireEvent.click(settings);
+  assert.deepEqual(navigate.mock.calls[0].arguments, [{ view: 'settings', targetId: 'ai' }]);
+  assert.ok(screen.getByRole('link', { name: '在 LeetCode 打开《Trapping Rain Water》' }));
+  assert.ok(screen.getByRole('link', { name: '打开原题' }).querySelector('svg[aria-hidden="true"]'));
+  assert.equal(screen.getAllByRole('link').length, 4);
+  assert.equal(view.container.querySelector('pre code')?.textContent?.trim(), '#records');
+  view.rerender(<RenderedMarkdown lang="zh" content="[查看题目详情](/#problems/42)" conversationLanguage={chatLanguageHint('Show me the tracker details for #42 接雨水.')} problem={problem} onWorkspaceLink={navigate} />);
+  const details = screen.getByRole('link', { name: 'View tracker details for #42 Trapping Rain Water' });
+  assert.equal(details.getAttribute('href'), '#problems/42');
+  view.rerender(<RenderedMarkdown lang="zh" content="[#notes/42](#notes/42)" conversationLanguage={chatLanguageHint('请用英文回答，打开我的笔记。')} onWorkspaceLink={navigate} />);
+  assert.ok(screen.getByRole('link', { name: 'View notes for #42' }));
+  view.rerender(<RenderedMarkdown lang="zh" conversationLanguage="zh" onWorkspaceLink={navigate} content={
+    '[查看详情与笔记](https://example.com/#problems/42) · [说明](https://example.com/guide#notes/42) · [Other site](https://another.test/#notes/42)'
+  } />);
+  const repaired = screen.getByRole('link', { name: '查看 #42 的题目详情' });
+  assert.equal(repaired.getAttribute('href'), '#problems/42');
+  assert.equal(repaired.getAttribute('target'), null);
+  assert.equal(screen.getByRole('link', { name: '说明' }).getAttribute('target'), '_blank');
+  assert.equal(screen.getByRole('link', { name: 'Other site' }).getAttribute('target'), '_blank');
+  view.rerender(<RenderedMarkdown lang="zh" content="My literal reference is #notes/42." />);
+  assert.equal(screen.queryByRole('link'), null);
+});
+
+it('renders structured recommendations and follows note links from a reopened conversation', async () => {
+  mock.method(api, 'getChatStatus', async () => ({ configured: true, provider: 'openai', model: 'synthetic' }));
+  const navigate = mock.fn();
+  const workspace = { revision: 0, timezone: 'UTC', navigate, notifyMutation() {}, openPractice() {} };
+  const content = [
+    '### Practice next', '1. **Track the complement.** Try [Two Sum](https://leetcode.com/problems/two-sum/).',
+    '2. Read [your note](#notes/LCR%20007).', '',
+    '[Details](#problems/1) · [Today](#today) · [Bogus](#missing) · [Relative](/api/v1/settings) · [Unsafe](javascript:alert).',
+    '', 'A footnote[^tip].', '', '[^tip]: More detail.',
+  ].join('\n');
+  serveChat([{ type: 'delta', text: content }, { type: 'done', provider: 'openai', model: 'synthetic' }]);
+  await act(async () => { render(<WorkspaceContext.Provider value={workspace}><ChatLauncher lang="en" onOpenAiSettings={() => {}} /></WorkspaceContext.Provider>); });
+  const open = () => act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Ask AI' })); });
+  await open();
+  await ask('Recommend a practice problem.');
+  const log = within(screen.getByRole('log'));
+  assert.ok(await log.findByRole('heading', { name: 'Practice next' }));
+  assert.equal(log.getByText('Track the complement.').tagName, 'STRONG');
+  assert.equal(log.getByText('Track the complement.').closest('ol')?.children.length, 2);
+  const external = log.getByRole('link', { name: 'Two Sum' });
+  assert.equal(external.getAttribute('href'), 'https://leetcode.com/problems/two-sum/');
+  assert.equal(external.getAttribute('target'), '_blank');
+  for (const name of ['Relative', 'Bogus', 'Unsafe']) assert.equal(log.queryByRole('link', { name }), null);
+  const footnote = document.querySelector('.chat-answer a[data-footnote-ref]')!;
+  assert.ok(footnote);
+  fireEvent.click(footnote);
+  assert.equal(navigate.mock.callCount(), 0);
+  await act(async () => { fireEvent.click(log.getByRole('link', { name: 'View tracker details for #1' })); });
+  assert.deepEqual(navigate.mock.calls[0].arguments, ['problems', '1']);
+  assert.equal(screen.queryByRole('log'), null);
+  await open();
+  await act(async () => { fireEvent.click(screen.getByRole('link', { name: 'your note' })); });
+  assert.deepEqual(navigate.mock.calls[1].arguments, ['notes', 'LCR 007']);
+});
 const { TodayProblemRow } = await import('../apps/web/src/components/TodayProblemRow.tsx');
 const { PracticeRecordCard } = await import('../apps/web/src/components/PracticeRecordCard.tsx');
 
@@ -489,7 +594,10 @@ it('offers graded hints for the attached problem, then the solution, and a revie
 
 it('sends only the attached problem once data access is turned off', async () => {
   mock.method(api, 'getChatStatus', async () => ({ configured: true, provider: 'openai', model: 'gpt-6-luna' }));
-  const requests = serveChat(answer('ok'));
+  const requests = serveChat([
+    { type: 'context', context: { problem: rain, recentAttemptCount: 2, savedNote: 'excerpt' } },
+    ...answer('ok').filter(event => event.type !== 'context'),
+  ]);
   assert.equal(getChatDataAccess(), true);
   setChatProblem(rain);
   await openPanel();
@@ -501,6 +609,10 @@ it('sends only the attached problem once data access is turned off', async () =>
   await ask('Why is this hard?');
   await waitFor(() => assert.equal(requests.length, 1));
   assert.deepEqual(requests[0], { messages: [{ role: 'user', content: 'Why is this hard?' }], context: { frontendId: '42' }, lang: 'en', dataAccess: false, provider: 'openai' });
+  const sources = await screen.findByText('View sources');
+  assert.equal(sources.closest('details')?.open, false);
+  assert.match(sources.parentElement?.textContent ?? '', /Practice summary, Recent attempts \(2\), Saved note excerpt/);
+  assert.doesNotMatch(sources.parentElement?.textContent ?? '', /Lookups/);
 
   // The choice is kept on this device and applies again from the next question.
   assert.equal(getChatDataAccess(), false);
@@ -675,7 +787,9 @@ it('keeps one conversation per problem and a general one, switched from History'
     (JSON.parse(localStorage.getItem('leetcode_tracker_chat_threads_v1')!) as { threads: Array<{ key: string }>; current: { key: string } }).threads.map(thread => thread.key),
     ['problem:42']));
   assert.equal(JSON.parse(localStorage.getItem('leetcode_tracker_chat_threads_v1')!).current.key, 'problem:42');
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '撤销删除' })); });
+  const history = within(screen.getByRole('group', { name: '对话历史' }));
+  assert.equal(document.activeElement, history.getByRole('button', { name: /^#42 Trapping Rain Water/ }));
+  await act(async () => { fireEvent.click(history.getByRole('button', { name: '撤销删除' })); });
   assert.equal(loadChatState().threads.general.entries[0].content, '动态规划怎么入门？');
   assert.ok(screen.getByRole('heading', { name: '#42 Trapping Rain Water' }));
 });
@@ -802,7 +916,6 @@ it('stores conversations per device, adopts the old single one and lets old ones
 });
 
 const { ApiError } = await import('../apps/web/src/platform/index.ts');
-const { within } = await import('@testing-library/react');
 type Proposal = Extract<ChatStreamEvent, { type: 'action' }>['action'];
 
 const practiceCard: Proposal = {
@@ -837,14 +950,20 @@ it('sends the selected permission, shows automatic writes and lets the user undo
   );
   await act(async () => { render(<ChatLauncher lang="en" onOpenAiSettings={() => {}} onDataChanged={changed} />); });
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Ask AI' })); });
-  const permission = await screen.findByRole('combobox', { name: 'Access permissions' }) as HTMLSelectElement;
-  assert.equal(permission.value, 'confirm');
+  const permission = document.querySelector<HTMLDetailsElement>('.chat-permissions')!;
+  const summary = permission.querySelector('summary')!;
+  assert.equal(summary.textContent, 'Ask before saving');
+  assert.equal(permission.open, false);
   await ask('Star both problems.');
   await waitFor(() => screen.getByText('Review this change.'));
   assert.equal(requests[0].writePermission, undefined);
 
-  await act(async () => { fireEvent.change(permission, { target: { value: 'full' } }); });
-  assert.equal(permission.value, 'full');
+  await act(async () => { fireEvent.click(summary); });
+  assert.equal(permission.open, true);
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^Save changes automatically/ })); });
+  assert.equal(summary.textContent, 'Save changes automatically');
+  assert.equal(permission.open, false);
+  assert.equal(document.activeElement, summary);
   // Previously proposed changes still require a decision.
   assert.ok(within(screen.getByRole('region', { name: 'Star problems' })).getByRole('button', { name: 'Star' }));
   await ask('Record a solved attempt for #1.');
@@ -861,15 +980,17 @@ it('sends the selected permission, shows automatic writes and lets the user undo
   assert.equal(changed.mock.callCount(), 2);
 
   await act(async () => { setChatDataAccess(false); });
-  assert.equal(permission.disabled, true);
+  assert.equal(summary.textContent, 'Answer only');
+  assert.equal(permission.querySelector('button'), null);
   await ask('How does a stack work?');
   assert.equal(requests[2].dataAccess, false);
   assert.equal(requests[2].writePermission, undefined);
   assert.match(requests[2].messages.map(turn => turn.content).join('\n'), /applied automatically, then undone by the user/);
 
   await act(async () => { setChatDataAccess(true); });
-  assert.equal(permission.value, 'full');
-  await act(async () => { fireEvent.change(permission, { target: { value: 'confirm' } }); });
+  assert.equal(summary.textContent, 'Save changes automatically');
+  await act(async () => { fireEvent.click(summary); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^Ask before saving/ })); });
   await ask('What is a deque?');
   assert.equal(requests[3].writePermission, undefined);
 });
@@ -878,8 +999,8 @@ it('does not offer to repeat a full-access answer whose stream ended without a r
   mock.method(api, 'getChatStatus', async () => ({ configured: true, provider: 'openai', model: 'gpt-6-luna' }));
   const requests = serveChat([{ type: 'context', context: {} }]);
   await openPanel();
-  const permission = screen.getByRole('combobox', { name: 'Access permissions' });
-  await act(async () => { fireEvent.change(permission, { target: { value: 'full' } }); });
+  await act(async () => { fireEvent.click(screen.getByText('Ask before saving', { selector: 'summary' })); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^Save changes automatically/ })); });
   await ask('Record a solved attempt for #1.');
   await waitFor(() => screen.getByText('A change may already have been saved. Check the tracker before asking again.'));
   assert.equal(requests[0].writePermission, 'full');

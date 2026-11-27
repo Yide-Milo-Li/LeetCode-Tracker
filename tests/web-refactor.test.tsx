@@ -962,6 +962,22 @@ it('problem detail uses the shared editor within one drawer and restores the inn
   assert.ok(!screen.queryByRole('dialog'));
 });
 
+it('opens a copied problem link by exact ID outside the catalog page and reports stale links', async () => {
+  const linked = { ...problem, questionFrontendId: 'LCR 007', title: 'Linked problem', favoriteFolderIds: [] };
+  mock.method(api, 'getCatalogProblem', async (id: string) => ({ problem: id === linked.questionFrontendId ? linked : null }));
+  location.hash = '#problems/LCR%20007';
+  await act(async () => { render(<App />); });
+  const drawer = within(await screen.findByRole('dialog', { name: 'Problem details' }));
+  assert.ok(drawer.getByRole('heading', { name: '#LCR 007 Linked problem' }));
+  assert.ok(drawer.getByRole('button', { name: 'Manage favorite' }));
+  await act(async () => {
+    location.hash = '#problems/unknown';
+    window.dispatchEvent(new window.HashChangeEvent('hashchange'));
+  });
+  assert.ok(await screen.findByText('Problem #unknown is missing from the local catalog.'));
+  assert.equal(screen.queryByRole('dialog'), null);
+});
+
 it('source totals can retry independently while hidden statistics suspends its chart renderer', async () => {
   const getStats = api.getPracticeStats;
   let attempts = 0;

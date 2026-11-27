@@ -160,7 +160,7 @@ const catalogApi = {
   /** Read the persisted catalog import result, including individual line errors. */
   getImportResult: (id: string) => request<ImportSummary>(`/imports/${encodeURIComponent(id)}`),
 
-  getCatalogProblem(frontendId: string, { signal }: ReadOptions = {}): Promise<{ problem: CatalogProblem | null }> {
+  getCatalogProblem(frontendId: string, { signal }: ReadOptions = {}): Promise<{ problem: CatalogListProblem | null }> {
     return request(`/catalog/problems/${encodeURIComponent(frontendId)}`, { signal });
   },
 

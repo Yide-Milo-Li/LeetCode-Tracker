@@ -351,6 +351,18 @@ html.dark .chat-panel {
   flex-shrink: 0;
   min-height: 28px;
 }
+.chat-thread-menu .chat-clear-feedback[data-visible] {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 4px;
+}
+.chat-thread-menu:has(.chat-clear-feedback[data-visible]) {
+  scroll-padding-top: 44px;
+}
 
 .chat-log {
   flex: 1;
@@ -450,9 +462,39 @@ html.dark .chat-panel {
   border: 0;
   border-radius: 0;
   background: transparent;
-  font-size: 14px;
-  line-height: 1.6;
+  max-inline-size: 65ch;
+  font-size: 15px;
+  line-height: 1.65;
   overflow-wrap: anywhere;
+}
+.notes-preview-pane.chat-answer :is(h1, h2, h3, h4, h5, h6) {
+  margin: 1em 0 .3em;
+  padding: 0;
+  border: 0;
+  font-size: 1.067em;
+  font-weight: 700;
+  line-height: 1.4;
+  text-wrap: balance;
+}
+.notes-preview-pane.chat-answer strong {
+  font-weight: 700;
+}
+.notes-preview-pane.chat-answer :is(ul, ol) {
+  padding-inline-start: 1.5em;
+}
+.notes-preview-pane.chat-answer a,
+.chat-sources a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: .16em;
+}
+.notes-preview-pane.chat-answer a:hover {
+  color: var(--primary-hover);
+}
+.chat-external-icon {
+  display: inline;
+  margin-inline-start: .2em;
+  vertical-align: -.04em;
 }
 .notes-preview-pane.chat-answer > :first-child {
   margin-top: 0;
@@ -493,20 +535,15 @@ html.dark .chat-panel {
 .notes-code-copy.btn-icon:hover:not(:disabled) {
   transform: none;
 }
-.chat-entry-foot .chat-entry-note {
-  flex: 1;
-  min-width: 0;
-  margin: 5px 0 0 6px;
-}
-.chat-entry-foot:has(.chat-action) {
-  flex-wrap: wrap;
-}
-.chat-entry-foot:has(.chat-action) .chat-entry-note {
-  flex-basis: 100%;
-  margin-top: 2px;
-}
 .chat-entry-foot .chat-action {
   margin-left: 4px;
+}
+.chat-sources > summary {
+  width: fit-content;
+  cursor: pointer;
+}
+.chat-sources > p {
+  margin: 4px 0 0;
 }
 
 /* Copy sits in the corner of a code block and stays out of the way until the block is used.
@@ -707,26 +744,72 @@ html.dark .chat-panel {
   background: var(--muted-surface);
 }
 .chat-permissions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 2px 8px;
-  margin-top: 8px;
+  margin-top: 4px;
   font-size: 13px;
 }
-.chat-permissions select {
-  min-height: 30px;
-  padding: 3px 26px 3px 8px;
-  background-position: right 7px center;
-  font-size: inherit;
+.chat-permissions > summary {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  min-height: 28px;
+  padding: 0 6px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
 }
-.chat-permissions select:disabled {
-  opacity: 0.65;
-  cursor: not-allowed;
+.chat-permissions > summary::-webkit-details-marker {
+  display: none;
+}
+.chat-permissions > summary:hover,
+.chat-permissions[open] > summary {
+  background: var(--surface);
+  color: var(--text-main);
+}
+.chat-permissions[data-automatic] > summary {
+  color: var(--text-main);
+  font-weight: 600;
+}
+.chat-permissions[open] > summary svg {
+  transform: rotate(180deg);
+}
+.chat-permission-options {
+  margin-top: 4px;
+  padding: 4px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--surface);
 }
 .chat-permissions .chat-entry-note {
-  flex-basis: 100%;
   margin: 0;
+  padding: 2px 6px 4px;
+}
+.chat-permission-options button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 6px;
+  border-radius: 4px;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.chat-permission-options button:hover {
+  background: var(--muted-surface);
+}
+.chat-permission-options button[aria-pressed='true'] {
+  background: var(--selected);
+}
+.chat-permission-options small {
+  display: block;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.chat-permission-options svg {
+  flex-shrink: 0;
 }
 /* A next step on the last answer, such as the next hint. Pressing one sends at once. */
 .chat-action {

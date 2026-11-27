@@ -2,19 +2,9 @@
 import { createContext, useContext, useLayoutEffect, useRef, type ComponentPropsWithoutRef, type RefObject } from 'react';
 import type { CatalogProblem, PracticeRecord, PlanItem } from './api.ts';
 import type { ChatAsk } from './chat/chat-context.ts';
+import type { WorkspaceView } from '../../../packages/contracts/src/workspace-links.ts';
 
-export type View =
-  | 'today'
-  | 'schedule'
-  | 'notes'
-  | 'problems'
-  | 'favorites'
-  | 'goal-lists'
-  | 'catalog-import'
-  | 'records'
-  | 'statistics'
-  | 'progress-import'
-  | 'settings';
+export type View = WorkspaceView;
 export type PracticeRequest =
   | { mode: 'manual'; problem?: CatalogProblem }
   | { mode: 'enrich'; record: PracticeRecord; draft?: PracticeDraft; elapsedMinutes?: number; fallbackFocusRef?: RefObject<HTMLElement | null> }

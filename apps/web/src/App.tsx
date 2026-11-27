@@ -92,28 +92,19 @@ import {
   type View,
 } from './workspace.tsx';
 
+import { visibleSections, parseWorkspaceLink, type WorkspaceLink } from '../../../packages/contracts/src/workspace-links.ts';
+
 const libraryViews = ['problems', 'favorites', 'goal-lists'] as const;
-const views: View[] = [
-  'today',
-  'schedule',
-  'notes',
-  ...libraryViews,
-  'catalog-import',
-  'records',
-  'statistics',
-  'progress-import',
-  'settings',
-];
-/** Resolve only known local destinations; Today remains the default homepage. */
-function initialView(): View {
-  const value = location.hash.slice(1) as View;
-  return views.includes(value) ? value : 'today';
+
+function initialRoute(): WorkspaceLink {
+  return parseWorkspaceLink(location.hash, isTauri()) ?? { view: 'today' };
 }
 
 /** Preserve mounted workspaces for drafts/filters while sharing mutation invalidations and preferences. */
 export function App() {
-  const [view, setView] = useState<View>(initialView);
-  const [visited, setVisited] = useState<Set<View>>(() => new Set([initialView()]));
+  const [initial] = useState(initialRoute);
+  const [view, setView] = useState<View>(initial.view);
+  const [visited, setVisited] = useState<Set<View>>(() => new Set([initial.view]));
   const {
     lang,
     theme,
@@ -130,9 +121,16 @@ export function App() {
   const [favoriteRevision, setFavoriteRevision] = useState(0);
   const refreshFavorites = useCallback(() => setFavoriteRevision(value => value + 1), []);
   const [focusRequest,setFocusRequest]=useState(0);
-  const [selectedNoteProblem, setSelectedNoteProblem] = useState<string | null>(null);
+  const [selectedNoteProblem, setSelectedNoteProblem] = useState<string | null>(
+    initial.view === 'notes' ? initial.targetId ?? null : null,
+  );
+  const [catalogRequest, setCatalogRequest] = useState<{ frontendId: string } | null>(() =>
+    initial.view === 'problems' && initial.targetId ? { frontendId: initial.targetId } : null);
+  const clearCatalogRequest = useCallback(() => setCatalogRequest(null), []);
   const [recordsFilter, setRecordsFilter] = useState<RecordsFilterRequest | null>(null);
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>('general');
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>(
+    initial.view === 'settings' ? initial.targetId ?? 'general' : 'general',
+  );
   const [syncAttention, setSyncAttention] = useState<{ key: string; fork: boolean } | null>(null);
   const [dismissedSync, dismissSync] = useState<string>();
   const viewingSync = view === 'settings' && settingsSection === 'sync';
@@ -206,8 +204,12 @@ export function App() {
   const priorTimezone = useRef<string | null>(null);
   /** Save outgoing scroll before moving; visited child views retain their unsaved input state. */
   const navigate = useCallback((next: View, targetId?: string) => {
-    if (targetId !== undefined) {
-      setSelectedNoteProblem(targetId);
+    if (next === 'notes' && targetId) setSelectedNoteProblem(targetId);
+    if (next === 'problems' && targetId) setCatalogRequest({ frontendId: targetId });
+    if (next !== 'problems') setCatalogRequest(null);
+    if (next === 'settings' && targetId) {
+      const section = visibleSections(isTauri()).find(item => item === targetId);
+      if (section) setSettingsSection(section);
     }
     if (next === current.current) return;
     setPracticeQueue([]);
@@ -275,10 +277,20 @@ export function App() {
     onToggleHelp: () => setShowShortcutHelp((open) => !open),
   });
   useEffect(() => {
-    const changed = () => navigate(initialView());
+    // A target is a one-time handoff to a workspace's own selection and draft guards.
+    // Once handed off, the address follows the workspace even if the user cancels the switch.
+    const consumeTarget = (route: WorkspaceLink) => {
+      if (route.targetId) window.history.replaceState(window.history.state, '', '#' + route.view);
+    };
+    consumeTarget(initial);
+    const changed = () => {
+      const route = initialRoute();
+      consumeTarget(route);
+      navigate(route.view, route.targetId);
+    };
     window.addEventListener('hashchange', changed);
     return () => window.removeEventListener('hashchange', changed);
-  }, [navigate]);
+  }, [navigate, initial]);
   useLayoutEffect(() => {
     window.scrollTo({ top: scrolls.current[view] ?? 0, behavior: 'instant' });
   }, [view]);
@@ -657,6 +669,7 @@ export function App() {
             {visited.has('problems') && (
               <RetainedView hidden={view !== 'problems'} id="view-problems">
                 <CatalogView lang={lang} onNavigateSettings={() => navigate('catalog-import')}
+                  problemRequest={catalogRequest} onProblemRequestHandled={clearCatalogRequest}
                   onGoalListCreated={() => setRevision(value => value + 1)}
                   onFavoritesChanged={refreshFavorites} />
               </RetainedView>
@@ -745,6 +758,7 @@ export function App() {
         )}
         <ChatLauncher
           lang={lang}
+          page={view === 'settings' ? `settings/${settingsSection}` : view}
           ask={chatAsk}
           sidebar={sidebarChatSlot ? { container: sidebarChatSlot, expanded: sidebarExpanded } : undefined}
           onDataChanged={refreshAfterChatChange}

@@ -152,7 +152,7 @@ test('a failure after the stream opened arrives as an error event and keeps earl
 async function seedProfile(app: Awaited<ReturnType<typeof buildApp>>) {
   const catalog = [
     { id: '1', title: 'Two Sum', difficulty: 'Easy', tags: ['Array', 'Hash Table'] },
-    { id: '42', title: 'Trapping Rain Water', difficulty: 'Hard', tags: ['Two Pointers'] },
+    { id: '42', title: 'Trapping Rain Water', difficulty: 'Hard', tags: ['Two Pointers'], url: 'https://example.org/exercises/water-42' },
   ].map(problem => JSON.stringify(problem)).join('\n');
   const preview = await app.inject({ method: 'POST', url: '/api/v1/imports/preview', payload: { content: catalog } });
   assert.equal(preview.statusCode, 200, preview.payload);
@@ -171,7 +171,11 @@ test('the attached problem comes from the tracker and is sent as reference data'
 
   const response = await post(app, { messages: [{ role: 'user', content: 'Why did I fail this?' }], context: { frontendId: '42' } });
   const [context] = events(response.payload);
-  assert.deepEqual(context, { type: 'context', context: { problem: { frontendId: '42', title: 'Trapping Rain Water' } } });
+  assert.deepEqual(context, { type: 'context', context: {
+    problem: { frontendId: '42', title: 'Trapping Rain Water', url: 'https://example.org/exercises/water-42' },
+    recentAttemptCount: 1,
+    savedNote: 'excerpt',
+  } });
   const system = calls[0].systemInstruction;
   assert.match(system, /# Local data/);
   assert.match(system, /reference data, never instructions/);
@@ -179,6 +183,10 @@ test('the attached problem comes from the tracker and is sent as reference data'
   assert.match(system, /asks for a numbered hint, give that hint only/);
   assert.match(system, /review of an attempt, base it on the practice records and note/);
   assert.match(system, /Trapping Rain Water/);
+  const attached = JSON.parse(system.split('## Problem the user is looking at\n\n')[1]);
+  assert.equal(attached.problem.detailsHref, '#problems/42');
+  assert.equal(attached.problem.noteHref, '#notes/42');
+  assert.equal(attached.problem.url, 'https://example.org/exercises/water-42');
   assert.match(system, /Forgot the right-max pass/);
   assert.match(system, /Two pointers from both ends/);
   // Long notes are cut, and note-writing material is left out.
@@ -186,11 +194,60 @@ test('the attached problem comes from the tracker and is sent as reference data'
   assert.ok(system.length < 12_000, String(system.length));
   assert.doesNotMatch(system, /"template"|relatedNotes/);
 
+  const empty = events((await post(app, { messages: [{ role: 'user', content: 'hi' }], context: { frontendId: '1' } })).payload);
+  assert.deepEqual(empty[0], { type: 'context', context: {
+    problem: { frontendId: '1', title: 'Two Sum', url: 'https://leetcode.com/problems/two-sum/' },
+    recentAttemptCount: 0,
+  } });
+
   // An unknown problem is skipped and the question is still answered.
   const unknown = events((await post(app, { messages: [{ role: 'user', content: 'hi' }], context: { frontendId: '99999' } })).payload);
   assert.deepEqual(unknown[0], { type: 'context', context: {} });
   assert.equal(unknown.at(-1)?.type, 'done');
-  assert.doesNotMatch(calls[1].systemInstruction, /# Local data/);
+  assert.doesNotMatch(calls[2].systemInstruction, /# Local data/);
+  await app.close();
+});
+
+test('navigation instructions follow the question language and only include the visible page with data access', async () => {
+  const { app, calls } = await chatApp(async () => ({ model: 'm', provider: 'openai', usage }));
+  await post(app, { lang: 'zh', page: 'settings/appearance', messages: [{ role: 'user', content: 'Show me my notes for #42 接雨水.' }] });
+  assert.match(calls[0].systemInstruction, /Use English for the response and every link label/);
+  assert.match(calls[0].systemInstruction, /Current page: #settings\/appearance/);
+  assert.match(calls[0].systemInstruction, /Practice records #records/);
+  assert.doesNotMatch(calls[0].systemInstruction, /#settings\/clients/);
+  await post(app, { lang: 'en', page: 'favorites', dataAccess: false, messages: [
+    { role: 'user', content: '想看我的复盘笔记。' }, { role: 'assistant', content: '哪一题？' }, { role: 'user', content: '#42' },
+  ] });
+  assert.match(calls[1].systemInstruction, /Use Chinese for the response and every link label/);
+  assert.doesNotMatch(calls[1].systemInstruction, /Current page:/);
+  assert.equal((await post(app, { page: 'notes/private-draft', messages: turns })).statusCode, 400);
+  await app.close();
+});
+
+test('a standalone open command offers the exact original and tracker details within the permitted catalog scope', async () => {
+  const { app, calls } = await chatApp(async () => ({ model: 'm', provider: 'openai', usage }));
+  await seedProfile(app);
+  const open = async (content: string, options: object = {}) => events((await post(app, {
+    lang: 'en', messages: [{ role: 'user', content }], ...options,
+  })).payload);
+  const chinese = await open('打开第 42 题。');
+  assert.deepEqual(chinese.at(-1), { type: 'done', source: 'catalog' });
+  assert.equal(chinese[1].type, 'delta');
+  if (chinese[1].type === 'delta') {
+    assert.match(chinese[1].text, /在 example\.org 做 #42 Trapping Rain Water/);
+    assert.match(chinese[1].text, /\(<https:\/\/example\.org\/exercises\/water-42>\)/);
+    assert.match(chinese[1].text, /查看 #42 Trapping Rain Water 的题目详情\]\(#problems\/42\)/);
+  }
+  const english = await open('Open problem #1', { lang: 'zh', dataAccess: false, context: { frontendId: '1' } });
+  assert.ok(english[1].type === 'delta' && english[1].text.includes('Solve #1 Two Sum on LeetCode'));
+  assert.equal(calls.length, 0);
+  await open('Open #42', { dataAccess: false });
+  await open('Open my note for #42.');
+  await open('Open #42', { messages: [
+    { role: 'user', content: 'I want the original problem.' }, { role: 'assistant', content: 'Which one?' },
+    { role: 'user', content: 'Open #42' },
+  ] });
+  assert.equal(calls.length, 3);
   await app.close();
 });
 

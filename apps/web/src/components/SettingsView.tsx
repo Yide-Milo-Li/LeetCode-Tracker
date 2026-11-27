@@ -9,6 +9,7 @@ import { ViewVisible } from '../workspace.tsx';
 import { PageHeader, Feedback } from './ui.tsx';
 import { visibleSections, type SettingsSection, type ThemeMode } from './settings/settings-model.ts';
 import { isTauri } from '../platform/index.ts';
+import { settingsNames } from '../../../../packages/contracts/src/workspace-links.ts';
 import { useAiProviderSettings } from './settings/useAiProviderSettings.ts';
 import { useBundleRestore } from './settings/useBundleRestore.ts';
 import { useDeviceSync } from './settings/useDeviceSync.ts';
@@ -140,16 +141,6 @@ export function SettingsView({
     };
   }, []);
 
-  const sectionLabel: Record<SettingsSection, string> = {
-    general: zh ? '通用' : 'General',
-    appearance: zh ? '外观' : 'Appearance',
-    practice: zh ? '练习与笔记' : 'Practice & notes',
-    ai: zh ? 'AI 助手' : 'AI assistant',
-    clients: zh ? 'AI 客户端' : 'AI clients',
-    sync: zh ? '设备同步' : 'Sync',
-    data: zh ? '数据' : 'Data',
-  };
-
   return (
     <div className="settings-view">
       <PageHeader title={zh ? '设置' : 'Settings'} />
@@ -180,7 +171,7 @@ export function SettingsView({
               setTimeout(() => document.getElementById(`settings-tab-${next}`)?.focus(), 0);
             }}
           >
-            {sectionLabel[id]}
+            {settingsNames[id][lang]}
           </button>
         ))}
       </div>

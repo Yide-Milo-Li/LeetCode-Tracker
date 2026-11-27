@@ -130,6 +130,7 @@ export function createTrackerToolRegistry(profile: Pick<TrackerProfile, 'exists'
       const simplified = catalogResult.items.map(it => ({
         frontendId: it.questionFrontendId,
         title: it.title,
+        url: it.url,
         difficulty: it.difficulty,
         tags: it.topicTags.map((t) => t.name),
         isPaidOnly: it.isPaidOnly,

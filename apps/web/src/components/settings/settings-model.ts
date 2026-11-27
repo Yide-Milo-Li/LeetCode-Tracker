@@ -13,16 +13,7 @@ import type { ThemePalette } from '../../../../../packages/contracts/src/sync.ts
 import { PALETTE_OPTIONS } from '../../palettes.ts';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
-export type SettingsSection = 'general' | 'appearance' | 'practice' | 'ai' | 'clients' | 'sync' | 'data';
-/** Tab order of the Settings view; arrow-key navigation wraps around the visible subset. */
-export const SECTIONS: SettingsSection[] = ['general', 'appearance', 'practice', 'ai', 'clients', 'sync', 'data'];
-/** Tabs that only make sense inside the desktop host (the MCP bridge lives in the Tauri sidecar). */
-const DESKTOP_ONLY_SECTIONS: ReadonlySet<SettingsSection> = new Set(['clients']);
-
-/** Tabs to show for the current host, in display order. */
-export function visibleSections(desktop: boolean): SettingsSection[] {
-  return desktop ? SECTIONS : SECTIONS.filter((id) => !DESKTOP_ONLY_SECTIONS.has(id));
-}
+export { visibleSections, type SettingsSection } from '../../../../../packages/contracts/src/workspace-links.ts';
 
 export type ProviderType = 'gemini' | 'openai' | 'deepseek';
 

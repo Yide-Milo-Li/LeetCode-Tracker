@@ -20,6 +20,9 @@ import {
   clampLauncher, clampPanel, dockAt, dockForPanel, launcherPoint, panelPoint, useChatPosition, useDrag, type Point,
 } from '../chat/chat-position.ts';
 import { Tooltip } from './ui.tsx';
+import { useWorkspace } from '../workspace.tsx';
+import type { WorkspaceLink } from '../../../../packages/contracts/src/workspace-links.ts';
+import type { ChatRequest } from '../../../../packages/contracts/src/chat.ts';
 
 const ChatPanel = React.lazy(() => import('./ChatPanel.tsx').then(module => ({ default: module.ChatPanel })));
 
@@ -31,6 +34,7 @@ export const LAUNCHER_REST_MS = 2500;
 
 export interface ChatLauncherProps {
   lang: Language;
+  page?: ChatRequest['page'];
   onOpenAiSettings: () => void;
   /** What another view asked for; each new `id` opens the panel on that problem and sends its preset, if it has one. */
   ask?: ChatAskRequest | null;
@@ -39,9 +43,10 @@ export interface ChatLauncherProps {
   onDataChanged?: () => void;
 }
 
-export function ChatLauncher({ lang, onOpenAiSettings, ask = null, sidebar, onDataChanged }: ChatLauncherProps) {
+export function ChatLauncher({ lang, page, onOpenAiSettings, ask = null, sidebar, onDataChanged }: ChatLauncherProps) {
   const zh = lang === 'zh';
-  const chat = useChat(lang, { onDataChanged });
+  const chat = useChat(lang, { onDataChanged, page });
+  const { navigate } = useWorkspace();
   const [open, setOpen] = useState(false);
   const [openedBefore, setOpenedBefore] = useState(hasOpenedChat);
   useEffect(() => {
@@ -152,6 +157,14 @@ export function ChatLauncher({ lang, onOpenAiSettings, ask = null, sidebar, onDa
     setTimeout(() => entryPoint.current?.focus(), 0);
   }, []);
 
+  const openWorkspaceLink = useCallback(({ view, targetId }: WorkspaceLink) => {
+    returnToSidebar.current = false;
+    setPending(null);
+    setOpen(false);
+    navigate(view, targetId);
+    document.getElementById('main-content')?.focus({ preventScroll: true });
+  }, [navigate]);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.isComposing || event.key.toLowerCase() !== 'j' || event.altKey || event.shiftKey) return;
@@ -196,6 +209,7 @@ export function ChatLauncher({ lang, onOpenAiSettings, ask = null, sidebar, onDa
         {sidebarEntry}
         <React.Suspense fallback={null}>
           <ChatPanel id={panelId} lang={lang} chat={chat} shortcut={shortcut} onClose={close}
+            onWorkspaceLink={openWorkspaceLink}
             pending={pending} onPendingHandled={clearPending}
             onOpenAiSettings={() => { close(); onOpenAiSettings(); }}
             position={at} side={position.dock.side} dragging={panelDrag.dragging}

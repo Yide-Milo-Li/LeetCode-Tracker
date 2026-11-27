@@ -9,11 +9,11 @@
  *
  * Change cards show what the AI proposed for confirmation or already saved with full access.
  */
-import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowUp, Check, History, Lightbulb, Maximize2, Minimize2, NotebookPen, RefreshCw, Square, Trash2, X } from 'lucide-react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { ArrowUp, Check, ChevronDown, History, Lightbulb, Maximize2, Minimize2, NotebookPen, RefreshCw, Square, Trash2, X } from 'lucide-react';
 import { api, type LLMProvider } from '../api.ts';
 import { CHAT_MAX_MESSAGE_CHARS } from '../../../../packages/contracts/src/chat-limits.ts';
-import type { ChatStatus } from '../../../../packages/contracts/src/chat.ts';
+import type { ChatStatus, ChatWritePermission } from '../../../../packages/contracts/src/chat.ts';
 import type { Language } from '../i18n.ts';
 import { ApiError } from '../platform/index.ts';
 import { localizeApiError } from '../error-i18n.ts';
@@ -28,7 +28,9 @@ import type { ChatDock, Point } from '../chat/chat-position.ts';
 import { GENERAL_THREAD, problemThread, type ChatThreadRef } from '../chat/chat-threads.ts';
 import { canRetryChatAnswer, type ChatController, type ChatEntry } from '../chat/useChat.ts';
 import { CopyButton } from './CopyButton.tsx';
-import { RenderedMarkdown } from './NotesMarkdownPreview.tsx';
+import { RenderedMarkdown, WorkspaceAnchor } from './NotesMarkdownPreview.tsx';
+import { problemWorkspaceHref, type WorkspaceLink } from '../../../../packages/contracts/src/workspace-links.ts';
+import { chatLanguageHint } from '../../../../packages/contracts/src/chat-language.ts';
 import { Feedback, IconButton, useActionPopover } from './ui.tsx';
 
 const PROVIDER_NAMES: Record<LLMProvider, string> = { gemini: 'Gemini', openai: 'OpenAI', deepseek: 'DeepSeek' };
@@ -50,6 +52,7 @@ export interface ChatPanelProps {
   shortcut: string;
   onClose: () => void;
   onOpenAiSettings: () => void;
+  onWorkspaceLink: (link: WorkspaceLink) => void;
   /** Top-left corner in viewport pixels. */
   position: Point;
   /** Window edge the launcher docks on; the panel grows from that edge when it opens. */
@@ -222,26 +225,96 @@ function Question({ entry, lang }: { entry: ChatEntry; lang: Language }) {
   );
 }
 
-function Answer({ entry, lang, isLast, busy, onRetry, onSaveNote, onOpenAiSettings, onConfirmChange, onDismissChange, onUndoChange }: {
+function AnswerSources({ context, tools, lang, onWorkspaceLink }: Pick<ChatEntry, 'context' | 'tools'> & {
+  lang: Language; onWorkspaceLink: (link: WorkspaceLink) => void;
+}) {
+  const zh = lang === 'zh';
+  const count = context?.recentAttemptCount;
+  const problem = context?.problem;
+  const source = (view: 'notes' | 'problems', label: string) => problem
+    ? <WorkspaceAnchor href={problemWorkspaceHref(view, problem.frontendId)} route={{ view, targetId: problem.frontendId }}
+        onNavigate={onWorkspaceLink}>{label}</WorkspaceAnchor>
+    : label;
+  const attached = [
+    problem && source('problems', `#${problem.frontendId} ${problem.title}`),
+    count === undefined ? null : (zh ? '练习概况' : 'Practice summary'),
+    typeof count === 'number' && count > 0 ? (zh ? `最近 ${count} 次练习` : `Recent attempts (${count})`) : null,
+    context?.savedNote === 'full' ? source('notes', zh ? '已保存的笔记' : 'Saved note') : null,
+    context?.savedNote === 'excerpt' ? source('notes', zh ? '已保存的笔记（节选）' : 'Saved note excerpt') : null,
+    context?.savedNote === 'headings' ? source('notes', zh ? '已保存笔记的小节标题' : 'Saved note headings') : null,
+  ].filter(Boolean);
+  if (!attached.length && !tools?.length) return null;
+  const separator = zh ? '、' : ', ';
+  return (
+    <details className="chat-sources chat-entry-note">
+      <summary>{zh ? '查看参考资料' : 'View sources'}</summary>
+      {attached.length > 0 && <p>{zh ? '随提问附带 ' : 'Attached · '}{attached.map((item, index) =>
+        <React.Fragment key={index}>{index > 0 && separator}{item}</React.Fragment>)}</p>}
+      {!!tools?.length && <p>{zh ? '按需查询 ' : 'Lookups · '}{tools.map(name => toolLabel(name, lang)).join(separator)}</p>}
+    </details>
+  );
+}
+
+function WritePermission({ lang, dataAccess }: { lang: Language; dataAccess: boolean }) {
+  const zh = lang === 'zh';
+  const permission = useChatWritePermission();
+  const disclosure = useRef<HTMLDetailsElement>(null);
+  const summary = useRef<HTMLElement>(null);
+  const labels: Record<ChatWritePermission, string> = {
+    confirm: zh ? '写入前询问' : 'Ask before saving',
+    full: zh ? '自动保存改动' : 'Save changes automatically',
+  };
+  const select = (next: ChatWritePermission) => {
+    setChatWritePermission(next);
+    if (disclosure.current) disclosure.current.open = false;
+    summary.current?.focus();
+  };
+
+  return (
+    <details className="chat-permissions" ref={disclosure} data-automatic={dataAccess && permission === 'full' ? true : undefined}>
+      <summary ref={summary}>
+        {dataAccess ? labels[permission] : (zh ? '新消息仅回答' : 'Answer only')}
+        <ChevronDown size={14} aria-hidden="true" />
+      </summary>
+      {dataAccess ? (
+        <div className="chat-permission-options" role="group" aria-label={zh ? '写入权限' : 'Write permissions'}>
+          <p className="chat-entry-note">{zh ? '适用于本设备上的新消息。' : 'Applies to new messages on this device.'}</p>
+          <button type="button" aria-pressed={permission === 'confirm'} onClick={() => select('confirm')}>
+            <span><strong>{labels.confirm}</strong><small>{zh ? '先让你确认，再保存改动。' : 'Review proposed changes before they are saved.'}</small></span>
+            {permission === 'confirm' && <Check size={14} aria-hidden="true" />}
+          </button>
+          <button type="button" aria-pressed={permission === 'full'} onClick={() => select('full')}>
+            <span>
+              <strong>{labels.full}</strong>
+              <small>{zh ? 'AI 可直接保存练习记录、笔记、收藏和目标题单的改动。'
+                : 'Let AI save changes to practice records, notes, favorites, and goal lists without asking.'}</small>
+            </span>
+            {permission === 'full' && <Check size={14} aria-hidden="true" />}
+          </button>
+        </div>
+      ) : <p className="chat-entry-note">{zh ? '在 AI 设置中允许查阅数据后，可选择写入方式。' : 'Enable AI data access in Settings to choose how changes are saved.'}</p>}
+    </details>
+  );
+}
+
+function Answer({ entry, conversationLanguage, lang, isLast, busy, onRetry, onSaveNote, onOpenAiSettings, onWorkspaceLink, onConfirmChange, onDismissChange, onUndoChange }: {
   entry: ChatEntry; lang: Language; isLast: boolean; busy: boolean; onRetry: () => void; onOpenAiSettings: () => void;
   onSaveNote?: () => void;
+  conversationLanguage?: Language;
+  onWorkspaceLink: (link: WorkspaceLink) => void;
   onConfirmChange: (id: string, args?: Record<string, unknown>) => void; onDismissChange: (id: string) => void; onUndoChange: (id: string) => void;
 }) {
   const zh = lang === 'zh';
   const changes = entry.changes ?? [];
   const settled = entry.state !== 'streaming';
   const canRetry = isLast && !busy && canRetryChatAnswer(entry);
-  const lookups = (entry.tools ?? []).map(name => toolLabel(name, lang));
-  const used = [
-    entry.context?.problem && `#${entry.context.problem.frontendId} ${entry.context.problem.title}`,
-    ...lookups,
-  ].filter(Boolean).join(zh ? '、' : ', ');
   // Say what is being read instead of a bare "thinking", before any text and between paragraphs.
   const reading = entry.reading ? toolLabel(entry.reading, lang) : undefined;
   return (
     <div className="chat-entry chat-entry-assistant">
       {entry.content
-        ? <div className="notes-preview-pane chat-answer"><RenderedMarkdown content={entry.content} lang={lang} copyCode /></div>
+        ? <div className="notes-preview-pane chat-answer"><RenderedMarkdown content={entry.content} lang={lang}
+            conversationLanguage={conversationLanguage} problem={entry.context?.problem} copyCode onWorkspaceLink={onWorkspaceLink} /></div>
         : !settled && changes.length === 0 && (
           <p className="chat-thinking" role="status">
             {reading ? (zh ? `正在查看${reading}…` : `Reading ${reading}…`) : (zh ? '正在思考…' : 'Thinking…')}
@@ -284,21 +357,18 @@ function Answer({ entry, lang, isLast, busy, onRetry, onSaveNote, onOpenAiSettin
           {onSaveNote && <button type="button" className="chat-action" onClick={onSaveNote}>
             <NotebookPen size={14} aria-hidden="true" />{zh ? '整理进笔记' : 'Save to my note'}
           </button>}
-          {used && <p className="chat-entry-note">{zh ? '参考了：' : 'Used: '}{used}</p>}
         </div>
       )}
+      {settled && (entry.content || changes.length > 0) && <AnswerSources context={entry.context} tools={entry.tools} lang={lang} onWorkspaceLink={onWorkspaceLink} />}
     </div>
   );
 }
 
 export function ChatPanel({
-  id, lang, chat, pending, onPendingHandled, shortcut, onClose, onOpenAiSettings, position, side, dragging, onDragStart, large, onToggleSize,
+  id, lang, chat, pending, onPendingHandled, shortcut, onClose, onOpenAiSettings, onWorkspaceLink, position, side, dragging, onDragStart, large, onToggleSize,
 }: ChatPanelProps) {
   const zh = lang === 'zh';
   const dataAccess = useChatDataAccess();
-  const writePermission = useChatWritePermission();
-  const permissionId = useId();
-  const permissionHelpId = useId();
   const problem = chat.current.problem ?? null;
   const switcher = useActionPopover({ align: 'end' });
   const { revision } = useWorkspace();
@@ -311,6 +381,14 @@ export function ChatPanel({
   const panel = useRef<HTMLElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const log = useRef<HTMLDivElement>(null);
+  const historyRows = useRef(new Map<string, HTMLButtonElement>());
+  const undoDeletion = useRef<HTMLButtonElement>(null);
+  const historyFocus = useRef<{ key?: string } | null>(null);
+  const lostUndoFocus = useRef(false);
+  const attachUndoDeletion = useCallback((button: HTMLButtonElement | null) => {
+    if (!button && document.activeElement === undoDeletion.current) lostUndoFocus.current = true;
+    undoDeletion.current = button;
+  }, []);
   /** Follow new text only while the reader is at the bottom; scrolling up to reread is respected. */
   const pinned = useRef(true);
 
@@ -406,6 +484,7 @@ export function ChatPanel({
     ...chat.threads.filter(thread => thread.key !== GENERAL_THREAD.key),
   ];
   const draftOnly = empty && Boolean(chat.draft);
+  const historyThreads = draftOnly ? [chat.current, ...listed] : listed;
   const todayQuestion = zh ? '今天的计划里，我应该先做哪道题？' : "Which problem in today's plan should I start with?";
   const weakQuestion = zh ? '我最近哪类题最薄弱？接下来该怎么补？' : 'Which topics am I weakest at lately, and how should I work on them?';
   // Questions that take a lookup are offered only while data access provides one.
@@ -424,12 +503,40 @@ export function ChatPanel({
     chat.select(thread);
     focusComposer();
   };
-  const clearConversation = (key: string) => {
-    switcher.close();
-    chat.clear(key);
-    focusComposer();
-  };
+  useLayoutEffect(() => {
+    const next = historyFocus.current;
+    const undoLostFocus = lostUndoFocus.current;
+    historyFocus.current = null;
+    lostUndoFocus.current = false;
+    if ((!next && !undoLostFocus) || !switcher.open) return;
+    const row = next?.key ? historyRows.current.get(next.key) : undefined;
+    (row ?? undoDeletion.current ?? switcher.triggerProps.ref.current)?.focus();
+  }, [chat.cleared, switcher.open, switcher.triggerProps.ref]);
 
+  const clearConversation = (key: string, index: number) => {
+    historyFocus.current = { key: (historyThreads[index + 1] ?? historyThreads[index - 1])?.key };
+    chat.clear(key);
+  };
+  const undoClear = () => {
+    if (switcher.open) historyFocus.current = { key: chat.cleared?.key };
+    else focusComposer();
+    chat.undoClear();
+  };
+  const deletionFeedback = (
+    <div className="chat-clear-feedback" data-visible={chat.cleared ? 'true' : undefined}>
+      <p role="status">{chat.cleared
+        ? (zh ? `已删除对话「${threadName(chat.cleared, lang)}」` : `Deleted conversation “${threadName(chat.cleared, lang)}”`)
+        : null}</p>
+      {chat.cleared && (
+        <button ref={attachUndoDeletion} type="button" className="text-link" onClick={undoClear}>
+          {zh ? '撤销删除' : 'Undo deletion'}
+        </button>
+      )}
+    </div>
+  );
+
+  // Carry the user's language forward through ID-only questions, including conversations reopened from storage.
+  let conversationLanguage: Language | undefined;
   return (
     <aside
       id={id}
@@ -470,7 +577,8 @@ export function ChatPanel({
                 {zh ? '开始通用对话' : 'Start a general conversation'}
               </button>
             )}
-            {(draftOnly ? [chat.current, ...listed] : listed).map(thread => {
+            {switcher.open && deletionFeedback}
+            {historyThreads.map((thread, index) => {
               const name = threadName(thread, lang);
               const stored = chat.threads.find(candidate => candidate.key === thread.key);
               const question = chat.entriesOf(thread.key).findLast(entry => entry.role === 'user');
@@ -478,6 +586,10 @@ export function ChatPanel({
               return (
                 <div key={thread.key} className="chat-thread-row">
                   <button type="button" className="notes-dropdown-item" aria-current={thread.key === chat.current.key ? 'true' : undefined}
+                    ref={node => {
+                      if (node) historyRows.current.set(thread.key, node);
+                      else historyRows.current.delete(thread.key);
+                    }}
                     onClick={() => openConversation(thread)}>
                     <span className="chat-thread-summary">
                       <span className="chat-thread-name">{name}</span>
@@ -488,7 +600,7 @@ export function ChatPanel({
                   </button>
                   <button type="button" className="chat-thread-delete"
                     aria-label={zh ? `删除对话：${name}` : `Delete conversation: ${name}`}
-                    onClick={() => clearConversation(thread.key)}>
+                    onClick={() => clearConversation(thread.key, index)}>
                     <Trash2 size={14} aria-hidden="true" />
                     {zh ? '删除' : 'Delete'}
                   </button>
@@ -502,16 +614,7 @@ export function ChatPanel({
         <IconButton icon={X} label={zh ? '关闭' : 'Close'} shortcut={shortcut} onClick={onClose} tooltipSide="bottom" />
       </header>
 
-      <div className="chat-clear-feedback" data-visible={chat.cleared ? 'true' : undefined}>
-        <p role="status">{chat.cleared
-          ? (zh ? `已删除对话「${threadName(chat.cleared, lang)}」` : `Deleted conversation “${threadName(chat.cleared, lang)}”`)
-          : null}</p>
-        {chat.cleared && (
-          <button type="button" className="text-link" onClick={() => { chat.undoClear(); focusComposer(); }}>
-            {zh ? '撤销删除' : 'Undo deletion'}
-          </button>
-        )}
-      </div>
+      {!switcher.open && deletionFeedback}
       <div
         ref={log}
         className="chat-log"
@@ -558,20 +661,24 @@ export function ChatPanel({
                   : (zh ? '每次发送本次提问及相关的近期对话。' : 'Each request includes your question and recent turns from this conversation.')}
               </p>
               {dataAccess && <p>{zh
-                ? 'AI 还可以按需查阅题库、练习记录和笔记，查到的数据也会发送。可在 AI 设置中关闭按需查阅。'
-                : 'The AI can also look up and send data from your catalog, practice records and notes. You can turn off lookups in AI settings.'}</p>}
+                ? 'AI 会看到当前页面的名称，也可以按需查阅题库、练习记录和笔记。可在 AI 设置中关闭按需查阅。'
+                : 'The AI sees the current page name and can look up and send data from your catalog, practice records and notes. You can turn off lookups in AI settings.'}</p>}
             </details>
           </div>
         )}
         {chat.entries.map((entry, index) => {
-          if (entry.role === 'user') return <Question key={entry.id} entry={entry} lang={lang} />;
+          if (entry.role === 'user') {
+            conversationLanguage = chatLanguageHint(entry.content) ?? conversationLanguage;
+            return <Question key={entry.id} entry={entry} lang={lang} />;
+          }
           const isLast = index === chat.entries.length - 1;
           // The preset refers to the last answer, so put the action on that answer alone.
           const canSaveNote = isLast && ready && !chat.busy && problem && dataAccess
             && entry.state === 'done' && entry.content.trim() && !entry.changes?.length;
           return <Answer key={entry.id} entry={entry} lang={lang} isLast={isLast} busy={chat.busy || !ready}
+            conversationLanguage={conversationLanguage}
             onRetry={() => chat.retry({ provider })} onSaveNote={canSaveNote ? () => runAction({ kind: 'save-note' }) : undefined}
-            onOpenAiSettings={onOpenAiSettings} onConfirmChange={chat.confirmChange}
+            onOpenAiSettings={onOpenAiSettings} onWorkspaceLink={onWorkspaceLink} onConfirmChange={chat.confirmChange}
             onDismissChange={chat.dismissChange} onUndoChange={chat.undoChange} />;
         })}
       </div>
@@ -614,20 +721,7 @@ export function ChatPanel({
             ? <button type="button" className="chat-send" aria-label={zh ? '停止回答' : 'Stop answering'} onClick={chat.stop}><Square size={14} aria-hidden="true" /></button>
             : <button type="submit" className="chat-send" aria-label={zh ? '发送' : 'Send'} disabled={!ready || !draft.trim()}><ArrowUp size={16} aria-hidden="true" /></button>}
         </div>
-        <div className="chat-permissions">
-          <label htmlFor={permissionId}>{zh ? '访问权限' : 'Access permissions'}</label>
-          <select id={permissionId} aria-describedby={permissionHelpId} value={writePermission} disabled={!dataAccess}
-            onChange={event => setChatWritePermission(event.target.value === 'full' ? 'full' : 'confirm')}>
-            <option value="confirm">{zh ? '需要我确认' : 'Ask for confirmation'}</option>
-            <option value="full">{zh ? '完全访问权限' : 'Full access'}</option>
-          </select>
-          <p id={permissionHelpId} className="chat-entry-note">
-            {dataAccess
-              ? (zh ? '完全访问会自动保存支持的改动。权限更改适用于新消息。'
-                : 'Full access saves supported changes without asking. Applies to new messages.')
-              : (zh ? '在 AI 助手设置中允许 AI 查看数据后可用。' : 'Enable AI data access in Settings to use write permissions.')}
-          </p>
-        </div>
+        <WritePermission lang={lang} dataAccess={dataAccess} />
       </form>
     </aside>
   );

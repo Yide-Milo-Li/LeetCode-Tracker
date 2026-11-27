@@ -66,6 +66,8 @@ interface CatalogViewProps {
   favoriteRevision?: number;
   onFavoritesChanged?: () => void;
   onGoalListCreated?: () => void;
+  problemRequest?: { frontendId: string } | null;
+  onProblemRequestHandled?: () => void;
 }
 
 export function CatalogView(props: CatalogViewProps) {
@@ -76,7 +78,7 @@ const SEARCH_DEBOUNCE_MS = 180;
 
 /** Retain filter state and reject out-of-order responses while catalog/import mutations refresh current data. */
 function CatalogWorkspace({ lang, onNavigateSettings, favoritesOnly = false, favoriteRevision: ownFavoriteRevision,
-  onFavoritesChanged, onGoalListCreated }: CatalogViewProps) {
+  onFavoritesChanged, onGoalListCreated, problemRequest, onProblemRequestHandled }: CatalogViewProps) {
   const t = translations[lang];
   const zh = lang === 'zh';
   const visible = useContext(ViewVisible);
@@ -103,6 +105,7 @@ function CatalogWorkspace({ lang, onNavigateSettings, favoritesOnly = false, fav
   const [overviewError, setOverviewError] = useState('');
   const [retry, setRetry] = useState(0);
   const [selected, setSelected] = useState<CatalogListProblem | null>(null);
+  const [linkError, setLinkError] = useState('');
   const [checkedProblems, setCheckedProblems] = useState(() => new Map<string, CatalogListProblem>());
   const [goalDraft, setGoalDraft] = useState<GoalList['items'] | null>(null);
   const [goalAddIds, setGoalAddIds] = useState<string[] | null>(null);
@@ -134,6 +137,25 @@ function CatalogWorkspace({ lang, onNavigateSettings, favoritesOnly = false, fav
   const detailBody = useRef<HTMLDivElement>(null);
   const recordTrigger = useRef<HTMLButtonElement>(null);
   const wasRecording = useRef(false);
+  useEffect(() => {
+    if (!visible || !problemRequest) return;
+    const controller = new AbortController();
+    setLinkError('');
+    setSelected(null);
+    setRecording(false);
+    const id = problemRequest.frontendId;
+    api.getCatalogProblem(id, { signal: controller.signal }).then(({ problem }) => {
+      if (controller.signal.aborted) return;
+      if (problem) setSelected(problem);
+      else setLinkError(zh ? `本地题库中找不到 #${id}。` : `Problem #${id} is missing from the local catalog.`);
+    }).catch(error => {
+      if (!controller.signal.aborted) setLinkError(localizeApiError(error, lang));
+    }).finally(() => {
+      if (!controller.signal.aborted) onProblemRequestHandled?.();
+    });
+    return () => controller.abort();
+  }, [problemRequest, visible, lang, zh, onProblemRequestHandled]);
+
   useEffect(() => {
     // The drawer stays mounted between steps, so focus must follow the replaced content explicitly.
     if (recording) detailBody.current?.querySelector<HTMLElement>('input:not(:disabled), select:not(:disabled), textarea:not(:disabled)')?.focus();
@@ -294,6 +316,8 @@ function CatalogWorkspace({ lang, onNavigateSettings, favoritesOnly = false, fav
         }
       />
       <span className="visually-hidden" role="status">{announcement}</span>
+      {problemRequest && <p role="status">{zh ? '正在打开题目…' : 'Opening problem…'}</p>}
+      {linkError && <Feedback>{linkError}</Feedback>}
       {favoritesOnly && (library.error ? <Feedback retry={{ label: t.retry, run: refreshFavorites }}>
         {localizeApiError(library.error, lang)}
       </Feedback> : library.data ? <FavoriteFolderPicker library={library.data} lang={lang} selected={favoriteScope}
@@ -483,7 +507,11 @@ function CatalogWorkspace({ lang, onNavigateSettings, favoritesOnly = false, fav
                     </label>
                   </td>
                   <td>
-                    <button className="problem-title-button" title={problem.title} onClick={() => setSelected(problem)}>
+                    <button className="problem-title-button" title={problem.title} onClick={() => {
+                      onProblemRequestHandled?.();
+                      setLinkError('');
+                      setSelected(problem);
+                    }}>
                       {problem.title}
                     </button>
                     {problem.isPaidOnly && <small className="pending-label">{t.statPremium}</small>}

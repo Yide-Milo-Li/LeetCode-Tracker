@@ -53,6 +53,8 @@ export function useNotesList({ selectedId, setSelectedId }: UseNotesListOptions)
   const [listRevision, setListRevision] = useState(0);
 
   const [selectedSummary, setSelectedSummary] = useState<ProblemNoteSummary | null>(null);
+  const [selectionFailure, setSelectionFailure] = useState<'missing' | 'failed' | null>(null);
+  const [selectionRetry, setSelectionRetry] = useState(0);
 
   useEffect(() => {
     const trimmed = search.trim();
@@ -73,6 +75,7 @@ export function useNotesList({ selectedId, setSelectedId }: UseNotesListOptions)
   useEffect(() => {
     let active = true;
     const controller = new AbortController();
+    setSelectionFailure(null);
     if (selectedId) {
       const matched = items.find((it) => it.questionFrontendId === selectedId);
       if (matched) {
@@ -87,16 +90,16 @@ export function useNotesList({ selectedId, setSelectedId }: UseNotesListOptions)
             const found = res.items.find((it) => it.questionFrontendId === selectedId);
             if (found) {
               setSelectedSummary(found);
-            }
+            } else setSelectionFailure('missing');
           })
-          .catch(() => {});
+          .catch(() => { if (active) setSelectionFailure('failed'); });
       }
     }
     return () => {
       active = false;
       controller.abort();
     };
-  }, [items, selectedId]);
+  }, [items, selectedId, selectionRetry]);
 
   /** Fetch the current filters and return cancellation for superseded list requests. */
   useEffect(() => {
@@ -172,6 +175,8 @@ export function useNotesList({ selectedId, setSelectedId }: UseNotesListOptions)
     setListRevision,
     selectedSummary,
     setSelectedSummary,
+    selectionFailure,
+    retrySelection: () => setSelectionRetry(value => value + 1),
   };
 }
 
