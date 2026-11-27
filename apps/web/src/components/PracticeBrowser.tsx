@@ -89,13 +89,19 @@ export function PracticeBrowser({ problem, lang, open, busy, news, canSummarize,
         scheduled = false;
         if (!alive) return;
         const rect = node.getBoundingClientRect();
-        const viewport = rect.width > 0 ? { width: Math.min(1, rect.width / window.innerWidth), top: rect.top / window.innerHeight } : null;
+        const viewport = rect.width > 0 && rect.height > 0
+          ? { width: rect.width, height: rect.height, viewportWidth: window.innerWidth }
+          : null;
         const key = JSON.stringify(viewport);
         const focusNow = focusPage;
         focusPage = false;
         if (!created) {
           // Even a session opened immediately into chat gets a live page for the return trip.
-          const initial = viewport ?? { width: 1, top: node.parentElement!.querySelector('header')!.getBoundingClientRect().bottom / window.innerHeight };
+          const initial = viewport ?? {
+            width: window.innerWidth,
+            height: Math.max(1, window.innerHeight - node.parentElement!.querySelector('header')!.getBoundingClientRect().bottom),
+            viewportWidth: window.innerWidth,
+          };
           await practiceCommand('practice_open', { url: problem.url, viewport: initial });
           created = true;
         } else if (key === last && !focusNow && appliedZoom === zoomRef.current) return;

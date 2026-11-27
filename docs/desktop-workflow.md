@@ -8,7 +8,7 @@ Open a LeetCode problem from Today, Problems, a goal list or Notes. The native a
 
 After asking a question, choose **Draft session note**. LCT uses excerpts of your questions and the answers from this visit, including follow-up questions. Review the proposed change before saving it. With chat data access turned off, the assistant can return the draft in chat. The editor contents and account credentials stay outside the chat context. **Back to LCT** closes the embedded page. The problem conversation remains available in chat history.
 
-Use **Open in system browser** for a sign-in method that requires an external browser. The web version opens problem links in a browser tab.
+Sign in to LeetCode inside LCT to reuse the site's persistent login cookies when you reopen a problem or restart the app. LeetCode controls when its session expires. Chrome and Safari keep their own sign-in sessions. Use **Open in system browser** for a sign-in method that requires an external browser. The web version opens problem links in a browser tab.
 
 ## Workspaces
 

@@ -51,25 +51,32 @@ fn problem_url(value: &str) -> Result<Url, String> {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Viewport {
-    // Fractions of the renderer viewport also account for UI zoom and display scaling.
-    top: f64,
+    // The page slot and the full renderer width, all measured in CSS pixels.
     width: f64,
+    height: f64,
+    viewport_width: f64,
 }
 
 impl Viewport {
     fn bounds(&self, size: PhysicalSize<u32>) -> Result<Rect, String> {
-        if !(0.0..1.0).contains(&self.top) || !(0.0 < self.width && self.width <= 1.0) {
+        if ![self.width, self.height, self.viewport_width]
+            .iter()
+            .all(|n| n.is_finite() && *n > 0.0)
+            || self.width > self.viewport_width
+        {
             return Err("Invalid practice layout".into());
         }
-        let y = (size.height as f64 * self.top).round() as u32;
+        // WebKit excludes the macOS title bar from its CSS viewport; the native parent can
+        // extend underneath it. Width gives the CSS-to-device scale on both platforms. The
+        // bottom of the page slot coincides with the bottom of the native client area.
+        let scale = f64::from(size.width) / self.viewport_width;
+        let width = (self.width * scale).round() as u32;
+        let height = ((self.height * scale).round() as u32).min(size.height);
         Ok(Rect {
-            position: PhysicalPosition::new(0, y as i32).into(),
-            size: PhysicalSize::new(
-                (size.width as f64 * self.width).round().max(1.0) as u32,
-                size.height.saturating_sub(y).max(1),
-            )
-            .into(),
+            position: PhysicalPosition::new(0, (size.height - height) as i32).into(),
+            size: PhysicalSize::new(width.max(1), height.max(1)).into(),
         })
     }
 }
@@ -188,6 +195,26 @@ pub fn close_views(app: &AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn page_slot_stays_below_the_toolbar_with_or_without_window_chrome() {
+        let slot = Viewport {
+            width: 1200.0,
+            height: 717.0,
+            viewport_width: 1600.0,
+        };
+        for (parent_height, top) in [(1600, 166), (1536, 102)] {
+            let bounds = slot.bounds(PhysicalSize::new(3200, parent_height)).unwrap();
+            assert_eq!(
+                bounds.position.to_physical::<i32>(2.0),
+                PhysicalPosition::new(0, top)
+            );
+            assert_eq!(
+                bounds.size.to_physical::<u32>(2.0),
+                PhysicalSize::new(2400, 1434)
+            );
+        }
+    }
+
     #[test]
     fn practice_starts_only_on_problem_pages() {
         for value in [

@@ -43,20 +43,55 @@ describe('embedded LeetCode practice', () => {
           const chrome = dialog.querySelector('header');
           const toggle = chrome.querySelector('[aria-expanded]');
           const onProblem = await until(() => window.__TAURI__.core.invoke('practice_on_problem', { url: link.href }));
+          const nativeWindow = window.__TAURI__.window.getCurrentWindow();
+          async function toolbarClear() {
+            const [host, size, position] = await Promise.all([nativeWindow.innerSize(), child.size(), child.position()]);
+            const scale = host.width / window.innerWidth;
+            const toolbar = chrome.getBoundingClientRect();
+            const slot = page.getBoundingClientRect();
+            // Native coordinates may include the title bar above the renderer's CSS viewport.
+            const toolbarBottom = host.height - (window.innerHeight - toolbar.bottom) * scale;
+            const controlsFit = [...chrome.children].every(control => {
+              const box = control.getBoundingClientRect();
+              return box.left >= 0 && box.right <= window.innerWidth && box.top >= 0 && box.bottom <= toolbar.bottom;
+            });
+            return controlsFit && Math.abs(position.y - toolbarBottom) <= scale
+              && Math.abs(size.width - slot.width * scale) <= scale
+              && Math.abs(position.y + size.height - host.height) <= scale;
+          }
+          await until(toolbarClear);
+          if (window.innerWidth === 1280) {
+            const resize = async width => {
+              await nativeWindow.setSize(new window.__TAURI__.dpi.LogicalSize(width, 700));
+              await until(() => window.innerWidth === width);
+              await until(toolbarClear);
+            };
+            await resize(1024);
+            await resize(1330);
+            await nativeWindow.setFullscreen(true);
+            await until(() => nativeWindow.isFullscreen());
+            await until(toolbarClear);
+            await nativeWindow.setFullscreen(false);
+            await until(async () => !(await nativeWindow.isFullscreen()));
+            await resize(1280);
+          }
           const before = await child.size();
           toggle.click();
           await until(() => dialog.querySelector('.chat-panel'));
           const wide = window.innerWidth >= 1500;
+          if (wide) {
+            await until(async () => (await child.size()).width < before.width);
+            await until(toolbarClear);
+          } else await until(() => page.getBoundingClientRect().width === 0);
           const chatWidth = dialog.querySelector('.chat-panel').getBoundingClientRect().width;
           const siteWidth = page.getBoundingClientRect().width;
-          if (wide) await until(async () => (await child.size()).width < before.width);
           const zoom = chrome.querySelector('select');
           zoom.value = '150';
           zoom.dispatchEvent(new Event('change', { bubbles: true }));
           await until(() => page.getBoundingClientRect().width === 0);
           zoom.value = '100';
           zoom.dispatchEvent(new Event('change', { bubbles: true }));
-          if (wide) await until(() => page.getBoundingClientRect().width === siteWidth);
+          if (wide) await until(toolbarClear);
           dialog.querySelector('.chat-panel').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
           await until(() => !dialog.querySelector('.chat-panel'));
           await until(async () => (await child.size()).width === before.width);
