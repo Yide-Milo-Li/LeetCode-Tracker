@@ -47,7 +47,7 @@ Preset identifiers are conveniences, not proof that an account has access to eve
 
 ## In-app chat
 
-The floating **Ask AI** panel (`Ctrl+J`, `⌘J` on macOS) sends questions to the provider selected in Settings. It works with Gemini, OpenAI with an API key, OpenAI with Sign in with ChatGPT, and DeepSeek.
+Open **Ask AI** from the sidebar, the floating button, or the keyboard shortcut (`Ctrl+J`, `⌘J` on macOS). The panel sends questions to the provider selected in Settings. It works with Gemini, OpenAI with an API key, OpenAI with Sign in with ChatGPT, and DeepSeek.
 
 Collapsed, the panel is a small button docked to one of the four window edges. It can be dragged to any spot along any edge and, 2.5 seconds after the pointer leaves it, shrinks to a thin bar on that edge until hovered or focused; the bar is tinted while an answer is still arriving, and stays tinted until the panel is opened when an answer finished behind it. The open panel moves by its header and stays open until closed; a header button switches it between the compact size and an enlarged one (up to 720 px wide, as tall as the window) for code and long answers. Placement and size are remembered in this browser's `localStorage` only.
 

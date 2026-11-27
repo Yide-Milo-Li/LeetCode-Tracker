@@ -994,7 +994,7 @@ it('saves completion before optional details, blocks double clicks and preserves
     render(<App />);
   });
   assert.deepEqual(within(screen.getByRole('navigation')).getAllByRole('button').map(button => button.getAttribute('aria-label')),
-    ['Today', 'Problems', 'Progress', 'Notes']);
+    ['Today', 'Problems', 'Progress', 'Notes', 'Ask AI']);
   const circle = screen.getByRole('button', { name: 'Mark complete: ' + problem.title });
   circle.focus();
   const started = Date.now();

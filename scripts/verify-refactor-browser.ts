@@ -375,7 +375,7 @@ try {
   await reload();
   await until("document.querySelectorAll('.completion-circle').length === 3");
   assert.deepEqual(await evaluate("[...document.querySelectorAll('nav[aria-label=\"Main navigation\"] button')].map(button => button.getAttribute('aria-label'))"),
-    ['Today', 'Problems', 'Progress', 'Notes']);
+    ['Today', 'Problems', 'Progress', 'Notes', 'Ask AI']);
   // Phase 10 regression: exercise actual CSS and browser event timing using isolated fixture data.
   const initialRecords = new Set(store.queryPracticeRecords({ limit: 100 }).items.map((record) => record.id));
   await evaluate("document.querySelector('.completion-circle[aria-pressed=false]').click()");

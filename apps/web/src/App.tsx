@@ -225,6 +225,7 @@ export function App() {
       return false;
     }
   });
+  const [sidebarChatSlot, setSidebarChatSlot] = useState<HTMLDivElement | null>(null);
 
   // Commit layout once; a cancellable translation preserves continuity without animating width.
   const previousSidebar = useRef(sidebarExpanded);
@@ -401,6 +402,7 @@ export function App() {
                 navBtn
               );
             })}
+            <div className="sidebar-chat-slot" ref={setSidebarChatSlot} />
           </nav>
           <div className="sidebar-bottom">
             {!sidebarExpanded ? (
@@ -744,6 +746,7 @@ export function App() {
         <ChatLauncher
           lang={lang}
           ask={chatAsk}
+          sidebar={sidebarChatSlot ? { container: sidebarChatSlot, expanded: sidebarExpanded } : undefined}
           onDataChanged={refreshAfterChatChange}
           onOpenAiSettings={() => {
             setSettingsSection('ai');

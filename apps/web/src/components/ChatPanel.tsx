@@ -36,6 +36,7 @@ const PROVIDER_NAMES: Record<LLMProvider, string> = { gemini: 'Gemini', openai: 
 const SETTINGS_ERRORS = new Set(['CHAT_NOT_CONFIGURED', 'CHAT_AUTH_ERROR', 'OPENAI_OAUTH_RECONNECT_REQUIRED']);
 
 export interface ChatPanelProps {
+  id: string;
   lang: Language;
   chat: ChatController;
   /**
@@ -291,7 +292,7 @@ function Answer({ entry, lang, isLast, busy, onRetry, onSaveNote, onOpenAiSettin
 }
 
 export function ChatPanel({
-  lang, chat, pending, onPendingHandled, shortcut, onClose, onOpenAiSettings, position, side, dragging, onDragStart, large, onToggleSize,
+  id, lang, chat, pending, onPendingHandled, shortcut, onClose, onOpenAiSettings, position, side, dragging, onDragStart, large, onToggleSize,
 }: ChatPanelProps) {
   const zh = lang === 'zh';
   const dataAccess = useChatDataAccess();
@@ -431,6 +432,7 @@ export function ChatPanel({
 
   return (
     <aside
+      id={id}
       ref={panel}
       tabIndex={-1}
       className={'chat-panel' + (dragging ? ' is-dragging' : '')}

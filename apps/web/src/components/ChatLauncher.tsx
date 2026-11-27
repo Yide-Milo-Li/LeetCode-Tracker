@@ -1,5 +1,5 @@
 /**
- * Floating entry point for the in-app AI chat.
+ * Shared controller for the floating and sidebar entry points to the in-app AI chat.
  *
  * Stays mounted for the whole session so the conversation and an answer in progress survive
  * closing the panel. The panel itself (and its Markdown renderer) loads on first open.
@@ -7,8 +7,8 @@
  * Collapsed, it is a small button docked to one of the four window edges. It can be dragged to
  * any spot along any edge. After the first opening it shrinks to a thin bar when left alone.
  */
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { flushSync } from 'react-dom';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { createPortal, flushSync } from 'react-dom';
 import { MessageSquareText } from 'lucide-react';
 import type { Language } from '../i18n.ts';
 import { useChat } from '../chat/useChat.ts';
@@ -34,11 +34,12 @@ export interface ChatLauncherProps {
   onOpenAiSettings: () => void;
   /** What another view asked for; each new `id` opens the panel on that problem and sends its preset, if it has one. */
   ask?: ChatAskRequest | null;
+  sidebar?: { container: HTMLDivElement; expanded: boolean };
   /** Chat wrote to the tracker; the views showing that data should reload. */
   onDataChanged?: () => void;
 }
 
-export function ChatLauncher({ lang, onOpenAiSettings, ask = null, onDataChanged }: ChatLauncherProps) {
+export function ChatLauncher({ lang, onOpenAiSettings, ask = null, sidebar, onDataChanged }: ChatLauncherProps) {
   const zh = lang === 'zh';
   const chat = useChat(lang, { onDataChanged });
   const [open, setOpen] = useState(false);
@@ -50,6 +51,9 @@ export function ChatLauncher({ lang, onOpenAiSettings, ask = null, onDataChanged
     }
   }, [open, openedBefore]);
   const launcher = useRef<HTMLButtonElement>(null);
+  const sidebarButton = useRef<HTMLButtonElement>(null);
+  const returnToSidebar = useRef(false);
+  const panelId = useId();
   const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform ?? '');
   const shortcut = isMac ? '⌘J' : 'Ctrl+J';
 
@@ -142,8 +146,10 @@ export function ChatLauncher({ lang, onOpenAiSettings, ask = null, onDataChanged
     setOpen(false);
     // A preset that was still waiting must not go out when the panel opens again.
     setPending(null);
-    // The launcher re-mounts with the panel gone; return focus to it for keyboard users.
-    setTimeout(() => launcher.current?.focus(), 0);
+    const entryPoint = returnToSidebar.current ? sidebarButton : launcher;
+    returnToSidebar.current = false;
+    // The floating launcher re-mounts with the panel gone.
+    setTimeout(() => entryPoint.current?.focus(), 0);
   }, []);
 
   useEffect(() => {
@@ -160,24 +166,49 @@ export function ChatLauncher({ lang, onOpenAiSettings, ask = null, onDataChanged
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [isMac, open, close]);
 
+  const label = zh ? '问 AI' : 'Ask AI';
+  const sidebarEntry = sidebar && createPortal(
+    <Tooltip text={label} shortcut={shortcut} position="right" disabled={sidebar.expanded || open}>
+      <button
+        ref={sidebarButton}
+        type="button"
+        className={'nav-item' + (open ? ' active' : '')}
+        aria-label={label}
+        aria-expanded={open}
+        aria-controls={open ? panelId : undefined}
+        onClick={() => {
+          returnToSidebar.current = true;
+          if (open) close();
+          else setOpen(true);
+        }}
+      >
+        <MessageSquareText size={20} aria-hidden="true" />
+        <span className="nav-label">{label}</span>
+      </button>
+    </Tooltip>,
+    sidebar.container,
+  );
+
   if (open) {
     const at = panelDrag.dragging && dragPoint ? dragPoint : panelPoint(position, viewport);
     return (
-      <React.Suspense fallback={null}>
-        <ChatPanel lang={lang} chat={chat} shortcut={shortcut} onClose={close}
-          pending={pending} onPendingHandled={clearPending}
-          onOpenAiSettings={() => { close(); onOpenAiSettings(); }}
-          position={at} side={position.dock.side} dragging={panelDrag.dragging}
-          onDragStart={event => panelDrag.start(event, at)}
-          large={large} onToggleSize={() => { const { large: _large, ...rest } = position; save(large ? rest : { ...rest, large: true }); }} />
-      </React.Suspense>
+      <>
+        {sidebarEntry}
+        <React.Suspense fallback={null}>
+          <ChatPanel id={panelId} lang={lang} chat={chat} shortcut={shortcut} onClose={close}
+            pending={pending} onPendingHandled={clearPending}
+            onOpenAiSettings={() => { close(); onOpenAiSettings(); }}
+            position={at} side={position.dock.side} dragging={panelDrag.dragging}
+            onDragStart={event => panelDrag.start(event, at)}
+            large={large} onToggleSize={() => { const { large: _large, ...rest } = position; save(large ? rest : { ...rest, large: true }); }} />
+        </React.Suspense>
+      </>
     );
   }
 
-  const label = zh ? '问 AI' : 'Ask AI';
   const dragging = launcherDrag.dragging && dragPoint !== null;
   const at = dragging ? dragPoint : launcherPoint(position.dock, viewport, tucked);
-  return (
+  const floatingEntry = (
     <div
       className={'chat-launcher' + (tucked && !dragging ? ' is-tucked' : '') + (dragging ? ' is-dragging' : '')}
       data-side={position.dock.side}
@@ -207,4 +238,5 @@ export function ChatLauncher({ lang, onOpenAiSettings, ask = null, onDataChanged
       </Tooltip>
     </div>
   );
+  return <>{sidebarEntry}{floatingEntry}</>;
 }

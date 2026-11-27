@@ -33,7 +33,7 @@ Object.defineProperty(window, 'matchMedia', {
 });
 
 const React = await import('react');
-const { render, renderHook, fireEvent, screen, within, act, cleanup } = await import('@testing-library/react');
+const { render, renderHook, fireEvent, screen, within, act, cleanup, waitFor } = await import('@testing-library/react');
 const { App } = await import('../apps/web/src/App.tsx');
 const { Tooltip, InfoPopover, Dialog } = await import('../apps/web/src/components/ui.tsx');
 const { TodayPlanView } = await import('../apps/web/src/components/TodayPlanView.tsx');
@@ -310,6 +310,33 @@ describe('Minimal Desktop UI - Phase 10', () => {
 
     assert.ok(sidebar.classList.contains('collapsed'), 'Sidebar should be collapsed again');
     assert.equal(localStorage.getItem('leetcode_tracker_sidebar_expanded'), 'false');
+  });
+
+  it('keeps Ask AI in both sidebar layouts and restores focus when the shared panel closes', async () => {
+    mock.method(api, 'getChatStatus', async () => ({ configured: true, provider: 'openai', model: 'test' }));
+    await act(async () => { render(<App />); });
+    const sidebar = within(screen.getByRole('navigation', { name: 'Main navigation' }));
+    const chat = sidebar.getByRole('button', { name: 'Ask AI', expanded: false });
+    await act(async () => { chat.focus(); fireEvent.click(chat); });
+
+    const panel = await screen.findByRole('complementary', { name: 'AI chat' });
+    assert.equal(chat.getAttribute('aria-controls'), panel.id);
+    assert.equal(chat.getAttribute('aria-expanded'), 'true');
+    assert.equal(screen.getByRole('button', { name: 'Today' }).getAttribute('aria-current'), 'page');
+
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Expand sidebar' })); });
+    assert.ok(sidebar.getByRole('button', { name: 'Ask AI', expanded: true }) === chat, 'Sidebar toggle keeps the chat button mounted');
+    assert.ok(screen.getByRole('complementary', { name: 'AI chat' }) === panel, 'Sidebar toggle keeps the same chat panel');
+    const composer = screen.getByRole('textbox', { name: 'Ask AI a question' });
+    await act(async () => { fireEvent.keyDown(composer, { key: 'Escape' }); });
+    await waitFor(() => assert.ok(document.activeElement === chat, 'Closing chat restores sidebar focus'));
+    assert.equal(chat.getAttribute('aria-expanded'), 'false');
+
+    await act(async () => { fireEvent.click(chat); });
+    await screen.findByRole('complementary', { name: 'AI chat' });
+    await act(async () => { fireEvent.click(chat); });
+    assert.equal(screen.queryByRole('complementary', { name: 'AI chat' }), null);
+    assert.ok(document.querySelector('.chat-launcher-button'));
   });
 
   it('renders tooltips on hover and focus, and dismisses on Escape', async () => {
