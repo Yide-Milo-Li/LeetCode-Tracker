@@ -11,6 +11,7 @@
 import type { FastifyInstance } from 'fastify';
 import { chatActionRequestSchema, chatRequestSchema, chatUndoSchema, type ChatStreamEvent } from '../../../../packages/contracts/src/chat.ts';
 import { ChatActionError } from '../chat/chat-service.ts';
+import { LLMError } from '../llm/types.ts';
 import type { RouteContext } from './types.ts';
 
 /** Ample for the capped conversation in any encoding, far below the catalog import limit. */
@@ -27,8 +28,11 @@ export function registerChatRoutes(app: FastifyInstance, { chat }: RouteContext)
         message: parsed.error.issues.map(issue => [issue.path.join('.'), issue.message].filter(Boolean).join(': ')).join('; '),
       });
     }
-    if (!chat.status().configured) {
-      return reply.code(503).send({ error: 'CHAT_NOT_CONFIGURED', message: 'Configure an AI provider in Settings.' });
+    try {
+      chat.checkRecipient(parsed.data.selection);
+    } catch (error) {
+      if (!(error instanceof LLMError)) throw error;
+      return reply.code(error.status).send({ error: error.code, message: error.message });
     }
 
     // Stop the provider request when the reader goes away; a finished response also closes.

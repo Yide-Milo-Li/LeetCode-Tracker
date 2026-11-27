@@ -314,7 +314,7 @@ export interface ActionPopover {
  * Fallback path (no Popover API): the panel mounts only while open, and outside clicks / Escape
  * are handled manually.
  */
-export function useActionPopover({ align = 'start' }: { align?: 'start' | 'end' } = {}): ActionPopover {
+export function useActionPopover({ align = 'start', side = 'bottom' }: { align?: 'start' | 'end'; side?: 'top' | 'bottom' } = {}): ActionPopover {
   const id = useId();
   const [native] = useState(supportsPopover);
   const [open, setOpen] = useState(false);
@@ -353,7 +353,7 @@ export function useActionPopover({ align = 'start' }: { align?: 'start' | 'end' 
       const { left, top } = placeFloating(
         trigger.getBoundingClientRect(),
         panel.getBoundingClientRect(),
-        'bottom',
+        side,
         align,
         4,
       );
@@ -368,16 +368,20 @@ export function useActionPopover({ align = 'start' }: { align?: 'start' | 'end' 
     const toggle = (event: Event) => setOpen((event as ToggleEvent).newState === 'open');
     panel.addEventListener('beforetoggle', beforeToggle);
     panel.addEventListener('toggle', toggle);
+    // Account model lists and handoff notices can resize an already open picker.
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
+    observer?.observe(panel);
     window.addEventListener('resize', place);
     document.addEventListener('scroll', place, true);
     return () => {
       cancelAnimationFrame(frame);
+      observer?.disconnect();
       panel.removeEventListener('beforetoggle', beforeToggle);
       panel.removeEventListener('toggle', toggle);
       window.removeEventListener('resize', place);
       document.removeEventListener('scroll', place, true);
     };
-  }, [native, align, panelNode]);
+  }, [native, align, side, panelNode]);
 
   // Fallback: emulate light dismiss and Escape while the panel is mounted.
   useEffect(() => {

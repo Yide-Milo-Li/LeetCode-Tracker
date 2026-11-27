@@ -47,6 +47,7 @@ import type {
   UpdateProgressSnapshotInput,
   UpdateSettingsInput,
   ChatActionReceipt,
+  ChatGPTModel,
   ChatActionRequest,
   ChatUndo,
   ChatStatus,
@@ -81,12 +82,6 @@ export interface GeminiStatus {
   /** The provider selected in Settings; any of the supported providers, not only Gemini. */
   provider?: LLMProvider;
   model: string;
-}
-
-/** A model offered to the signed-in ChatGPT account. */
-export interface ChatGPTModel {
-  slug: string;
-  displayName: string;
 }
 
 /** Result structure returned by Gemini formatting API. */
@@ -720,7 +715,7 @@ export const syncApi = {
 
 /** Unified API client instance aggregating all endpoint domains. */
 export const chatApi = {
-  /** Whether the active AI provider can answer chat questions. */
+  /** The settings default and the recipients available to the chat picker. */
   getChatStatus(): Promise<ChatStatus> {
     return request('/chat/status');
   },

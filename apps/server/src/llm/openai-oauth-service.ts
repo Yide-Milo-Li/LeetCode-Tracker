@@ -10,7 +10,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { OpenAIOAuthSummary } from '../../../../packages/contracts/src/sync.ts';
-import { isValidDynamicOpenaiModel } from '../../../../packages/contracts/src/llm-models.ts';
+import { isValidDynamicOpenaiModel, normalizeReasoningEffort, type ChatGPTModel } from '../../../../packages/contracts/src/llm-models.ts';
 import type { CatalogStore } from '../../../../packages/database/src/store.ts';
 import {
   OPENAI_OAUTH_SETTING_KEYS as K,
@@ -48,11 +48,7 @@ export interface OpenAIOAuthServiceContext {
   onStateChanged: () => void | Promise<void>;
 }
 
-/** A model the signed-in account may use, as shown in the model picker. */
-export interface ChatGPTModel {
-  slug: string;
-  displayName: string;
-}
+export type { ChatGPTModel };
 
 /** Result of signing out. */
 export interface OpenAIDisconnectResult extends OpenAIOAuthSummary {
@@ -254,10 +250,21 @@ export class OpenAIOAuthService {
     }
     const items = (json.models as Array<Record<string, unknown>>)
       .filter(model => model && model.visibility === 'list' && typeof model.slug === 'string' && isValidDynamicOpenaiModel(model.slug))
-      .map(model => ({
-        slug: model.slug as string,
-        displayName: typeof model.display_name === 'string' && model.display_name ? model.display_name : model.slug as string,
-      }));
+      .map(model => {
+        const levels = Array.isArray(model.supported_reasoning_levels) ? model.supported_reasoning_levels : [];
+        const efforts = levels.flatMap(level => {
+          const value = typeof level === 'string' ? level : level?.effort;
+          const effort = typeof value === 'string' && normalizeReasoningEffort('openai', value);
+          return effort ? [effort] : [];
+        });
+        const defaultEffort = typeof model.default_reasoning_level === 'string' && normalizeReasoningEffort('openai', model.default_reasoning_level);
+        return {
+          slug: model.slug as string,
+          displayName: typeof model.display_name === 'string' && model.display_name ? model.display_name : model.slug as string,
+          ...(efforts.length ? { reasoningEfforts: [...new Set(efforts)] } : {}),
+          ...(defaultEffort && efforts.includes(defaultEffort) ? { defaultEffort } : {}),
+        };
+      });
     this.models = { accountKey, fetchedAt: this.now(), items };
     return items;
   }

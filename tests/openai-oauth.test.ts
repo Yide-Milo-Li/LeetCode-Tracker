@@ -54,7 +54,8 @@ function fakeOpenAI() {
     models: [
       { slug: 'gpt-hidden', display_name: 'Hidden', visibility: 'hide' },
       { slug: 'gpt-synthetic-a', display_name: 'Synthetic A', visibility: 'list' },
-      { slug: 'gpt-synthetic-b', display_name: 'Synthetic B', visibility: 'list' },
+      { slug: 'gpt-synthetic-b', display_name: 'Synthetic B', visibility: 'list', default_reasoning_level: 'high',
+        supported_reasoning_levels: [{ effort: 'medium' }, { effort: 'high' }, { effort: 'unknown' }] },
     ],
     /** nonce captured from the authorize URL, echoed into the ID token. */
     pendingNonce: '',
@@ -186,7 +187,7 @@ test('first sign-in registers a dynamic client and stores a token-free summary',
     const models = await t.api('/settings/openai/oauth/models');
     assert.deepEqual(models.body.models, [
       { slug: 'gpt-synthetic-a', displayName: 'Synthetic A' },
-      { slug: 'gpt-synthetic-b', displayName: 'Synthetic B' },
+      { slug: 'gpt-synthetic-b', displayName: 'Synthetic B', reasoningEfforts: ['medium', 'high'], defaultEffort: 'high' },
     ]);
 
     // A state is single-use: replaying the redirect cannot complete a second exchange.

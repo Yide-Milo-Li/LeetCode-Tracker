@@ -36,6 +36,11 @@ export const supportedOpenaiModels = [
   'gpt-6.1-terra',
 ] as const;
 export type SupportedOpenaiModel = (typeof supportedOpenaiModels)[number];
+export const chatModelPresets: Record<LLMProvider, readonly string[]> = {
+  gemini: supportedGeminiModels,
+  openai: supportedOpenaiModels,
+  deepseek: [fixedProviderModels.deepseek],
+};
 export const defaultOpenaiModel: SupportedOpenaiModel = 'gpt-6-luna';
 
 /** Normalize an OpenAI model string to its canonical identifier, or null if unsupported. */
@@ -71,6 +76,14 @@ export function isValidDynamicOpenaiModel(model?: string | null): boolean {
 /** All canonical reasoning effort identifiers across providers. */
 export const reasoningEffortLevels = ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type ReasoningEffort = (typeof reasoningEffortLevels)[number];
+
+/** A model advertised by the signed-in ChatGPT account. Older catalogs omit effort metadata. */
+export interface ChatGPTModel {
+  slug: string;
+  displayName: string;
+  reasoningEfforts?: ReasoningEffort[];
+  defaultEffort?: ReasoningEffort;
+}
 
 export const geminiHydrogenReasoningEfforts = ['low', 'medium', 'high', 'xhigh'] as const;
 export const openaiLunaReasoningEfforts = ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const;

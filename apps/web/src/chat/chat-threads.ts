@@ -6,6 +6,8 @@
  * and surplus conversations are dropped automatically so storage stays bounded.
  */
 import { isDecided, type ChatChange } from './chat-changes.ts';
+import type { ChatModelSelection } from '../../../../packages/contracts/src/chat.ts';
+import { getSupportedReasoningEfforts } from '../../../../packages/contracts/src/llm-models.ts';
 import type { ChatProblemRef } from './chat-context.ts';
 import type { ChatEntry } from './useChat.ts';
 
@@ -16,6 +18,7 @@ export interface ChatThreadRef {
 }
 
 export interface ChatThread extends ChatThreadRef {
+  selection?: ChatModelSelection;
   entries: ChatEntry[];
   /** Epoch milliseconds of the last question asked here. */
   usedAt: number;
@@ -88,7 +91,7 @@ function readRef(value: unknown): ChatThreadRef | null {
  */
 export function pruneThreads(threads: Record<string, ChatThread>, now: number, keep: ReadonlySet<string> = new Set()): Record<string, ChatThread> {
   const kept = Object.values(threads)
-    .filter(thread => thread.entries.length > 0 && (keep.has(thread.key) || now - thread.usedAt < THREAD_IDLE_MS))
+    .filter(thread => (thread.entries.length > 0 || thread.selection) && (keep.has(thread.key) || now - thread.usedAt < THREAD_IDLE_MS))
     .sort((a, b) => Number(keep.has(b.key)) - Number(keep.has(a.key)) || b.usedAt - a.usedAt)
     .slice(0, MAX_THREADS);
   return Object.fromEntries(kept.map(thread => [thread.key, thread]));
@@ -103,9 +106,17 @@ function readStored(now: number): ChatState | null {
   const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null') as { threads?: unknown; current?: unknown } | null;
   if (!stored || typeof stored !== 'object') return null;
   const threads: Record<string, ChatThread> = {};
-  for (const raw of Array.isArray(stored.threads) ? stored.threads as Array<{ entries?: unknown; usedAt?: unknown }> : []) {
+  for (const raw of Array.isArray(stored.threads) ? stored.threads as Array<Partial<ChatThread>> : []) {
     const ref = readRef(raw);
-    if (ref) threads[ref.key] = { ...ref, entries: readEntries(raw.entries), usedAt: typeof raw.usedAt === 'number' ? raw.usedAt : now };
+    if (!ref) continue;
+    const pick = raw.selection;
+    const valid = pick && ['openai', 'gemini', 'deepseek'].includes(pick.provider)
+      && typeof pick.model === 'string' && pick.model.length > 0 && pick.model.length <= 160
+      && getSupportedReasoningEfforts(pick.provider, pick.model).includes(pick.reasoningEffort);
+    threads[ref.key] = {
+      ...ref, entries: readEntries(raw.entries), usedAt: typeof raw.usedAt === 'number' ? raw.usedAt : now,
+      ...(valid ? { selection: { provider: pick.provider, model: pick.model, reasoningEffort: pick.reasoningEffort } } : {}),
+    };
   }
   return { threads: pruneThreads(threads, now), current: readRef(stored.current) ?? GENERAL_THREAD };
 }

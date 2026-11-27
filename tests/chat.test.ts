@@ -422,6 +422,45 @@ async function withFetch<T>(handler: (url: string, init: RequestInit) => Promise
 
 const finished = (text: string) => [{ choices: [{ delta: { content: text } }] }, { choices: [{ delta: {}, finish_reason: 'stop' }] }, '[DONE]'];
 
+test('chat routes concurrent selections independently of the unconfigured settings default', async () => {
+  const endpoints: string[] = [];
+  await withFetch(async url => {
+    endpoints.push(url);
+    return sse(finished('Selected answer.'));
+  }, async requests => {
+    const assistant = new LLMAssistant({
+      provider: 'gemini', providers: {
+        gemini: { apiKey: '' },
+        openai: { apiKey: 'synthetic', baseUrl: 'https://openai.example.test/v1' },
+        deepseek: { apiKey: 'synthetic', baseUrl: 'https://deepseek.example.test/v1' },
+      },
+    });
+    const store = new CatalogStore(new DatabaseSync(':memory:'), { skipBackup: true });
+    const app = await buildApp({ store, geminiAssistant: assistant, disableStatic: true });
+    try {
+      const status = (await app.inject('/api/v1/chat/status')).json();
+      assert.equal(status.configured, false);
+      assert.deepEqual(status.providers.map((p: { provider: string; configured: boolean }) => [p.provider, p.configured]),
+        [['openai', true], ['deepseek', true], ['gemini', false]]);
+      assert.doesNotMatch(JSON.stringify(status), /synthetic|example\.test|apiKey|baseUrl/);
+      const openai = { provider: 'openai', model: 'gpt-6.1-terra', reasoningEffort: 'xhigh' };
+      const deepseek = { provider: 'deepseek', model: 'deepseek-flash', reasoningEffort: 'none' };
+      const results = await Promise.all([openai, deepseek].map(selection => post(app, { messages: turns, selection, dataAccess: false })));
+      assert.deepEqual(results.map(res => events(res.payload).at(-1)), [openai, deepseek].map(({ provider, model }) => ({ type: 'done', provider, model })));
+      assert.deepEqual(new Set(endpoints), new Set(['https://openai.example.test/v1/chat/completions', 'https://deepseek.example.test/v1/chat/completions']));
+      assert.equal(requests.find(body => body.model === openai.model)?.reasoning_effort, 'xhigh');
+      assert.deepEqual(requests.find(body => body.model === deepseek.model)?.thinking, { type: 'disabled' });
+      assert.equal(assistant.getStatus().provider, 'gemini');
+      for (const [selection, expected] of [
+        [{ ...deepseek, reasoningEffort: 'medium' }, 400], [{ ...openai, model: 'unknown' }, 400],
+        [{ provider: 'gemini', model: 'models/gemini-4-hydrogen', reasoningEffort: 'high' }, 503],
+      ] as const) assert.equal((await post(app, { selection, messages: turns })).statusCode, expected);
+      assert.equal((await post(app, { selection: openai, provider: 'deepseek', messages: turns })).statusCode, 400);
+      assert.equal(requests.length, 2);
+    } finally { await app.close(); }
+  });
+});
+
 test('the assistant falls back to another model only before any text was shown', async () => {
   const traces: Array<{ purpose: string; model?: string; status?: string; attempt?: number }> = [];
   const options = {
@@ -930,13 +969,15 @@ test('every model turn of an answer goes to the provider the question was asked 
   let firstTool = { id: 'c1', name: 'tracker_get_favorite_folders', arguments: '{}' };
   const assistant: ILLMAssistant = {
     getStatus: () => ({ configured: true, provider: active.provider, model: 'm', baseUrl: active.baseUrl }),
+    getProviderStatus: provider => ({ configured: true, provider, model: 'm', baseUrl: active.baseUrl }),
     formatProgressText: async () => ({ candidates: [], unparsedSnippets: [], model: 'm' }),
     streamChat: async params => {
-      calls.push({ ...params, provider: active.provider });
+      const provider = params.selection?.provider ?? active.provider;
+      calls.push({ ...params, provider });
       onCall(calls.length);
       if (!params.steps?.length) return toolTurn([firstTool]);
       params.onDelta('Answer.');
-      return { model: 'm', provider: active.provider, usage };
+      return { model: 'm', provider, usage };
     },
   };
   const store = new CatalogStore(new DatabaseSync(':memory:'), { skipBackup: true });
@@ -971,6 +1012,19 @@ test('every model turn of an answer goes to the provider the question was asked 
   assert.deepEqual(done.at(-1), { type: 'done', provider: 'openai', model: 'm' });
   assert.equal(calls.length, 2);
   assert.equal((await post(app, { messages: [{ role: 'user', content: 'hi' }], provider: 'claude' })).statusCode, 400);
+
+  // An explicit pick survives unrelated settings changes across tool rounds. Changing its own
+  // endpoint still stops the next round before that endpoint receives the lookup result.
+  const selection = { provider: 'openai', model: 'm', reasoningEffort: 'high' };
+  calls.length = 0;
+  onCall = round => { if (round === 1) active.provider = 'deepseek'; };
+  assert.deepEqual((await ask({ selection })).at(-1), { type: 'done', provider: 'openai', model: 'm' });
+  assert.deepEqual(calls.map(call => call.selection), [selection, selection]);
+  calls.length = 0;
+  onCall = round => { if (round === 1) active.baseUrl = 'https://new-gateway.example/v1'; };
+  assert.deepEqual((await ask({ selection })).at(-1), changed);
+  assert.equal(calls.length, 1);
+  active.provider = 'openai';
 
   // A tool call from an answer whose provider changed cannot commit a full-access write.
   const practicesBefore = await app.inject('/api/v1/practice-records');

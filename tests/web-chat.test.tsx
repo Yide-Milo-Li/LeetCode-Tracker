@@ -6,7 +6,7 @@
 import { afterEach, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import type { ChatRequest, ChatStreamEvent } from '../packages/contracts/src/chat.ts';
+import type { ChatRequest, ChatStatus, ChatStreamEvent } from '../packages/contracts/src/chat.ts';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/', pretendToBeVisual: true });
 Object.assign(globalThis, {
@@ -127,7 +127,8 @@ it('streams an answer, lists what the AI looked up and keeps the conversation', 
     { type: 'done', provider: 'openai', model: 'gpt-6-luna' },
   ]);
   await openPanel();
-  assert.equal(screen.getByText('OpenAI · gpt-6-luna').tagName, 'P');
+  assert.ok(screen.getByRole('button', { name: /Choose model · OpenAI · gpt-6-luna/ }));
+  assert.doesNotMatch(document.querySelector('.chat-header')!.textContent!, /OpenAI|gpt-6/);
   const privacy = screen.getByText('What goes to OpenAI');
   assert.equal(privacy.closest('details')?.open, false);
   await act(async () => { fireEvent.click(privacy); });
@@ -210,6 +211,63 @@ it('keeps partial text on a failure and retries the same question', async () => 
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Open AI settings' })); });
   assert.equal(settings.mock.callCount(), 1);
   assert.equal(screen.queryByRole('complementary'), null);
+});
+
+it('switches chat recipients with a preview, keeping the draft, recent turns and per-chat choice', async () => {
+  const status: ChatStatus = {
+    configured: true, provider: 'deepseek', model: 'deepseek-flash', providers: [
+      { provider: 'openai', model: 'account-small', reasoningEffort: 'medium', configured: true, accountModels: true },
+      { provider: 'deepseek', model: 'deepseek-flash', reasoningEffort: 'high', configured: true, accountModels: false },
+      { provider: 'gemini', model: 'models/gemini-4-hydrogen', reasoningEffort: 'high', configured: false, accountModels: false },
+    ],
+  };
+  mock.method(api, 'getChatStatus', async () => status);
+  mock.method(api, 'getOpenAIChatGPTModels', async () => ({ models: [
+    { slug: 'account-large', displayName: 'Account Large', reasoningEfforts: ['low', 'high'], defaultEffort: 'high' },
+  ] }));
+  const requests = serveChat(answer('First answer'), answer('Second answer'), answer('Retried answer'));
+  await openPanel();
+  await ask('Remember this');
+  await screen.findByText('First answer');
+  const field = screen.getByRole('textbox') as HTMLTextAreaElement;
+  const click = async (button: HTMLElement) => act(async () => { fireEvent.click(button); });
+  await act(async () => { fireEvent.change(field, { target: { value: 'Continue here' } }); });
+  const trigger = () => screen.getByRole('button', { name: /Choose model/ });
+  await click(trigger());
+  await click(screen.getByRole('button', { name: 'Gemini (not connected)' }));
+  assert.ok(screen.getByRole('button', { name: 'Open AI settings' }));
+  await click(screen.getByRole('button', { name: 'OpenAI' }));
+  assert.match(screen.getByText(/Your next message goes to OpenAI/).textContent!, /recent conversation history/);
+  await act(async () => { fireEvent.keyDown(window, { key: 'Escape' }); });
+  assert.equal(document.activeElement, trigger());
+  assert.match(trigger().ariaLabel!, /DeepSeek/);
+  await click(trigger());
+  await click(screen.getByRole('button', { name: 'OpenAI' }));
+  await click(await screen.findByRole('button', { name: 'Account Large' }));
+  const effort = screen.getByRole('combobox', { name: 'Reasoning effort' }) as HTMLSelectElement;
+  assert.deepEqual(Array.from(effort.options, item => item.value), ['low', 'high']);
+  assert.equal(effort.value, 'high');
+  await act(async () => { fireEvent.change(effort, { target: { value: 'low' } }); });
+  await click(screen.getByRole('button', { name: 'Apply to this chat' }));
+  assert.equal(requests.length, 1);
+  assert.equal(field.value, 'Continue here');
+  assert.equal(document.activeElement, field);
+  assert.ok(screen.getByText('OpenAI will answer your next message.'));
+  assert.match(trigger().ariaLabel!, /OpenAI · account-large · Low/);
+  await ask(field.value);
+  await screen.findByText('Second answer');
+  assert.equal(screen.queryByText('OpenAI will answer your next message.'), null);
+  assert.deepEqual(requests[1].selection, { provider: 'openai', model: 'account-large', reasoningEffort: 'low' });
+  assert.deepEqual(requests[1].messages.map(item => item.content), ['Remember this', 'First answer', 'Continue here']);
+  assert.deepEqual(loadChatState().threads.general.selection, requests[1].selection);
+  await click(screen.getByRole('button', { name: 'Answer again' }));
+  await screen.findByText('Retried answer');
+  assert.deepEqual(requests[2], requests[1]);
+  await act(async () => { setChatProblem({ frontendId: '42' }); });
+  await waitFor(() => assert.match(trigger().ariaLabel!, /DeepSeek/));
+  await openHistory();
+  await click(screen.getByRole('button', { name: /^General/ }));
+  await waitFor(() => assert.match(trigger().ariaLabel!, /account-large/));
 });
 
 it('explains a missing provider and toggles with the keyboard shortcut', async () => {
@@ -925,7 +983,8 @@ it('shows the last question in History and persists a deletion and its undo duri
   const history = screen.getByRole('group', { name: 'Conversation history' });
   assert.ok(history.contains(screen.getByText(question.content)));
   const remove = screen.getByRole('button', { name: 'Delete conversation: #42 Trapping Rain Water' });
-  assert.equal(remove.textContent, 'Delete');
+  assert.equal(remove.textContent, '');
+  assert.ok(remove.querySelector('svg[aria-hidden="true"]'));
   await act(async () => { fireEvent.click(remove); });
   assert.equal(loadChatState().threads[thread.key], undefined);
   assert.ok(screen.getByRole('button', { name: 'Stop answering' }));
@@ -1458,12 +1517,12 @@ it('names the provider in use after Settings change, and sends each question to 
   let view!: ReturnType<typeof render>;
   await act(async () => { view = render(launcher(0)); });
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Ask AI' })); });
-  await waitFor(() => screen.getByText('OpenAI · gpt-6-luna'));
+  await screen.findByRole('button', { name: /Choose model · OpenAI · gpt-6-luna/ });
 
   // Saving AI settings while the panel stays open bumps the workspace revision.
   status.mock.mockImplementation(async () => ({ configured: true, provider: 'deepseek', model: 'deepseek-flash' }) as never);
   await act(async () => { view.rerender(launcher(1)); });
-  await waitFor(() => screen.getByText('DeepSeek · deepseek-flash'));
+  await screen.findByRole('button', { name: /Choose model · DeepSeek · deepseek-flash/ });
   assert.ok(screen.getByText('What goes to DeepSeek'));
 
   // Changed elsewhere without the panel noticing: the server refuses, and the panel reads it again.
@@ -1472,7 +1531,7 @@ it('names the provider in use after Settings change, and sends each question to 
   await waitFor(() => screen.getByRole('alert'));
   assert.equal(requests[0].provider, 'deepseek');
   assert.match(screen.getByRole('alert').textContent ?? '', /provider in Settings changed/);
-  await waitFor(() => screen.getByText('Gemini · gemini-4-hydrogen'));
+  await screen.findByRole('button', { name: /Choose model · Gemini · gemini-4-hydrogen/ });
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Try again' })); });
   await waitFor(() => screen.getByText('ok'));
   assert.equal(requests[1].provider, 'gemini');
@@ -1480,7 +1539,7 @@ it('names the provider in use after Settings change, and sends each question to 
   // Coming back to the window reads it again too.
   status.mock.mockImplementation(async () => ({ configured: true, provider: 'openai', model: 'gpt-6-luna' }) as never);
   await act(async () => { fireEvent.focus(window); });
-  await waitFor(() => screen.getByText('OpenAI · gpt-6-luna'));
+  await screen.findByRole('button', { name: /Choose model · OpenAI · gpt-6-luna/ });
 });
 
 it('sends a preset about the problem it was asked about, even once another one is shown', async () => {

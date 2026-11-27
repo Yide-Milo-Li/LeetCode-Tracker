@@ -15,11 +15,12 @@
  */
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { chatModelPresets, isValidDynamicOpenaiModel, resolveModelReasoningEffort } from '../../../../packages/contracts/src/llm-models.ts';
 import { chatLanguageHint } from '../../../../packages/contracts/src/chat-language.ts';
 import { problemOpeningChoices } from './problem-navigation.ts';
 import { problemWorkspaceHref, settingsNames, visibleSections, workspaceNames, workspaceViews } from '../../../../packages/contracts/src/workspace-links.ts';
 import type {
-  ChatActionProposal, ChatActionReceipt, ChatActionRequest, ChatContext, ChatContextSummary, ChatRequest, ChatStatus, ChatStreamEvent, ChatUndo,
+  ChatActionProposal, ChatActionReceipt, ChatActionRequest, ChatContext, ChatContextSummary, ChatModelSelection, ChatRequest, ChatStatus, ChatStreamEvent, ChatUndo,
 } from '../../../../packages/contracts/src/chat.ts';
 import { ApplicationError } from '../../../../packages/application/src/errors.ts';
 import type { TrackerApplication } from '../../../../packages/application/src/application.ts';
@@ -218,8 +219,34 @@ export class ChatService {
 
   /** Whether the active provider can answer; makes no network request. */
   status(): ChatStatus {
-    const { configured, provider, model } = this.ctx.assistant.getStatus();
-    return { configured: configured && Boolean(this.ctx.assistant.streamChat), provider, model };
+    const { assistant } = this.ctx;
+    const { configured, provider, model } = assistant.getStatus();
+    const status: ChatStatus = { configured: configured && Boolean(assistant.streamChat), provider, model };
+    if (assistant.getProviderStatus) {
+      status.providers = (['openai', 'deepseek', 'gemini'] as const).map(provider => {
+        const config = assistant.getProviderStatus!(provider);
+        return {
+          provider, model: config.model, configured: config.configured && Boolean(assistant.streamChat),
+          reasoningEffort: resolveModelReasoningEffort(provider, config.model, config.reasoningEffort),
+          accountModels: config.authMode === 'chatgpt',
+        };
+      });
+    }
+    return status;
+  }
+
+  /** Validate the requested recipient before opening the stream or attaching local data. */
+  checkRecipient(selection?: ChatModelSelection): void {
+    const { assistant } = this.ctx;
+    const status = selection ? assistant.getProviderStatus?.(selection.provider) : assistant.getStatus();
+    if (!status?.configured || !assistant.streamChat || (selection && status.provider !== selection.provider)) {
+      throw new LLMError('CHAT_NOT_CONFIGURED', 'Connect this AI provider in Settings.', 503);
+    }
+    if (selection && selection.model !== status.model) {
+      const allowed = status.authMode === 'chatgpt' ? isValidDynamicOpenaiModel(selection.model)
+        : chatModelPresets[selection.provider].includes(selection.model);
+      if (!allowed) throw new LLMError('CHAT_MODEL_UNAVAILABLE', 'Choose an available model for this conversation.', 400);
+    }
   }
 
   /**
@@ -236,12 +263,12 @@ export class ChatService {
     // Every model turn of one answer goes where the question was asked: the provider the user was
     // shown, at the endpoint that was active then. Other settings, such as the model, may change.
     const recipient = () => {
-      const { provider, baseUrl } = assistant.getStatus();
-      return JSON.stringify([provider, baseUrl ?? null]);
+      const status = request.selection ? assistant.getProviderStatus?.(request.selection.provider) : assistant.getStatus();
+      return JSON.stringify([status?.provider, status?.baseUrl, status?.authMode, status?.configured]);
     };
     const asked = recipient();
     const assertSameProvider = () => {
-      if (recipient() !== asked || (request.provider !== undefined && assistant.getStatus().provider !== request.provider)) {
+      if (recipient() !== asked || (!request.selection && request.provider !== undefined && assistant.getStatus().provider !== request.provider)) {
         throw new LLMError('CHAT_PROVIDER_CHANGED', 'The AI provider settings changed. Ask again to use the current provider.', 409);
       }
     };
@@ -304,6 +331,7 @@ export class ChatService {
         assertSameProvider();
         try {
           result = await streamChat({
+            selection: request.selection,
             systemInstruction: system(),
             messages: request.messages,
             ...(tools.length ? { tools, steps } : {}),

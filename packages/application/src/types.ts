@@ -3,6 +3,7 @@
  * Supports Google Gemini, OpenAI, and DeepSeek with unified domain capabilities.
  */
 import type { ProgressCandidateInput } from '../../contracts/src/practice.ts';
+import type { ChatModelSelection } from '../../contracts/src/chat.ts';
 import type { Bilingual, Rules, RulePatch } from '../../contracts/src/recommendations.ts';
 import type { CatalogProblem, OpenAIAuthMode, ReasoningEffort } from '../../contracts/src/sync.ts';
 import type { AiFragment, LayoutGroup } from '../../markdown/src/index.ts';
@@ -56,6 +57,7 @@ export { LLMError as GeminiFormatError };
 
 /** Status reported by the active LLM assistant. */
 export interface LLMAssistantStatus {
+  authMode?: OpenAIAuthMode;
   configured: boolean;
   provider?: LLMProviderType;
   model: string;
@@ -303,11 +305,12 @@ export interface ILLMAssistant {
     deadline?: number;
   }): Promise<{ selectedQuestionIds: string[]; model: string; provider?: LLMProviderType }>;
   /**
-   * Stream one chat answer from the active provider.
+   * Stream one chat answer using the conversation's selection or the settings default.
    *
    * @throws LLMError with a `CHAT_*` code, or `OPENAI_OAUTH_RECONNECT_REQUIRED`.
    */
   streamChat?(params: {
+    selection?: ChatModelSelection;
     systemInstruction: string;
     messages: ChatMessage[];
     /** Tools offered for this turn; see {@link StreamChatParams.tools}. */
@@ -325,6 +328,8 @@ export interface ILLMAssistant {
     replay?: unknown;
   }>;
   getStatus(): LLMAssistantStatus;
+  /** Assistants that can route individual chat requests independently of the settings default. */
+  getProviderStatus?(provider: LLMProviderType): LLMAssistantStatus;
   updateConfig?(config: {
     provider?: LLMProviderType | null;
     apiKey?: string | null;

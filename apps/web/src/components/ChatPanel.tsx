@@ -11,7 +11,9 @@
  */
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ArrowUp, Check, ChevronDown, History, Lightbulb, Maximize2, Minimize2, NotebookPen, RefreshCw, Square, Trash2, X } from 'lucide-react';
-import { api, type LLMProvider } from '../api.ts';
+import { api } from '../api.ts';
+import { getDefaultReasoningEffort } from '../../../../packages/contracts/src/llm-models.ts';
+import { ChatModelPicker, conversationRecipient, providerNames } from './ChatModelPicker.tsx';
 import { CHAT_MAX_MESSAGE_CHARS } from '../../../../packages/contracts/src/chat-limits.ts';
 import type { ChatStatus, ChatWritePermission } from '../../../../packages/contracts/src/chat.ts';
 import type { Language } from '../i18n.ts';
@@ -33,7 +35,6 @@ import { problemWorkspaceHref, type WorkspaceLink } from '../../../../packages/c
 import { chatLanguageHint } from '../../../../packages/contracts/src/chat-language.ts';
 import { Feedback, IconButton, useActionPopover } from './ui.tsx';
 
-const PROVIDER_NAMES: Record<LLMProvider, string> = { gemini: 'Gemini', openai: 'OpenAI', deepseek: 'DeepSeek' };
 /** Codes for which asking again cannot help until Settings change. */
 const SETTINGS_ERRORS = new Set(['CHAT_NOT_CONFIGURED', 'CHAT_AUTH_ERROR', 'OPENAI_OAUTH_RECONNECT_REQUIRED']);
 
@@ -371,6 +372,10 @@ export function ChatPanel({
   const dataAccess = useChatDataAccess();
   const problem = chat.current.problem ?? null;
   const switcher = useActionPopover({ align: 'end' });
+  const modelPicker = useActionPopover({ align: 'end', side: 'top' });
+  const closeModelPicker = modelPicker.close;
+  useLayoutEffect(() => { closeModelPicker(); }, [chat.current.key, closeModelPicker]);
+  const [handoff, setHandoff] = useState<{ key: string; afterEntry?: string; provider: string } | null>(null);
   const { revision } = useWorkspace();
   const [connection, setConnection] = useState<ChatStatus | 'failed' | null>(null);
   const status = connection === 'failed' ? null : connection;
@@ -380,6 +385,7 @@ export function ChatPanel({
   const { draft, setDraft } = chat;
   const panel = useRef<HTMLElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
+  const focusAfterSelection = useRef(false);
   const log = useRef<HTMLDivElement>(null);
   const historyRows = useRef(new Map<string, HTMLButtonElement>());
   const undoDeletion = useRef<HTMLButtonElement>(null);
@@ -408,7 +414,14 @@ export function ChatPanel({
   }, []);
   const refused = chat.entries.at(-1)?.error?.code === 'CHAT_PROVIDER_CHANGED' ? chat.entries.at(-1)!.id : null;
   useEffect(() => { if (refused) setStatusCheck(count => count + 1); }, [refused]);
-  const ready = status?.configured === true;
+  const { ready, provider, selection, unavailableModel } = conversationRecipient(status, chat.selectionOf(chat.current.key));
+  useLayoutEffect(() => {
+    if (!focusAfterSelection.current) return;
+    focusAfterSelection.current = false;
+    input.current?.focus();
+  }, [selection]);
+  const lastEntry = chat.entries.at(-1)?.id;
+  const showHandoff = handoff && handoff.key === chat.current.key && handoff.afterEntry === lastEntry && handoff.provider === provider;
   const frontendId = problem?.frontendId;
   const empty = chat.entries.length === 0;
   const practice = useAsyncResource(async signal => {
@@ -435,12 +448,10 @@ export function ChatPanel({
     field.style.height = `${Math.min(field.scrollHeight, 148)}px`;
   }, [draft]);
 
-  /** The question goes to the provider this panel names; the server refuses it if that changed. */
-  const provider = status?.provider;
   const ask = (text: string) => {
     if (!ready || chat.busy || !text.trim()) return;
     pinned.current = true;
-    chat.send(text, { provider });
+    chat.send(text, { provider, selection });
     setDraft('');
     // A suggestion button disappears once the conversation starts; keep the keyboard in the field.
     input.current?.focus();
@@ -450,12 +461,14 @@ export function ChatPanel({
    * request. A preset about another problem goes to that problem's conversation.
    */
   const runAction = (action: ChatAction, about: ChatProblemRef | null = problem) => {
-    if (!about || !ready) return;
+    if (!about) return;
     const thread = problemThread(about);
+    const recipient = conversationRecipient(status, chat.selectionOf(thread.key));
+    if (!recipient.ready) return;
     const shown = thread.key === chat.current.key;
     if (shown && chat.busy) return;
     const target = shown && chat.current.problem ? chat.current.problem : about;
-    const options = { provider, thread: shown ? chat.current : thread };
+    const options = { provider: recipient.provider, selection: recipient.selection, thread: shown ? chat.current : thread };
     if (action.kind === 'hint') {
       const level = nextHintLevel(shown ? chat.entries : chat.entriesOf(thread.key), target.frontendId);
       if (!hintLabel(level, lang)) return;
@@ -475,7 +488,7 @@ export function ChatPanel({
     runAction(pending.action, pending.problem);
   }, [pending, status]);
 
-  const providerName = provider ? PROVIDER_NAMES[provider] : '';
+  const providerName = provider ? providerNames[provider] : '';
   const nextHint = problem ? hintLabel(nextHintLevel(chat.entries, problem.frontendId), lang) : null;
   const title = threadName(chat.current, lang);
   const general = chat.threads.find(thread => thread.key === GENERAL_THREAD.key);
@@ -549,7 +562,7 @@ export function ChatPanel({
       aria-label={zh ? 'AI 对话' : 'AI chat'}
       onKeyDown={event => {
         // Esc closes the conversation list first when that is open.
-        if (event.key === 'Escape' && !event.nativeEvent.isComposing && !switcher.open) {
+        if (event.key === 'Escape' && !event.nativeEvent.isComposing && !switcher.open && !modelPicker.open) {
           event.stopPropagation();
           onClose();
         }
@@ -564,7 +577,6 @@ export function ChatPanel({
       >
         <div className="chat-heading">
           <h2 title={title}>{title}</h2>
-          {ready && <p>{providerName}{status?.model ? ` · ${status.model.replace(/^models\//, '')}` : ''}</p>}
         </div>
         <button type="button" className="chat-thread-button" {...switcher.triggerProps}>
           <History size={15} aria-hidden="true" />{zh ? '历史记录' : 'History'}
@@ -602,7 +614,6 @@ export function ChatPanel({
                     aria-label={zh ? `删除对话：${name}` : `Delete conversation: ${name}`}
                     onClick={() => clearConversation(thread.key, index)}>
                     <Trash2 size={14} aria-hidden="true" />
-                    {zh ? '删除' : 'Delete'}
                   </button>
                 </div>
               );
@@ -637,7 +648,11 @@ export function ChatPanel({
           <p className="chat-thinking" role="status">{zh ? '正在检查 AI 连接…' : 'Checking the AI connection…'}</p>
         ) : !ready && (
           <div className="chat-empty">
-            <p>{zh ? '连接一个 AI 服务后，就可以在这里提问。' : 'Connect an AI provider to ask questions here.'}</p>
+            <p>{unavailableModel
+              ? (zh ? '当前连接已不支持此模型。请在输入框下方选择其他模型。' : 'This connection no longer supports the selected model. Choose another below the input.')
+              : status?.providers?.some(item => item.configured)
+              ? (zh ? `${providerName} 尚未连接。你可以在输入框下方选择已连接的模型。` : `${providerName} is not connected. Choose a connected model below the input.`)
+              : (zh ? '连接一个 AI 服务后，就可以在这里提问。' : 'Connect an AI provider to ask questions here.')}</p>
             <button type="button" className="btn btn-secondary" onClick={onOpenAiSettings}>{zh ? '打开 AI 设置' : 'Open AI settings'}</button>
           </div>
         )}
@@ -677,13 +692,16 @@ export function ChatPanel({
             && entry.state === 'done' && entry.content.trim() && !entry.changes?.length;
           return <Answer key={entry.id} entry={entry} lang={lang} isLast={isLast} busy={chat.busy || !ready}
             conversationLanguage={conversationLanguage}
-            onRetry={() => chat.retry({ provider })} onSaveNote={canSaveNote ? () => runAction({ kind: 'save-note' }) : undefined}
+            onRetry={() => chat.retry({ provider, selection })} onSaveNote={canSaveNote ? () => runAction({ kind: 'save-note' }) : undefined}
             onOpenAiSettings={onOpenAiSettings} onWorkspaceLink={onWorkspaceLink} onConfirmChange={chat.confirmChange}
             onDismissChange={chat.dismissChange} onUndoChange={chat.undoChange} />;
         })}
       </div>
 
       <form className="chat-composer" onSubmit={event => { event.preventDefault(); ask(draft); }}>
+        <div role="status" className="chat-handoff">{showHandoff && (zh
+          ? `下一条消息将由 ${providerName} 回答。`
+          : `${providerName} will answer your next message.`)}</div>
         {!empty && nextHint && (
           <div className="chat-context">
             <button type="button" className="chat-action" disabled={!ready || chat.busy} onClick={() => runAction({ kind: 'hint' })}>
@@ -721,7 +739,18 @@ export function ChatPanel({
             ? <button type="button" className="chat-send" aria-label={zh ? '停止回答' : 'Stop answering'} onClick={chat.stop}><Square size={14} aria-hidden="true" /></button>
             : <button type="submit" className="chat-send" aria-label={zh ? '发送' : 'Send'} disabled={!ready || !draft.trim()}><ArrowUp size={16} aria-hidden="true" /></button>}
         </div>
-        <WritePermission lang={lang} dataAccess={dataAccess} />
+        <div className="chat-composer-controls">
+          <WritePermission lang={lang} dataAccess={dataAccess} />
+          {provider && status && <ChatModelPicker key={chat.current.key} lang={lang} popover={modelPicker} busy={chat.busy}
+            providers={status.providers ?? []} active={selection ?? { provider, model: status.model, reasoningEffort: getDefaultReasoningEffort(provider, status.model) }}
+            hasHistory={!empty} hasProblem={Boolean(problem)} onSettings={onOpenAiSettings}
+            onApply={next => {
+              if (next.provider !== provider) setHandoff({ key: chat.current.key, afterEntry: lastEntry, provider: next.provider });
+              focusAfterSelection.current = true;
+              chat.setSelection(next);
+              modelPicker.close();
+            }} />}
+        </div>
       </form>
     </aside>
   );

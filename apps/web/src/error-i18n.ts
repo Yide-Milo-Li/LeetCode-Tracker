@@ -243,6 +243,10 @@ const API_ERROR_MESSAGES: Record<string, BilingualMessage> = {
     en: 'The AI provider in Settings changed, so this answer stopped before anything more was sent. Ask again to use the current provider.',
     zh: '设置里的 AI 服务商变了，这次回答已经停下，没有再发送任何内容。重新提问会使用当前的服务商。',
   },
+  CHAT_MODEL_UNAVAILABLE: {
+    en: 'This model is no longer available. Choose another model below the input and try again.',
+    zh: '这个模型已不可用。请在输入框下方选择其他模型后重试。',
+  },
   CHAT_FAILED: {
     en: 'The chat request failed. Try again.',
     zh: '对话请求失败，请重试。',

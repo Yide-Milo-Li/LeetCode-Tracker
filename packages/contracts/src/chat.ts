@@ -13,6 +13,7 @@
  */
 import { z } from 'zod';
 import { llmProviderSchema } from './sync.ts';
+import { getSupportedReasoningEfforts, reasoningEffortLevels } from './llm-models.ts';
 import { workspaceViews, linkedSettingsSections } from './workspace-links.ts';
 import { CHAT_MAX_MESSAGES, CHAT_MAX_MESSAGE_CHARS, CHAT_MAX_TOTAL_CHARS } from './chat-limits.ts';
 
@@ -38,6 +39,14 @@ export type ChatContext = z.infer<typeof chatContextSchema>;
 const chatWritePermissionSchema = z.enum(['confirm', 'full']);
 export type ChatWritePermission = z.infer<typeof chatWritePermissionSchema>;
 
+const chatModelSelectionSchema = z.object({
+  provider: llmProviderSchema,
+  model: z.string().trim().min(1).max(160),
+  reasoningEffort: z.enum(reasoningEffortLevels),
+}).strict().refine(value => getSupportedReasoningEfforts(value.provider, value.model).includes(value.reasoningEffort),
+  { path: ['reasoningEffort'], message: 'Unsupported reasoning effort for this model.' });
+export type ChatModelSelection = z.infer<typeof chatModelSelectionSchema>;
+
 export const chatRequestSchema = z.object({
   messages: z.array(chatMessageSchema).min(1).max(CHAT_MAX_MESSAGES),
   context: chatContextSchema.optional(),
@@ -53,12 +62,16 @@ export const chatRequestSchema = z.object({
   /** Omitted means confirm each change. Ignored when data access is off. */
   writePermission: chatWritePermissionSchema.optional(),
   /**
-   * The provider the user was told the question goes to. When another one is active, or the
-   * active one changes while answering, the answer ends with `CHAT_PROVIDER_CHANGED` before
-   * anything more is sent.
+   * The provider shown to the user. On requests without an explicit selection, the active
+   * provider must still match before every call.
    */
   provider: llmProviderSchema.optional(),
+  /** Explicit conversation recipient. Without a selection, the active-provider guard above applies. */
+  selection: chatModelSelectionSchema.optional(),
 }).strict().superRefine((value, ctx) => {
+  if (value.selection && value.provider && value.selection.provider !== value.provider) {
+    ctx.addIssue({ code: 'custom', path: ['selection'], message: 'The selected provider must match the recipient.' });
+  }
   // Refinements also run on input that already failed a field rule, such as an empty list.
   const last = value.messages.at(-1);
   if (last && last.role !== 'user') {
@@ -171,4 +184,11 @@ export interface ChatStatus {
   configured: boolean;
   provider?: z.infer<typeof llmProviderSchema>;
   model: string;
+  providers?: ChatProviderOption[];
+}
+
+export interface ChatProviderOption extends ChatModelSelection {
+  configured: boolean;
+  /** The signed-in account supplies the model list instead of the API-key presets. */
+  accountModels: boolean;
 }

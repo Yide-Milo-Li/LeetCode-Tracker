@@ -9,7 +9,7 @@
  * An answer may carry proposals for the user to confirm or changes already saved with full access.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ChatContextSummary, ChatRequest, ChatStreamEvent, ChatTurn } from '../../../../packages/contracts/src/chat.ts';
+import type { ChatContextSummary, ChatModelSelection, ChatRequest, ChatStreamEvent, ChatTurn } from '../../../../packages/contracts/src/chat.ts';
 import { CHAT_MAX_MESSAGE_CHARS, CHAT_MAX_TOTAL_CHARS } from '../../../../packages/contracts/src/chat-limits.ts';
 import { api } from '../api.ts';
 import { ApiError } from '../platform/index.ts';
@@ -115,15 +115,12 @@ export function requestTurns(entries: ChatEntry[]): ChatTurn[] {
   return turns;
 }
 
-/** The provider a question is said to go to; see `provider` in the chat request. */
-export type ChatProvider = NonNullable<ChatRequest['provider']>;
+export type ChatRecipient = Pick<ChatRequest, 'provider' | 'selection'>;
 
-export interface ChatSendOptions {
+export interface ChatSendOptions extends ChatRecipient {
   /** Marks the question as a rung of the hint ladder, so the next rung can be offered. */
   hint?: ChatHint;
   preset?: ChatEntry['preset'];
-  /** The provider the panel names; the server refuses the answer when another one is active. */
-  provider?: ChatProvider;
   /**
    * The conversation to ask in; defaults to the one shown. A question asked from outside the
    * panel goes to the problem it was asked about, even if another conversation is shown by now.
@@ -171,7 +168,9 @@ export interface ChatController {
    * Ask the last question again. Its answer is replaced, unless it holds a change the user
    * confirmed: then it stays, and the question is asked again after it.
    */
-  retry(options?: Pick<ChatSendOptions, 'provider'>): void;
+  retry(options?: ChatRecipient): void;
+  selectionOf(key: string): ChatModelSelection | undefined;
+  setSelection(selection: ChatModelSelection): void;
   /** The entries of any conversation, by key; empty for one that has none. */
   entriesOf(key: string): ChatEntry[];
   stop(): void;
@@ -232,11 +231,14 @@ export function useChat(lang: Language, options: ChatOptions = {}): ChatControll
     let threads = savedThreads;
     if (busyKeys.size > 0) {
       if (!historyEdits.current.size) return;
-      // Keep partial answers out of storage; write just the conversations the user managed.
+      // Save explicit choices immediately, even when their new recipient is for the next turn.
+      // For a streaming thread only the previously saved turns are safe to serialize.
       threads = { ...base };
       for (const key of historyEdits.current) {
-        if (savedThreads[key]) threads[key] = savedThreads[key];
-        else delete threads[key];
+        const thread = savedThreads[key];
+        if (!thread) delete threads[key];
+        else if (busyKeys.has(key)) threads[key] = { ...thread, entries: base[key]?.entries ?? [] };
+        else threads[key] = thread;
       }
     }
     historyEdits.current.clear();
@@ -269,7 +271,7 @@ export function useChat(lang: Language, options: ChatOptions = {}): ChatControll
     return () => clearTimeout(timer);
   }, [undoExpiresAt]);
 
-  const run = useCallback((thread: ChatThreadRef, history: ChatEntry[], provider?: ChatProvider) => {
+  const run = useCallback((thread: ChatThreadRef, history: ChatEntry[], recipient: ChatRecipient) => {
     const { key } = thread;
     const answerId = crypto.randomUUID();
     const dataAccess = getChatDataAccess();
@@ -295,7 +297,7 @@ export function useChat(lang: Language, options: ChatOptions = {}): ChatControll
       // Asking is also the moment old and surplus conversations are let go.
       threads: pruneThreads({
         ...current.threads,
-        [key]: { ...thread, entries: [...history, answer], usedAt: Date.now() },
+        [key]: { ...thread, selection: recipient.selection, entries: [...history, answer], usedAt: Date.now() },
       }, Date.now(), inFlight),
     }));
     setBusyKeys(keys => new Set(keys).add(key));
@@ -347,7 +349,7 @@ export function useChat(lang: Language, options: ChatOptions = {}): ChatControll
       // Read when the question is sent, so a change in Settings applies to the next one.
       ...(dataAccess ? {} : { dataAccess: false }),
       ...(fullAccess ? { writePermission: 'full' } : {}),
-      ...(provider ? { provider } : {}),
+      ...recipient,
     };
     void streamChat(request, onEvent, abort.signal)
       .then(() => {
@@ -382,7 +384,7 @@ export function useChat(lang: Language, options: ChatOptions = {}): ChatControll
     return { ...current, threads, current: next };
   }), []);
 
-  const send = useCallback((text: string, { hint, preset, provider, thread }: ChatSendOptions = {}) => {
+  const send = useCallback((text: string, { hint, preset, thread, ...recipient }: ChatSendOptions = {}) => {
     const content = text.trim();
     const { current, threads } = stateRef.current;
     const target = thread ?? current;
@@ -393,10 +395,10 @@ export function useChat(lang: Language, options: ChatOptions = {}): ChatControll
     const question: ChatEntry = {
       id: crypto.randomUUID(), role: 'user', content, state: 'done', ...(hint ? { hint } : {}), ...(preset ? { preset } : {}),
     };
-    run(ref, [...(stored?.entries ?? []), question], provider);
+    run(ref, [...(stored?.entries ?? []), question], recipient);
   }, [run]);
 
-  const retry = useCallback(({ provider }: Pick<ChatSendOptions, 'provider'> = {}) => {
+  const retry = useCallback((recipient: ChatRecipient = {}) => {
     const { current, threads } = stateRef.current;
     if (controllers.current.has(current.key)) return;
     const entries = threads[current.key]?.entries ?? [];
@@ -407,13 +409,25 @@ export function useChat(lang: Language, options: ChatOptions = {}): ChatControll
     if (!canRetryChatAnswer(answer)) return;
     if (hasActedChanges(answer)) {
       // The answer and its cards stay; the model sees them, with what became of each change.
-      run(current, [...entries, { ...question, id: crypto.randomUUID() }], provider);
+      run(current, [...entries, { ...question, id: crypto.randomUUID() }], recipient);
     } else {
-      run(current, entries.slice(0, lastQuestion + 1), provider);
+      run(current, entries.slice(0, lastQuestion + 1), recipient);
     }
   }, [run]);
 
   const entriesOf = useCallback((key: string) => stateRef.current.threads[key]?.entries ?? NO_ENTRIES, []);
+  const selectionOf = useCallback((key: string) => stateRef.current.threads[key]?.selection, []);
+  const setSelection = useCallback((selection: ChatModelSelection) => {
+    const ref = stateRef.current.current;
+    historyEdits.current.add(ref.key);
+    setState(current => {
+      const thread = current.threads[ref.key] ?? { ...ref, entries: [] };
+      const now = Date.now();
+      return { ...current, threads: pruneThreads({
+        ...current.threads, [ref.key]: { ...thread, selection, usedAt: now },
+      }, now, new Set([...controllers.current.keys(), ref.key])) };
+    });
+  }, []);
 
   const stop = useCallback(() => controllers.current.get(stateRef.current.current.key)?.abort(), []);
 
@@ -529,7 +543,7 @@ export function useChat(lang: Language, options: ChatOptions = {}): ChatControll
     entries: state.threads[state.current.key]?.entries ?? NO_ENTRIES,
     busy: busyKeys.has(state.current.key),
     anyBusy: busyKeys.size > 0,
-    threads, select, send, retry, entriesOf, stop, clear, cleared: state.cleared?.ref ?? null, undoClear,
+    threads, select, send, retry, entriesOf, selectionOf, setSelection, stop, clear, cleared: state.cleared?.ref ?? null, undoClear,
     draft: state.drafts[state.current.key] ?? '',
     setDraft, confirmChange, dismissChange, undoChange,
   };

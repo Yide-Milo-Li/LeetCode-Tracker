@@ -5,6 +5,7 @@
  * Retries progress formatting and falls back locally for planning; import failures remain explicit.
  */
 import { randomUUID } from 'node:crypto';
+import type { ChatModelSelection } from '../../../../packages/contracts/src/chat.ts';
 import { normalizeUsage, sumUsage, type LLMUsage } from './usage.ts';
 import { emitDiagnostic, type DiagnosticSink } from './diagnostics.ts';
 import { quotas } from '../../../../packages/domain/src/index.ts';
@@ -269,11 +270,15 @@ export class LLMAssistant implements ILLMAssistant {
    * Check status of currently active LLM provider.
    */
   public getStatus(): LLMAssistantStatus {
-    const activeCfg = this.providerConfigs[this.activeProviderType];
-    const isConfigured = this.isProviderConfigured(this.activeProviderType);
+    return this.getProviderStatus(this.activeProviderType);
+  }
+
+  public getProviderStatus(provider: LLMProviderType): LLMAssistantStatus {
+    const activeCfg = this.providerConfigs[provider];
     return {
-      configured: isConfigured,
-      provider: this.activeProviderType,
+      configured: this.isProviderConfigured(provider),
+      provider,
+      authMode: activeCfg.authMode,
       model: activeCfg.model,
       fallbackModels: [...activeCfg.fallbackModels],
       baseUrl: activeCfg.baseUrl,
@@ -937,7 +942,7 @@ Return ONLY valid JSON conforming to the schema.`;
   }
 
   /**
-   * Stream one chat answer from the active provider.
+   * Stream one chat answer using the conversation's selection or the settings default.
    *
    * A fallback model is tried only while nothing has reached the caller; once text was delivered
    * a failure is final, so an answer never restarts under the reader. The request is abandoned
@@ -949,6 +954,7 @@ Return ONLY valid JSON conforming to the schema.`;
    * `OPENAI_OAUTH_RECONNECT_REQUIRED` from a lost ChatGPT session.
    */
   public async streamChat(params: {
+    selection?: ChatModelSelection;
     systemInstruction: string;
     messages: ChatMessage[];
     tools?: ChatToolSpec[];
@@ -956,14 +962,16 @@ Return ONLY valid JSON conforming to the schema.`;
     onDelta: (text: string) => void;
     abortSignal?: AbortSignal;
   }): Promise<{ model: string; provider: LLMProviderType; usage: LLMUsage; toolCalls?: ChatToolCall[]; replay?: unknown }> {
-    const providerType = this.activeProviderType;
+    const providerType = params.selection?.provider ?? this.activeProviderType;
     const active = this.providerConfigs[providerType];
     if (!this.isProviderConfigured(providerType)) {
       throw new LLMError('CHAT_NOT_CONFIGURED', 'Configure an AI provider in Settings.', 503, providerType);
     }
     const provider = this.providers[providerType];
     if (!provider.streamChat) throw new LLMError('CHAT_UNAVAILABLE', 'This AI provider cannot stream chat answers.', 503, providerType);
-    const config = { ...active, fallbackModels: [...active.fallbackModels] };
+    // Explicit picks stay on that model across tool rounds, even if another request changes settings.
+    const models = params.selection ? [params.selection.model] : [active.model, ...active.fallbackModels];
+    const effort = params.selection?.reasoningEffort ?? active.reasoningEffort;
     const operation = { id: randomUUID(), attempt: 0, usages: [] as LLMUsage[] };
 
     const controller = new AbortController();
@@ -986,7 +994,7 @@ Return ONLY valid JSON conforming to the schema.`;
     aborted.catch(() => {});
 
     try {
-      for (const model of [config.model, ...config.fallbackModels]) {
+      for (const model of models) {
         if (controller.signal.aborted) break;
         let delivered = false;
         const started = Date.now();
@@ -1001,7 +1009,7 @@ Return ONLY valid JSON conforming to the schema.`;
             tools: params.tools,
             steps: params.steps,
             abortSignal: controller.signal,
-            reasoningEffort: resolveModelReasoningEffort(providerType, model, config.reasoningEffort),
+            reasoningEffort: resolveModelReasoningEffort(providerType, model, effort),
             onDelta: text => {
               if (controller.signal.aborted) return;
               delivered = true;
