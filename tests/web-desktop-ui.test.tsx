@@ -42,6 +42,45 @@ const { DesktopAgentPanel } = await import('../apps/web/src/components/settings/
 const { api } = await import('../apps/web/src/api.ts');
 const { useEncouragement } = await import('../apps/web/src/hooks/useEncouragement.ts');
 
+it('resizes the practice split by pointer or keyboard, restores a cancelled drag and remembers the committed fraction', async () => {
+  const { PracticeDivider, readPracticeSplit } = await import('../apps/web/src/components/PracticeDivider.tsx');
+  function Split() {
+    const [choice, setChoice] = React.useState(readPracticeSplit);
+    return <PracticeDivider lang="en" pageId="problem" width={1600} pageWidth={1600 * (choice ?? 0.75)}
+      preference={choice} onChange={setChoice} />;
+  }
+  localStorage.clear();
+  let view = render(<Split />);
+  const divider = screen.getByRole('separator');
+  const capture = mock.fn();
+  Object.assign(divider, { setPointerCapture: capture });
+  const pointer = (type: string, clientX: number) => fireEvent(divider,
+    new dom.window.PointerEvent(type, { pointerId: 1, isPrimary: true, button: 0, clientX, bubbles: true }));
+  pointer('pointerdown', 1203);
+  pointer('pointermove', 963);
+  assert.equal(divider.getAttribute('aria-valuenow'), '60');
+  assert.equal(capture.mock.callCount(), 1);
+  assert.equal(readPracticeSplit(), null);
+  pointer('pointerup', 963);
+  assert.equal(readPracticeSplit(), 0.6);
+  pointer('pointerdown', 963);
+  pointer('pointermove', 803);
+  pointer('pointercancel', 803);
+  assert.equal(divider.getAttribute('aria-valuenow'), '60');
+  view.unmount();
+  view = render(<Split />);
+  const restored = screen.getByRole('separator');
+  assert.equal(restored.getAttribute('aria-valuenow'), '60');
+  fireEvent.keyDown(restored, { key: 'ArrowLeft' });
+  assert.equal(restored.getAttribute('aria-valuenow'), '58');
+  fireEvent.keyDown(restored, { key: 'Home' });
+  assert.equal(restored.getAttribute('aria-valuenow'), restored.getAttribute('aria-valuemin'));
+  fireEvent.doubleClick(restored);
+  assert.equal(readPracticeSplit(), null);
+  assert.equal(restored.getAttribute('aria-valuenow'), '75');
+  view.unmount();
+});
+
 it('checks on startup, separates download from installation, and blocks restart for an unsaved note', async () => {
   const { DesktopUpdateNotice } = await import('../apps/web/src/components/DesktopUpdateNotice.tsx');
   const { DesktopUpdateRow } = await import('../apps/web/src/components/settings/DesktopUpdateRow.tsx');

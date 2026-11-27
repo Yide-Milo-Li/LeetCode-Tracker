@@ -82,6 +82,17 @@ describe('embedded LeetCode practice', () => {
           if (wide) {
             await until(async () => (await child.size()).width < before.width);
             await until(toolbarClear);
+            const divider = dialog.querySelector('[role="separator"]');
+            const key = value => divider.dispatchEvent(new KeyboardEvent('keydown', { key: value, bubbles: true }));
+            key('Enter');
+            await until(toolbarClear);
+            const start = page.getBoundingClientRect().width;
+            key('ArrowLeft');
+            await until(() => page.getBoundingClientRect().width < start - 10);
+            await until(toolbarClear);
+            key('Enter');
+            await until(() => page.getBoundingClientRect().width === start);
+            await until(toolbarClear);
           } else await until(() => page.getBoundingClientRect().width === 0);
           const chatWidth = dialog.querySelector('.chat-panel').getBoundingClientRect().width;
           const siteWidth = page.getBoundingClientRect().width;

@@ -2,6 +2,7 @@ import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'reac
 import { createPortal } from 'react-dom';
 import { ArrowLeft, Columns2, ExternalLink, MessageSquareText, MoreHorizontal, NotebookPen, PanelRightClose } from 'lucide-react';
 import { PracticeNote, type PracticeNoteStatus } from './PracticeNote.tsx';
+import { PracticeDivider, practiceSplitBounds, readPracticeSplit } from './PracticeDivider.tsx';
 import type { Language } from '../i18n.ts';
 import { openExternalUrl } from '../platform/index.ts';
 import { practiceCommand, type PracticeProblem } from '../platform/practice.ts';
@@ -59,8 +60,12 @@ export function PracticeBrowser({ problem, lang, open, busy, news, pane, onPane,
   const previousOpen = useRef(open);
   const [zoom, setZoom] = useState(savedZoom);
   const zoomRef = useRef(zoom);
-  const rail = Math.min(520, Math.max(400, Math.round(width * 0.24)));
-  const autoSplit = width - rail >= 1100 * Math.max(1, zoom / 100);
+  const defaultRail = Math.min(520, Math.max(400, Math.round(width * 0.24)));
+  // Dragging the divider must not cross the threshold that would close the split itself.
+  const autoSplit = width - defaultRail >= 1100 * Math.max(1, zoom / 100);
+  const [fraction, setFraction] = useState(readPracticeSplit);
+  const { min, max } = practiceSplitBounds(width);
+  const pageWidth = Math.round(Math.max(min, Math.min(max, fraction === null ? width - defaultRail : width * fraction)));
   const [manualSplit, setManualSplit] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [visitedNote, setVisitedNote] = useState(false);
@@ -169,7 +174,7 @@ export function PracticeBrowser({ problem, lang, open, busy, news, pane, onPane,
   const label = zh ? '问 LCT' : 'Ask LCT';
   return createPortal(
     <dialog ref={dialog} className="practice-workspace" data-overlay-host="" data-chat={open ? 'open' : 'closed'}
-      data-split={open && split ? 'true' : undefined} style={{ '--practice-rail': rail + 'px' } as React.CSSProperties}
+      data-split={open && split ? 'true' : undefined} style={{ '--practice-rail': (width - pageWidth) + 'px' } as React.CSSProperties}
       aria-label={zh ? '刷题工作区' : 'Practice workspace'} onCancel={event => {
         event.preventDefault();
         if (open) onToggle();
@@ -177,7 +182,9 @@ export function PracticeBrowser({ problem, lang, open, busy, news, pane, onPane,
       <header className="practice-toolbar">
         <button type="button" className="practice-icon" aria-label={zh ? '返回 LCT' : 'Back to LCT'} title={zh ? '返回 LCT' : 'Back to LCT'} onClick={onClose}><ArrowLeft size={16} /></button>
         <span className="practice-title" title={problem.title}><span>#{problem.frontendId}</span> {problem.title}</span>
-        {elsewhere && !failed && <button className="text-link" onClick={() => retry(n => n + 1)}>{zh ? '回到本题' : 'Return to this problem'}</button>}
+        {elsewhere && !failed && <button className="text-link" onClick={() => retry(n => n + 1)}
+          title={zh ? `对话和笔记仍属于 #${problem.frontendId}` : `Chat and notes are still for #${problem.frontendId}`}>
+          {zh ? `回到 #${problem.frontendId}` : `Return to #${problem.frontendId}`}</button>}
         <button className="practice-icon" aria-label={zh ? '页面选项' : 'Page options'} title={zh ? '页面选项' : 'Page options'}
           aria-expanded={optionsOpen} aria-controls={panelId + '-options'} onClick={() => setOptionsOpen(value => !value)}><MoreHorizontal size={17} /></button>
         {!open ? <button type="button" className="practice-ask" data-practice-chat-toggle="" aria-expanded={false}
@@ -211,10 +218,12 @@ export function PracticeBrowser({ problem, lang, open, busy, news, pane, onPane,
           {externalFailed && <span role="alert">{zh ? '无法打开系统浏览器。' : 'Could not open the system browser.'}</span>}
         </div>}
       </header>
-      <div ref={slot} className="practice-page">
+      <div ref={slot} id={panelId + '-page'} className="practice-page">
         {failed && <div role="alert">{zh ? '无法打开嵌入式题目页。' : 'Could not open the embedded problem page.'}
           <button className="btn btn-secondary" onClick={() => retry(n => n + 1)}>{zh ? '重试' : 'Retry'}</button></div>}
       </div>
+      {open && split && <PracticeDivider lang={lang} pageId={panelId + '-page'} width={width}
+        pageWidth={pageWidth} preference={fraction} onChange={setFraction} />}
       <div className="practice-chat" role="tabpanel" id={panelId + '-chat-panel'} aria-labelledby={panelId + '-chat'} hidden={!open || pane !== 'chat'}>
         {open && pane === 'chat' && children}
       </div>

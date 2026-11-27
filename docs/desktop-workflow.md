@@ -6,7 +6,9 @@ The same desktop UI runs in the Windows and Apple Silicon macOS desktop apps as 
 
 Open a problem from Today, Problems, a goal list or Notes. Choose **Ask LCT** or press **Command+J** on macOS or **Ctrl+J** on Windows. The panel opens on the right when LeetCode can keep at least 1100 readable CSS pixels. In narrower windows it uses the reading area. Choose **Show side by side** to keep the problem visible while chatting or taking notes. **Close panel** or **Escape** returns to the editor. Page zoom and **Open in system browser** are under **Page options**.
 
-Use **Chat** and **Note** at the top of the panel to switch while solving. The note editor keeps your unsaved text as you switch or collapse the panel. **Save note** writes to the same problem note you see in the Notes workspace.
+Drag the divider between LeetCode and the panel to adjust their widths. The app remembers the proportion on this device. With the divider focused, use the left and right arrow keys to adjust it. Double-click the divider or press Enter on it to restore automatic sizing.
+
+Use **Chat** and **Note** at the top of the panel to switch while solving. Both follow the problem ID shown in the toolbar. Following a link to a different problem within LeetCode keeps the original association. Open the other problem from LCT to start its own conversation and note. The note editor keeps your unsaved text as you switch or collapse the panel. **Save note** writes to the same problem note you see in the Notes workspace.
 
 After an answer, choose **Draft note from this chat**. LCT uses questions and follow-ups from the current visit. When reopening a problem before asking a new question, **Draft note from chat history** uses its earlier conversation. Review the suggested change in chat and confirm it, then choose **View problem note**. If the assistant returns a text draft, **Add to note draft** places it after your handwritten text for editing and saving. LeetCode editor contents and account credentials stay outside the chat context.
 
