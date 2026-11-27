@@ -28,8 +28,7 @@
   cursor: grab;
   touch-action: none;
 }
-/* Extends the hit area to the window edge, so the pointer that reveals a tucked launcher is still
-   on it once it has slid out. */
+/* Keep the slim handle easy to hit without enlarging its visible footprint. */
 .chat-launcher-button::after {
   content: '';
   position: absolute;
@@ -141,6 +140,16 @@
 .chat-launcher.is-tucked .chat-launcher-button::before {
   opacity: 0.25;
   transform: none;
+}
+@media (hover: hover) {
+  .chat-launcher.is-tucked .chat-launcher-button:hover::before {
+    opacity: 0.65;
+  }
+}
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .chat-launcher.is-tucked .chat-launcher-button:hover::before {
+    transform: scale(1.12);
+  }
 }
 /* The bar itself shows keyboard focus, and an answer arriving or waiting to be read while the panel is closed. */
 .chat-launcher.is-tucked .chat-launcher-button:focus-visible {

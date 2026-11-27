@@ -335,6 +335,72 @@ it('docks the launcher beside the nearer edge and opens the panel next to it', (
   assert.deepEqual(dockForPanel({ left: 300, top: 150 }, viewport, { side: 'top', left: 600 }), { side: 'bottom', left: 300 });
 });
 
+for (const side of ['left', 'right', 'top', 'bottom'] as const) {
+  it(`tucks the chat against the ${side} edge during a sustained header drag`, async t => {
+    mock.method(api, 'getChatStatus', async () => ({ configured: true, provider: 'openai', model: 'test' }));
+    await openPanel();
+    const large = side === 'top';
+    if (large) fireEvent.click(screen.getByRole('button', { name: 'Enlarge panel' }));
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Keep this draft' } });
+    const panel = screen.getByRole('complementary');
+    const x = Number.parseFloat(panel.style.left) + 100;
+    const y = Number.parseFloat(panel.style.top) + 14;
+    const header = screen.getByRole('heading', { name: 'General' });
+    fireEvent.pointerDown(header, { button: 0, clientX: x, clientY: y, pointerId: 1 });
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    // The top grab has only 22px of physical travel beyond contact.
+    const clientX = side === 'left' ? 50 : side === 'right' ? window.innerWidth - 100 : x;
+    const clientY = side === 'top' ? 0 : side === 'bottom' ? y + 65 : y;
+    fireEvent.pointerMove(window, { clientX, clientY, pointerId: 1 });
+    await act(async () => { t.mock.timers.tick(449); });
+    assert.ok(panel.isConnected);
+    await act(async () => { t.mock.timers.tick(1); });
+    assert.equal(panel.isConnected, false);
+    const dock = screen.getByRole('button', { name: 'Ask AI' }).closest('.chat-launcher')!;
+    assert.equal(dock.getAttribute('data-side'), side);
+    assert.ok(dock.classList.contains('is-tucked'));
+    fireEvent.pointerUp(window, { clientX, clientY, pointerId: 1 });
+    assert.equal(document.documentElement.classList.contains('chat-dragging'), false);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Ask AI' })); });
+    assert.equal((screen.getByRole('textbox') as HTMLTextAreaElement).value, 'Keep this draft');
+    if (large) assert.equal(screen.getByRole('complementary').getAttribute('data-size'), 'large');
+  });
+}
+
+it('keeps the panel open on edge contact, sliding, retreat, early release and pointer cancellation', async t => {
+  mock.method(api, 'getChatStatus', async () => ({ configured: false, model: '' }));
+  await openPanel();
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const panel = screen.getByRole('complementary');
+  const header = screen.getByRole('heading', { name: 'General' });
+  const start = () => fireEvent.pointerDown(header, { button: 0, clientX: 700, clientY: 150, pointerId: 1 });
+  const move = (x: number, y = 150, pointerId = 1) => fireEvent.pointerMove(window, { clientX: x, clientY: y, pointerId });
+  const stillOpen = async () => {
+    await act(async () => { t.mock.timers.tick(500); });
+    assert.ok(panel.isConnected);
+  };
+  start();
+  move(716); // The default placement is 16px from the right drag limit.
+  await stillOpen();
+  move(743);
+  await stillOpen();
+  move(760, 150, 2);
+  await stillOpen();
+  move(760);
+  move(760, 175);
+  await stillOpen();
+  move(768, 175);
+  move(758, 175);
+  await stillOpen();
+  move(775, 175);
+  fireEvent.pointerUp(window, { pointerId: 1 });
+  await stillOpen();
+  start();
+  move(760);
+  fireEvent.pointerCancel(window, { pointerId: 1 });
+  await stillOpen();
+});
+
 it('drags the launcher to an edge, remembers it and tucks away when left alone', async () => {
   mock.method(api, 'getChatStatus', async () => ({ configured: false, model: '' }));
   const stored = () => JSON.parse(localStorage.getItem('leetcode_tracker_chat_position_v1') ?? 'null');
@@ -389,7 +455,8 @@ it('drags the launcher to an edge, remembers it and tucks away when left alone',
   await waitFor(() => assert.equal(returningDock.classList.contains('is-tucked'), true), { timeout: LAUNCHER_REST_MS + 1500 });
   assert.equal(returningDock.getAttribute('data-side'), 'right');
   await act(async () => { fireEvent.pointerEnter(returningButton); });
-  assert.equal(returningDock.classList.contains('is-tucked'), false);
+  assert.equal(returningDock.classList.contains('is-tucked'), true);
+  assert.equal(screen.queryByRole('complementary'), null);
   await act(async () => { fireEvent.keyDown(window, { key: 'j', ctrlKey: true }); });
   assert.equal((await waitFor(() => screen.getByRole('complementary'))).style.left, `${width - 420 - 8}px`);
 });

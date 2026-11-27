@@ -80,21 +80,69 @@ export function dockAt(point: Point, viewport: Viewport): ChatDock {
   const toSide = Math.min(x, viewport.width - x);
   const toTopOrBottom = Math.min(y, viewport.height - y);
   if (toTopOrBottom < toSide) {
-    return {
-      side: y < viewport.height / 2 ? 'top' : 'bottom',
-      left: clamp(point.left, EDGE_GAP, viewport.width - LAUNCHER_SIZE - EDGE_GAP),
-    };
+    return dockOnEdge(y < viewport.height / 2 ? 'top' : 'bottom', point.left, viewport);
   }
-  return {
-    side: x < viewport.width / 2 ? 'left' : 'right',
-    bottom: clamp(viewport.height - point.top - LAUNCHER_SIZE, EDGE_GAP, viewport.height - LAUNCHER_SIZE - EDGE_GAP),
-  };
+  return dockOnEdge(x < viewport.width / 2 ? 'left' : 'right', point.top, viewport);
+}
+
+function dockOnEdge(side: ChatDock['side'], offset: number, viewport: Viewport): ChatDock {
+  if (side === 'top' || side === 'bottom') {
+    return { side, left: clamp(offset, EDGE_GAP, viewport.width - LAUNCHER_SIZE - EDGE_GAP) };
+  }
+  return { side, bottom: clamp(viewport.height - offset - LAUNCHER_SIZE, EDGE_GAP, viewport.height - LAUNCHER_SIZE - EDGE_GAP) };
 }
 
 export const clampPanel = (point: Point, viewport: Viewport, large = false): Point => ({
   left: clamp(point.left, PANEL_MIN_GAP, viewport.width - panelWidth(viewport, large) - PANEL_MIN_GAP),
   top: clamp(point.top, PANEL_MIN_GAP, viewport.height - panelHeight(viewport, large) - PANEL_MIN_GAP),
 });
+
+const EDGE_PUSH_PX = 32;
+const EDGE_HOLD_MS = 450;
+
+interface DragGesture {
+  move: (raw: Point, previous: Point, event: PointerEvent) => void;
+  cancel: () => void;
+}
+
+/** Tracks one header drag. At the physical screen edge a held pointer can stop emitting moves. */
+export function panelEdgeHold(viewport: Viewport, large: boolean, onTuck: (dock: ChatDock, panel: Point) => void): DragGesture {
+  let hold: { side: ChatDock['side']; peak: number; along: number; timer: ReturnType<typeof setTimeout> } | undefined;
+  function cancel() {
+    if (hold) clearTimeout(hold.timer);
+    hold = undefined;
+  }
+  function move(raw: Point, previous: Point, pointer: PointerEvent) {
+    const panel = clampPanel(raw, viewport, large);
+    const x = raw.left - panel.left;
+    const y = raw.top - panel.top;
+    const horizontal = Math.abs(x) >= Math.abs(y);
+    const side = horizontal ? (x < 0 ? 'left' : 'right') : (y < 0 ? 'top' : 'bottom');
+    const depth = Math.abs(horizontal ? x : y);
+    const along = horizontal ? pointer.clientY : pointer.clientX;
+    if (hold) {
+      if (hold.side === side && depth > 0 && depth >= hold.peak - 5 && Math.abs(along - hold.along) <= 12) {
+        hold.peak = Math.max(hold.peak, depth);
+        return;
+      }
+      cancel();
+    }
+    const dx = raw.left - previous.left;
+    const dy = raw.top - previous.top;
+    const outward = horizontal ? Math.sign(x) * dx : Math.sign(y) * dy;
+    if (outward <= Math.abs(horizontal ? dy : dx)) return;
+    const remaining = horizontal
+      ? (x < 0 ? pointer.clientX : viewport.width - pointer.clientX)
+      : (y < 0 ? pointer.clientY : viewport.height - pointer.clientY);
+    // A grab close to the leading edge (especially the header at the top) can run out of travel.
+    if (depth < EDGE_PUSH_PX && !(depth >= 6 && remaining <= 2)) return;
+    hold = { side, peak: depth, along, timer: setTimeout(() => {
+      hold = undefined;
+      onTuck(dockOnEdge(side, along - LAUNCHER_SIZE / 2, viewport), panel);
+    }, EDGE_HOLD_MS) };
+  }
+  return { move, cancel };
+}
 
 /** Where the panel opens: the spot it was dragged to, otherwise at the dock's edge, aligned with the launcher. */
 export function panelPoint(position: ChatPosition, viewport: Viewport): Point {
@@ -198,22 +246,24 @@ export function useChatPosition() {
  * outrunning the element. After a drag, `consumeClick` reports `true` once so the release does not
  * also activate the element.
  */
-export function useDrag(handlers: { onMove: (point: Point) => void; onEnd: (point: Point) => void }) {
+export function useDrag(handlers: { onMove: (point: Point) => void; onEnd: (point: Point) => void }, enabled = true) {
   const [dragging, setDragging] = useState(false);
   const latest = useRef(handlers);
   latest.current = handlers;
   const suppressClick = useRef(false);
   const release = useRef<(() => void) | null>(null);
 
-  useEffect(() => () => release.current?.(), []);
+  const cancel = useCallback(() => release.current?.(), []);
+  useEffect(() => enabled ? cancel : undefined, [enabled, cancel]);
 
-  const start = useCallback((event: React.PointerEvent, origin: Point) => {
-    if (event.button !== 0) return;
-    release.current?.();
+  const start = useCallback((event: React.PointerEvent, origin: Point, gesture?: DragGesture) => {
+    if (!enabled || event.button !== 0 || release.current) return;
+    const pointerId = event.pointerId;
     const from = { x: event.clientX, y: event.clientY };
     let moved = false;
     let last = origin;
     const move = (next: PointerEvent) => {
+      if (next.pointerId !== pointerId) return;
       const dx = next.clientX - from.x;
       const dy = next.clientY - from.y;
       if (!moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
@@ -223,29 +273,38 @@ export function useDrag(handlers: { onMove: (point: Point) => void; onEnd: (poin
         // Stops text selection and keeps the grabbing cursor while the pointer crosses the page.
         document.documentElement.classList.add('chat-dragging');
       }
+      const previous = last;
       last = { left: origin.left + dx, top: origin.top + dy };
       latest.current.onMove(last);
+      gesture?.move(last, previous, next);
     };
-    const stop = () => {
+    const stop = (next: PointerEvent) => {
+      if (next.pointerId !== pointerId) return;
       release.current?.();
       if (!moved) return;
       suppressClick.current = true;
       // The click, if any, follows the release in the same task; never swallow a later one.
       setTimeout(() => { suppressClick.current = false; }, 0);
-      setDragging(false);
       latest.current.onEnd(last);
     };
-    release.current = () => {
+    const releaseDrag = () => {
+      gesture?.cancel();
+      if (moved) setDragging(false);
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', stop);
       window.removeEventListener('pointercancel', stop);
+      window.removeEventListener('blur', releaseDrag);
+      window.removeEventListener('resize', releaseDrag);
       document.documentElement.classList.remove('chat-dragging');
       release.current = null;
     };
+    release.current = releaseDrag;
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', stop);
     window.addEventListener('pointercancel', stop);
-  }, []);
+    window.addEventListener('blur', releaseDrag);
+    window.addEventListener('resize', releaseDrag);
+  }, [enabled]);
 
   const consumeClick = useCallback(() => {
     const suppressed = suppressClick.current;
@@ -253,5 +312,5 @@ export function useDrag(handlers: { onMove: (point: Point) => void; onEnd: (poin
     return suppressed;
   }, []);
 
-  return { dragging, start, consumeClick };
+  return { dragging, start, cancel, consumeClick };
 }

@@ -8,7 +8,7 @@
  * any spot along any edge. After the first opening it shrinks to a thin bar when left alone.
  */
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { createPortal, flushSync } from 'react-dom';
+import { createPortal } from 'react-dom';
 import { MessageSquareText } from 'lucide-react';
 import type { Language } from '../i18n.ts';
 import { useChat } from '../chat/useChat.ts';
@@ -17,7 +17,7 @@ import { useChatProblem, type ChatAsk, type ChatAskRequest } from '../chat/chat-
 import { problemThread } from '../chat/chat-threads.ts';
 import { loadActiveTimer, subscribeTimer } from '../timer-service.ts';
 import {
-  clampLauncher, clampPanel, dockAt, dockForPanel, launcherPoint, panelPoint, useChatPosition, useDrag, type Point,
+  clampLauncher, clampPanel, dockAt, dockForPanel, launcherPoint, panelEdgeHold, panelPoint, useChatPosition, useDrag, type Point,
 } from '../chat/chat-position.ts';
 import { Tooltip } from './ui.tsx';
 import { useWorkspace } from '../workspace.tsx';
@@ -29,7 +29,7 @@ const ChatPanel = React.lazy(() => import('./ChatPanel.tsx').then(module => ({ d
 /** The tooltip opens toward the inside of the window. */
 const TOOLTIP_SIDE = { left: 'right', right: 'left', top: 'bottom', bottom: 'top' } as const;
 
-/** How long the launcher stays a full button after the pointer or keyboard leaves it. */
+/** Idle time before the launcher shrinks to its edge bar. */
 export const LAUNCHER_REST_MS = 2500;
 
 export interface ChatLauncherProps {
@@ -116,18 +116,16 @@ export function ChatLauncher({ lang, page, onOpenAiSettings, ask = null, sidebar
     if (!openedBefore) return;
     restTimer.current = setTimeout(() => { if (!hovering.current) setTucked(true); }, LAUNCHER_REST_MS);
   }, [openedBefore]);
-  const wake = useCallback(() => {
-    setTucked(false);
-    rest();
-  }, [rest]);
   useEffect(() => {
-    if (!open) {
+    if (open) {
+      setTucked(false);
+    } else {
       // The button unmounts under the pointer when the panel opens, so no leave event cleared this.
       hovering.current = false;
-      wake();
+      rest();
     }
     return () => clearTimeout(restTimer.current);
-  }, [open, wake]);
+  }, [open, rest]);
 
   const launcherDrag = useDrag({
     onMove: point => setDragPoint(clampLauncher(point, viewport)),
@@ -135,9 +133,10 @@ export function ChatLauncher({ lang, page, onOpenAiSettings, ask = null, sidebar
       setDragPoint(null);
       // Moving the launcher also moves where the panel opens.
       save({ dock: dockAt(clampLauncher(point, viewport), viewport), ...size });
+      setTucked(false);
       rest();
     },
-  });
+  }, !open);
   const panelDrag = useDrag({
     onMove: point => setDragPoint(clampPanel(point, viewport, large)),
     onEnd: point => {
@@ -145,7 +144,7 @@ export function ChatLauncher({ lang, page, onOpenAiSettings, ask = null, sidebar
       setDragPoint(null);
       save({ dock: dockForPanel(panel, viewport, position.dock, large), panel, ...size });
     },
-  });
+  }, open);
 
   const close = useCallback(() => {
     setOpen(false);
@@ -204,6 +203,19 @@ export function ChatLauncher({ lang, page, onOpenAiSettings, ask = null, sidebar
 
   if (open) {
     const at = panelDrag.dragging && dragPoint ? dragPoint : panelPoint(position, viewport);
+    const startPanelDrag = (event: React.PointerEvent) => {
+      const edgeHold = panelEdgeHold(viewport, large, (dock, panel) => {
+        // End the drag before swapping elements so a late pointerup cannot overwrite this dock.
+        panelDrag.cancel();
+        save({ dock, panel, ...size });
+        setDragPoint(null);
+        returnToSidebar.current = false;
+        setPending(null);
+        setTucked(true);
+        setOpen(false);
+      });
+      panelDrag.start(event, at, edgeHold);
+    };
     return (
       <>
         {sidebarEntry}
@@ -213,7 +225,7 @@ export function ChatLauncher({ lang, page, onOpenAiSettings, ask = null, sidebar
             pending={pending} onPendingHandled={clearPending}
             onOpenAiSettings={() => { close(); onOpenAiSettings(); }}
             position={at} side={position.dock.side} dragging={panelDrag.dragging}
-            onDragStart={event => panelDrag.start(event, at)}
+            onDragStart={startPanelDrag}
             large={large} onToggleSize={() => { const { large: _large, ...rest } = position; save(large ? rest : { ...rest, large: true }); }} />
         </React.Suspense>
       </>
@@ -236,12 +248,9 @@ export function ChatLauncher({ lang, page, onOpenAiSettings, ask = null, sidebar
           className={'chat-launcher-button' + (chat.anyBusy ? ' is-busy' : news ? ' has-news' : '')}
           aria-label={chat.anyBusy ? (zh ? '问 AI（正在回答）' : 'Ask AI (answering)') : news ? (zh ? '问 AI（有新回答）' : 'Ask AI (new answer)') : label}
           aria-expanded={false}
-          onPointerDown={event => launcherDrag.start(event, launcherPoint(position.dock, viewport, false))}
-          // Rendered at once: the tooltip is off while tucked and decides on the mouse event that follows.
-          onPointerEnter={() => { hovering.current = true; flushSync(() => setTucked(false)); }}
+          onPointerDown={event => launcherDrag.start(event, launcherPoint(position.dock, viewport, tucked))}
+          onPointerEnter={() => { hovering.current = true; }}
           onPointerLeave={() => { hovering.current = false; rest(); }}
-          onFocus={wake}
-          onKeyDown={wake}
           onClick={() => { if (!launcherDrag.consumeClick()) setOpen(true); }}
         >
           <span className="chat-launcher-face" aria-hidden="true">
