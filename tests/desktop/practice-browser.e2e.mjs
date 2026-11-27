@@ -106,6 +106,30 @@ describe('embedded LeetCode practice', () => {
           };
           const firstNote = await until(noteField);
           const initialText = firstNote.value;
+          const editor = firstNote.closest('.practice-note-editor');
+          edit(firstNote, '');
+          (await until(() => editor.querySelector('.nw-editor-empty-template'))).click();
+          await until(() => firstNote.value.includes('##'));
+          edit(firstNote, 'Complement');
+          firstNote.setSelectionRange(0, firstNote.value.length);
+          editor.querySelector('button[aria-label="Bold"]').click();
+          await until(() => firstNote.value === '**Complement**');
+          const views = editor.querySelectorAll('.nw-view-btn');
+          views[1].click();
+          await until(() => editor.querySelector('.notes-preview-pane strong')?.textContent === 'Complement');
+          const source = firstNote.getBoundingClientRect();
+          const preview = editor.querySelector('.notes-preview-pane').getBoundingClientRect();
+          if (wide ? preview.top < source.bottom : preview.left < source.right) {
+            throw new Error('Preview does not fit the available panel width');
+          }
+          views[0].click();
+          editor.querySelector('.nw-ai-btn').click();
+          const review = await until(() => dialog.querySelector('[data-overlay-host] [role="dialog"]'));
+          await until(() => page.getBoundingClientRect().width === 0);
+          if (review.closest('[inert]')) throw new Error('The format review cannot receive input');
+          review.querySelector('.overlay-header button').click();
+          await until(() => !dialog.querySelector('[data-overlay-host]'));
+          if (wide) await until(toolbarClear);
           const draft = initialText + '\nCheck the complement.';
           edit(firstNote, draft);
           const title = chrome.querySelector('.practice-title');

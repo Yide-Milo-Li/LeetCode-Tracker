@@ -221,7 +221,7 @@ export function ChatLauncher({ lang, page, onOpenAiSettings, ask = null, sidebar
       if (event.isComposing || event.key.toLowerCase() !== 'j' || event.altKey || event.shiftKey) return;
       if (!(isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey)) return;
       // A modal dialog owns the keyboard, and the panel would open beneath its backdrop.
-      if (!practice && document.querySelector('[data-overlay-host]')) return;
+      if (document.querySelector('[data-overlay-host]:not(.practice-workspace)')) return;
       event.preventDefault();
       if (practice && pane === 'note') { setPane('chat'); setOpen(true); }
       else if (open) close();
@@ -289,6 +289,7 @@ export function ChatLauncher({ lang, page, onOpenAiSettings, ask = null, sidebar
         lang={lang} open={open} busy={!!problem && chat.busy} news={!!problem && news} width={viewport.width}
         shortcut={shortcut} pane={pane} onPane={setPane} onToggle={toggle} onClose={() => leave()}
         draftIds={draftIds} onNoteStatus={updateNoteStatus} onNoteSaved={onDataChanged} insertions={insertions}
+        onOpenAiSettings={() => leave(onOpenAiSettings)}
         onExcerptUsed={id => setInsertions(previous => {
           const insert = previous.get(id);
           return insert ? new Map(previous).set(id, { ...insert, text: null }) : previous;

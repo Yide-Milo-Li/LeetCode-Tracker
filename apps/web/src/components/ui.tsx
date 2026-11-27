@@ -627,6 +627,9 @@ export function IconButton({
 /** Editors route late responses to recovery as soon as an exit starts, before visual unmount. */
 export const DialogClosingContext = React.createContext<React.RefObject<boolean>>({ current: false });
 
+/** Keep nested overlays inside the native dialog that owns the top layer. */
+export const DialogPortalParent = React.createContext<React.RefObject<HTMLElement | null> | null>(null);
+
 /**
  * Trap focus, inert the background, animate smoothly, and restore the trigger.
  * Dismissal never changes saved data.
@@ -657,6 +660,7 @@ export function Dialog({
   fallbackFocusRef?: React.RefObject<HTMLElement | null>;
 }) {
   const titleId = useId();
+  const portalParent = React.useContext(DialogPortalParent);
   const panel = useRef<HTMLDivElement>(null);
   const [isClosing, setIsClosing] = useState(false);
   const closingRef = useRef(false);
@@ -698,8 +702,10 @@ export function Dialog({
   useEffect(() => {
     const trigger = document.activeElement as HTMLElement | null;
     const node = host.current!;
-    document.body.appendChild(node);
-    const siblings = Array.from(document.body.children).filter((n) => n !== node) as HTMLElement[];
+    // An outer native dialog makes everything outside it inert, including body portals.
+    const parent = portalParent?.current ?? document.body;
+    parent.appendChild(node);
+    const siblings = Array.from(parent.children).filter((n) => n !== node) as HTMLElement[];
     const previous = siblings.map((n) => n.inert);
     siblings.forEach((n) => {
       n.inert = true;
@@ -785,7 +791,7 @@ export function Dialog({
         ? trigger : fallbackFocusRef?.current;
       if (destination?.isConnected && !destination.closest('[hidden]')) destination.focus();
     };
-  }, [requestClose, finishClose, initialFocusRef, fallbackFocusRef]);
+  }, [requestClose, finishClose, initialFocusRef, fallbackFocusRef, portalParent]);
 
   return createPortal(
     <DialogClosingContext.Provider value={closingRef}>

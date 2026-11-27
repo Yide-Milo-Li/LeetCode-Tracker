@@ -333,6 +333,7 @@ export function NoteEditorPanel({ lang, editor, isMac, codeMenu, viewMode, onVie
       <div className={`notes-canvas-grid ${viewMode === 'edit' ? 'edit-only' : viewMode === 'preview' ? 'preview-only' : ''}`}>
         <div className="notes-editor-pane">
           <textarea
+            aria-label={zh ? '本题笔记' : 'Problem note'}
             aria-describedby={editor.hasConflict ? conflictMessageId : undefined}
             ref={textareaRef}
             className="nw-editor-textarea"

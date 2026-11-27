@@ -821,6 +821,10 @@ it('continues a problem chat in the workspace and drafts from this visit alone w
     assert.doesNotMatch(requests[2].messages[0].content, /Old visit only/);
     await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Add to note draft' })); });
     await waitFor(() => assert.equal(editor.value, 'My own thought\n\nLook at the boundary.'));
+    await act(async () => { fireEvent.keyDown(editor, { key: 'z', ctrlKey: true }); });
+    assert.equal(editor.value, 'My own thought');
+    await act(async () => { fireEvent.keyDown(editor, { key: 'z', ctrlKey: true, shiftKey: true }); });
+    assert.equal(editor.value, 'My own thought\n\nLook at the boundary.');
     assert.equal(save.mock.callCount(), 0);
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Close panel' })); });
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Back to LCT' })); });

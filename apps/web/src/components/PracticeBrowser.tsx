@@ -2,6 +2,7 @@ import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'reac
 import { createPortal } from 'react-dom';
 import { ArrowLeft, Columns2, ExternalLink, MessageSquareText, MoreHorizontal, NotebookPen, PanelRightClose } from 'lucide-react';
 import { PracticeNote, type PracticeNoteStatus } from './PracticeNote.tsx';
+import { DialogPortalParent } from './ui.tsx';
 import { PracticeDivider, practiceSplitBounds, readPracticeSplit } from './PracticeDivider.tsx';
 import type { Language } from '../i18n.ts';
 import { openExternalUrl } from '../platform/index.ts';
@@ -41,6 +42,7 @@ interface Props {
   draftIds: ReadonlySet<string>;
   onNoteStatus(frontendId: string, status: PracticeNoteStatus): void;
   onNoteSaved?: () => void;
+  onOpenAiSettings(): void;
   insertions: ReadonlyMap<string, { id: string; text: string | null }>;
   onExcerptUsed(frontendId: string): void;
   discardRequest: (() => void) | null;
@@ -52,7 +54,7 @@ interface Props {
   children: React.ReactNode;
 }
 
-export function PracticeBrowser({ initial, location, onLocation, lang, open, busy, news, pane, onPane, draftIds, onNoteStatus, onNoteSaved, insertions, onExcerptUsed, discardRequest, cancelDiscard, shortcut, width, onToggle, onClose, children }: Props) {
+export function PracticeBrowser({ initial, location, onLocation, lang, open, busy, news, pane, onPane, draftIds, onNoteStatus, onNoteSaved, onOpenAiSettings, insertions, onExcerptUsed, discardRequest, cancelDiscard, shortcut, width, onToggle, onClose, children }: Props) {
   const zh = lang === 'zh';
   const problem = typeof location === 'object' ? location : null;
   const locationLabel = location === 'loading' ? (zh ? '正在识别题目…' : 'Finding problem…')
@@ -239,10 +241,13 @@ export function PracticeBrowser({ initial, location, onLocation, lang, open, bus
           <button className="text-link" onClick={discardRequest}>{zh ? '放弃修改并离开' : 'Discard and leave'}</button>
         </div>}
         {!problem && <p>{locationLabel}</p>}
-        {Array.from(editorIds, id => <div key={id} className="practice-note-slot" hidden={id !== activeId}>
-          <PracticeNote frontendId={id} lang={lang} onStatus={onNoteStatus} onSaved={onNoteSaved}
-            excerpt={insertions.get(id)?.text ?? null} onExcerptUsed={() => onExcerptUsed(id)} />
-        </div>)}
+        <DialogPortalParent.Provider value={dialog}>
+          {Array.from(editorIds, id => <div key={id} className="practice-note-slot" hidden={id !== activeId}>
+            <PracticeNote frontendId={id} lang={lang} active={open && pane === 'note' && id === activeId}
+              onStatus={onNoteStatus} onSaved={onNoteSaved} onOpenAiSettings={onOpenAiSettings}
+              excerpt={insertions.get(id)?.text ?? null} onExcerptUsed={() => onExcerptUsed(id)} />
+          </div>)}
+        </DialogPortalParent.Provider>
       </div>
     </dialog>, document.body,
   );
