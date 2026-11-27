@@ -38,7 +38,9 @@ export type ChatAction =
   /** Problems in the user's catalog that test the same pattern. */
   | { kind: 'similar' }
   /** Put the last answer into the problem's note, as a change the user confirms. */
-  | { kind: 'save-note' };
+  | { kind: 'save-note' }
+  /** A bounded transcript of this practice visit, captured when the user asks for a draft. */
+  | { kind: 'session-note'; prompt: string };
 
 /**
  * What a view hands to the chat when the user asks about a problem from outside the panel. With

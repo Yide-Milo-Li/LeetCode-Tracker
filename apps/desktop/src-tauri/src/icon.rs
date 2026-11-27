@@ -289,7 +289,7 @@ mod win32 {
     }
 
     pub fn target_sizes(app: &AppHandle) -> (u32, u32) {
-        let Some(window) = app.get_webview_window("main") else {
+        let Some(window) = app.get_window("main") else {
             return (16, 32);
         };
         let Ok(raw) = window.hwnd() else {
@@ -324,7 +324,7 @@ mod win32 {
         variants: &[DecodedIconVariant],
         replace_variants: bool,
     ) -> Result<(), String> {
-        let Some(window) = app.get_webview_window("main") else {
+        let Some(window) = app.get_window("main") else {
             return Ok(());
         };
         let raw_hwnd = window.hwnd().map_err(|_| "Missing window handle")?;

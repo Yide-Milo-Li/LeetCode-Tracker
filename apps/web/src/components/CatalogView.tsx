@@ -549,7 +549,7 @@ function CatalogWorkspace({ lang, onNavigateSettings, favoritesOnly = false, fav
                         <Tooltip text={t.openLink} side="top"><a
                           className="btn-icon"
                           aria-label={t.openLink}
-                          href={safeUrl(problem.url)}
+                          href={safeUrl(problem.url)} data-practice-id={problem.questionFrontendId} data-practice-title={problem.title}
                           target="_blank"
                           rel="noopener noreferrer"
                         >
@@ -679,7 +679,7 @@ function CatalogWorkspace({ lang, onNavigateSettings, favoritesOnly = false, fav
             {safeUrl(selected.url) && (
               <a
                 className="btn btn-secondary"
-                href={safeUrl(selected.url)}
+                href={safeUrl(selected.url)} data-practice-id={selected.questionFrontendId} data-practice-title={selected.title}
                 target="_blank"
                 rel="noopener noreferrer"
               >

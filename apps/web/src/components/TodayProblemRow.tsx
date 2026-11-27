@@ -92,7 +92,7 @@ export function TodayProblemRow({
           {problemUrl ? (
             <a
               className="problem-title-link"
-              href={problemUrl}
+              href={problemUrl} data-practice-id={item.problem.questionFrontendId} data-practice-title={item.problem.title}
               target="_blank"
               rel="noopener noreferrer"
               title={zh ? '打开题目' : 'Open problem'}

@@ -112,7 +112,7 @@ export function TodayGoalLists({ lang, goals, nextTaskRef }: {
               aria-label={zh ? `完成 #${item.frontendId} ${item.title}` : `Complete #${item.frontendId} ${item.title}`}
               disabled={!!pending} onClick={() => void changeItem(list, item.frontendId, 'complete')}><Circle size={20} aria-hidden="true" /></button>
             {/^https?:\/\//i.test(item.url)
-              ? <a className="goal-item-title problem-title-link" href={item.url} target="_blank" rel="noopener noreferrer" title={zh ? '打开题目 ↗' : 'Open problem ↗'}>#{item.frontendId} {item.title}<span aria-hidden="true" className="problem-link-mark"> ↗</span></a>
+              ? <a className="goal-item-title problem-title-link" href={item.url} data-practice-id={item.frontendId} data-practice-title={item.title} target="_blank" rel="noopener noreferrer" title={zh ? '打开题目 ↗' : 'Open problem ↗'}>#{item.frontendId} {item.title}<span aria-hidden="true" className="problem-link-mark"> ↗</span></a>
               : <span className="goal-item-title">#{item.frontendId} {item.title}</span>}
             <GoalProblemActions lang={lang} frontendId={item.frontendId} title={item.title} disabled={!!pending} fallbackFocusRef={editButton}
               onRemove={() => void changeItem(list, item.frontendId, 'remove')} />

@@ -1,6 +1,7 @@
 //! Desktop host: native authorization, private sidecar ownership and recoverable startup.
 mod icon;
 mod persistent_icon;
+mod practice;
 mod process;
 mod security;
 mod updates;
@@ -561,7 +562,7 @@ fn set_app_icon(
             return Err("Invalid icon".into());
         };
         let image = tauri::image::Image::new_owned(best.rgba.clone(), best.width, best.height);
-        if let Some(window) = app.get_webview_window("main") {
+        if let Some(window) = app.get_window("main") {
             window
                 .set_icon(image)
                 .map_err(|_| "Could not update the window icon")?;
@@ -622,9 +623,29 @@ pub fn run() {
     let builder = builder
         .plugin(tauri_plugin_wdio::init())
         .plugin(tauri_plugin_wdio_webdriver::init());
+    let commands: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
+        practice::practice_open,
+        practice::practice_layout,
+        practice::practice_close,
+        practice::practice_on_problem,
+        api_request,
+        api_stream,
+        api_stream_cancel,
+        export_data_file,
+        pick_folder,
+        open_external,
+        get_desktop_status,
+        retry_sidecar,
+        get_icon_target_sizes,
+        set_app_icon,
+        updates::desktop_update_info,
+        updates::check_desktop_update,
+        updates::download_desktop_update,
+        updates::install_desktop_update
+    ];
     builder
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
-            if let Some(window) = app.get_webview_window("main") {
+            if let Some(window) = app.get_window("main") {
                 let _ = window.unminimize();
                 let _ = window.show();
                 let _ = window.set_focus();
@@ -640,22 +661,22 @@ pub fn run() {
             begin_startup(app.handle().clone());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            api_request,
-            api_stream,
-            api_stream_cancel,
-            export_data_file,
-            pick_folder,
-            open_external,
-            get_desktop_status,
-            retry_sidecar,
-            get_icon_target_sizes,
-            set_app_icon,
-            updates::desktop_update_info,
-            updates::check_desktop_update,
-            updates::download_desktop_update,
-            updates::install_desktop_update
-        ])
+        .invoke_handler(move |request| {
+            if request.message.webview().label() != "main" {
+                request
+                    .resolver
+                    .reject("Native commands require the tracker view");
+                return true;
+            }
+            commands(request)
+        })
+        .on_page_load(|view, payload| {
+            if view.label() == "main"
+                && matches!(payload.event(), tauri::webview::PageLoadEvent::Started)
+            {
+                let _ = practice::close_views(view.app_handle());
+            }
+        })
         .build(tauri::generate_context!())
         .expect("Could not initialize the desktop window")
         .run(|app, event| {
@@ -677,15 +698,17 @@ pub fn run() {
                     event: tauri::WindowEvent::CloseRequested { api, .. },
                     ..
                 } => {
-                    if !app.state::<DesktopState>().exiting.load(Ordering::SeqCst) {
+                    if label == "main"
+                        && !app.state::<DesktopState>().exiting.load(Ordering::SeqCst)
+                    {
                         api.prevent_close();
-                        if let Some(window) = app.get_webview_window(label) {
+                        if let Some(window) = app.get_window(label) {
                             let _ = window.hide();
                         }
                     }
                 }
                 tauri::RunEvent::Reopen { .. } => {
-                    if let Some(window) = app.get_webview_window("main") {
+                    if let Some(window) = app.get_window("main") {
                         let _ = window.show();
                         let _ = window.set_focus();
                     }

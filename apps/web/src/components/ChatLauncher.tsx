@@ -15,6 +15,8 @@ import { useChat } from '../chat/useChat.ts';
 import { hasOpenedChat, rememberChatOpened } from '../chat/chat-settings.ts';
 import { useChatProblem, type ChatAsk, type ChatAskRequest } from '../chat/chat-context.ts';
 import { problemThread } from '../chat/chat-threads.ts';
+import { sessionNotePrompt } from '../chat/chat-presets.ts';
+import { PRACTICE_OPEN, PRACTICE_SHORTCUT, type PracticeProblem } from '../platform/practice.ts';
 import { loadActiveTimer, subscribeTimer } from '../timer-service.ts';
 import {
   clampLauncher, clampPanel, dockAt, dockForPanel, launcherPoint, panelEdgeHold, panelPoint, useChatPosition, useDrag, type Point,
@@ -25,6 +27,7 @@ import type { WorkspaceLink } from '../../../../packages/contracts/src/workspace
 import type { ChatRequest } from '../../../../packages/contracts/src/chat.ts';
 
 const ChatPanel = React.lazy(() => import('./ChatPanel.tsx').then(module => ({ default: module.ChatPanel })));
+const PracticeBrowser = React.lazy(() => import('./PracticeBrowser.tsx').then(module => ({ default: module.PracticeBrowser })));
 
 /** The tooltip opens toward the inside of the window. */
 const TOOLTIP_SIDE = { left: 'right', right: 'left', top: 'bottom', bottom: 'top' } as const;
@@ -45,7 +48,8 @@ export interface ChatLauncherProps {
 
 export function ChatLauncher({ lang, page, onOpenAiSettings, ask = null, sidebar, onDataChanged }: ChatLauncherProps) {
   const zh = lang === 'zh';
-  const chat = useChat(lang, { onDataChanged, page });
+  const [practice, setPractice] = useState<{ problem: PracticeProblem; before: Set<string> } | null>(null);
+  const chat = useChat(lang, { onDataChanged, page: practice ? 'problems' : page });
   const { navigate } = useWorkspace();
   const [open, setOpen] = useState(false);
   const [openedBefore, setOpenedBefore] = useState(hasOpenedChat);
@@ -65,11 +69,23 @@ export function ChatLauncher({ lang, page, onOpenAiSettings, ask = null, sidebar
   const viewProblem = useChatProblem();
   /** A preset waiting for the panel, with the problem it was asked about. */
   const [pending, setPending] = useState<Required<ChatAsk> | null>(null);
+  useEffect(() => {
+    const enter = (event: Event) => {
+      const problem = (event as CustomEvent<PracticeProblem>).detail;
+      const thread = problemThread(problem);
+      setPractice({ problem, before: new Set(chat.entriesOf(thread.key).map(entry => entry.id)) });
+      chat.select(thread);
+      setOpen(false);
+      setPending(null);
+    };
+    window.addEventListener(PRACTICE_OPEN, enter);
+    return () => window.removeEventListener(PRACTICE_OPEN, enter);
+  }, [chat.select, chat.entriesOf]);
   // The conversation follows the problem: the note that was just opened, the problem a timer was
   // started on, or the problem another view asked about. With none, the last conversation stays.
   useEffect(() => {
-    if (viewProblem) chat.select(problemThread(viewProblem));
-  }, [viewProblem?.frontendId, viewProblem?.title]);
+    if (!practice && viewProblem) chat.select(problemThread(viewProblem));
+  }, [viewProblem?.frontendId, viewProblem?.title, practice]);
   useEffect(() => {
     if (!ask) return;
     chat.select(problemThread(ask.problem));
@@ -82,6 +98,7 @@ export function ChatLauncher({ lang, page, onOpenAiSettings, ask = null, sidebar
   const timed = useRef<string | null>(null);
   useEffect(() => {
     const follow = () => {
+      if (practice) return;
       const timer = loadActiveTimer();
       const frontendId = timer?.frontendId ?? null;
       if (frontendId === timed.current) return;
@@ -90,16 +107,17 @@ export function ChatLauncher({ lang, page, onOpenAiSettings, ask = null, sidebar
     };
     follow();
     return subscribeTimer(follow);
-  }, [chat.select]);
+  }, [chat.select, practice]);
   const clearPending = useCallback(() => setPending(null), []);
   // An answer that finished behind a closed panel is marked on the launcher until the panel opens.
   const [news, setNews] = useState(false);
   const wasBusy = useRef(false);
+  const activityBusy = practice ? chat.busy : chat.anyBusy;
   useEffect(() => {
     if (open) setNews(false);
-    else if (wasBusy.current && !chat.anyBusy) setNews(true);
-    wasBusy.current = chat.anyBusy;
-  }, [chat.anyBusy, open]);
+    else if (wasBusy.current && !activityBusy) setNews(true);
+    wasBusy.current = activityBusy;
+  }, [activityBusy, open]);
   const { position, viewport, save } = useChatPosition();
   const large = position.large === true;
   /** The size as stored with a placement; the compact size is the absence of the field. */
@@ -169,14 +187,19 @@ export function ChatLauncher({ lang, page, onOpenAiSettings, ask = null, sidebar
       if (event.isComposing || event.key.toLowerCase() !== 'j' || event.altKey || event.shiftKey) return;
       if (!(isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey)) return;
       // A modal dialog owns the keyboard, and the panel would open beneath its backdrop.
-      if (document.querySelector('[data-overlay-host]')) return;
+      if (!practice && document.querySelector('[data-overlay-host]')) return;
       event.preventDefault();
       if (open) close();
       else setOpen(true);
     };
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isMac, open, close]);
+    const fromPage = () => { if (practice) { setPending(null); setOpen(value => !value); } };
+    window.addEventListener(PRACTICE_SHORTCUT, fromPage);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener(PRACTICE_SHORTCUT, fromPage);
+    };
+  }, [isMac, open, close, practice]);
 
   const label = zh ? '问 AI' : 'Ask AI';
   const sidebarEntry = sidebar && createPortal(
@@ -201,6 +224,31 @@ export function ChatLauncher({ lang, page, onOpenAiSettings, ask = null, sidebar
     sidebar.container,
   );
 
+  if (practice) {
+    const { problem, before } = practice;
+    const leave = () => { setOpen(false); setPending(null); setPractice(null); };
+    const toggle = () => { setPending(null); setOpen(value => !value); };
+    const entries = chat.entriesOf(problemThread(problem).key);
+    const canSummarize = entries.some(entry => !before.has(entry.id) && entry.role === 'user' && entry.preset !== 'session-note');
+    return <React.Suspense fallback={null}>
+      <PracticeBrowser problem={problem} lang={lang} open={open} busy={chat.busy} news={news} width={viewport.width}
+        shortcut={shortcut} canSummarize={canSummarize} onToggle={toggle} onClose={leave}
+        onSummarize={() => {
+          const prompt = sessionNotePrompt(lang, problem, entries, before);
+          if (!prompt) return;
+          setPending({ problem, action: { kind: 'session-note', prompt } });
+          setOpen(true);
+        }}>
+        {open && <React.Suspense fallback={null}>
+          <ChatPanel id={panelId} lang={lang} chat={chat} shortcut={shortcut} onClose={toggle}
+            onWorkspaceLink={link => { leave(); openWorkspaceLink(link); }}
+            onOpenAiSettings={() => { leave(); onOpenAiSettings(); }}
+            pending={pending} onPendingHandled={clearPending} />
+        </React.Suspense>}
+      </PracticeBrowser>
+    </React.Suspense>;
+  }
+
   if (open) {
     const at = panelDrag.dragging && dragPoint ? dragPoint : panelPoint(position, viewport);
     const startPanelDrag = (event: React.PointerEvent) => {
@@ -224,9 +272,8 @@ export function ChatLauncher({ lang, page, onOpenAiSettings, ask = null, sidebar
             onWorkspaceLink={openWorkspaceLink}
             pending={pending} onPendingHandled={clearPending}
             onOpenAiSettings={() => { close(); onOpenAiSettings(); }}
-            position={at} side={position.dock.side} dragging={panelDrag.dragging}
-            onDragStart={startPanelDrag}
-            large={large} onToggleSize={() => { const { large: _large, ...rest } = position; save(large ? rest : { ...rest, large: true }); }} />
+            floating={{ position: at, side: position.dock.side, dragging: panelDrag.dragging, onDragStart: startPanelDrag,
+              large, onToggleSize: () => { const { large: _large, ...rest } = position; save(large ? rest : { ...rest, large: true }); } }} />
         </React.Suspense>
       </>
     );

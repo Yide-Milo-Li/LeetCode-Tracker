@@ -1,6 +1,14 @@
 # Desktop workflow guide
 
-The same desktop UI runs in the Windows and Apple Silicon macOS desktop apps as well as source-mode browsers. Native mode shows recoverable startup status, uses native dialogs for exports, and opens allowed external links in the system browser. See [installation and runtime behavior](desktop.md).
+The same desktop UI runs in the Windows and Apple Silicon macOS desktop apps as well as source-mode browsers. Native mode shows recoverable startup status and uses native dialogs for exports. Catalog problem links open the embedded practice browser. Other allowed external links open in the system browser. See [installation and runtime behavior](desktop.md).
+
+## Solve a problem with LCT
+
+Open a LeetCode problem from Today, Problems, a goal list or Notes. The native app gives the problem the full window below a small toolbar. Choose **Ask LCT** or press **Command+J** on macOS or **Ctrl+J** on Windows. At 100% zoom, windows at least 1500 CSS pixels wide show chat beside the page. Increasing the page zoom raises that threshold to preserve at least 1100 readable CSS pixels for LeetCode. In smaller windows, chat temporarily takes over the reading area. Press **Escape** from chat to return to the same page. Replies continue while chat is closed. The zoom selector remembers your preference on this device.
+
+After asking a question, choose **Draft session note**. LCT uses excerpts of your questions and the answers from this visit, including follow-up questions. Review the proposed change before saving it. With chat data access turned off, the assistant can return the draft in chat. The editor contents and account credentials stay outside the chat context. **Back to LCT** closes the embedded page. The problem conversation remains available in chat history.
+
+Use **Open in system browser** for a sign-in method that requires an external browser. The web version opens problem links in a browser tab.
 
 ## Workspaces
 

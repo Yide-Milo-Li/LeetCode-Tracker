@@ -69,7 +69,7 @@ export function NoteProblemHeader({
               #{summary.questionFrontendId}. {summary.title}
             </span>
             <a
-              href={summary.url}
+              href={summary.url} data-practice-id={summary.questionFrontendId} data-practice-title={summary.title}
               target="_blank"
               rel="noreferrer"
               className="nw-external-link"

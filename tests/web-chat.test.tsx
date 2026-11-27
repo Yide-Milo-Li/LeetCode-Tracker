@@ -624,6 +624,70 @@ const answer = (text: string): ChatStreamEvent[] => [
   { type: 'done', provider: 'openai', model: 'gpt-6-luna' },
 ];
 
+it('continues a problem chat in the workspace and drafts from this visit alone with review', async () => {
+  const { PRACTICE_OPEN, PRACTICE_SHORTCUT } = await import('../apps/web/src/platform/practice.ts');
+  const { setChatWritePermission } = await import('../apps/web/src/chat/chat-settings.ts');
+  const calls: string[] = [];
+  const requests: ChatRequest[] = [];
+  const dialogs = dom.window.HTMLDialogElement.prototype;
+  Object.assign(dialogs, {
+    showModal(this: HTMLDialogElement) { this.open = true; },
+    close(this: HTMLDialogElement) { this.open = false; },
+  });
+  Object.assign(globalThis, { ResizeObserver: class { observe() {} disconnect() {} } });
+  mock.method(api, 'getChatStatus', async () => ({ configured: true, provider: 'openai', model: 'gpt-6-luna' }));
+  Object.assign(window, { __TAURI_INTERNALS__: {
+    transformCallback: () => 1,
+    async invoke(command: string, args: { body: string; onChunk: { onmessage(chunk: number[]): void } }) {
+      calls.push(command);
+      if (command === 'api_stream') {
+        requests.push(JSON.parse(args.body));
+        args.onChunk.onmessage(Array.from(encode(answer('Look at the boundary.'))));
+        return { status: 200, body: '' };
+      }
+      if (command === 'practice_on_problem') return true;
+    },
+  } });
+  try {
+    const thread = problemThread(rain);
+    saveChatState({ current: thread, threads: { [thread.key]: { ...thread, entries: [
+      { id: 'old', role: 'user', state: 'done', content: 'Old visit only' },
+    ], usedAt: Date.now() } } });
+    setChatWritePermission('full');
+    await act(async () => { render(<ChatLauncher lang="en" onOpenAiSettings={() => {}} />); });
+    await act(async () => { window.dispatchEvent(new dom.window.CustomEvent(PRACTICE_OPEN, {
+      detail: { ...rain, url: 'https://leetcode.com/problems/trapping-rain-water/' },
+    })); });
+    const draft = await screen.findByRole('button', { name: 'Draft session note' });
+    assert.equal((draft as HTMLButtonElement).disabled, true);
+    await act(async () => { window.dispatchEvent(new Event(PRACTICE_SHORTCUT)); });
+    await waitFor(() => screen.getByRole('textbox'));
+    await ask('Why compare the two boundaries?');
+    await act(async () => { fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Escape' }); });
+    assert.equal(screen.queryByRole('textbox'), null);
+    await act(async () => { window.dispatchEvent(new Event(PRACTICE_SHORTCUT)); });
+    await ask('What if both sides are equal?');
+    await act(async () => { fireEvent.click(draft); });
+    await waitFor(() => assert.equal(requests.length, 3));
+    assert.equal(requests[0].writePermission, 'full');
+    assert.equal(requests[2].writePermission, undefined);
+    assert.equal(requests[2].context?.frontendId, '42');
+    assert.equal(requests[2].messages.length, 1);
+    assert.match(requests[2].messages[0].content, /Why compare the two boundaries\?/);
+    assert.match(requests[2].messages[0].content, /What if both sides are equal\?/);
+    assert.doesNotMatch(requests[2].messages[0].content, /Old visit only/);
+    assert.equal(calls.filter(name => name === 'practice_open').length, 1);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Back to LCT' })); });
+    await waitFor(() => assert.ok(calls.includes('practice_close')));
+  } finally {
+    cleanup();
+    Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
+    Reflect.deleteProperty(globalThis, 'ResizeObserver');
+    Reflect.deleteProperty(dialogs, 'showModal');
+    Reflect.deleteProperty(dialogs, 'close');
+  }
+});
+
 it('climbs the hint ladder one answered rung at a time and describes an attempt', () => {
   const turn = (level: number, text: string, frontendId = '42') => [
     { id: `q${level}${Math.random()}`, role: 'user' as const, content: hintPrompt(level, 'en', rain), state: 'done' as const, hint: { frontendId, level } },

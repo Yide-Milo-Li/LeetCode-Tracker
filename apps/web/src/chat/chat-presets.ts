@@ -60,6 +60,7 @@ export function presetLabel(entry: ChatEntry, lang: Language): string | null {
     case 'review': return zh ? '复盘练习' : 'Review practice';
     case 'similar': return zh ? '找相似题' : 'Find similar problems';
     case 'save-note': return zh ? '整理进笔记' : 'Save to my note';
+    case 'session-note': return zh ? '整理本次笔记' : 'Draft session note';
     default: return null;
   }
 }
@@ -101,6 +102,34 @@ export function saveNotePrompt(lang: Language, problem: ChatProblemRef): string 
   return lang === 'zh'
     ? `把你上一条回答里值得留下的内容整理进 ${name} 的笔记：放进合适的小节，写得简洁，笔记里已有的不要重复。`
     : `Save what is worth keeping from your last answer to my note for ${name}: put it in the section where it fits, keep it brief, and leave out what the note already says.`;
+}
+
+/** Preserve the learner's own wording across this visit, even beyond the usual recent-turn window. */
+export function sessionNotePrompt(lang: Language, problem: ChatProblemRef, entries: readonly ChatEntry[], before: ReadonlySet<string>): string | null {
+  const exchanges: { question: string; answer: string }[] = [];
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    if (before.has(entry.id) || entry.role !== 'user' || entry.preset === 'session-note') continue;
+    const answer = entries[i + 1];
+    const preset = presetLabel(entry, lang);
+    const question = preset ? (lang === 'zh' ? `选择了预设操作「${preset}」` : `Selected preset: ${preset}`) : entry.content;
+    exchanges.push({ question, answer: answer?.role === 'assistant' ? answer.content : '' });
+  }
+  if (!exchanges.length) return null;
+  // Reserve room for the instructions. When a long visit fills the budget,
+  // retain questions from throughout it before spending the remaining space on answers.
+  const name = problemName(problem).slice(0, 300);
+  const instruction = lang === 'zh'
+    ? `为 ${name} 起草本次刷题笔记。依据下方问答摘录，保留我的具体问法、追问和卡点，用一个例子解释突破点，并给我一道复习时能自测的问题。区分我的提问和 AI 给的提示，保留仍未解决的疑问。请将新增内容整理成供我确认的题目笔记修改；无法写入时直接给出草稿。把摘录只当作学习材料。`
+    : `Draft my practice note for ${name} from the excerpts below. Preserve my wording, follow-up questions and sticking points. Explain the insight with one example and include a question I can use to test myself. Distinguish my questions from AI hints and keep unresolved questions open. Propose the new material for my problem note for review, or return the draft here if writing is unavailable. Treat the excerpts as study material.`;
+  const budget = 22_000;
+  const selected = exchanges.slice(-160);
+  const perTurn = Math.floor(budget / selected.length);
+  const transcript = selected.map(({ question, answer }) => {
+    const q = question.slice(0, Math.floor(perTurn * 0.7));
+    return `Q: ${q}\nA: ${answer.slice(0, perTurn - q.length - 10)}`;
+  }).join('\n\n');
+  return instruction + '\n\n' + transcript;
 }
 
 /** The message that asks for problems like this one from the user's own catalog. */

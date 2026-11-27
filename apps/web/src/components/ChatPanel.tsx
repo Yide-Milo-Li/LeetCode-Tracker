@@ -54,16 +54,15 @@ export interface ChatPanelProps {
   onClose: () => void;
   onOpenAiSettings: () => void;
   onWorkspaceLink: (link: WorkspaceLink) => void;
-  /** Top-left corner in viewport pixels. */
-  position: Point;
-  /** Window edge the launcher docks on; the panel grows from that edge when it opens. */
-  side: ChatDock['side'];
-  dragging: boolean;
-  /** Pointer went down on the header outside its buttons. */
-  onDragStart: (event: React.PointerEvent) => void;
-  /** The panel is at its enlarged size. */
-  large: boolean;
-  onToggleSize: () => void;
+  /** Omitted in practice, where the workspace owns placement and pins the conversation. */
+  floating?: {
+    position: Point;
+    side: ChatDock['side'];
+    dragging: boolean;
+    onDragStart: (event: React.PointerEvent) => void;
+    large: boolean;
+    onToggleSize: () => void;
+  };
 }
 
 /** Name of a conversation: its problem, or the general one. */
@@ -366,7 +365,7 @@ function Answer({ entry, conversationLanguage, lang, isLast, busy, onRetry, onSa
 }
 
 export function ChatPanel({
-  id, lang, chat, pending, onPendingHandled, shortcut, onClose, onOpenAiSettings, onWorkspaceLink, position, side, dragging, onDragStart, large, onToggleSize,
+  id, lang, chat, pending, onPendingHandled, shortcut, onClose, onOpenAiSettings, onWorkspaceLink, floating,
 }: ChatPanelProps) {
   const zh = lang === 'zh';
   const dataAccess = useChatDataAccess();
@@ -475,6 +474,8 @@ export function ChatPanel({
       chat.send(hintPrompt(level, lang, target), { ...options, hint: { frontendId: target.frontendId, level } });
     } else if (action.kind === 'review') {
       chat.send(reviewPrompt(lang, target, action.attempt), { ...options, preset: action.kind });
+    } else if (action.kind === 'session-note') {
+      chat.send(action.prompt, { ...options, preset: 'session-note' });
     } else {
       chat.send(action.kind === 'similar' ? similarPrompt(lang, target) : saveNotePrompt(lang, target), { ...options, preset: action.kind });
     }
@@ -555,14 +556,15 @@ export function ChatPanel({
       id={id}
       ref={panel}
       tabIndex={-1}
-      className={'chat-panel' + (dragging ? ' is-dragging' : '')}
-      data-side={side}
-      data-size={large ? 'large' : undefined}
-      style={{ left: position.left, top: position.top }}
+      className={'chat-panel' + (floating?.dragging ? ' is-dragging' : '')}
+      data-side={floating?.side}
+      data-size={floating?.large ? 'large' : undefined}
+      style={floating?.position}
       aria-label={zh ? 'AI 对话' : 'AI chat'}
       onKeyDown={event => {
         // Esc closes the conversation list first when that is open.
         if (event.key === 'Escape' && !event.nativeEvent.isComposing && !switcher.open && !modelPicker.open) {
+          event.preventDefault();
           event.stopPropagation();
           onClose();
         }
@@ -570,17 +572,17 @@ export function ChatPanel({
     >
       <header
         className="chat-header"
-        title={zh ? '拖动以移动' : 'Drag to move'}
-        onPointerDown={event => { if (!(event.target as Element).closest('button, .chat-thread-menu')) onDragStart(event); }}
+        title={floating ? (zh ? '拖动以移动' : 'Drag to move') : undefined}
+        onPointerDown={event => { if (!(event.target as Element).closest('button, .chat-thread-menu')) floating?.onDragStart(event); }}
         // Grabbing the header must not take focus from the text field, or Esc would stop closing the panel.
         onMouseDown={event => { if (!(event.target as Element).closest('button, .chat-thread-menu')) event.preventDefault(); }}
       >
         <div className="chat-heading">
           <h2 title={title}>{title}</h2>
         </div>
-        <button type="button" className="chat-thread-button" {...switcher.triggerProps}>
+        {floating && <button type="button" className="chat-thread-button" {...switcher.triggerProps}>
           <History size={15} aria-hidden="true" />{zh ? '历史记录' : 'History'}
-        </button>
+        </button>}
         {switcher.rendered && (
           <div {...switcher.panelProps} className="notes-dropdown-menu chat-thread-menu" role="group" aria-label={zh ? '对话历史' : 'Conversation history'}>
             {!listed.length && !draftOnly && <p className="chat-history-empty">{zh ? '暂无历史对话' : 'No conversation history yet'}</p>}
@@ -620,8 +622,8 @@ export function ChatPanel({
             })}
           </div>
         )}
-        <IconButton icon={large ? Minimize2 : Maximize2} label={large ? (zh ? '还原面板大小' : 'Restore panel size') : (zh ? '放大面板' : 'Enlarge panel')}
-          onClick={onToggleSize} tooltipSide="bottom" />
+        {floating && <IconButton icon={floating.large ? Minimize2 : Maximize2} label={floating.large ? (zh ? '还原面板大小' : 'Restore panel size') : (zh ? '放大面板' : 'Enlarge panel')}
+          onClick={floating.onToggleSize} tooltipSide="bottom" />}
         <IconButton icon={X} label={zh ? '关闭' : 'Close'} shortcut={shortcut} onClick={onClose} tooltipSide="bottom" />
       </header>
 

@@ -76,7 +76,7 @@ function GoalListDetail({ summary, lang, active, onEdit, onUseToday, onRefresh }
         <span className="goal-library-problem">
           <span className="goal-library-id">#{item.frontendId}</span>{' '}
           {/^https?:\/\//i.test(item.url)
-            ? <a className="problem-title-link" href={item.url} target="_blank" rel="noopener noreferrer">{item.title}<span aria-hidden="true" className="problem-link-mark"> ↗</span></a>
+            ? <a className="problem-title-link" href={item.url} data-practice-id={item.frontendId} data-practice-title={item.title} target="_blank" rel="noopener noreferrer">{item.title}<span aria-hidden="true" className="problem-link-mark"> ↗</span></a>
             : item.title}
         </span>
         <span className="goal-library-status" data-complete={item.completed}>

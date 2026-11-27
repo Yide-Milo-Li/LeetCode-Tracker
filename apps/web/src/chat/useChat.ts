@@ -42,7 +42,7 @@ export interface ChatEntry {
   /** On a question from the hint ladder: the problem and the rung it asked for. */
   hint?: ChatHint;
   /** A preset with a short display label. The full question stays in content. */
-  preset?: 'review' | 'similar' | 'save-note';
+  preset?: 'review' | 'similar' | 'save-note' | 'session-note';
 }
 
 /** Rung of the hint ladder a question asked for; see `chat-presets.ts`. */
@@ -275,7 +275,8 @@ export function useChat(lang: Language, options: ChatOptions = {}): ChatControll
     const { key } = thread;
     const answerId = crypto.randomUUID();
     const dataAccess = getChatDataAccess();
-    const fullAccess = dataAccess && getChatWritePermission() === 'full';
+    const sessionNote = history.at(-1)?.preset === 'session-note';
+    const fullAccess = !sessionNote && dataAccess && getChatWritePermission() === 'full';
     const answer: ChatEntry = {
       id: answerId, role: 'assistant', content: '', state: 'streaming',
       ...(fullAccess ? { writeOutcomeUnknown: true } : {}),
@@ -342,7 +343,8 @@ export function useChat(lang: Language, options: ChatOptions = {}): ChatControll
     const fail = (code: string, message: string) => settle(entry => ({ ...entry, state: 'error', error: { code, message } }));
 
     const request: ChatRequest = {
-      messages: requestTurns(history),
+      // A session note already carries this visit's evidence. Earlier visits must not leak into it.
+      messages: requestTurns(sessionNote ? history.slice(-1) : history),
       context: thread.problem ? { frontendId: thread.problem.frontendId } : {},
       lang: langRef.current,
       ...(dataAccess && pageRef.current ? { page: pageRef.current } : {}),

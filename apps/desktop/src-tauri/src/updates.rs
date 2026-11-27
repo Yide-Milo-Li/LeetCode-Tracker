@@ -162,7 +162,7 @@ fn install(app: &AppHandle, update: &PendingUpdate) -> Result<(), String> {
         initialize_service(app);
         state.installing_update.store(false, Ordering::SeqCst);
         #[cfg(windows)]
-        if let Some(window) = app.get_webview_window("main") {
+        if let Some(window) = app.get_window("main") {
             let _ = window.show();
         }
     } else {

@@ -1,0 +1,80 @@
+/** Opt-in live page smoke test for the isolated desktop E2E application. */
+import assert from 'node:assert/strict';
+
+describe('embedded LeetCode practice', () => {
+  it('opens a catalog problem, preserves reading width, and returns to the catalog', async () => {
+    await browser.waitUntil(async () => (await browser.execute(() => window.__TAURI_INTERNALS__?.invoke('get_desktop_status')))?.state === 'ready');
+    await browser.execute(async () => {
+      const core = window.__TAURI_INTERNALS__;
+      async function post(path, data) {
+        const result = await core.invoke('api_request', { method: 'POST', path: '/api/v1' + path,
+          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+        if (result.status !== 200) throw new Error('Could not prepare test catalog: ' + result.status);
+        return JSON.parse(result.body);
+      }
+      const preview = await post('/imports/preview', { content: JSON.stringify({ id: '1', title: 'Two Sum', difficulty: 'Easy', tags: ['Array'] }) });
+      await post('/imports', { previewId: preview.previewId });
+    });
+    await browser.execute(() => { location.hash = '#problems'; });
+    await browser.waitUntil(() => browser.execute(() => !!document.querySelector('a[data-practice-id="1"]')));
+    for (const width of [1280, 1600]) {
+      await browser.setWindowSize(width, 800);
+      // The embedded driver's window lookup only supports single-webview windows. Start the
+      // sequence in the main renderer and return its results after the native child closes.
+      const result = await browser.executeAsync(async (done) => {
+        const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+        async function until(read) {
+          const start = Date.now();
+          while (Date.now() - start < 18000) {
+            const value = await read();
+            if (value) return value;
+            await sleep(80);
+          }
+          throw new Error('Timed out waiting for ' + String(read).slice(0, 140));
+        }
+        let result;
+        try {
+          const link = document.querySelector('a[data-practice-id="1"]');
+          link.click();
+          const dialog = await until(() => document.querySelector('dialog.practice-workspace[open]'));
+          const page = dialog.querySelector('.practice-page');
+          const getPage = () => window.__TAURI__.webview.Webview.getByLabel('practice-page');
+          const child = await until(getPage);
+          const chrome = dialog.querySelector('header');
+          const toggle = chrome.querySelector('[aria-expanded]');
+          const onProblem = await until(() => window.__TAURI__.core.invoke('practice_on_problem', { url: link.href }));
+          const before = await child.size();
+          toggle.click();
+          await until(() => dialog.querySelector('.chat-panel'));
+          const wide = window.innerWidth >= 1500;
+          const chatWidth = dialog.querySelector('.chat-panel').getBoundingClientRect().width;
+          const siteWidth = page.getBoundingClientRect().width;
+          if (wide) await until(async () => (await child.size()).width < before.width);
+          const zoom = chrome.querySelector('select');
+          zoom.value = '150';
+          zoom.dispatchEvent(new Event('change', { bubbles: true }));
+          await until(() => page.getBoundingClientRect().width === 0);
+          zoom.value = '100';
+          zoom.dispatchEvent(new Event('change', { bubbles: true }));
+          if (wide) await until(() => page.getBoundingClientRect().width === siteWidth);
+          dialog.querySelector('.chat-panel').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+          await until(() => !dialog.querySelector('.chat-panel'));
+          await until(async () => (await child.size()).width === before.width);
+          result = { wide, onProblem, chatWidth, siteWidth, fullWidth: page.getBoundingClientRect().width, viewport: window.innerWidth };
+        } catch (error) { result = { error: String(error) }; }
+        finally {
+          document.querySelector('.practice-toolbar button')?.click();
+          await sleep(350);
+        }
+        done(result);
+      });
+      assert.ok(!result.error, result.error);
+      assert.equal(result.onProblem, true);
+      assert.equal(result.wide, width >= 1500);
+      assert.equal(result.fullWidth, result.viewport);
+      if (result.wide) assert.ok(result.siteWidth >= 1100 && result.chatWidth >= 390);
+      else assert.ok(result.siteWidth === 0 && result.chatWidth >= 600);
+      console.log('Practice layout', result);
+    }
+  });
+});

@@ -67,7 +67,7 @@ export function QuickNoteDrawer({
           {formatDifficulty(problem.difficulty, lang)}
         </span>
         {/^https?:\/\//i.test(problem.url) && <a
-          href={problem.url}
+          href={problem.url} data-practice-id={problem.frontendId} data-practice-title={problem.title}
           target="_blank"
           rel="noreferrer"
           className="btn-icon quick-note-external"

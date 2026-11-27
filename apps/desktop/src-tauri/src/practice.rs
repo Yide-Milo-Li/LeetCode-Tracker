@@ -1,0 +1,211 @@
+//! A remote LeetCode view beside the trusted renderer. The renderer owns its lifetime and layout.
+use reqwest::Url;
+use serde::Deserialize;
+use tauri::{
+    webview::NewWindowResponse, AppHandle, Manager, PhysicalPosition, PhysicalSize, Rect,
+    WebviewBuilder, WebviewUrl, WebviewWindowBuilder,
+};
+
+const LABEL: &str = "practice-page";
+const SIGN_IN: &str = "practice-sign-in";
+
+fn standard_https(url: &Url) -> bool {
+    url.scheme() == "https"
+        && url.port().is_none()
+        && url.username().is_empty()
+        && url.password().is_none()
+}
+
+fn leetcode(url: &Url) -> bool {
+    standard_https(url) && matches!(url.host_str(), Some("leetcode.com" | "leetcode.cn"))
+}
+
+fn sign_in(url: &Url) -> bool {
+    standard_https(url)
+        && match url.host_str() {
+            Some("leetcode.com" | "leetcode.cn") => url.path().starts_with("/accounts/"),
+            Some("github.com") => {
+                url.path() == "/login"
+                    || url.path().starts_with("/login/")
+                    || url.path().starts_with("/sessions/")
+                    || url.path() == "/session"
+            }
+            Some("accounts.google.com") => true,
+            _ => false,
+        }
+}
+
+fn problem_slug(url: &Url) -> Option<&str> {
+    let slug = url.path().strip_prefix("/problems/")?.split('/').next()?;
+    (!slug.is_empty() && slug.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-'))
+        .then_some(slug)
+}
+
+fn problem_url(value: &str) -> Result<Url, String> {
+    let url = Url::parse(value).map_err(|_| "Invalid problem URL")?;
+    if leetcode(&url) && problem_slug(&url).is_some() {
+        Ok(url)
+    } else {
+        Err("Invalid problem URL".into())
+    }
+}
+
+#[derive(Deserialize)]
+pub struct Viewport {
+    // Fractions of the renderer viewport also account for UI zoom and display scaling.
+    top: f64,
+    width: f64,
+}
+
+impl Viewport {
+    fn bounds(&self, size: PhysicalSize<u32>) -> Result<Rect, String> {
+        if !(0.0..1.0).contains(&self.top) || !(0.0 < self.width && self.width <= 1.0) {
+            return Err("Invalid practice layout".into());
+        }
+        let y = (size.height as f64 * self.top).round() as u32;
+        Ok(Rect {
+            position: PhysicalPosition::new(0, y as i32).into(),
+            size: PhysicalSize::new(
+                (size.width as f64 * self.width).round().max(1.0) as u32,
+                size.height.saturating_sub(y).max(1),
+            )
+            .into(),
+        })
+    }
+}
+
+#[tauri::command]
+pub async fn practice_open(app: AppHandle, url: String, viewport: Viewport) -> Result<(), String> {
+    let url = problem_url(&url)?;
+    let main = app.get_webview("main").ok_or("Missing main view")?;
+    let window = main.window();
+    let bounds = viewport.bounds(window.inner_size().map_err(|e| e.to_string())?)?;
+    close_views(&app)?;
+    let popup_app = app.clone();
+    let builder = WebviewBuilder::new(LABEL, WebviewUrl::External(url))
+        .zoom_hotkeys_enabled(false)
+        .on_new_window(move |target, features| {
+            if !sign_in(&target) || popup_app.get_window(SIGN_IN).is_some() {
+                return NewWindowResponse::Deny;
+            }
+            // WebKit needs the opener's window features for a federated sign-in callback.
+            let popup =
+                WebviewWindowBuilder::new(&popup_app, SIGN_IN, WebviewUrl::External(target))
+                    .window_features(features)
+                    .title("LeetCode")
+                    .on_navigation(|next| leetcode(next) || sign_in(next))
+                    .on_new_window(|_, _| NewWindowResponse::Deny)
+                    .build();
+            match popup {
+                Ok(window) => NewWindowResponse::Create { window },
+                Err(_) => NewWindowResponse::Deny,
+            }
+        })
+        .on_navigation(move |next| {
+            if next.origin().ascii_serialization() == "https://lct-shortcut.invalid" {
+                match next.path() {
+                    "/ask" => {
+                        let _ = main.set_focus();
+                        let _ = main.eval("window.dispatchEvent(new Event('lct-practice-shortcut'))");
+                    }
+                    "/larger" | "/smaller" | "/reset" => {
+                        let direction = &next.path()[1..];
+                        let _ = main.eval(format!("window.dispatchEvent(new CustomEvent('lct-practice-zoom', {{detail:'{direction}'}}))"));
+                    }
+                    _ => {}
+                }
+                return false;
+            }
+            leetcode(next) || sign_in(next)
+        })
+        // Only the explicit shortcut crosses views. Page contents, editor input and cookies stay on the site.
+        .initialization_script(include_str!("practice-shortcut.js"));
+    window
+        .add_child(builder, bounds.position, bounds.size)
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn practice_layout(
+    app: AppHandle,
+    viewport: Option<Viewport>,
+    focus_page: bool,
+    zoom: Option<f64>,
+) -> Result<(), String> {
+    let view = app.get_webview(LABEL).ok_or("Practice page is closed")?;
+    if let Some(zoom) = zoom {
+        if !(0.8..=2.0).contains(&zoom) {
+            return Err("Invalid page zoom".into());
+        }
+        view.set_zoom(zoom).map_err(|e| e.to_string())?;
+    }
+    if let Some(viewport) = viewport {
+        let size = view.window().inner_size().map_err(|e| e.to_string())?;
+        view.set_bounds(viewport.bounds(size)?)
+            .map_err(|e| e.to_string())?;
+        view.show().map_err(|e| e.to_string())?;
+        if focus_page {
+            view.set_focus().map_err(|e| e.to_string())?;
+            view.eval("window.dispatchEvent(new Event('lct-practice-return'))")
+                .map_err(|e| e.to_string())?;
+        }
+    } else {
+        view.hide().map_err(|e| e.to_string())?;
+        if let Some(main) = app.get_webview("main") {
+            main.set_focus().map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// The shell asks only whether the selected problem is still on screen. Login URLs never leave this boundary.
+#[tauri::command]
+pub async fn practice_on_problem(app: AppHandle, url: String) -> Result<bool, String> {
+    let expected = problem_url(&url)?;
+    let view = app.get_webview(LABEL).ok_or("Practice page is closed")?;
+    let current = view.url().map_err(|e| e.to_string())?;
+    Ok(leetcode(&current)
+        && current.host_str() == expected.host_str()
+        && problem_slug(&current) == problem_slug(&expected))
+}
+
+#[tauri::command]
+pub async fn practice_close(app: AppHandle) -> Result<(), String> {
+    close_views(&app)
+}
+
+pub fn close_views(app: &AppHandle) -> Result<(), String> {
+    if let Some(popup) = app.get_window(SIGN_IN) {
+        popup.destroy().map_err(|e| e.to_string())?;
+    }
+    if let Some(view) = app.get_webview(LABEL) {
+        view.close().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn practice_starts_only_on_problem_pages() {
+        for value in [
+            "https://leetcode.com/problems/two-sum/",
+            "https://leetcode.cn/problems/two-sum/description/",
+        ] {
+            assert!(problem_url(value).is_ok());
+        }
+        for value in [
+            "https://leetcode.com/",
+            "https://leetcode.com/problems/",
+            "https://github.com/problems/test/",
+            "https://leetcode.com.evil.test/problems/test/",
+            "https://name@leetcode.com/problems/test/",
+            "https://leetcode.com:8080/problems/test/",
+            "http://leetcode.com/problems/test/",
+        ] {
+            assert!(problem_url(value).is_err());
+        }
+    }
+}

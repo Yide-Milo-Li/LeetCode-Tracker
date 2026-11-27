@@ -1,3 +1,5 @@
+import { PRACTICE_OPEN, practiceTarget } from './practice.ts';
+
 /**
  * Cross-platform desktop and browser abstraction layer.
  * Detects whether the UI is executing inside the native Tauri desktop shell or a standard browser,
@@ -165,6 +167,11 @@ export function initDesktopPlatform(getLang?: () => 'en' | 'zh'): void {
       const destination = new URL(href);
       if (['https:', 'http:'].includes(destination.protocol) && destination.origin !== window.location.origin) {
         e.preventDefault();
+        const problem = practiceTarget(anchor, destination);
+        if (problem && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+          window.dispatchEvent(new CustomEvent(PRACTICE_OPEN, { detail: problem }));
+          return;
+        }
         void openExternalUrl(href).catch(() => {
           // Native validation remains authoritative; show a failure instead of an unhandled rejection.
           const zh = getLang ? getLang() === 'zh' : document.documentElement.lang.toLowerCase().startsWith('zh');
