@@ -1,7 +1,7 @@
 /**
  * Conversation state for the in-app AI chat.
  *
- * The server keeps no history, so this hook owns the turns and resends the recent ones with each
+ * The server keeps no history, so this hook owns the turns and selects context for each
  * question. There is one conversation per problem plus a general one (see `chat-threads.ts`);
  * the hook shows one of them at a time, and an answer keeps streaming into its own conversation
  * while another one is shown.
@@ -9,12 +9,12 @@
  * An answer may carry proposals for the user to confirm or changes already saved with full access.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ChatContextSummary, ChatModelSelection, ChatRequest, ChatStreamEvent, ChatTurn } from '../../../../packages/contracts/src/chat.ts';
-import { CHAT_MAX_MESSAGE_CHARS, CHAT_MAX_TOTAL_CHARS } from '../../../../packages/contracts/src/chat-limits.ts';
+import type { ChatContextSummary, ChatModelSelection, ChatRequest, ChatStreamEvent } from '../../../../packages/contracts/src/chat.ts';
 import { api } from '../api.ts';
 import { ApiError } from '../platform/index.ts';
 import type { Language } from '../i18n.ts';
-import { changeStatusNote, type ChatChange } from './chat-changes.ts';
+import type { ChatChange } from './chat-changes.ts';
+import { requestTurns } from './chat-history.ts';
 import { getChatDataAccess, getChatWritePermission } from './chat-settings.ts';
 import { streamChat } from './chat-stream.ts';
 import {
@@ -78,11 +78,7 @@ function updateThread(session: ChatSession, key: string, update: (thread: ChatTh
   return next === cleared.thread ? session : { ...session, cleared: { ...cleared, thread: next } };
 }
 
-/**
- * Turns sent with a question. A conversation about one problem rarely needs more, older turns
- * cost tokens on every question, and the model can look tracker data up again.
- */
-export const CHAT_REQUEST_TURNS = 12;
+export { CHAT_REQUEST_TURNS, requestTurns } from './chat-history.ts';
 
 /**
  * Answer text is added to the conversation at most this often. Every addition re-renders the
@@ -90,30 +86,6 @@ export const CHAT_REQUEST_TURNS = 12;
  * the answer gets.
  */
 const DELTA_FLUSH_MS = 40;
-
-/**
- * Select the turns to send: newest first until a request limit is reached, never starting with
- * an answer. Empty answers (failed before any text) are left out. An answer that proposed changes
- * is followed by what became of each, so the model knows what the user confirmed.
- */
-export function requestTurns(entries: ChatEntry[]): ChatTurn[] {
-  const turns: ChatTurn[] = [];
-  let total = 0;
-  for (let index = entries.length - 1; index >= 0 && turns.length < CHAT_REQUEST_TURNS; index -= 1) {
-    const notes = (entries[index].changes ?? []).map(changeStatusNote).join('\n');
-    const text = entries[index].content.trim();
-    // The notes are short; cutting the answer instead keeps them whole at the limit.
-    const content = notes
-      ? `${text.slice(0, CHAT_MAX_MESSAGE_CHARS - notes.length - 2)}${text ? '\n\n' : ''}${notes}`
-      : text.slice(0, CHAT_MAX_MESSAGE_CHARS);
-    if (!content) continue;
-    if (total + content.length > CHAT_MAX_TOTAL_CHARS) break;
-    total += content.length;
-    turns.unshift({ role: entries[index].role, content });
-  }
-  while (turns[0]?.role === 'assistant') turns.shift();
-  return turns;
-}
 
 export type ChatRecipient = Pick<ChatRequest, 'provider' | 'selection'>;
 

@@ -179,11 +179,13 @@ export function describeChange(change: ChatActionProposal, lang: Language, zone:
  * it, so it never has to guess whether the user confirmed.
  */
 export function changeStatusNote(change: ChatChange): string {
+  if (change.state === 'applying') return `[Proposed change ${change.name}: confirmed, application in progress]`;
+  if (change.state === 'undoing') return `[Change ${change.name}: applied, undo in progress]`;
   if (change.automatic) {
     const outcome = change.state === 'undone' ? 'applied automatically, then undone by the user' : 'applied automatically';
     return `[Change ${change.name}: ${outcome}]`;
   }
-  const outcome = change.state === 'applied' || change.state === 'undoing'
+  const outcome = change.state === 'applied'
     ? `the user ${change.edited ? 'edited its values, then confirmed it' : 'confirmed it'} and it was applied`
     : change.state === 'undone' ? 'the user confirmed it, then undid it; nothing changed'
     : change.state === 'dismissed' ? 'the user dismissed it; nothing changed'

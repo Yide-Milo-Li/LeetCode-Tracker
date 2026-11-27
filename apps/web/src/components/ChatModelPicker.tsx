@@ -3,6 +3,7 @@ import { Check, ChevronDown } from 'lucide-react';
 import type { ChatModelSelection, ChatProviderOption, ChatStatus } from '../../../../packages/contracts/src/chat.ts';
 import { chatModelPresets, getSupportedReasoningEfforts, resolveModelReasoningEffort, type LLMProvider, type ReasoningEffort } from '../../../../packages/contracts/src/llm-models.ts';
 import { api } from '../api.ts';
+import { CHAT_REQUEST_TURNS } from '../chat/chat-history.ts';
 import { useAsyncResource } from '../hooks/useAsyncResource.ts';
 import type { Language } from '../i18n.ts';
 import type { ActionPopover } from './ui.tsx';
@@ -63,6 +64,7 @@ function ModelChoices({ lang, active, providers, hasHistory, hasProblem, busy, o
     ...(accountList && (!account.data || account.error) ? [draft.model] : []),
   ])];
   const name = providerNames[draft.provider];
+  const historyLimit = CHAT_REQUEST_TURNS - 1;
   const changedProvider = active.provider !== draft.provider;
   const changed = changedProvider || active.model !== draft.model || active.reasoningEffort !== effort;
   const selectProvider = (option: ChatProviderOption) => {
@@ -110,8 +112,8 @@ function ModelChoices({ lang, active, providers, hasHistory, hasProblem, busy, o
     </div>
     {config.configured && <div className="chat-model-apply">
       {changedProvider && <p role="status">{zh
-        ? `下次发送时，${name} 会收到你的提问${hasHistory ? '和近期对话' : ''}${hasProblem ? '，以及随题附带的题目、练习和笔记资料' : ''}。`
-        : `Your next message goes to ${name}${hasHistory ? ', along with recent conversation history' : ''}${hasProblem ? ', including any attached problem, practice, and note details' : ''}.`}</p>}
+        ? `下次发送时，${name} 会收到你的提问${hasHistory ? `、最近的问答和选取的早期片段（本对话最多 ${historyLimit} 条历史消息）` : ''}${hasProblem ? '，以及随题附带的题目、练习和笔记资料' : ''}。`
+        : `Your next message goes to ${name}${hasHistory ? ` with recent messages and selected earlier excerpts (up to ${historyLimit} messages from this chat)` : ''}${hasProblem ? ', including any attached problem, practice, and note details' : ''}.`}</p>}
       {busy && changed && <p>{zh ? '当前回答会继续使用原模型。' : 'The current reply will finish with its original model.'}</p>}
       <button className="btn btn-primary" type="button" disabled={!changed || !models.includes(draft.model)} onClick={() => onApply({ ...selectionOf(draft), reasoningEffort: effort })}>
         {zh ? '应用到此对话' : 'Apply to this chat'}

@@ -42,7 +42,7 @@ export const CHAT_STORAGE_KEY = STORAGE_KEY;
 /** The single conversation kept before conversations were split by problem. */
 const LEGACY_STORAGE_KEY = 'leetcode_tracker_chat_v1';
 /** Entries kept per conversation; older turns scroll out of a long one. */
-const STORED_ENTRIES = 80;
+export const CHAT_STORED_ENTRIES = 80;
 export const MAX_THREADS = 50;
 /** A conversation not used for this long is dropped. */
 export const THREAD_IDLE_MS = 30 * 24 * 60 * 60 * 1000;
@@ -168,7 +168,7 @@ function storedEntry({ reading: _reading, ...entry }: ChatEntry): ChatEntry {
 }
 
 /** A conversation as it is stored. */
-const storedThread = (thread: ChatThread): ChatThread => ({ ...thread, entries: thread.entries.slice(-STORED_ENTRIES).map(storedEntry) });
+const storedThread = (thread: ChatThread): ChatThread => ({ ...thread, entries: thread.entries.slice(-CHAT_STORED_ENTRIES).map(storedEntry) });
 
 /** Stored form of a conversation as text, kept per object: an unchanged conversation keeps its object. */
 const storedText = new WeakMap<ChatThread, string>();

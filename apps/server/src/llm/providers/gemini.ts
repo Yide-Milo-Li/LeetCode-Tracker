@@ -24,7 +24,7 @@ import type {
 /** Streaming transport; replaceable so tests need no network. */
 export type GeminiStreamFn = (params: {
   model: string;
-  contents: Array<{ role: 'user' | 'model'; parts: GeminiPart[] }>;
+  contents: GeminiContent[];
   config: {
     systemInstruction: string;
     abortSignal: AbortSignal;
@@ -39,6 +39,20 @@ export type GeminiStreamFn = (params: {
 
 /** A content part as the API sends it: text, a function call or response, with any thought signature. */
 type GeminiPart = Part;
+type GeminiContent = { role: 'user' | 'model'; parts: GeminiPart[] };
+
+/** Earlier excerpts and unanswered questions can place two messages from the same speaker together. */
+function textContents(messages: StreamChatParams['messages']): GeminiContent[] {
+  const contents: GeminiContent[] = [];
+  for (const message of messages) {
+    const role = message.role === 'assistant' ? 'model' : 'user';
+    const part = { text: message.content };
+    const last = contents.at(-1);
+    if (last?.role === role) last.parts.push(part);
+    else contents.push({ role, parts: [part] });
+  }
+  return contents;
+}
 
 /** Prefix of call ids made up here because the API sent none; they are not sent back. */
 const LOCAL_CALL_ID = 'local-call-';
@@ -48,8 +62,8 @@ const LOCAL_CALL_ID = 'local-call-';
  * function-call parts carry thought signatures the API requires back; all results of one turn go
  * into a single user content, one response per call.
  */
-function toolContents(steps: ChatToolStep[]): Array<{ role: 'user' | 'model'; parts: GeminiPart[] }> {
-  const contents: Array<{ role: 'user' | 'model'; parts: GeminiPart[] }> = [];
+function toolContents(steps: ChatToolStep[]): GeminiContent[] {
+  const contents: GeminiContent[] = [];
   for (const step of steps) {
     if (step.role === 'assistant') {
       contents.push({ role: 'model', parts: step.replay as GeminiPart[] });
@@ -181,14 +195,7 @@ export class GeminiProvider extends BaseLLMProvider {
       ?? (request => new GoogleGenAI({ apiKey }).models.generateContentStream(request));
     const stream = await open({
       model: params.model,
-      // Gemini names the assistant role `model`.
-      contents: [
-        ...params.messages.map(message => ({
-          role: message.role === 'assistant' ? 'model' as const : 'user' as const,
-          parts: [{ text: message.content }],
-        })),
-        ...toolContents(params.steps ?? []),
-      ],
+      contents: [...textContents(params.messages), ...toolContents(params.steps ?? [])],
       config: {
         systemInstruction: params.systemInstruction,
         abortSignal: params.abortSignal,

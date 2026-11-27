@@ -7,6 +7,9 @@ import { afterEach, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import type { ChatRequest, ChatStatus, ChatStreamEvent } from '../packages/contracts/src/chat.ts';
+import { chatRequestSchema } from '../packages/contracts/src/chat.ts';
+import type { ChatEntry } from '../apps/web/src/chat/useChat.ts';
+import { handoffFixture } from './fixtures/chat-handoff.ts';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/', pretendToBeVisual: true });
 Object.assign(globalThis, {
@@ -101,16 +104,74 @@ it('sends the newest turns within the request limits and never starts with an an
 
   const long = Array.from({ length: 30 }, (_, index) => [entry('user', `q${index}`), entry('assistant', `a${index}`)]).flat();
   const kept = requestTurns([...long, entry('user', 'latest')]);
-  // Twelve turns at most; the oldest of them was an answer, which cannot lead.
-  assert.equal(kept.length, 11);
+  assert.equal(kept.length, 12);
+  assert.equal(kept[0].content, 'q0');
   assert.equal(kept[0].role, 'user');
   assert.equal(kept.at(-1)?.content, 'latest');
 
-  // A huge earlier answer is dropped whole rather than pushing the request over the total limit.
+  // A large older answer leaves room for the opening constraint and the current request.
   const heavy = requestTurns([entry('user', 'old'), entry('assistant', 'x'.repeat(24_000)), ...Array.from({ length: 5 }, () => entry('user', 'y'.repeat(24_000))), entry('user', 'now')]);
   assert.equal(heavy.reduce((total, turn) => total + turn.content.length, 0) <= 120_000, true);
   assert.equal(heavy.at(-1)?.content, 'now');
-  assert.equal(heavy.some(turn => turn.content === 'old'), false);
+  assert.equal(heavy[0].content, 'old');
+  assert.ok(chatRequestSchema.safeParse({ messages: heavy }).success);
+});
+
+it('recalls the original goal, correction and cited evidence with their original roles in English and Chinese', () => {
+  for (const lang of ['en', 'zh'] as const) {
+    const { entries, facts } = handoffFixture(lang);
+    const messages = requestTurns(entries);
+    assert.ok(chatRequestSchema.safeParse({ messages }).success);
+    let previous = -1;
+    for (const [i, fact] of facts.entries()) {
+      const index = messages.findIndex(turn => turn.content.includes(fact));
+      assert.ok(index > previous, fact);
+      assert.equal(messages[index].role, i === 2 || i === 4 ? 'assistant' : 'user');
+      previous = index;
+    }
+    assert.match(messages.find(turn => turn.content.includes(facts[2]))!.content, /\[…\]/u);
+    assert.deepEqual(requestTurns(entries), messages);
+    const size = messages.reduce((sum, turn) => sum + turn.content.length, 0);
+    const oldWindowSize = entries.slice(-11).reduce((sum, entry) => sum + entry.content.length, 0);
+    assert.ok(size < oldWindowSize * 0.7, `${lang}: ${size} / ${oldWindowSize}`);
+  }
+});
+
+it('keeps the current input and preceding code intact at the message limit, and reports uncertain writes', () => {
+  const entry = (role: ChatEntry['role'], content: string): ChatEntry => ({ id: 'test', role, content, state: 'done' });
+  const source = '0123456789'.repeat(2400);
+  const current = '😀'.repeat(12000);
+  const messages = requestTurns([entry('user', source), entry('assistant', source), entry('user', current)]);
+  assert.deepEqual(messages.map(turn => turn.content), [source, source, current]);
+  assert.ok(chatRequestSchema.safeParse({ messages }).success);
+
+  const question = entry('user', 'Save this to my note.');
+  const followup = entry('user', 'Did it save?');
+  const stopped: ChatEntry = { ...entry('assistant', ''), state: 'stopped', writeOutcomeUnknown: true };
+  assert.match(requestTurns([question, stopped, followup])[1].content, /Write outcome unknown/);
+  assert.match(requestTurns([question, { ...stopped, content: 'I started', writeOutcomeUnknown: false }, followup])[1].content, /Incomplete answer/);
+  assert.deepEqual(requestTurns([stopped, followup]), [{ role: 'user', content: followup.content }]);
+  for (const [state, expected] of [['applying', 'application in progress'], ['undoing', 'undo in progress']] as const) {
+    const updating: ChatEntry = { ...entry('assistant', ''), changes: [{
+      id: 'write', name: 'tracker_patch_note', state, args: {}, labels: { problems: {}, folders: {}, lists: {} },
+    }] };
+    assert.ok(requestTurns([question, updating, followup])[1].content.includes(expected));
+  }
+});
+
+it('recalls the exact problem ID among similar numbers and cuts Unicode excerpts on code point boundaries', () => {
+  const entries: ChatEntry[] = [];
+  const add = (role: ChatEntry['role'], content: string) => entries.push({ id: String(entries.length), role, content, state: 'done' });
+  add('user', 'Compare these problems.');
+  add('assistant', 'Which ones?');
+  for (const id of [42, 420, 421, 422, 3, 4, 5]) {
+    add('user', `Problem #${id}`);
+    add('assistant', `Case ${id}: ${'😀'.repeat(1300)}`);
+  }
+  add('user', '回到42，继续。');
+  const turns = requestTurns(entries);
+  assert.ok(turns.some(turn => turn.role === 'assistant' && turn.content.startsWith('Case 42:')));
+  for (const turn of turns) assert.doesNotMatch(turn.content, /[\uD800-\uDFFF]/u);
 });
 
 it('streams an answer, lists what the AI looked up and keeps the conversation', async () => {
@@ -237,7 +298,7 @@ it('switches chat recipients with a preview, keeping the draft, recent turns and
   await click(screen.getByRole('button', { name: 'Gemini (not connected)' }));
   assert.ok(screen.getByRole('button', { name: 'Open AI settings' }));
   await click(screen.getByRole('button', { name: 'OpenAI' }));
-  assert.match(screen.getByText(/Your next message goes to OpenAI/).textContent!, /recent conversation history/);
+  assert.match(screen.getByText(/Your next message goes to OpenAI/).textContent!, /selected earlier excerpts \(up to 11 messages from this chat\)/);
   await act(async () => { fireEvent.keyDown(window, { key: 'Escape' }); });
   assert.equal(document.activeElement, trigger());
   assert.match(trigger().ariaLabel!, /DeepSeek/);
@@ -268,6 +329,40 @@ it('switches chat recipients with a preview, keeping the draft, recent turns and
   await openHistory();
   await click(screen.getByRole('button', { name: /^General/ }));
   await waitFor(() => assert.match(trigger().ariaLabel!, /account-large/));
+});
+
+it('sends the same selected evidence from a restored chat on follow-up and retry with another provider', async () => {
+  const providers: NonNullable<ChatStatus['providers']> = [
+    { provider: 'deepseek', model: 'deepseek-flash', reasoningEffort: 'high', configured: true, accountModels: false },
+    { provider: 'gemini', model: 'models/gemini-4-hydrogen', reasoningEffort: 'high', configured: true, accountModels: false },
+  ];
+  mock.method(api, 'getChatStatus', async () => ({ ...providers[0], providers }));
+  const { entries, facts } = handoffFixture('en');
+  const other = problemThread({ frontendId: '42' });
+  const unrelated = 'Private correction from a different conversation';
+  saveChatState({ current: GENERAL_THREAD, threads: {
+    general: { ...GENERAL_THREAD, entries: entries.slice(0, -1), usedAt: Date.now() },
+    [other.key]: { ...other, entries: [{ ...entries[0], content: unrelated }], usedAt: Date.now() },
+  } });
+  const requests = serveChat(
+    [{ type: 'delta', text: 'First follow-up' }, { type: 'done', provider: 'deepseek', model: providers[0].model }],
+    [{ type: 'delta', text: 'Retried with Gemini' }, { type: 'done', provider: 'gemini', model: providers[1].model }],
+  );
+  await openPanel();
+  await ask(entries.at(-1)!.content);
+  await screen.findByText('First follow-up');
+  const click = async (button: HTMLElement) => act(async () => { fireEvent.click(button); });
+  await click(screen.getByRole('button', { name: /Choose model/ }));
+  await click(screen.getByRole('button', { name: 'Gemini' }));
+  await click(screen.getByRole('button', { name: 'Apply to this chat' }));
+  assert.equal(requests.length, 1);
+  await click(screen.getByRole('button', { name: 'Answer again' }));
+  await screen.findByText('Retried with Gemini');
+  assert.equal(requests[1].selection?.provider, 'gemini');
+  assert.deepEqual(requests[1].messages, requests[0].messages);
+  const history = requests[1].messages.map(turn => turn.content);
+  for (const fact of facts) assert.ok(history.some(text => text.includes(fact)), fact);
+  assert.ok(history.every(text => !text.includes(unrelated)));
 });
 
 it('explains a missing provider and toggles with the keyboard shortcut', async () => {

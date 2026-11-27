@@ -363,7 +363,8 @@ test('Gemini streaming maps roles, skips empty chunks and requires a finish reas
     streamFn: async params => { seen.push(params); return (async function* () { yield* chunks; })(); },
   });
   const run = (target: GeminiProvider) => collect(onDelta => target.streamChat({
-    model: 'models/gemini-4-hydrogen', systemInstruction: 'Be brief.', messages: turns, abortSignal: new AbortController().signal, reasoningEffort: 'low', onDelta,
+    model: 'models/gemini-4-hydrogen', systemInstruction: 'Be brief.', messages: [{ role: 'user', content: 'Hints only.' }, ...turns],
+    abortSignal: new AbortController().signal, reasoningEffort: 'low', onDelta,
   }));
 
   const ok = await run(provider([
@@ -374,6 +375,7 @@ test('Gemini streaming maps roles, skips empty chunks and requires a finish reas
   assert.deepEqual(ok.deltas, ['Push ', '索引']);
   assert.deepEqual((ok.result as { usage: unknown }).usage, { inputTokens: 8, outputTokens: 3, cachedInputTokens: null, reasoningTokens: null, totalTokens: 11, source: 'provider' });
   assert.deepEqual(seen[0].contents.map(content => content.role), ['user', 'model', 'user']);
+  assert.deepEqual(seen[0].contents[0].parts, [{ text: 'Hints only.' }, { text: turns[0].content }]);
   assert.equal(seen[0].contents[2].parts[0].text, '举个例子');
   assert.equal(seen[0].config.systemInstruction, 'Be brief.');
   assert.equal(seen[0].config.thinkingConfig.thinkingLevel, 'LOW');
