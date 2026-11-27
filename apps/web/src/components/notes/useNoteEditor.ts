@@ -55,10 +55,12 @@ interface UseNoteEditorOptions {
   /** Raw controlled prop; `boolean` wins over the resolved setting refs at save time. */
   controlledFormatOnSave: boolean | null | undefined;
   formatSetting: FormatOnSaveSetting;
+  onSaved?: () => void;
+  loadTimeline?: boolean;
   /** List-owned setters patched after a save and cleared when nothing is selected. */
-  setSelectedSummary: Dispatch<SetStateAction<ProblemNoteSummary | null>>;
-  setItems: Dispatch<SetStateAction<ProblemNoteSummary[]>>;
-  setListRevision: Dispatch<SetStateAction<number>>;
+  setSelectedSummary?: Dispatch<SetStateAction<ProblemNoteSummary | null>>;
+  setItems?: Dispatch<SetStateAction<ProblemNoteSummary[]>>;
+  setListRevision?: Dispatch<SetStateAction<number>>;
 }
 
 interface NoteSnapshot { content: string; hash?: string }
@@ -78,6 +80,8 @@ export function useNoteEditor({
   externalRevision,
   controlledFormatOnSave,
   formatSetting,
+  onSaved,
+  loadTimeline = true,
   setSelectedSummary,
   setItems,
   setListRevision,
@@ -468,7 +472,7 @@ export function useNoteEditor({
   useEffect(() => {
     if (!selectedId) {
       setLoadedId(null);
-      setSelectedSummary(null);
+      setSelectedSummary?.(null);
       replaceNoteContent('', { resetHistory: true });
       rememberSaved('');
       setPractices([]);
@@ -513,8 +517,8 @@ export function useNoteEditor({
       });
 
     // Fetch practice timeline
-    setLoadingPractices(true);
-    const practiceLoad = api
+    setLoadingPractices(loadTimeline);
+    const practiceLoad = !loadTimeline ? Promise.resolve() : api
       .getPracticeRecords({ questionFrontendId: selectedId, page: 1, limit: 100 }, { signal: controller.signal })
       .then((res) => {
         if (!active) return;
@@ -532,7 +536,7 @@ export function useNoteEditor({
       active = false;
       controller.abort();
     };
-  }, [selectedId, retryRevision, rememberSaved, replaceNoteContent, setSelectedSummary]);
+  }, [selectedId, retryRevision, rememberSaved, replaceNoteContent, setSelectedSummary, loadTimeline]);
 
   useEffect(() => {
     if (seenExternalRevision.current === externalRevision) return;
@@ -566,13 +570,13 @@ export function useNoteEditor({
       if (active && session.active) setPractices(result.items);
     };
     void initialLoad.current.then(async () => {
-      if (active) await Promise.allSettled([refreshNote(), refreshPractices()]);
+      if (active) await Promise.allSettled([refreshNote(), ...(loadTimeline ? [refreshPractices()] : [])]);
     });
     return () => {
       active = false;
       controller.abort();
     };
-  }, [externalRevision, selectedId, rememberSaved, replaceNoteContent]);
+  }, [externalRevision, selectedId, rememberSaved, replaceNoteContent, loadTimeline]);
 
   /** Retry through the cancellable loading effect rather than a separate unguarded request. */
   const handleRetryLoad = useCallback(() => {
@@ -702,7 +706,7 @@ export function useNoteEditor({
         }, 2500);
 
         const isMeaningful = hasMeaningfulNoteContent(note.content);
-        setSelectedSummary((prev) =>
+        setSelectedSummary?.((prev) =>
           prev && prev.questionFrontendId === targetId
             ? {
                 ...prev,
@@ -712,7 +716,7 @@ export function useNoteEditor({
             : prev
         );
 
-        setItems((prev) =>
+        setItems?.((prev) =>
           prev.map((it) =>
             it.questionFrontendId === targetId
               ? {
@@ -726,7 +730,10 @@ export function useNoteEditor({
       }
       // A saved note can change list membership even after switching problems. Refresh
       // the latest filters while mounted, without reloading the current editor draft.
-      if (editorSession.current.active) setListRevision((current) => current + 1);
+      if (editorSession.current.active) {
+        setListRevision?.((current) => current + 1);
+        onSaved?.();
+      }
     } catch (err) {
       if (isLatestProblemSave() && submittedDrafts.current.get(targetId) === submitted) {
         submitted.failed = { error: err };

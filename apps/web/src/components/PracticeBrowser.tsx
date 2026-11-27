@@ -1,9 +1,12 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, ExternalLink, MessageSquareText, NotebookPen } from 'lucide-react';
+import { ArrowLeft, Columns2, ExternalLink, MessageSquareText, MoreHorizontal, NotebookPen, PanelRightClose } from 'lucide-react';
+import { PracticeNote, type PracticeNoteStatus } from './PracticeNote.tsx';
 import type { Language } from '../i18n.ts';
 import { openExternalUrl } from '../platform/index.ts';
 import { practiceCommand, type PracticeProblem } from '../platform/practice.ts';
+
+export type PracticePane = 'chat' | 'note';
 
 // A resize, retry or unmount can arrive while the OS is still creating its webview.
 // Order native mutations across mounts, including StrictMode and a quick reopen.
@@ -29,16 +32,22 @@ interface Props {
   open: boolean;
   busy: boolean;
   news: boolean;
-  canSummarize: boolean;
+  pane: PracticePane;
+  onPane(pane: PracticePane): void;
+  onNoteStatus(status: PracticeNoteStatus): void;
+  onNoteSaved?: () => void;
+  excerpt: string | null;
+  onExcerptUsed(): void;
+  discardRequest: (() => void) | null;
+  cancelDiscard(): void;
   shortcut: string;
   width: number;
   onToggle(): void;
   onClose(): void;
-  onSummarize(): void;
   children: React.ReactNode;
 }
 
-export function PracticeBrowser({ problem, lang, open, busy, news, canSummarize, shortcut, width, onToggle, onClose, onSummarize, children }: Props) {
+export function PracticeBrowser({ problem, lang, open, busy, news, pane, onPane, onNoteStatus, onNoteSaved, excerpt, onExcerptUsed, discardRequest, cancelDiscard, shortcut, width, onToggle, onClose, children }: Props) {
   const zh = lang === 'zh';
   const dialog = useRef<HTMLDialogElement>(null);
   const slot = useRef<HTMLDivElement>(null);
@@ -51,7 +60,13 @@ export function PracticeBrowser({ problem, lang, open, busy, news, canSummarize,
   const [zoom, setZoom] = useState(savedZoom);
   const zoomRef = useRef(zoom);
   const rail = Math.min(520, Math.max(400, Math.round(width * 0.24)));
-  const split = width - rail >= 1100 * Math.max(1, zoom / 100);
+  const autoSplit = width - rail >= 1100 * Math.max(1, zoom / 100);
+  const [manualSplit, setManualSplit] = useState(false);
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const [visitedNote, setVisitedNote] = useState(false);
+  const split = autoSplit || manualSplit;
+  const panelId = useId();
+  useEffect(() => { if (open && pane === 'note') setVisitedNote(true); }, [open, pane]);
 
   useEffect(() => {
     const adjust = (event: Event) => {
@@ -160,28 +175,57 @@ export function PracticeBrowser({ problem, lang, open, busy, news, canSummarize,
         if (open) onToggle();
       }}>
       <header className="practice-toolbar">
-        <button type="button" className="btn btn-secondary" onClick={onClose}><ArrowLeft size={16} />{zh ? '返回 LCT' : 'Back to LCT'}</button>
-        <strong className="practice-title" title={problem.title}>#{problem.frontendId} {problem.title}</strong>
-        <select value={zoom} aria-label={zh ? '题目页面缩放' : 'Problem page zoom'} title={zh ? '题目页面缩放' : 'Problem page zoom'}
-          onChange={event => setZoom(Number(event.target.value))}>
-          {ZOOM_STEPS.map(percent => <option key={percent} value={percent}>{percent}%</option>)}
-        </select>
+        <button type="button" className="practice-icon" aria-label={zh ? '返回 LCT' : 'Back to LCT'} title={zh ? '返回 LCT' : 'Back to LCT'} onClick={onClose}><ArrowLeft size={16} /></button>
+        <span className="practice-title" title={problem.title}><span>#{problem.frontendId}</span> {problem.title}</span>
         {elsewhere && !failed && <button className="text-link" onClick={() => retry(n => n + 1)}>{zh ? '回到本题' : 'Return to this problem'}</button>}
-        {externalFailed && <span role="alert">{zh ? '无法打开系统浏览器。' : 'Could not open the system browser.'}</span>}
-        <button type="button" className="btn-icon" title={zh ? '用系统浏览器打开' : 'Open in system browser'} aria-label={zh ? '用系统浏览器打开' : 'Open in system browser'}
-          onClick={() => { void openExternalUrl(problem.url).catch(() => setExternalFailed(true)); }}><ExternalLink size={16} /></button>
-        <button type="button" className="btn btn-secondary" disabled={!canSummarize || busy} onClick={onSummarize}>
-          <NotebookPen size={16} />{zh ? '整理本次笔记' : 'Draft session note'}
-        </button>
-        <button type="button" className="btn btn-primary" aria-expanded={open} title={shortcut} onClick={onToggle}>
-          <MessageSquareText size={16} />{busy ? (zh ? '正在回答…' : 'Answering…') : news ? (zh ? '查看新回答' : 'New answer') : label}
-        </button>
+        <button className="practice-icon" aria-label={zh ? '页面选项' : 'Page options'} title={zh ? '页面选项' : 'Page options'}
+          aria-expanded={optionsOpen} aria-controls={panelId + '-options'} onClick={() => setOptionsOpen(value => !value)}><MoreHorizontal size={17} /></button>
+        {!open ? <button type="button" className="practice-ask" data-practice-chat-toggle="" aria-expanded={false}
+          title={shortcut} onClick={() => { setOptionsOpen(false); onToggle(); }}>
+          <MessageSquareText size={15} />{busy ? (zh ? '正在回答…' : 'Answering…') : news ? (zh ? '查看新回答' : 'New answer') : label}
+        </button> : <>
+          <div className="practice-tabs" role="tablist" aria-label={zh ? '刷题侧栏' : 'Practice panel'} onKeyDown={event => {
+            if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+            event.preventDefault();
+            const next = event.key === 'Home' ? 'chat' : event.key === 'End' ? 'note' : pane === 'chat' ? 'note' : 'chat';
+            onPane(next);
+            document.getElementById(panelId + '-' + next)?.focus();
+          }}>
+            {(['chat', 'note'] as const).map(key => <button type="button" key={key} role="tab" id={panelId + '-' + key}
+              aria-selected={pane === key} aria-controls={panelId + '-' + key + '-panel'} tabIndex={pane === key ? 0 : -1} onClick={() => onPane(key)}>
+              {key === 'chat' ? <MessageSquareText size={14} /> : <NotebookPen size={14} />}
+              {key === 'chat' ? (zh ? '对话' : 'Chat') : (zh ? '笔记' : 'Note')}
+            </button>)}
+          </div>
+          {!autoSplit && <button className="practice-icon" aria-label={zh ? '并排显示' : 'Show side by side'} title={zh ? '并排显示' : 'Show side by side'}
+            aria-pressed={manualSplit} onClick={() => setManualSplit(value => !value)}><Columns2 size={15} /></button>}
+          <button className="practice-icon" data-practice-chat-toggle="" aria-expanded={true} title={shortcut} aria-label={zh ? '收起侧栏' : 'Close panel'} onClick={onToggle}><PanelRightClose size={16} /></button>
+        </>}
+        {optionsOpen && <div className="practice-options" id={panelId + '-options'}>
+          <label>{zh ? '题目页面缩放' : 'Problem page zoom'} <select value={zoom} onChange={event => setZoom(Number(event.target.value))}>
+            {ZOOM_STEPS.map(percent => <option key={percent} value={percent}>{percent}%</option>)}
+          </select></label>
+          <button className="text-link" onClick={() => { void openExternalUrl(problem.url).catch(() => setExternalFailed(true)); }}>
+            <ExternalLink size={14} />{zh ? '用系统浏览器打开' : 'Open in system browser'}
+          </button>
+          {externalFailed && <span role="alert">{zh ? '无法打开系统浏览器。' : 'Could not open the system browser.'}</span>}
+        </div>}
       </header>
       <div ref={slot} className="practice-page">
         {failed && <div role="alert">{zh ? '无法打开嵌入式题目页。' : 'Could not open the embedded problem page.'}
           <button className="btn btn-secondary" onClick={() => retry(n => n + 1)}>{zh ? '重试' : 'Retry'}</button></div>}
       </div>
-      {open && <div className="practice-chat">{children}</div>}
+      <div className="practice-chat" role="tabpanel" id={panelId + '-chat-panel'} aria-labelledby={panelId + '-chat'} hidden={!open || pane !== 'chat'}>
+        {open && pane === 'chat' && children}
+      </div>
+      <div className="practice-chat practice-note" role="tabpanel" id={panelId + '-note-panel'} aria-labelledby={panelId + '-note'} hidden={!open || pane !== 'note'}>
+        {discardRequest && <div className="practice-note-conflict" role="alert">
+          <p>{zh ? '离开后会丢失未保存的笔记。' : 'Leaving will discard your unsaved note edits.'}</p>
+          <button className="btn btn-secondary btn-sm" onClick={cancelDiscard}>{zh ? '继续编辑' : 'Keep editing'}</button>
+          <button className="text-link" onClick={discardRequest}>{zh ? '放弃修改并离开' : 'Discard and leave'}</button>
+        </div>}
+        {(visitedNote || (open && pane === 'note')) && <PracticeNote frontendId={problem.frontendId} lang={lang} onStatus={onNoteStatus} onSaved={onNoteSaved} excerpt={excerpt} onExcerptUsed={onExcerptUsed} />}
+      </div>
     </dialog>, document.body,
   );
 }

@@ -41,7 +41,7 @@ describe('embedded LeetCode practice', () => {
           const getPage = () => window.__TAURI__.webview.Webview.getByLabel('practice-page');
           const child = await until(getPage);
           const chrome = dialog.querySelector('header');
-          const toggle = chrome.querySelector('[aria-expanded]');
+          const toggle = chrome.querySelector('[data-practice-chat-toggle]');
           const onProblem = await until(() => window.__TAURI__.core.invoke('practice_on_problem', { url: link.href }));
           const nativeWindow = window.__TAURI__.window.getCurrentWindow();
           async function toolbarClear() {
@@ -85,12 +85,27 @@ describe('embedded LeetCode practice', () => {
           } else await until(() => page.getBoundingClientRect().width === 0);
           const chatWidth = dialog.querySelector('.chat-panel').getBoundingClientRect().width;
           const siteWidth = page.getBoundingClientRect().width;
-          const zoom = chrome.querySelector('select');
+          chrome.querySelector('[role="tab"][id$="-note"]').click();
+          await until(() => dialog.querySelector('.practice-note textarea:not(:disabled)'));
+          if (!wide) {
+            const pin = chrome.querySelector('button[aria-pressed]');
+            pin.click();
+            await until(toolbarClear);
+            pin.click();
+            await until(() => page.getBoundingClientRect().width === 0);
+          }
+          chrome.querySelector('[role="tab"][id$="-chat"]').click();
+          await until(() => dialog.querySelector('.chat-panel'));
+          const options = chrome.querySelector('button[aria-controls$="-options"]');
+          options.click();
+          const zoom = await until(() => chrome.querySelector('select'));
           zoom.value = '150';
           zoom.dispatchEvent(new Event('change', { bubbles: true }));
           await until(() => page.getBoundingClientRect().width === 0);
           zoom.value = '100';
           zoom.dispatchEvent(new Event('change', { bubbles: true }));
+          if (wide) await until(toolbarClear);
+          options.click();
           if (wide) await until(toolbarClear);
           dialog.querySelector('.chat-panel').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
           await until(() => !dialog.querySelector('.chat-panel'));

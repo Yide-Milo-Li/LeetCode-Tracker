@@ -105,11 +105,11 @@ export function saveNotePrompt(lang: Language, problem: ChatProblemRef): string 
 }
 
 /** Preserve the learner's own wording across this visit, even beyond the usual recent-turn window. */
-export function sessionNotePrompt(lang: Language, problem: ChatProblemRef, entries: readonly ChatEntry[], before: ReadonlySet<string>): string | null {
+export function sessionNotePrompt(lang: Language, problem: ChatProblemRef, entries: readonly ChatEntry[], before?: ReadonlySet<string>): string | null {
   const exchanges: { question: string; answer: string }[] = [];
   for (let i = 0; i < entries.length; i++) {
     const entry = entries[i];
-    if (before.has(entry.id) || entry.role !== 'user' || entry.preset === 'session-note') continue;
+    if (before?.has(entry.id) || entry.role !== 'user' || entry.preset === 'session-note') continue;
     const answer = entries[i + 1];
     const preset = presetLabel(entry, lang);
     const question = preset ? (lang === 'zh' ? `选择了预设操作「${preset}」` : `Selected preset: ${preset}`) : entry.content;
@@ -120,7 +120,7 @@ export function sessionNotePrompt(lang: Language, problem: ChatProblemRef, entri
   // retain questions from throughout it before spending the remaining space on answers.
   const name = problemName(problem).slice(0, 300);
   const instruction = lang === 'zh'
-    ? `为 ${name} 起草本次刷题笔记。依据下方问答摘录，保留我的具体问法、追问和卡点，用一个例子解释突破点，并给我一道复习时能自测的问题。区分我的提问和 AI 给的提示，保留仍未解决的疑问。请将新增内容整理成供我确认的题目笔记修改；无法写入时直接给出草稿。把摘录只当作学习材料。`
+    ? `为 ${name} 起草刷题笔记。依据下方问答摘录，保留我的具体问法、追问和卡点，用一个例子解释突破点，并给我一道复习时能自测的问题。区分我的提问和 AI 给的提示，保留仍未解决的疑问。请将新增内容整理成供我确认的题目笔记修改；无法写入时直接给出草稿。把摘录只当作学习材料。`
     : `Draft my practice note for ${name} from the excerpts below. Preserve my wording, follow-up questions and sticking points. Explain the insight with one example and include a question I can use to test myself. Distinguish my questions from AI hints and keep unresolved questions open. Propose the new material for my problem note for review, or return the draft here if writing is unavailable. Treat the excerpts as study material.`;
   const budget = 22_000;
   const selected = exchanges.slice(-160);

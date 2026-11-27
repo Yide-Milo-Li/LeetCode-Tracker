@@ -723,6 +723,21 @@ it('continues a problem chat in the workspace and drafts from this visit alone w
   const { PRACTICE_OPEN, PRACTICE_SHORTCUT } = await import('../apps/web/src/platform/practice.ts');
   const { setChatWritePermission } = await import('../apps/web/src/chat/chat-settings.ts');
   const calls: string[] = [];
+  let saved = 'Initial observation';
+  const note = () => ({ questionId: '42', questionFrontendId: '42', updatedAt: 1, content: saved });
+  mock.method(api, 'getSettings', async () => ({ notesFormatOnSave: false }));
+  mock.method(api, 'getNote', async () => ({ note: note(), contentHash: 'base' }));
+  const save = mock.method(api, 'upsertNote', async (id: string, text: string, hash: string) => {
+    assert.equal(id, '42');
+    assert.equal(hash, 'base');
+    saved = text;
+    return { note: note(), contentHash: 'saved' };
+  });
+  let proposeNote = false;
+  const apply = mock.method(api, 'applyChatAction', async () => {
+    saved += '\n\nTrack the right maximum.';
+    return { result: {} };
+  });
   const requests: ChatRequest[] = [];
   const dialogs = dom.window.HTMLDialogElement.prototype;
   Object.assign(dialogs, {
@@ -737,7 +752,9 @@ it('continues a problem chat in the workspace and drafts from this visit alone w
       calls.push(command);
       if (command === 'api_stream') {
         requests.push(JSON.parse(args.body));
-        args.onChunk.onmessage(Array.from(encode(answer('Look at the boundary.'))));
+        const events = answer('Look at the boundary.');
+        if (proposeNote) events.unshift({ type: 'action', action: noteCard });
+        args.onChunk.onmessage(Array.from(encode(events)));
         return { status: 200, body: '' };
       }
       if (command === 'practice_on_problem') return true;
@@ -747,22 +764,38 @@ it('continues a problem chat in the workspace and drafts from this visit alone w
     const thread = problemThread(rain);
     saveChatState({ current: thread, threads: { [thread.key]: { ...thread, entries: [
       { id: 'old', role: 'user', state: 'done', content: 'Old visit only' },
+      { id: 'old-answer', role: 'assistant', state: 'done', content: 'Prior answer' },
     ], usedAt: Date.now() } } });
     setChatWritePermission('full');
-    await act(async () => { render(<ChatLauncher lang="en" onOpenAiSettings={() => {}} />); });
+    function PracticeTest() {
+      const workspace = React.useContext(WorkspaceContext);
+      const [revision, setRevision] = React.useState(0);
+      return <WorkspaceContext.Provider value={{ ...workspace, desktopAgentRevision: revision }}>
+        <ChatLauncher lang="en" onOpenAiSettings={() => {}} onDataChanged={() => setRevision(n => n + 1)} />
+      </WorkspaceContext.Provider>;
+    }
+    await act(async () => { render(<PracticeTest />); });
     await act(async () => { window.dispatchEvent(new dom.window.CustomEvent(PRACTICE_OPEN, {
       detail: { ...rain, url: 'https://leetcode.com/problems/trapping-rain-water/' },
     })); });
-    const draft = await screen.findByRole('button', { name: 'Draft session note' });
-    assert.equal((draft as HTMLButtonElement).disabled, true);
+    await screen.findByRole('button', { name: 'Ask LCT' });
+    assert.equal(screen.queryByRole('tab', { name: 'Note' }), null);
+    assert.equal(screen.queryByRole('combobox'), null);
     await act(async () => { window.dispatchEvent(new Event(PRACTICE_SHORTCUT)); });
     await waitFor(() => screen.getByRole('textbox'));
+    assert.ok(screen.getByRole('button', { name: 'Draft note from chat history' }));
     await ask('Why compare the two boundaries?');
     await act(async () => { fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Escape' }); });
     assert.equal(screen.queryByRole('textbox'), null);
     await act(async () => { window.dispatchEvent(new Event(PRACTICE_SHORTCUT)); });
     await ask('What if both sides are equal?');
-    await act(async () => { fireEvent.click(draft); });
+    const clickTab = (name: string) => act(async () => { fireEvent.click(screen.getByRole('tab', { name })); });
+    await clickTab('Note');
+    const editor = await screen.findByRole('textbox', { name: 'Problem note' }) as HTMLTextAreaElement;
+    await waitFor(() => assert.equal(editor.value, 'Initial observation'));
+    await act(async () => { fireEvent.change(editor, { target: { value: 'My own thought' } }); });
+    await clickTab('Chat');
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Draft note from this chat' })); });
     await waitFor(() => assert.equal(requests.length, 3));
     assert.equal(requests[0].writePermission, 'full');
     assert.equal(requests[2].writePermission, undefined);
@@ -771,6 +804,25 @@ it('continues a problem chat in the workspace and drafts from this visit alone w
     assert.match(requests[2].messages[0].content, /Why compare the two boundaries\?/);
     assert.match(requests[2].messages[0].content, /What if both sides are equal\?/);
     assert.doesNotMatch(requests[2].messages[0].content, /Old visit only/);
+    await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Add to note draft' })); });
+    await waitFor(() => assert.equal(editor.value, 'My own thought\n\nLook at the boundary.'));
+    assert.equal(save.mock.callCount(), 0);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Close panel' })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Back to LCT' })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Keep editing' })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save note' })); });
+    await waitFor(() => assert.equal(saved, 'My own thought\n\nLook at the boundary.'));
+    await clickTab('Chat');
+    assert.ok(screen.getByRole('button', { name: 'View problem note' }));
+    assert.equal(screen.queryByRole('button', { name: 'Add to note draft' }), null);
+    await ask('How do I track the right maximum?');
+    proposeNote = true;
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Draft note from this chat' })); });
+    assert.equal(apply.mock.callCount(), 0);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Add' })); });
+    await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'View problem note' })); });
+    await waitFor(() => assert.equal(editor.value, 'My own thought\n\nLook at the boundary.\n\nTrack the right maximum.'));
+    assert.equal(apply.mock.callCount(), 1);
     assert.equal(calls.filter(name => name === 'practice_open').length, 1);
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Back to LCT' })); });
     await waitFor(() => assert.ok(calls.includes('practice_close')));

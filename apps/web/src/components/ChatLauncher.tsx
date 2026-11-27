@@ -16,6 +16,8 @@ import { hasOpenedChat, rememberChatOpened } from '../chat/chat-settings.ts';
 import { useChatProblem, type ChatAsk, type ChatAskRequest } from '../chat/chat-context.ts';
 import { problemThread } from '../chat/chat-threads.ts';
 import { sessionNotePrompt } from '../chat/chat-presets.ts';
+import type { PracticePane } from './PracticeBrowser.tsx';
+import type { PracticeNoteStatus } from './PracticeNote.tsx';
 import { PRACTICE_OPEN, PRACTICE_SHORTCUT, type PracticeProblem } from '../platform/practice.ts';
 import { loadActiveTimer, subscribeTimer } from '../timer-service.ts';
 import {
@@ -49,6 +51,15 @@ export interface ChatLauncherProps {
 export function ChatLauncher({ lang, page, onOpenAiSettings, ask = null, sidebar, onDataChanged }: ChatLauncherProps) {
   const zh = lang === 'zh';
   const [practice, setPractice] = useState<{ problem: PracticeProblem; before: Set<string> } | null>(null);
+  const [pane, setPane] = useState<PracticePane>('chat');
+  const [noteStatus, setNoteStatus] = useState<PracticeNoteStatus>('clean');
+  const [discardRequest, setDiscardRequest] = useState<(() => void) | null>(null);
+  const [excerpt, setExcerpt] = useState<{ id: string; text: string } | null>(null);
+  const [insertedAnswer, setInsertedAnswer] = useState<string | null>(null);
+  const updateNoteStatus = useCallback((status: PracticeNoteStatus) => {
+    setNoteStatus(status);
+    if (status === 'clean') setDiscardRequest(null);
+  }, []);
   const chat = useChat(lang, { onDataChanged, page: practice ? 'problems' : page });
   const { navigate } = useWorkspace();
   const [open, setOpen] = useState(false);
@@ -73,6 +84,11 @@ export function ChatLauncher({ lang, page, onOpenAiSettings, ask = null, sidebar
     const enter = (event: Event) => {
       const problem = (event as CustomEvent<PracticeProblem>).detail;
       const thread = problemThread(problem);
+      setPane('chat');
+      setNoteStatus('clean');
+      setInsertedAnswer(null);
+      setExcerpt(null);
+      setDiscardRequest(null);
       setPractice({ problem, before: new Set(chat.entriesOf(thread.key).map(entry => entry.id)) });
       chat.select(thread);
       setOpen(false);
@@ -189,17 +205,23 @@ export function ChatLauncher({ lang, page, onOpenAiSettings, ask = null, sidebar
       // A modal dialog owns the keyboard, and the panel would open beneath its backdrop.
       if (!practice && document.querySelector('[data-overlay-host]')) return;
       event.preventDefault();
-      if (open) close();
+      if (practice && pane === 'note') { setPane('chat'); setOpen(true); }
+      else if (open) close();
       else setOpen(true);
     };
     window.addEventListener('keydown', onKeyDown);
-    const fromPage = () => { if (practice) { setPending(null); setOpen(value => !value); } };
+    const fromPage = () => {
+      if (!practice) return;
+      setPending(null);
+      setPane('chat');
+      setOpen(value => pane === 'note' || !value);
+    };
     window.addEventListener(PRACTICE_SHORTCUT, fromPage);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener(PRACTICE_SHORTCUT, fromPage);
     };
-  }, [isMac, open, close, practice]);
+  }, [isMac, open, close, practice, pane]);
 
   const label = zh ? '问 AI' : 'Ask AI';
   const sidebarEntry = sidebar && createPortal(
@@ -226,23 +248,35 @@ export function ChatLauncher({ lang, page, onOpenAiSettings, ask = null, sidebar
 
   if (practice) {
     const { problem, before } = practice;
-    const leave = () => { setOpen(false); setPending(null); setPractice(null); };
-    const toggle = () => { setPending(null); setOpen(value => !value); };
+    const leave = (after?: () => void) => {
+      const finish = () => { setOpen(false); setPending(null); setPractice(null); setDiscardRequest(null); after?.(); };
+      if (noteStatus === 'clean') finish();
+      else {
+        setOpen(true);
+        setPane('note');
+        if (noteStatus === 'dirty') setDiscardRequest(() => finish);
+      }
+    };
+    const toggle = () => { setPending(null); setPane('chat'); setOpen(value => !value); };
     const entries = chat.entriesOf(problemThread(problem).key);
-    const canSummarize = entries.some(entry => !before.has(entry.id) && entry.role === 'user' && entry.preset !== 'session-note');
+    const eligible = (entry: (typeof entries)[number]) => entry.role === 'user' && entry.preset !== 'session-note';
+    const currentVisit = entries.some(entry => eligible(entry) && !before.has(entry.id));
     return <React.Suspense fallback={null}>
       <PracticeBrowser problem={problem} lang={lang} open={open} busy={chat.busy} news={news} width={viewport.width}
-        shortcut={shortcut} canSummarize={canSummarize} onToggle={toggle} onClose={leave}
-        onSummarize={() => {
-          const prompt = sessionNotePrompt(lang, problem, entries, before);
-          if (!prompt) return;
-          setPending({ problem, action: { kind: 'session-note', prompt } });
-          setOpen(true);
-        }}>
+        shortcut={shortcut} pane={pane} onPane={setPane} onToggle={toggle} onClose={() => leave()}
+        onNoteStatus={updateNoteStatus} onNoteSaved={onDataChanged} excerpt={excerpt?.text ?? null}
+        onExcerptUsed={() => { setInsertedAnswer(excerpt?.id ?? null); setExcerpt(null); }}
+        discardRequest={noteStatus === 'dirty' ? discardRequest : null} cancelDiscard={() => setDiscardRequest(null)}>
         {open && <React.Suspense fallback={null}>
           <ChatPanel id={panelId} lang={lang} chat={chat} shortcut={shortcut} onClose={toggle}
-            onWorkspaceLink={link => { leave(); openWorkspaceLink(link); }}
-            onOpenAiSettings={() => { leave(); onOpenAiSettings(); }}
+            practiceNote={{ available: entries.some(eligible), fromHistory: !currentVisit, insertedAnswer,
+              prompt: () => sessionNotePrompt(lang, problem, entries, currentVisit ? before : undefined),
+              view: () => setPane('note'), addDraft: (id, text) => { setExcerpt({ id, text }); setPane('note'); } }}
+            onWorkspaceLink={link => {
+              if (link.view === 'notes' && link.targetId === problem.frontendId) setPane('note');
+              else leave(() => openWorkspaceLink(link));
+            }}
+            onOpenAiSettings={() => leave(onOpenAiSettings)}
             pending={pending} onPendingHandled={clearPending} />
         </React.Suspense>}
       </PracticeBrowser>

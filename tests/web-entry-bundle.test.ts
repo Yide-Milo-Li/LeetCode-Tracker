@@ -17,8 +17,10 @@ test('returning users load Today without the setup wizard or the Zod runtime', a
     const chunk = pending.pop()!;
     if (visited.has(chunk.fileName)) continue;
     visited.add(chunk.fileName);
-    assert.ok(chunk.map?.sources.length, chunk.fileName);
-    for (const source of chunk.map.sources) {
+    // Shared lazy chunks can extract Rolldown's interop helper, which has no input source map.
+    const sources = chunk.map?.sources ?? [];
+    if (!sources.length) assert.deepEqual(chunk.moduleIds, ['\0rolldown/runtime.js'], chunk.fileName);
+    for (const source of [...sources, ...chunk.moduleIds]) {
       assert.doesNotMatch(source, /\/node_modules\/zod\/|\/components\/SetupGuide\.tsx$/, chunk.fileName + ' includes ' + source);
     }
     for (const name of chunk.imports) {

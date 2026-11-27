@@ -54,6 +54,14 @@ export interface ChatPanelProps {
   onClose: () => void;
   onOpenAiSettings: () => void;
   onWorkspaceLink: (link: WorkspaceLink) => void;
+  practiceNote?: {
+    available: boolean;
+    fromHistory: boolean;
+    insertedAnswer: string | null;
+    prompt(): string | null;
+    view(): void;
+    addDraft(id: string, text: string): void;
+  };
   /** Omitted in practice, where the workspace owns placement and pins the conversation. */
   floating?: {
     position: Point;
@@ -365,7 +373,7 @@ function Answer({ entry, conversationLanguage, lang, isLast, busy, onRetry, onSa
 }
 
 export function ChatPanel({
-  id, lang, chat, pending, onPendingHandled, shortcut, onClose, onOpenAiSettings, onWorkspaceLink, floating,
+  id, lang, chat, pending, onPendingHandled, shortcut, onClose, onOpenAiSettings, onWorkspaceLink, floating, practiceNote,
 }: ChatPanelProps) {
   const zh = lang === 'zh';
   const dataAccess = useChatDataAccess();
@@ -431,7 +439,7 @@ export function ChatPanel({
     && practice.data?.revision === revision && practice.data.available;
   // The field is disabled until the provider status arrives, so the panel takes focus first; that
   // keeps Esc working from the moment it opens. The field takes over unless focus has moved on.
-  useEffect(() => { panel.current?.focus(); }, []);
+  useEffect(() => { if (document.activeElement?.getAttribute('role') !== 'tab') panel.current?.focus(); }, []);
   useEffect(() => {
     if (ready && document.activeElement === panel.current) input.current?.focus();
   }, [ready]);
@@ -549,6 +557,9 @@ export function ChatPanel({
     </div>
   );
 
+  const last = chat.entries.at(-1);
+  const isSessionDraft = chat.entries.at(-2)?.preset === 'session-note';
+  const noteChanges = last?.changes?.filter(change => change.name === 'tracker_patch_note' && change.args.frontendId === frontendId) ?? [];
   // Carry the user's language forward through ID-only questions, including conversations reopened from storage.
   let conversationLanguage: Language | undefined;
   return (
@@ -570,7 +581,7 @@ export function ChatPanel({
         }
       }}
     >
-      <header
+      {floating && <header
         className="chat-header"
         title={floating ? (zh ? '拖动以移动' : 'Drag to move') : undefined}
         onPointerDown={event => { if (!(event.target as Element).closest('button, .chat-thread-menu')) floating?.onDragStart(event); }}
@@ -625,7 +636,7 @@ export function ChatPanel({
         {floating && <IconButton icon={floating.large ? Minimize2 : Maximize2} label={floating.large ? (zh ? '还原面板大小' : 'Restore panel size') : (zh ? '放大面板' : 'Enlarge panel')}
           onClick={floating.onToggleSize} tooltipSide="bottom" />}
         <IconButton icon={X} label={zh ? '关闭' : 'Close'} shortcut={shortcut} onClick={onClose} tooltipSide="bottom" />
-      </header>
+      </header>}
 
       {!switcher.open && deletionFeedback}
       <div
@@ -690,7 +701,7 @@ export function ChatPanel({
           }
           const isLast = index === chat.entries.length - 1;
           // The preset refers to the last answer, so put the action on that answer alone.
-          const canSaveNote = isLast && ready && !chat.busy && problem && dataAccess
+          const canSaveNote = !practiceNote && isLast && ready && !chat.busy && problem && dataAccess
             && entry.state === 'done' && entry.content.trim() && !entry.changes?.length;
           return <Answer key={entry.id} entry={entry} lang={lang} isLast={isLast} busy={chat.busy || !ready}
             conversationLanguage={conversationLanguage}
@@ -698,6 +709,18 @@ export function ChatPanel({
             onOpenAiSettings={onOpenAiSettings} onWorkspaceLink={onWorkspaceLink} onConfirmChange={chat.confirmChange}
             onDismissChange={chat.dismissChange} onUndoChange={chat.undoChange} />;
         })}
+        {practiceNote?.available && ready && !chat.busy && last?.role === 'assistant' && last.state === 'done' && (
+          <div className="practice-note-action">
+            {!isSessionDraft ? <button type="button" className="chat-action" onClick={() => {
+              const prompt = practiceNote.prompt();
+              if (prompt) runAction({ kind: 'session-note', prompt });
+            }}><NotebookPen size={14} />{practiceNote.fromHistory ? (zh ? '从历史对话生成笔记' : 'Draft note from chat history')
+              : (zh ? '从本次对话生成笔记' : 'Draft note from this chat')}</button>
+              : (practiceNote.insertedAnswer === last.id || noteChanges.some(change => change.state === 'applied')) ? <button className="text-link" onClick={practiceNote.view}>{zh ? '查看本题笔记' : 'View problem note'}</button>
+              : !noteChanges.length && last.content.trim() && <button className="chat-action" onClick={() => practiceNote.addDraft(last.id, last.content)}>
+                <NotebookPen size={14} />{zh ? '添加到笔记草稿' : 'Add to note draft'}</button>}
+          </div>
+        )}
       </div>
 
       <form className="chat-composer" onSubmit={event => { event.preventDefault(); ask(draft); }}>
