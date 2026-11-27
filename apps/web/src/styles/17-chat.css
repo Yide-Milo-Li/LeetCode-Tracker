@@ -751,11 +751,6 @@ html.dark .chat-panel {
   margin-top: 4px;
   container-type: inline-size;
 }
-.chat-handoff:not(:empty) {
-  margin: 0 0 6px 5px;
-  color: var(--text-muted);
-  font-size: 13px;
-}
 .chat-permissions {
   font-size: 13px;
 }
@@ -865,6 +860,8 @@ html.dark .chat-panel {
 .chat-model-apply { display: grid; justify-items: end; gap: 8px; border-top: 1px solid var(--border-color); padding: 8px 10px; }
 .chat-model-apply p, .chat-model-disconnected p { margin: 0; color: var(--text-muted); line-height: 1.45; }
 .chat-model-apply p { justify-self: stretch; }
+.chat-model-apply .chat-data-note { justify-self: stretch; color: var(--text-muted); }
+.chat-model-apply .chat-data-note p { margin-top: 6px; }
 .chat-model-apply .btn { min-height: 28px; padding: 3px 9px; font-size: 13px; }
 .chat-model-disconnected { padding: 3px 6px; }
 .chat-model-link { margin-top: 4px; background: transparent; color: var(--text-main); font: inherit; text-decoration: underline; cursor: pointer; }

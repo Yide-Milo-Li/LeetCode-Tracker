@@ -382,7 +382,6 @@ export function ChatPanel({
   const modelPicker = useActionPopover({ align: 'end', side: 'top' });
   const closeModelPicker = modelPicker.close;
   useLayoutEffect(() => { closeModelPicker(); }, [chat.current.key, closeModelPicker]);
-  const [handoff, setHandoff] = useState<{ key: string; afterEntry?: string; provider: string } | null>(null);
   const { revision } = useWorkspace();
   const [connection, setConnection] = useState<ChatStatus | 'failed' | null>(null);
   const status = connection === 'failed' ? null : connection;
@@ -427,8 +426,6 @@ export function ChatPanel({
     focusAfterSelection.current = false;
     input.current?.focus();
   }, [selection]);
-  const lastEntry = chat.entries.at(-1)?.id;
-  const showHandoff = handoff && handoff.key === chat.current.key && handoff.afterEntry === lastEntry && handoff.provider === provider;
   const frontendId = problem?.frontendId;
   const empty = chat.entries.length === 0;
   const practice = useAsyncResource(async signal => {
@@ -724,9 +721,6 @@ export function ChatPanel({
       </div>
 
       <form className="chat-composer" onSubmit={event => { event.preventDefault(); ask(draft); }}>
-        <div role="status" className="chat-handoff">{showHandoff && (zh
-          ? `下一条消息将由 ${providerName} 回答。`
-          : `${providerName} will answer your next message.`)}</div>
         {!empty && nextHint && (
           <div className="chat-context">
             <button type="button" className="chat-action" disabled={!ready || chat.busy} onClick={() => runAction({ kind: 'hint' })}>
@@ -770,7 +764,6 @@ export function ChatPanel({
             providers={status.providers ?? []} active={selection ?? { provider, model: status.model, reasoningEffort: getDefaultReasoningEffort(provider, status.model) }}
             hasHistory={!empty} hasProblem={Boolean(problem)} onSettings={onOpenAiSettings}
             onApply={next => {
-              if (next.provider !== provider) setHandoff({ key: chat.current.key, afterEntry: lastEntry, provider: next.provider });
               focusAfterSelection.current = true;
               chat.setSelection(next);
               modelPicker.close();

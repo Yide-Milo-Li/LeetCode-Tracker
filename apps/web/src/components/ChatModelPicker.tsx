@@ -111,9 +111,18 @@ function ModelChoices({ lang, active, providers, hasHistory, hasProblem, busy, o
       </div>
     </div>
     {config.configured && <div className="chat-model-apply">
-      {changedProvider && <p role="status">{zh
-        ? `下次发送时，${name} 会收到你的提问${hasHistory ? `、最近的问答和选取的早期片段（本对话最多 ${historyLimit} 条历史消息）` : ''}${hasProblem ? '，以及随题附带的题目、练习和笔记资料' : ''}。`
-        : `Your next message goes to ${name}${hasHistory ? ` with recent messages and selected earlier excerpts (up to ${historyLimit} messages from this chat)` : ''}${hasProblem ? ', including any attached problem, practice, and note details' : ''}.`}</p>}
+      {changedProvider && <>
+        <p role="status">{hasHistory
+          ? (zh
+            ? `下次发送时，${name} 会收到你的提问、最近的问答和选取的早期片段（本对话最多 ${historyLimit} 条历史消息）。`
+            : `Your next message goes to ${name} with recent messages and selected earlier excerpts (up to ${historyLimit} messages from this chat).`)
+          : (zh ? `下一条消息将发送给 ${name}。` : `Your next message goes to ${name}.`)}</p>
+        {hasProblem && <details key={draft.provider} className="chat-data-note">
+          <summary>{zh ? '发送内容' : 'What gets sent'}</summary>
+          <p>{zh ? '随提问附带可用的题目资料、近期练习和已保存的笔记。'
+            : 'Your question includes available problem details, recent attempts, and your saved note.'}</p>
+        </details>}
+      </>}
       {busy && changed && <p>{zh ? '当前回答会继续使用原模型。' : 'The current reply will finish with its original model.'}</p>}
       <button className="btn btn-primary" type="button" disabled={!changed || !models.includes(draft.model)} onClick={() => onApply({ ...selectionOf(draft), reasoningEffort: effort })}>
         {zh ? '应用到此对话' : 'Apply to this chat'}
