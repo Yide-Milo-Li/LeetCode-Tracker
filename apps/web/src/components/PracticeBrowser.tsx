@@ -197,8 +197,8 @@ export function PracticeBrowser({ problem, lang, open, busy, news, pane, onPane,
               {key === 'chat' ? (zh ? '对话' : 'Chat') : (zh ? '笔记' : 'Note')}
             </button>)}
           </div>
-          {!autoSplit && <button className="practice-icon" aria-label={zh ? '并排显示' : 'Show side by side'} title={zh ? '并排显示' : 'Show side by side'}
-            aria-pressed={manualSplit} onClick={() => setManualSplit(value => !value)}><Columns2 size={15} /></button>}
+          {!autoSplit && <button className="practice-layout-toggle" aria-label={zh ? '并排显示' : 'Show side by side'} title={zh ? '并排显示' : 'Show side by side'}
+            aria-pressed={manualSplit} onClick={() => setManualSplit(value => !value)}><Columns2 size={15} />{zh ? '并排' : 'Side by side'}</button>}
           <button className="practice-icon" data-practice-chat-toggle="" aria-expanded={true} title={shortcut} aria-label={zh ? '收起侧栏' : 'Close panel'} onClick={onToggle}><PanelRightClose size={16} /></button>
         </>}
         {optionsOpen && <div className="practice-options" id={panelId + '-options'}>

@@ -53,7 +53,7 @@
 .practice-toolbar select { inline-size: auto; }
 
 .practice-title > span { margin-inline-end: .3em; color: var(--text-muted); font-variant-numeric: tabular-nums; }
-.practice-toolbar :is(.practice-icon, .practice-ask, [role='tab']) {
+.practice-toolbar :is(.practice-icon, .practice-ask, .practice-layout-toggle, [role='tab']) {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   min-block-size: 30px; padding: 4px 8px; border: 0; border-radius: 6px;
   font: inherit; font-size: .8125rem; color: var(--text-muted); background: transparent; cursor: pointer;
